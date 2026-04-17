@@ -1,5 +1,6 @@
 import { ResourceNotFoundError } from "../shared/errors";
 import type { SecurityToolkit } from "../../plugins/security";
+import { buildCommentForm } from "../comments/comment-form";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminRepository } from "./repository";
 
@@ -48,6 +49,115 @@ export class AdminManagementService {
 				offset: input.offset,
 				totalCount: result.totalCount,
 			},
+		};
+	}
+
+	public async listPages(input: {
+		siteKey?: string;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const result = await this.repository.listPages({
+			siteId,
+			search: input.search,
+			limit: input.limit,
+			offset: input.offset,
+		});
+
+		return {
+			items: result.items,
+			pagination: {
+				limit: input.limit,
+				offset: input.offset,
+				totalCount: result.totalCount,
+			},
+		};
+	}
+
+	public async listUsers(input: {
+		siteKey?: string;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const result = await this.repository.listUsers({
+			siteId,
+			search: input.search,
+			limit: input.limit,
+			offset: input.offset,
+		});
+
+		return {
+			items: result.items,
+			pagination: {
+				limit: input.limit,
+				offset: input.offset,
+				totalCount: result.totalCount,
+			},
+		};
+	}
+
+	public async listVisitors(input: {
+		siteKey?: string;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const result = await this.repository.listVisitors({
+			siteId,
+			search: input.search,
+			limit: input.limit,
+			offset: input.offset,
+		});
+
+		return {
+			items: result.items,
+			pagination: {
+				limit: input.limit,
+				offset: input.offset,
+				totalCount: result.totalCount,
+			},
+		};
+	}
+
+	public async listSitesSummary() {
+		const items = await this.repository.listSitesSummary();
+
+		return {
+			items: items.map((item) => {
+				const configuredSite = this.siteRegistry.getConfiguredSite(
+					item.siteKey,
+				);
+				if (!configuredSite) {
+					throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+				}
+
+				return {
+					siteKey: item.siteKey,
+					name: item.name,
+					allowedOrigins: item.allowedOrigins,
+					comments: {
+						enabled: item.comments.enabled,
+						defaultStatus: item.comments.defaultStatus,
+						identity: buildCommentForm(configuredSite, {
+							allowWebsite: item.comments.allowWebsite,
+							commentRequireJson: item.comments.commentRequireJson,
+						}),
+						allowWebsite: item.comments.allowWebsite,
+						captcha: item.comments.captcha,
+					},
+					pageFeedback: item.pageFeedback,
+					notifications: item.notifications,
+					pageCount: item.pageCount,
+					commentCount: item.commentCount,
+					userCount: item.userCount,
+					visitorCount: item.visitorCount,
+				};
+			}),
 		};
 	}
 
@@ -148,7 +258,11 @@ export class AdminManagementService {
 
 	public async getSettings(siteKey: string) {
 		const siteId = await this.resolveSiteId(siteKey);
+		const configuredSite = this.siteRegistry.getConfiguredSite(siteKey);
 		if (!siteId) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+		if (!configuredSite) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -164,6 +278,10 @@ export class AdminManagementService {
 				defaultStatus: settings.defaultStatus,
 				maxDepth: settings.maxDepth,
 				rootLimit: settings.rootLimit,
+				identity: buildCommentForm(configuredSite, {
+					allowWebsite: settings.allowWebsite,
+					commentRequireJson: settings.commentRequireJson,
+				}),
 				allowWebsite: settings.allowWebsite,
 				captcha: {
 					mode: settings.captchaMode,
@@ -198,6 +316,9 @@ export class AdminManagementService {
 				defaultStatus?: "pending" | "approved";
 				maxDepth?: number;
 				rootLimit?: number;
+				identity?: {
+					require?: Array<"nickname" | "email" | "website">;
+				};
 				allowWebsite?: boolean;
 				captcha?: {
 					mode?: "never" | "always" | "threshold";
@@ -233,6 +354,9 @@ export class AdminManagementService {
 			defaultStatus: input.comments?.defaultStatus,
 			maxDepth: input.comments?.maxDepth,
 			rootLimit: input.comments?.rootLimit,
+			commentRequireJson: input.comments?.identity?.require
+				? JSON.stringify(input.comments.identity.require)
+				: undefined,
 			allowWebsite: input.comments?.allowWebsite,
 			allowPageLike: input.pageFeedback?.allowLike,
 			captchaMode: input.comments?.captcha?.mode,

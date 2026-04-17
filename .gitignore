@@ -3,6 +3,7 @@ dist/
 coverage/
 .DS_Store
 .serena/
+.superpowers/
 .temp/
 .idea/
 .vscode/

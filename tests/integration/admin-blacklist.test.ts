@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -15,16 +16,7 @@ describe("admin blacklist", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const login = await fixture.app.inject({
-			method: "POST",
-			url: "/api/admin/session/login",
-			payload: {
-				token: "replace-me",
-			},
-		});
-		const adminCookie = login.cookies.find(
-			(cookie) => cookie.name === "qingyan_admin",
-		);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
 
 		const createResponse = await fixture.app.inject({
 			method: "POST",

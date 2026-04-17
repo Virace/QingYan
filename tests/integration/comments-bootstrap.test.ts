@@ -49,7 +49,7 @@ describe("GET /api/comments/bootstrap", () => {
 			siteId: site.id,
 			pageKey: "post:welcome",
 			pageTitle: "Welcome",
-			pageUrl: "https://fangyuan.example.com/posts/welcome/",
+			pageUrl: "/posts/welcome/",
 			commentCount: 2,
 			rootCommentCount: 1,
 			pageViewCount: 5,
@@ -125,9 +125,11 @@ describe("GET /api/comments/bootstrap", () => {
 				supportsReply: true,
 				supportsVote: true,
 				supportsCaptcha: true,
-				requiredAuthorFields: ["name"],
-				optionalAuthorFields: ["website"],
 				defaultStatus: "pending",
+			},
+			commentForm: {
+				allow: ["nickname", "email", "website"],
+				require: ["nickname", "email"],
 			},
 			thread: {
 				siteKey: "fangyuan",
@@ -156,6 +158,8 @@ describe("GET /api/comments/bootstrap", () => {
 				challenge: null,
 			},
 		});
+		expect(response.json().capability.requiredAuthorFields).toBeUndefined();
+		expect(response.json().capability.optionalAuthorFields).toBeUndefined();
 
 		const payload = response.json();
 		expect(payload.comments).toHaveLength(1);
@@ -191,5 +195,23 @@ describe("GET /api/comments/bootstrap", () => {
 			},
 		});
 		expect(response.json().captcha.challenge.challengeId).toMatch(/^cap_/);
+	});
+
+	it("accepts path-only pageUrl in bootstrap requests and stores the normalized path", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:path-only-bootstrap&pageTitle=Path%20Only&pageUrl=%2Fposts%2Fpath-only-bootstrap%2F",
+		});
+
+		expect(response.statusCode).toBe(200);
+
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:path-only-bootstrap"));
+		expect(pageThread?.pageUrl).toBe("/posts/path-only-bootstrap/");
 	});
 });

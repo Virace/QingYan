@@ -1,7 +1,11 @@
 import { z } from "zod";
 
+const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
+
 export const adminLoginBodySchema = z.object({
 	token: z.string().min(1),
+	challengeId: z.string().min(1).optional(),
+	captchaValue: z.string().min(1).optional(),
 });
 
 export const adminCommentsQuerySchema = z.object({
@@ -12,6 +16,17 @@ export const adminCommentsQuerySchema = z.object({
 	limit: z.coerce.number().int().positive().max(100).default(20),
 	offset: z.coerce.number().int().min(0).default(0),
 });
+
+const adminCollectionQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	search: z.string().min(1).optional(),
+	limit: z.coerce.number().int().positive().max(100).default(20),
+	offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const adminPagesQuerySchema = adminCollectionQuerySchema;
+export const adminUsersQuerySchema = adminCollectionQuerySchema;
+export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
 
 export const adminCommentParamsSchema = z.object({
 	commentId: z.string().min(1),
@@ -58,6 +73,11 @@ export const adminSettingsBodySchema = z
 				defaultStatus: z.enum(["pending", "approved"]).optional(),
 				maxDepth: z.number().int().positive().optional(),
 				rootLimit: z.number().int().positive().optional(),
+				identity: z
+					.object({
+						require: z.array(commentIdentityFieldSchema).optional(),
+					})
+					.optional(),
 				allowWebsite: z.boolean().optional(),
 				captcha: z
 					.object({

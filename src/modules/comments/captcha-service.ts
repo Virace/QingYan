@@ -8,6 +8,7 @@ import type {
 	CaptchaAction,
 	CommentsWriteRepository,
 } from "./write-repository";
+import { requiresCaptchaForAttempt } from "./captcha-threshold";
 
 interface CaptchaPayload {
 	answer: string;
@@ -271,7 +272,12 @@ export class CaptchaService {
 				maxRequests: policy.captchaThresholdMaxActions,
 			},
 		});
-		if (snapshot.count + 1 >= policy.captchaThresholdMaxActions) {
+		if (
+			requiresCaptchaForAttempt(
+				snapshot.count,
+				policy.captchaThresholdMaxActions,
+			)
+		) {
 			await this.createChallengeSession({
 				siteId: site.id,
 				visitorId: visitor.id,

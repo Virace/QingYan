@@ -36,6 +36,7 @@ describe("POST /api/comments", () => {
 				parentCommentId: null,
 				author: {
 					name: "Alice",
+					email: "alice@example.com",
 				},
 				content: {
 					raw: "hello qingyan",
@@ -143,6 +144,45 @@ describe("POST /api/comments", () => {
 			.where(eq(pageThreads.pageKey, "post:create-comment"));
 		expect(thread?.commentCount).toBe(1);
 		expect(thread?.rootCommentCount).toBe(1);
+		expect(thread?.pageUrl).toBe("/posts/create-comment/");
+	});
+
+	it("accepts path-only pageUrl input and stores the normalized path", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(runtimeSettings).set({
+			captchaMode: "never",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:path-only-comment",
+				pageTitle: "Path Only Comment",
+				pageUrl: "/posts/path-only-comment/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "path only page url",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:path-only-comment"));
+		expect(thread?.pageUrl).toBe("/posts/path-only-comment/");
 	});
 
 	it("requires captcha on the third write attempt in threshold mode", async () => {
@@ -165,6 +205,7 @@ describe("POST /api/comments", () => {
 				parentCommentId: null,
 				author: {
 					name: "Alice",
+					email: "alice@example.com",
 				},
 				content: {
 					raw: "first",
@@ -193,6 +234,7 @@ describe("POST /api/comments", () => {
 				parentCommentId: null,
 				author: {
 					name: "Alice",
+					email: "alice@example.com",
 				},
 				content: {
 					raw: "follow-up",
@@ -236,6 +278,7 @@ describe("POST /api/comments", () => {
 			parentCommentId: null,
 			author: {
 				name: "Alice",
+				email: "alice@example.com",
 			},
 			content: {
 				raw: `comment-${suffix}`,

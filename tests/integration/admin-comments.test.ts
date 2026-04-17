@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { comments, pageThreads, sites } from "../../src/db/schema";
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -17,16 +18,7 @@ describe("admin comments", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const login = await fixture.app.inject({
-			method: "POST",
-			url: "/api/admin/session/login",
-			payload: {
-				token: "replace-me",
-			},
-		});
-		const adminCookie = login.cookies.find(
-			(cookie) => cookie.name === "qingyan_admin",
-		);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
 
 		const [site] = await fixture.app.db
 			.select()
@@ -40,6 +32,7 @@ describe("admin comments", () => {
 			siteId: site.id,
 			pageKey: "post:admin-comments",
 			pageTitle: "Admin Comments",
+			pageUrl: "/posts/admin-comments/",
 			commentCount: 1,
 			rootCommentCount: 1,
 		});
@@ -82,6 +75,7 @@ describe("admin comments", () => {
 					id: "c_admin_1",
 					status: "pending",
 					authorEmail: "admin@example.com",
+					pageUrl: "http://localhost:4321/posts/admin-comments/",
 				},
 			],
 			pagination: {

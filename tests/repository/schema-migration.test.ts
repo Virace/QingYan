@@ -96,6 +96,9 @@ describe("initial migration", () => {
 			expect(initialMigrationSql).toContain("`triggered_by` text NOT NULL");
 			expect(initialMigrationSql).toContain("`scope` text");
 			expect(initialMigrationSql).toContain("`match_mode` text");
+			expect(initialMigrationSql).toContain(
+				'`comment_require_json` text DEFAULT \'["nickname","email"]\' NOT NULL',
+			);
 		} finally {
 			fixture.cleanup();
 		}
@@ -117,6 +120,7 @@ describe("initial migration", () => {
 
 			expect(runtimeSettingsColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
+					"comment_require_json",
 					"captcha_mode",
 					"captcha_threshold_window_sec",
 					"captcha_threshold_max_actions",
@@ -128,6 +132,11 @@ describe("initial migration", () => {
 					"auto_blacklist_ttl_sec",
 				]),
 			);
+			expect(
+				runtimeSettingsColumns.find(
+					(column) => column.name === "comment_require_json",
+				)?.dflt_value,
+			).toBe('\'["nickname","email"]\'');
 			expect(
 				runtimeSettingsColumns.find((column) => column.name === "captcha_mode")
 					?.dflt_value,

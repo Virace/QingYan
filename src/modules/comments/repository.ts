@@ -17,6 +17,7 @@ import type {
 	RegisteredSiteRecord,
 	SiteRegistry,
 } from "../shared/site-registry";
+import { normalizePagePath } from "../shared/page-url";
 
 export interface VisitorRecord {
 	id: number;
@@ -144,19 +145,21 @@ export class CommentsRepository {
 	}
 
 	public async getOrCreatePageThread(input: ThreadRecordInput) {
+		const normalizedPageUrl = normalizePagePath(input.pageUrl);
+
 		await this.db
 			.insert(pageThreads)
 			.values({
 				siteId: input.siteId,
 				pageKey: input.pageKey,
 				pageTitle: input.pageTitle,
-				pageUrl: input.pageUrl,
+				pageUrl: normalizedPageUrl,
 			})
 			.onConflictDoUpdate({
 				target: [pageThreads.siteId, pageThreads.pageKey],
 				set: {
 					pageTitle: input.pageTitle,
-					pageUrl: input.pageUrl,
+					pageUrl: normalizedPageUrl,
 					updatedAt: new Date().toISOString(),
 				},
 			});

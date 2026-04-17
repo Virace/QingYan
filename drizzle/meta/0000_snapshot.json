@@ -1080,6 +1080,14 @@
           "autoincrement": false,
           "default": 20
         },
+        "comment_require_json": {
+          "name": "comment_require_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[\"nickname\",\"email\"]'"
+        },
         "allow_website": {
           "name": "allow_website",
           "type": "integer",

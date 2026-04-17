@@ -68,8 +68,7 @@ export function createTestConfig(databaseFile: string): AppConfig {
 			rateLimit: {
 				adminLogin: {
 					windowSec: 600,
-					maxFailures: 10,
-					autoBlacklistSec: 3600,
+					maxFailures: 5,
 				},
 				commentCreate: {
 					windowSec: 300,
@@ -119,6 +118,9 @@ export function createTestConfig(databaseFile: string): AppConfig {
 						defaultStatus: "pending",
 						maxDepth: 3,
 						rootLimit: 20,
+						identity: {
+							require: ["nickname", "email"],
+						},
 						captcha: {
 							mode: "threshold",
 							thresholdWindowSec: 60,
@@ -134,7 +136,6 @@ export function createTestConfig(databaseFile: string): AppConfig {
 								ttlSec: 1800,
 							},
 						},
-						requireEmail: false,
 						allowWebsite: true,
 					},
 					pageFeedback: {

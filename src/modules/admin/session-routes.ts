@@ -12,6 +12,12 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 		new AdminRepository(fastify.db),
 	);
 
+	fastify.get("/captcha", async (request) =>
+		service.createCaptcha({
+			ip: request.context?.ip,
+		}),
+	);
+
 	fastify.post("/login", async (request, reply) => {
 		const parsed = adminLoginBodySchema.safeParse(request.body);
 		if (!parsed.success) {
@@ -21,6 +27,8 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		const result = await service.login({
+			captchaValue: parsed.data.captchaValue,
+			challengeId: parsed.data.challengeId,
 			token: parsed.data.token,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,

@@ -21,6 +21,9 @@ export const runtimeSettings = sqliteTable(
 		defaultStatus: text("default_status").notNull().default("pending"),
 		maxDepth: integer("max_depth").notNull().default(3),
 		rootLimit: integer("root_limit").notNull().default(20),
+		commentRequireJson: text("comment_require_json")
+			.notNull()
+			.default('["nickname","email"]'),
 		allowWebsite: integer("allow_website", { mode: "boolean" })
 			.notNull()
 			.default(true),

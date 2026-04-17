@@ -2,8 +2,13 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "./config/types";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
+import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSettingsRoutes } from "./modules/admin/settings-routes";
+import { adminSitesRoutes } from "./modules/admin/sites-routes";
+import { adminUiRoutes } from "./modules/admin/ui-routes";
+import { adminUsersRoutes } from "./modules/admin/users-routes";
+import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
@@ -18,6 +23,9 @@ import securityPlugin from "./plugins/security";
 export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 	const app = Fastify({
 		logger: true,
+		routerOptions: {
+			ignoreTrailingSlash: true,
+		},
 		trustProxy: config.server.trustProxy,
 	});
 	const openApi = await loadOpenApiDocument();
@@ -68,11 +76,16 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 		reply.type("text/html; charset=utf-8").send(renderOpenApiHtml()),
 	);
 
+	await app.register(adminUiRoutes);
 	await app.register(adminSessionRoutes, { prefix: "/api/admin/session" });
 	await app.register(commentsPublicRoutes, { prefix: "/api" });
 	await app.register(pageFeedbackPublicRoutes, { prefix: "/api" });
 	await app.register(commentsAdminRoutes, { prefix: "/api/admin/comments" });
+	await app.register(adminPagesRoutes, { prefix: "/api/admin/pages" });
+	await app.register(adminUsersRoutes, { prefix: "/api/admin/users" });
+	await app.register(adminVisitorsRoutes, { prefix: "/api/admin/visitors" });
 	await app.register(adminBlacklistRoutes, { prefix: "/api/admin/blacklist" });
+	await app.register(adminSitesRoutes, { prefix: "/api/admin/sites" });
 	await app.register(adminSettingsRoutes, { prefix: "/api/admin/settings" });
 
 	return app;

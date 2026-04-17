@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { pageUrlInputSchema } from "../shared/page-url";
 
 export const bootstrapQuerySchema = z.object({
 	siteKey: z.string().min(1),
 	pageKey: z.string().min(1),
 	pageTitle: z.string().min(1).optional(),
-	pageUrl: z.string().url().optional(),
+	pageUrl: pageUrlInputSchema.optional(),
 	sortBy: z.enum(["newest", "oldest"]).default("newest"),
 	limit: z.coerce.number().int().positive().max(100).default(20),
 	offset: z.coerce.number().int().min(0).default(0),
@@ -22,11 +23,11 @@ export const createCommentBodySchema = z.object({
 	siteKey: z.string().min(1),
 	pageKey: z.string().min(1),
 	pageTitle: z.string().min(1),
-	pageUrl: z.string().url(),
+	pageUrl: pageUrlInputSchema,
 	parentCommentId: z.string().min(1).nullable(),
 	author: z.object({
-		name: z.string().min(1),
-		email: z.string().email().optional(),
+		name: z.string().trim().optional().default(""),
+		email: z.string().trim().email().optional(),
 		website: z.string().url().optional(),
 	}),
 	content: z.object({
@@ -51,7 +52,7 @@ export const captchaStateQuerySchema = z.object({
 	siteKey: z.string().min(1),
 	pageKey: z.string().min(1),
 	pageTitle: z.string().min(1).optional(),
-	pageUrl: z.string().url().optional(),
+	pageUrl: pageUrlInputSchema.optional(),
 });
 
 export const captchaVerifyBodySchema = z.object({

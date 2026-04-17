@@ -3,6 +3,7 @@ import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { SecurityToolkit } from "../../plugins/security";
 import type { CommentsRepository } from "./repository";
 import type { CaptchaService } from "./captcha-service";
+import { buildCommentForm } from "./comment-form";
 import type { CommentsWriteRepository } from "./write-repository";
 
 function resolveIdentity(
@@ -29,7 +30,7 @@ export class CommentsWriteService {
 		pageUrl: string;
 		parentCommentId: string | null;
 		author: {
-			name: string;
+			name?: string;
 			email?: string;
 			website?: string;
 		};
@@ -62,14 +63,29 @@ export class CommentsWriteService {
 		if (!commentsEnabled) {
 			throw new AppError(403, "COMMENTS_DISABLED", "评论功能未开启。");
 		}
-		if (configuredSite.defaults.comments.requireEmail && !input.author.email) {
+
+		const commentForm = buildCommentForm(configuredSite, {
+			allowWebsite:
+				settings?.allowWebsite ?? configuredSite.defaults.comments.allowWebsite,
+			commentRequireJson: settings?.commentRequireJson,
+		});
+		const authorName = input.author.name?.trim() ?? "";
+		const authorEmail = input.author.email?.trim() || undefined;
+		const authorWebsite = input.author.website?.trim() || undefined;
+		if (commentForm.require.includes("nickname") && !authorName) {
+			throw new AppError(400, "COMMENT_VALIDATION_FAILED", "评论参数不完整。");
+		}
+		if (commentForm.require.includes("email") && !authorEmail) {
+			throw new AppError(400, "COMMENT_VALIDATION_FAILED", "评论参数不完整。");
+		}
+		if (commentForm.require.includes("website") && !authorWebsite) {
 			throw new AppError(400, "COMMENT_VALIDATION_FAILED", "评论参数不完整。");
 		}
 
 		await this.security.assertNotBlacklisted({
 			siteKey: input.siteKey,
 			visitorKey: visitor.visitorKey,
-			email: input.author.email,
+			email: authorEmail,
 			ip: input.ip,
 			requestScope: "write",
 			errorCode: "COMMENT_BLACKLISTED",
@@ -116,13 +132,11 @@ export class CommentsWriteService {
 			pageThreadId: thread.id,
 			parentCommentId: input.parentCommentId,
 			visitorId: visitor.id,
-			authorName: input.author.name,
-			authorEmail: input.author.email,
-			authorWebsite:
-				(settings?.allowWebsite ??
-				configuredSite.defaults.comments.allowWebsite)
-					? input.author.website
-					: undefined,
+			authorName,
+			authorEmail,
+			authorWebsite: commentForm.allow.includes("website")
+				? authorWebsite
+				: undefined,
 			contentRaw: input.contentRaw,
 			status,
 		});

@@ -1,21 +1,87 @@
-import { and, count, desc, eq, isNull, like, or, sql } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNotNull,
+	isNull,
+	like,
+	or,
+	sql,
+} from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import {
 	adminSessions,
 	blacklistRules,
 	comments,
+	pageViewSessions,
 	pageThreads,
 	runtimeSettings,
 	sites,
+	visitors,
 } from "../../db/schema";
+import { resolvePublicPageUrl } from "../shared/page-url";
+import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
+
+function parseStringArray(payload?: string | null): string[] {
+	if (!payload) {
+		return [];
+	}
+
+	try {
+		const parsed = JSON.parse(payload) as unknown;
+		return Array.isArray(parsed)
+			? parsed.filter(
+					(item): item is string => typeof item === "string" && item.length > 0,
+				)
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+function toCountMap<T extends number | null | undefined>(
+	rows: Array<{ key: number | null; value: T }>,
+): Map<number, number> {
+	const map = new Map<number, number>();
+
+	for (const row of rows) {
+		if (row.key === null) {
+			continue;
+		}
+
+		map.set(row.key, Number(row.value ?? 0));
+	}
+
+	return map;
+}
 
 export class AdminRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
 	public async listSites() {
 		return this.db.select().from(sites);
+	}
+
+	private async listActiveBlacklistRules(targetType: "email" | "visitor") {
+		const nowIso = new Date().toISOString();
+
+		return this.db
+			.select()
+			.from(blacklistRules)
+			.where(
+				and(
+					eq(blacklistRules.targetType, targetType),
+					or(
+						isNull(blacklistRules.expiresAt),
+						gte(blacklistRules.expiresAt, nowIso),
+					),
+				),
+			);
 	}
 
 	public async getSiteByKey(siteKey: string) {
@@ -106,9 +172,12 @@ export class AdminRepository {
 				updatedAt: comments.updatedAt,
 				pageKey: pageThreads.pageKey,
 				pageTitle: pageThreads.pageTitle,
+				pageUrl: pageThreads.pageUrl,
+				allowedOriginsJson: sites.allowedOriginsJson,
 			})
 			.from(comments)
 			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
+			.innerJoin(sites, eq(sites.id, comments.siteId))
 			.where(whereCondition)
 			.orderBy(desc(comments.createdAt))
 			.limit(input.limit)
@@ -123,9 +192,401 @@ export class AdminRepository {
 			.where(whereCondition);
 
 		return {
-			items: rows,
+			items: rows.map((row) => ({
+				id: row.id,
+				parentId: row.parentId,
+				status: row.status,
+				authorName: row.authorName,
+				authorEmail: row.authorEmail,
+				contentRaw: row.contentRaw,
+				isPinned: row.isPinned,
+				isFolded: row.isFolded,
+				replyCount: row.replyCount,
+				voteUpCount: row.voteUpCount,
+				voteDownCount: row.voteDownCount,
+				createdAt: row.createdAt,
+				updatedAt: row.updatedAt,
+				pageKey: row.pageKey,
+				pageTitle: row.pageTitle,
+				pageUrl: resolvePublicPageUrl(
+					row.pageUrl,
+					parseStringArray(row.allowedOriginsJson),
+				),
+			})),
 			totalCount: total?.value ?? 0,
 		};
+	}
+
+	public async listPages(input: {
+		siteId?: number;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const rows = await this.db
+			.select({
+				id: pageThreads.id,
+				siteId: pageThreads.siteId,
+				siteKey: sites.siteKey,
+				allowedOriginsJson: sites.allowedOriginsJson,
+				pageKey: pageThreads.pageKey,
+				pageTitle: pageThreads.pageTitle,
+				pageUrl: pageThreads.pageUrl,
+				commentCount: pageThreads.commentCount,
+				rootCommentCount: pageThreads.rootCommentCount,
+				pageLikeCount: pageThreads.pageLikeCount,
+				updatedAt: pageThreads.updatedAt,
+			})
+			.from(pageThreads)
+			.innerJoin(sites, eq(sites.id, pageThreads.siteId))
+			.where(
+				and(
+					input.siteId ? eq(pageThreads.siteId, input.siteId) : undefined,
+					searchValue
+						? or(
+								like(pageThreads.pageKey, searchValue),
+								like(pageThreads.pageTitle, searchValue),
+								like(pageThreads.pageUrl, searchValue),
+							)
+						: undefined,
+				),
+			)
+			.orderBy(desc(pageThreads.updatedAt));
+
+		const pageThreadIds = rows.map((row) => row.id);
+		if (pageThreadIds.length === 0) {
+			return {
+				items: [],
+				totalCount: 0,
+			};
+		}
+
+		const visitorCounts = toCountMap(
+			await this.db
+				.select({
+					key: pageViewSessions.pageThreadId,
+					value: sql<number>`COUNT(DISTINCT ${pageViewSessions.visitorId})`,
+				})
+				.from(pageViewSessions)
+				.where(inArray(pageViewSessions.pageThreadId, pageThreadIds))
+				.groupBy(pageViewSessions.pageThreadId),
+		);
+		const userCounts = toCountMap(
+			await this.db
+				.select({
+					key: comments.pageThreadId,
+					value: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
+				})
+				.from(comments)
+				.where(
+					and(
+						inArray(comments.pageThreadId, pageThreadIds),
+						isNull(comments.deletedAt),
+						isNotNull(comments.authorEmail),
+					),
+				)
+				.groupBy(comments.pageThreadId),
+		);
+
+		return {
+			items: rows
+				.slice(input.offset, input.offset + input.limit)
+				.map((row) => ({
+					siteKey: row.siteKey,
+					pageKey: row.pageKey,
+					pageTitle: row.pageTitle,
+					pageUrl: resolvePublicPageUrl(
+						row.pageUrl,
+						parseStringArray(row.allowedOriginsJson),
+					),
+					commentCount: row.commentCount,
+					rootCommentCount: row.rootCommentCount,
+					pageLikeCount: row.pageLikeCount,
+					updatedAt: row.updatedAt,
+					visitorCount: visitorCounts.get(row.id) ?? 0,
+					userCount: userCounts.get(row.id) ?? 0,
+				})),
+			totalCount: rows.length,
+		};
+	}
+
+	public async listUsers(input: {
+		siteId?: number;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const rows = await this.db
+			.select({
+				email: comments.authorEmail,
+				namesJson: sql<string>`json_group_array(DISTINCT ${comments.authorName})`,
+				commentCount: count(),
+				pendingCount: sql<number>`SUM(CASE WHEN ${comments.status} = 'pending' THEN 1 ELSE 0 END)`,
+				approvedCount: sql<number>`SUM(CASE WHEN ${comments.status} = 'approved' THEN 1 ELSE 0 END)`,
+				lastCommentAt: sql<string>`MAX(${comments.createdAt})`,
+				pageCount: sql<number>`COUNT(DISTINCT ${comments.pageThreadId})`,
+				siteCount: sql<number>`COUNT(DISTINCT ${comments.siteId})`,
+			})
+			.from(comments)
+			.where(
+				and(
+					isNull(comments.deletedAt),
+					isNotNull(comments.authorEmail),
+					input.siteId ? eq(comments.siteId, input.siteId) : undefined,
+					searchValue
+						? or(
+								like(comments.authorEmail, searchValue),
+								like(comments.authorName, searchValue),
+							)
+						: undefined,
+				),
+			)
+			.groupBy(comments.authorEmail);
+		const emailRules = await this.listActiveBlacklistRules("email");
+		const items = rows
+			.map((row) => ({
+				email: row.email ?? "",
+				names: parseStringArray(row.namesJson),
+				commentCount: Number(row.commentCount ?? 0),
+				pendingCount: Number(row.pendingCount ?? 0),
+				approvedCount: Number(row.approvedCount ?? 0),
+				lastCommentAt: row.lastCommentAt,
+				pageCount: Number(row.pageCount ?? 0),
+				siteCount: Number(row.siteCount ?? 0),
+				isBlacklisted: emailRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ email: row.email ?? undefined },
+					),
+				),
+			}))
+			.sort((left, right) =>
+				(right.lastCommentAt ?? "").localeCompare(left.lastCommentAt ?? ""),
+			);
+
+		return {
+			items: items.slice(input.offset, input.offset + input.limit),
+			totalCount: items.length,
+		};
+	}
+
+	public async listVisitors(input: {
+		siteId?: number;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const rows = await this.db
+			.select({
+				id: visitors.id,
+				siteId: visitors.siteId,
+				siteKey: sites.siteKey,
+				visitorKey: visitors.visitorKey,
+				lastSeenAt: visitors.lastSeenAt,
+				createdAt: visitors.createdAt,
+			})
+			.from(visitors)
+			.innerJoin(sites, eq(sites.id, visitors.siteId))
+			.where(
+				and(
+					input.siteId ? eq(visitors.siteId, input.siteId) : undefined,
+					searchValue ? like(visitors.visitorKey, searchValue) : undefined,
+				),
+			)
+			.orderBy(desc(visitors.lastSeenAt));
+
+		const visitorIds = rows.map((row) => row.id);
+		if (visitorIds.length === 0) {
+			return {
+				items: [],
+				totalCount: 0,
+			};
+		}
+
+		const commentStatsRows = await this.db
+			.select({
+				visitorId: comments.visitorId,
+				commentCount: count(),
+				emailCount: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
+				emailsJson: sql<string>`json_group_array(DISTINCT ${comments.authorEmail})`,
+			})
+			.from(comments)
+			.where(
+				and(
+					isNull(comments.deletedAt),
+					isNotNull(comments.visitorId),
+					inArray(comments.visitorId, visitorIds),
+				),
+			)
+			.groupBy(comments.visitorId);
+		const pageCountMap = toCountMap(
+			await this.db
+				.select({
+					key: pageViewSessions.visitorId,
+					value: sql<number>`COUNT(DISTINCT ${pageViewSessions.pageThreadId})`,
+				})
+				.from(pageViewSessions)
+				.where(
+					and(
+						isNotNull(pageViewSessions.visitorId),
+						inArray(pageViewSessions.visitorId, visitorIds),
+					),
+				)
+				.groupBy(pageViewSessions.visitorId),
+		);
+		const commentStatsMap = new Map<
+			number,
+			{ commentCount: number; emailCount: number; emails: string[] }
+		>();
+		for (const row of commentStatsRows) {
+			if (row.visitorId === null) {
+				continue;
+			}
+
+			commentStatsMap.set(row.visitorId, {
+				commentCount: Number(row.commentCount ?? 0),
+				emailCount: Number(row.emailCount ?? 0),
+				emails: parseStringArray(row.emailsJson),
+			});
+		}
+
+		const visitorRules = await this.listActiveBlacklistRules("visitor");
+
+		return {
+			items: rows.slice(input.offset, input.offset + input.limit).map((row) => {
+				const commentStats = commentStatsMap.get(row.id);
+				return {
+					siteKey: row.siteKey,
+					visitorKey: row.visitorKey,
+					lastSeenAt: row.lastSeenAt,
+					createdAt: row.createdAt,
+					commentCount: commentStats?.commentCount ?? 0,
+					pageCount: pageCountMap.get(row.id) ?? 0,
+					emailCount: commentStats?.emailCount ?? 0,
+					emails: commentStats?.emails ?? [],
+					blacklist: {
+						visitor: visitorRules.some((rule) =>
+							matchBlacklistRule(
+								{
+									targetType: rule.targetType,
+									targetValue: rule.targetValue,
+									matchMode: rule.matchMode,
+								},
+								{ visitorKey: row.visitorKey },
+							),
+						),
+						ip: null,
+					},
+				};
+			}),
+			totalCount: rows.length,
+		};
+	}
+
+	public async listSitesSummary() {
+		const rows = await this.db
+			.select({
+				siteId: sites.id,
+				siteKey: sites.siteKey,
+				name: sites.name,
+				allowedOriginsJson: sites.allowedOriginsJson,
+				commentsEnabled: runtimeSettings.commentsEnabled,
+				defaultStatus: runtimeSettings.defaultStatus,
+				commentRequireJson: runtimeSettings.commentRequireJson,
+				allowWebsite: runtimeSettings.allowWebsite,
+				captchaMode: runtimeSettings.captchaMode,
+				allowPageLike: runtimeSettings.allowPageLike,
+				emailNotificationsEnabled: runtimeSettings.emailNotificationsEnabled,
+			})
+			.from(sites)
+			.innerJoin(runtimeSettings, eq(runtimeSettings.siteId, sites.id))
+			.orderBy(sites.siteKey);
+
+		const siteIds = rows.map((row) => row.siteId);
+		if (siteIds.length === 0) {
+			return [];
+		}
+
+		const pageCountMap = toCountMap(
+			await this.db
+				.select({
+					key: pageThreads.siteId,
+					value: count(),
+				})
+				.from(pageThreads)
+				.where(inArray(pageThreads.siteId, siteIds))
+				.groupBy(pageThreads.siteId),
+		);
+		const commentCountMap = toCountMap(
+			await this.db
+				.select({
+					key: comments.siteId,
+					value: count(),
+				})
+				.from(comments)
+				.where(
+					and(inArray(comments.siteId, siteIds), isNull(comments.deletedAt)),
+				)
+				.groupBy(comments.siteId),
+		);
+		const userCountMap = toCountMap(
+			await this.db
+				.select({
+					key: comments.siteId,
+					value: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
+				})
+				.from(comments)
+				.where(
+					and(
+						inArray(comments.siteId, siteIds),
+						isNull(comments.deletedAt),
+						isNotNull(comments.authorEmail),
+					),
+				)
+				.groupBy(comments.siteId),
+		);
+		const visitorCountMap = toCountMap(
+			await this.db
+				.select({
+					key: visitors.siteId,
+					value: count(),
+				})
+				.from(visitors)
+				.where(inArray(visitors.siteId, siteIds))
+				.groupBy(visitors.siteId),
+		);
+
+		return rows.map((row) => ({
+			siteKey: row.siteKey,
+			name: row.name,
+			allowedOrigins: parseStringArray(row.allowedOriginsJson),
+			comments: {
+				enabled: row.commentsEnabled,
+				defaultStatus: row.defaultStatus,
+				commentRequireJson: row.commentRequireJson,
+				allowWebsite: row.allowWebsite,
+				captcha: {
+					mode: row.captchaMode,
+				},
+			},
+			pageFeedback: {
+				allowLike: row.allowPageLike,
+			},
+			notifications: {
+				emailEnabled: row.emailNotificationsEnabled,
+			},
+			pageCount: pageCountMap.get(row.siteId) ?? 0,
+			commentCount: commentCountMap.get(row.siteId) ?? 0,
+			userCount: userCountMap.get(row.siteId) ?? 0,
+			visitorCount: visitorCountMap.get(row.siteId) ?? 0,
+		}));
 	}
 
 	public async getCommentById(commentId: string) {
@@ -274,6 +735,7 @@ export class AdminRepository {
 			defaultStatus?: "pending" | "approved";
 			maxDepth?: number;
 			rootLimit?: number;
+			commentRequireJson?: string;
 			allowWebsite?: boolean;
 			allowPageLike?: boolean;
 			captchaMode?: "never" | "always" | "threshold";
@@ -295,6 +757,7 @@ export class AdminRepository {
 				defaultStatus: input.defaultStatus,
 				maxDepth: input.maxDepth,
 				rootLimit: input.rootLimit,
+				commentRequireJson: input.commentRequireJson,
 				allowWebsite: input.allowWebsite,
 				allowPageLike: input.allowPageLike,
 				captchaMode: input.captchaMode,

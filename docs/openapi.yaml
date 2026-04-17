@@ -16,7 +16,11 @@ tags:
   - name: Page Feedback
   - name: Admin Session
   - name: Admin Comments
+  - name: Admin Pages
+  - name: Admin Users
+  - name: Admin Visitors
   - name: Admin Blacklist
+  - name: Admin Sites
   - name: Admin Settings
 paths:
   /healthz:
@@ -206,6 +210,20 @@ paths:
           $ref: '#/components/responses/Error409'
         '429':
           $ref: '#/components/responses/Error429'
+  /api/admin/session/captcha:
+    get:
+      tags: [Admin Session]
+      summary: 获取管理员登录验证码
+      operationId: adminCaptcha
+      responses:
+        '200':
+          description: 管理员登录验证码
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCaptchaChallengeResponse'
+        '403':
+          $ref: '#/components/responses/Error403'
   /api/admin/session/login:
     post:
       tags: [Admin Session]
@@ -224,12 +242,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminLoginResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
         '401':
           $ref: '#/components/responses/Error401'
         '403':
           $ref: '#/components/responses/Error403'
-        '429':
-          $ref: '#/components/responses/Error429'
   /api/admin/session/logout:
     post:
       tags: [Admin Session]
@@ -345,6 +363,93 @@ paths:
           $ref: '#/components/responses/Error401'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/admin/pages:
+    get:
+      tags: [Admin Pages]
+      summary: 列出页面管理聚合数据
+      operationId: listAdminPages
+      security:
+        - AdminSessionCookie: []
+      parameters:
+        - name: siteKey
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 页面管理列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminPagesListResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+  /api/admin/users:
+    get:
+      tags: [Admin Users]
+      summary: 按邮箱聚合列出用户视图
+      operationId: listAdminUsers
+      security:
+        - AdminSessionCookie: []
+      parameters:
+        - name: siteKey
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 用户管理列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUsersListResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+  /api/admin/visitors:
+    get:
+      tags: [Admin Visitors]
+      summary: 列出访客管理聚合数据
+      operationId: listAdminVisitors
+      security:
+        - AdminSessionCookie: []
+      parameters:
+        - name: siteKey
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: 访客管理列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminVisitorsListResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
   /api/admin/blacklist:
     get:
       tags: [Admin Blacklist]
@@ -438,6 +543,22 @@ paths:
           $ref: '#/components/responses/Error401'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/admin/sites:
+    get:
+      tags: [Admin Sites]
+      summary: 列出站点总览与运行时摘要
+      operationId: listAdminSites
+      security:
+        - AdminSessionCookie: []
+      responses:
+        '200':
+          description: 站点总览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSitesListResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
     put:
       tags: [Admin Settings]
       summary: 更新站点运行时设置
@@ -497,8 +618,12 @@ components:
       in: query
       required: false
       schema:
-        type: string
-        format: uri
+        oneOf:
+          - type: string
+            format: uri
+          - type: string
+            pattern: ^/
+      description: 完整页面 URL，或去掉域名后的页面路径（如 `/posts/welcome/`）
     SortBy:
       name: sortBy
       in: query
@@ -608,8 +733,6 @@ components:
         - supportsReply
         - supportsVote
         - supportsCaptcha
-        - requiredAuthorFields
-        - optionalAuthorFields
         - defaultStatus
         - message
       properties:
@@ -621,14 +744,6 @@ components:
           type: boolean
         supportsCaptcha:
           type: boolean
-        requiredAuthorFields:
-          type: array
-          items:
-            type: string
-        optionalAuthorFields:
-          type: array
-          items:
-            type: string
         defaultStatus:
           type: string
           enum: [pending, approved]
@@ -636,6 +751,20 @@ components:
           type:
             - string
             - 'null'
+    CommentForm:
+      type: object
+      required: [allow, require]
+      properties:
+        allow:
+          type: array
+          items:
+            type: string
+            enum: [nickname, email, website]
+        require:
+          type: array
+          items:
+            type: string
+            enum: [nickname, email, website]
     ThreadSummary:
       type: object
       required: [siteKey, pageKey, pageTitle]
@@ -797,6 +926,7 @@ components:
       type: object
       required:
         - capability
+        - commentForm
         - thread
         - pagination
         - comments
@@ -806,6 +936,8 @@ components:
       properties:
         capability:
           $ref: '#/components/schemas/CommentCapability'
+        commentForm:
+          $ref: '#/components/schemas/CommentForm'
         thread:
           $ref: '#/components/schemas/ThreadSummary'
         pagination:
@@ -851,15 +983,18 @@ components:
         pageTitle:
           type: string
         pageUrl:
-          type: string
-          format: uri
+          oneOf:
+            - type: string
+              format: uri
+            - type: string
+              pattern: ^/
+          description: 完整页面 URL，或去掉域名后的页面路径
         parentCommentId:
           type:
             - string
             - 'null'
         author:
           type: object
-          required: [name]
           properties:
             name:
               type: string
@@ -954,8 +1089,12 @@ components:
         pageTitle:
           type: string
         pageUrl:
-          type: string
-          format: uri
+          oneOf:
+            - type: string
+              format: uri
+            - type: string
+              pattern: ^/
+          description: 完整页面 URL，或去掉域名后的页面路径
     PageLikeResponse:
       type: object
       required: [pageFeedback]
@@ -964,10 +1103,32 @@ components:
           $ref: '#/components/schemas/PageFeedbackSummary'
     AdminLoginRequest:
       type: object
-      required: [token]
+      required: [token, challengeId, captchaValue]
       properties:
         token:
           type: string
+        challengeId:
+          type: string
+        captchaValue:
+          type: string
+    AdminCaptchaChallengeResponse:
+      type: object
+      required: [challenge]
+      properties:
+        challenge:
+          type: object
+          required: [challengeId, mode, imageData, expiresAt]
+          properties:
+            challengeId:
+              type: string
+            mode:
+              type: string
+              const: inline_value
+            imageData:
+              type: string
+            expiresAt:
+              type: string
+              format: date-time
     AdminLoginResponse:
       type: object
       required: [authenticated, session]
@@ -1031,6 +1192,7 @@ components:
         - updatedAt
         - pageKey
         - pageTitle
+        - pageUrl
       properties:
         id:
           type: string
@@ -1070,6 +1232,21 @@ components:
           type:
             - string
             - 'null'
+        pageUrl:
+          type:
+            - string
+            - 'null'
+          format: uri
+    AdminCollectionPagination:
+      type: object
+      required: [limit, offset, totalCount]
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        totalCount:
+          type: integer
     AdminCommentsListResponse:
       type: object
       required: [items, pagination]
@@ -1079,15 +1256,154 @@ components:
           items:
             $ref: '#/components/schemas/AdminCommentListItem'
         pagination:
-          type: object
-          required: [limit, offset, totalCount]
-          properties:
-            limit:
-              type: integer
-            offset:
-              type: integer
-            totalCount:
-              type: integer
+          $ref: '#/components/schemas/AdminCollectionPagination'
+    AdminPageListItem:
+      type: object
+      required:
+        - siteKey
+        - pageKey
+        - pageTitle
+        - pageUrl
+        - commentCount
+        - rootCommentCount
+        - pageLikeCount
+        - updatedAt
+        - visitorCount
+        - userCount
+      properties:
+        siteKey:
+          type: string
+        pageKey:
+          type: string
+        pageTitle:
+          type:
+            - string
+            - 'null'
+        pageUrl:
+          type:
+            - string
+            - 'null'
+          format: uri
+        commentCount:
+          type: integer
+        rootCommentCount:
+          type: integer
+        pageLikeCount:
+          type: integer
+        updatedAt:
+          type: string
+        visitorCount:
+          type: integer
+        userCount:
+          type: integer
+    AdminPagesListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminPageListItem'
+        pagination:
+          $ref: '#/components/schemas/AdminCollectionPagination'
+    AdminUserListItem:
+      type: object
+      required:
+        - email
+        - names
+        - commentCount
+        - pendingCount
+        - approvedCount
+        - lastCommentAt
+        - pageCount
+        - siteCount
+        - isBlacklisted
+      properties:
+        email:
+          type: string
+          format: email
+        names:
+          type: array
+          items:
+            type: string
+        commentCount:
+          type: integer
+        pendingCount:
+          type: integer
+        approvedCount:
+          type: integer
+        lastCommentAt:
+          type: string
+        pageCount:
+          type: integer
+        siteCount:
+          type: integer
+        isBlacklisted:
+          type: boolean
+    AdminUsersListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUserListItem'
+        pagination:
+          $ref: '#/components/schemas/AdminCollectionPagination'
+    AdminVisitorBlacklistState:
+      type: object
+      required: [visitor, ip]
+      properties:
+        visitor:
+          type: boolean
+        ip:
+          oneOf:
+            - type: boolean
+            - type: 'null'
+    AdminVisitorListItem:
+      type: object
+      required:
+        - siteKey
+        - visitorKey
+        - lastSeenAt
+        - createdAt
+        - commentCount
+        - pageCount
+        - emailCount
+        - emails
+        - blacklist
+      properties:
+        siteKey:
+          type: string
+        visitorKey:
+          type: string
+        lastSeenAt:
+          type: string
+        createdAt:
+          type: string
+        commentCount:
+          type: integer
+        pageCount:
+          type: integer
+        emailCount:
+          type: integer
+        emails:
+          type: array
+          items:
+            type: string
+            format: email
+        blacklist:
+          $ref: '#/components/schemas/AdminVisitorBlacklistState'
+    AdminVisitorsListResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminVisitorListItem'
+        pagination:
+          $ref: '#/components/schemas/AdminCollectionPagination'
     AdminCommentPatchRequest:
       type: object
       minProperties: 1
@@ -1276,6 +1592,7 @@ components:
         - defaultStatus
         - maxDepth
         - rootLimit
+        - identity
         - allowWebsite
         - captcha
         - abuseGuard
@@ -1289,6 +1606,8 @@ components:
           type: integer
         rootLimit:
           type: integer
+        identity:
+          $ref: '#/components/schemas/CommentForm'
         allowWebsite:
           type: boolean
         captcha:
@@ -1365,6 +1684,14 @@ components:
             rootLimit:
               type: integer
               minimum: 1
+            identity:
+              type: object
+              properties:
+                require:
+                  type: array
+                  items:
+                    type: string
+                    enum: [nickname, email, website]
             allowWebsite:
               type: boolean
             captcha:
@@ -1411,3 +1738,65 @@ components:
           properties:
             emailEnabled:
               type: boolean
+    AdminSiteSummaryItem:
+      type: object
+      required:
+        - siteKey
+        - name
+        - allowedOrigins
+        - comments
+        - pageFeedback
+        - notifications
+        - pageCount
+        - commentCount
+        - userCount
+        - visitorCount
+      properties:
+        siteKey:
+          type: string
+        name:
+          type: string
+        allowedOrigins:
+          type: array
+          items:
+            type: string
+        comments:
+          type: object
+          required: [enabled, defaultStatus, identity, allowWebsite, captcha]
+          properties:
+            enabled:
+              type: boolean
+            defaultStatus:
+              type: string
+              enum: [pending, approved]
+            identity:
+              $ref: '#/components/schemas/CommentForm'
+            allowWebsite:
+              type: boolean
+            captcha:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [never, always, threshold]
+        pageFeedback:
+          $ref: '#/components/schemas/AdminSettingsPageFeedback'
+        notifications:
+          $ref: '#/components/schemas/AdminSettingsNotifications'
+        pageCount:
+          type: integer
+        commentCount:
+          type: integer
+        userCount:
+          type: integer
+        visitorCount:
+          type: integer
+    AdminSitesListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminSiteSummaryItem'

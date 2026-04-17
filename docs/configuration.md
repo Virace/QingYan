@@ -50,6 +50,7 @@ pnpm config:check:local
 - `sites[].defaults.comments.defaultStatus`
 - `sites[].defaults.comments.maxDepth`
 - `sites[].defaults.comments.rootLimit`
+- `sites[].defaults.comments.identity.*`
 - `sites[].defaults.comments.allowWebsite`
 - `sites[].defaults.comments.captcha.*`
 - `sites[].defaults.comments.abuseGuard.*`
@@ -102,6 +103,8 @@ admin:
 - `tokenHash`: 后台登录口令
   - 支持明文直接比较，主要用于本地开发
   - 支持 `sha256:<hex>` 格式，适合部署环境
+- 后台登录每次都需要先完成管理员登录验证码
+- 同一 IP 连续 5 次登录错误会被永久加入后台登录黑名单
 - `session.cookieName`: 后台 cookie 名
 - `session.ttlMinutes`: 会话有效期
 - `session.sameSite`: `strict | lax | none`
@@ -119,8 +122,7 @@ security:
   rateLimit:
     adminLogin:
       windowSec: 600
-      maxFailures: 10
-      autoBlacklistSec: 3600
+      maxFailures: 5
     commentCreate:
       windowSec: 300
       maxRequests: 5
@@ -137,7 +139,7 @@ security:
 
 - `requestIdHeader`: 外部请求链路传入 request id 时使用的 header 名
 - `globalFloodGuard`: 进程级总请求洪峰保护
-- `rateLimit.adminLogin`: 后台登录失败限流和自动黑名单
+- `rateLimit.adminLogin`: 保留后台登录相关兼容配置结构；当前实现使用管理员登录验证码和 5 次失败永久封 IP 作为主保护逻辑
 - `rateLimit.commentCreate`: 评论创建限流
 - `rateLimit.commentVote`: 评论投票限流
 - `rateLimit.captchaVerify`: 验证码验证失败限流
@@ -147,7 +149,6 @@ security:
 
 - `maxRequests` 用于请求次数限流
 - `maxFailures` 用于失败次数限流
-- `autoBlacklistSec` 仅 `adminLogin` 使用，触发后自动写入黑名单
 
 ### `captcha`
 
@@ -197,6 +198,10 @@ sites:
         defaultStatus: pending
         maxDepth: 3
         rootLimit: 20
+        identity:
+          require:
+            - nickname
+            - email
         captcha:
           mode: threshold
           thresholdWindowSec: 60
@@ -209,7 +214,6 @@ sites:
             enabled: true
             scope: post
             ttlSec: 1800
-        requireEmail: false
         allowWebsite: true
       pageFeedback:
         allowLike: true
@@ -226,16 +230,17 @@ sites:
 - `defaults.comments.defaultStatus`: 新评论默认状态，`pending` 或 `approved`
 - `defaults.comments.maxDepth`: 评论最大嵌套深度
 - `defaults.comments.rootLimit`: 首层评论分页上限默认值
+- `defaults.comments.identity.require`: 评论身份字段必填集合
+  - 当前允许 key：`nickname | email | website`
 - `defaults.comments.captcha.mode`: `never | always | threshold`
 - `defaults.comments.captcha.thresholdWindowSec`: 阈值验证码统计窗口
-- `defaults.comments.captcha.thresholdMaxActions`: 触发验证码前允许的写操作次数
+- `defaults.comments.captcha.thresholdMaxActions`: 从第 N 次写操作开始要求验证码
 - `defaults.comments.abuseGuard.enabled`: 是否启用滥用保护
 - `defaults.comments.abuseGuard.windowSec`: 滥用写入统计窗口
 - `defaults.comments.abuseGuard.maxWriteActions`: 达到阈值后可进入自动黑名单逻辑
 - `defaults.comments.abuseGuard.autoBlacklist.enabled`: 是否自动拉黑
 - `defaults.comments.abuseGuard.autoBlacklist.scope`: `post | all`
 - `defaults.comments.abuseGuard.autoBlacklist.ttlSec`: 自动黑名单有效期
-- `defaults.comments.requireEmail`: 是否要求评论必须带邮箱
 - `defaults.comments.allowWebsite`: 是否允许评论作者提交个人网站
 - `defaults.pageFeedback.allowLike`: 是否允许页面点赞
 - `defaults.notifications.emailEnabled`: 是否启用邮件通知开关

@@ -62,6 +62,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 
 		return {
 			capability: result.capability,
+			commentForm: result.commentForm,
 			thread: {
 				siteKey: parsed.data.siteKey,
 				pageKey: result.thread.pageKey,

@@ -5,6 +5,21 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function extractCaptchaAnswer(imageData: string): string {
+	const encoded = imageData.split(",")[1];
+	if (!encoded) {
+		throw new Error("Expected captcha image data");
+	}
+
+	const svg = Buffer.from(encoded, "base64").toString("utf-8");
+	const matched = svg.match(/>(\d{4})</);
+	if (!matched?.[1]) {
+		throw new Error("Expected captcha answer in SVG");
+	}
+
+	return matched[1];
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -12,6 +27,79 @@ afterEach(async () => {
 });
 
 describe("admin session", () => {
+	it("requires captcha before allowing admin login", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/session/login",
+			payload: {
+				token: "replace-me",
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "ADMIN_CAPTCHA_REQUIRED",
+			},
+		});
+	});
+
+	it("permanently blacklists an ip after five invalid token submissions", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		for (let index = 1; index <= 5; index += 1) {
+			const captchaResponse = await fixture.app.inject({
+				method: "GET",
+				url: "/api/admin/session/captcha",
+			});
+			expect(captchaResponse.statusCode).toBe(200);
+
+			const { challenge } = captchaResponse.json() as {
+				challenge: {
+					challengeId: string;
+					imageData: string;
+				};
+			};
+
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/api/admin/session/login",
+				payload: {
+					token: "wrong-token",
+					challengeId: challenge.challengeId,
+					captchaValue: extractCaptchaAnswer(challenge.imageData),
+				},
+			});
+
+			expect(response.statusCode).toBe(index === 5 ? 403 : 401);
+		}
+
+		const rules = await fixture.app.db.select().from(blacklistRules);
+		expect(rules).toHaveLength(1);
+		expect(rules[0]).toMatchObject({
+			targetType: "ip",
+			targetValue: "127.0.0.1",
+			source: "auto",
+			scope: "all",
+			expiresAt: null,
+		});
+
+		const captchaResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/session/captcha",
+		});
+		expect(captchaResponse.statusCode).toBe(403);
+		expect(captchaResponse.json()).toMatchObject({
+			error: {
+				code: "ADMIN_BLACKLISTED",
+			},
+		});
+	});
+
 	it("rejects login from a blacklisted source with admin-specific error code", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -23,11 +111,8 @@ describe("admin session", () => {
 		});
 
 		const response = await fixture.app.inject({
-			method: "POST",
-			url: "/api/admin/session/login",
-			payload: {
-				token: "replace-me",
-			},
+			method: "GET",
+			url: "/api/admin/session/captcha",
 		});
 
 		expect(response.statusCode).toBe(403);
@@ -42,11 +127,26 @@ describe("admin session", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
+		const invalidCaptcha = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/session/captcha",
+		});
+		const invalidChallenge = invalidCaptcha.json() as {
+			challenge: {
+				challengeId: string;
+				imageData: string;
+			};
+		};
+
 		const invalidLogin = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/session/login",
 			payload: {
 				token: "wrong-token",
+				challengeId: invalidChallenge.challenge.challengeId,
+				captchaValue: extractCaptchaAnswer(
+					invalidChallenge.challenge.imageData,
+				),
 			},
 		});
 		expect(invalidLogin.statusCode).toBe(401);
@@ -56,11 +156,25 @@ describe("admin session", () => {
 			},
 		});
 
+		const captchaResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/session/captcha",
+		});
+		expect(captchaResponse.statusCode).toBe(200);
+		const challenge = captchaResponse.json() as {
+			challenge: {
+				challengeId: string;
+				imageData: string;
+			};
+		};
+
 		const loginResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/session/login",
 			payload: {
 				token: "replace-me",
+				challengeId: challenge.challenge.challengeId,
+				captchaValue: extractCaptchaAnswer(challenge.challenge.imageData),
 			},
 		});
 		expect(loginResponse.statusCode).toBe(200);

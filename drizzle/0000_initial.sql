@@ -145,6 +145,7 @@ CREATE TABLE `runtime_settings` (
 	`default_status` text DEFAULT 'pending' NOT NULL,
 	`max_depth` integer DEFAULT 3 NOT NULL,
 	`root_limit` integer DEFAULT 20 NOT NULL,
+	`comment_require_json` text DEFAULT '["nickname","email"]' NOT NULL,
 	`allow_website` integer DEFAULT true NOT NULL,
 	`allow_page_like` integer DEFAULT true NOT NULL,
 	`captcha_mode` text DEFAULT 'threshold' NOT NULL,

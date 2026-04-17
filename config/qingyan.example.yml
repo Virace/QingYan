@@ -26,8 +26,7 @@ security:
   rateLimit:
     adminLogin:
       windowSec: 600
-      maxFailures: 10
-      autoBlacklistSec: 3600
+      maxFailures: 5
     commentCreate:
       windowSec: 300
       maxRequests: 5
@@ -69,6 +68,10 @@ sites:
         defaultStatus: pending
         maxDepth: 3
         rootLimit: 20
+        identity:
+          require:
+            - nickname
+            - email
         captcha:
           mode: threshold
           thresholdWindowSec: 60
@@ -81,7 +84,6 @@ sites:
             enabled: true
             scope: post
             ttlSec: 1800
-        requireEmail: false
         allowWebsite: true
       pageFeedback:
         allowLike: true

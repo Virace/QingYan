@@ -87,6 +87,7 @@ describe("POST /api/page-feedback/like", () => {
 					parentCommentId: null,
 					author: {
 						name: "Alice",
+						email: "alice@example.com",
 					},
 					content: {
 						raw,

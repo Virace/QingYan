@@ -30,6 +30,7 @@ function buildRuntimeSettingsInsert(siteId: number, site: SiteConfig) {
 		defaultStatus: site.defaults.comments.defaultStatus,
 		maxDepth: site.defaults.comments.maxDepth,
 		rootLimit: site.defaults.comments.rootLimit,
+		commentRequireJson: JSON.stringify(site.defaults.comments.identity.require),
 		allowWebsite: site.defaults.comments.allowWebsite,
 		allowPageLike: site.defaults.pageFeedback.allowLike,
 		captchaMode: site.defaults.comments.captcha.mode,

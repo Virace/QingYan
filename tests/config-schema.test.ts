@@ -36,8 +36,7 @@ describe("configSchema", () => {
 				rateLimit: {
 					adminLogin: {
 						windowSec: 600,
-						maxFailures: 10,
-						autoBlacklistSec: 3600,
+						maxFailures: 5,
 					},
 					commentCreate: {
 						windowSec: 300,
@@ -87,6 +86,9 @@ describe("configSchema", () => {
 							defaultStatus: "pending",
 							maxDepth: 3,
 							rootLimit: 20,
+							identity: {
+								require: ["nickname", "email"],
+							},
 							captcha: {
 								mode: "threshold",
 								thresholdWindowSec: 60,
@@ -102,7 +104,6 @@ describe("configSchema", () => {
 									ttlSec: 1800,
 								},
 							},
-							requireEmail: false,
 							allowWebsite: true,
 						},
 						pageFeedback: {
@@ -121,6 +122,9 @@ describe("configSchema", () => {
 			enabled: false,
 			windowSec: 10,
 			maxRequests: 120,
+		});
+		expect(parsed.sites[0]?.defaults.comments.identity).toEqual({
+			require: ["nickname", "email"],
 		});
 		expect(parsed.sites[0]?.defaults.comments.captcha).toEqual({
 			mode: "threshold",

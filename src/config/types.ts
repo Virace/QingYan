@@ -13,6 +13,12 @@ const commentsCaptchaDefaultsSchema = z.object({
 	thresholdMaxActions: z.number().int().positive(),
 });
 
+const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
+
+const commentsIdentitySchema = z.object({
+	require: z.array(commentIdentityFieldSchema),
+});
+
 const commentsAutoBlacklistDefaultsSchema = z.object({
 	enabled: z.boolean(),
 	scope: z.enum(["post", "all"]),
@@ -31,9 +37,9 @@ const commentsDefaultsSchema = z.object({
 	defaultStatus: z.enum(["pending", "approved"]),
 	maxDepth: z.number().int().positive(),
 	rootLimit: z.number().int().positive(),
+	identity: commentsIdentitySchema,
 	captcha: commentsCaptchaDefaultsSchema,
 	abuseGuard: commentsAbuseGuardDefaultsSchema,
-	requireEmail: z.boolean().default(false),
 	allowWebsite: z.boolean().default(true),
 });
 

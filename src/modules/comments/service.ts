@@ -2,6 +2,7 @@ import type { SiteConfig } from "../../config/types";
 import { ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
 import type { CaptchaService } from "./captcha-service";
+import { buildCommentForm } from "./comment-form";
 import type { CommentsRepository } from "./repository";
 
 function buildCapability(
@@ -18,21 +19,12 @@ function buildCapability(
 	const commentsDefaults = site.defaults.comments;
 	const supportsCaptcha =
 		(settings?.captchaMode ?? commentsDefaults.captcha.mode) !== "never";
-	const requiredAuthorFields = ["name"];
-	if (commentsDefaults.requireEmail) {
-		requiredAuthorFields.push("email");
-	}
 
 	return {
 		enabled: settings?.commentsEnabled ?? commentsDefaults.enabled,
 		supportsReply: (settings?.maxDepth ?? commentsDefaults.maxDepth) > 1,
 		supportsVote: true,
 		supportsCaptcha,
-		requiredAuthorFields,
-		optionalAuthorFields:
-			(settings?.allowWebsite ?? commentsDefaults.allowWebsite)
-				? ["website"]
-				: [],
 		defaultStatus: settings?.defaultStatus ?? commentsDefaults.defaultStatus,
 		message: null,
 	};
@@ -124,6 +116,12 @@ export class CommentsService {
 
 		return {
 			capability: buildCapability(configuredSite, settings ?? undefined),
+			commentForm: buildCommentForm(configuredSite, {
+				allowWebsite:
+					settings?.allowWebsite ??
+					configuredSite.defaults.comments.allowWebsite,
+				commentRequireJson: settings?.commentRequireJson,
+			}),
 			thread: refreshedThread,
 			pagination: {
 				sortBy: pagination.sortBy,

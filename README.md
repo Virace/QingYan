@@ -15,8 +15,11 @@ QingYan 是一个面向内容站点的第一方评论后端，当前基线服务
 - 评论首屏 bootstrap：`GET /api/comments/bootstrap`
 - 评论线程分页：`GET /api/comments/thread`
 - 评论创建、投票、验证码验证
+- bootstrap 返回 `commentForm.allow / require`，前端可按 `nickname | email | website` 动态渲染必填项
 - 页面点赞
-- 后台登录、评论审核、黑名单、运行时设置
+- 后台登录（管理员登录验证码 + 5 次失败永久封禁 IP）
+- 后台评论审核、黑名单、页面管理、用户管理、访客管理、站点总览、运行时设置
+- 浏览器后台入口：`GET /admin`
 - SQLite + Drizzle migration 基线
 - Docker / Compose 本地或单机部署
 

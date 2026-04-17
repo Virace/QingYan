@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -15,16 +16,7 @@ describe("admin settings", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const login = await fixture.app.inject({
-			method: "POST",
-			url: "/api/admin/session/login",
-			payload: {
-				token: "replace-me",
-			},
-		});
-		const adminCookie = login.cookies.find(
-			(cookie) => cookie.name === "qingyan_admin",
-		);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
@@ -39,6 +31,10 @@ describe("admin settings", () => {
 			comments: {
 				enabled: true,
 				defaultStatus: "pending",
+				identity: {
+					allow: ["nickname", "email", "website"],
+					require: ["nickname", "email"],
+				},
 				captcha: {
 					mode: "threshold",
 					thresholdWindowSec: 60,
@@ -66,6 +62,9 @@ describe("admin settings", () => {
 			payload: {
 				comments: {
 					defaultStatus: "approved",
+					identity: {
+						require: ["nickname"],
+					},
 					captcha: {
 						mode: "always",
 						thresholdWindowSec: 120,
@@ -94,6 +93,10 @@ describe("admin settings", () => {
 		expect(updateResponse.json()).toMatchObject({
 			comments: {
 				defaultStatus: "approved",
+				identity: {
+					allow: ["nickname", "email", "website"],
+					require: ["nickname"],
+				},
 				captcha: {
 					mode: "always",
 					thresholdWindowSec: 120,
