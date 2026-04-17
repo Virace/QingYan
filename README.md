@@ -1,4 +1,8 @@
-# QingYan
+# 清言
+
+<p align="center" style="background-color:#fff">
+  <img src="docs/branding/qingyan-logo-lockup.png" alt="清言（QingYan）品牌图" width="560" />
+</p>
 
 ![Node 24](https://img.shields.io/badge/node-%3E%3D24-43853d?logo=node.js&logoColor=white)
 ![TypeScript 6](https://img.shields.io/badge/typescript-6-3178c6?logo=typescript&logoColor=white)
@@ -6,9 +10,9 @@
 ![SQLite](https://img.shields.io/badge/sqlite-3-003b57?logo=sqlite&logoColor=white)
 ![OpenAPI](https://img.shields.io/badge/openapi-3.1-6ba539?logo=openapiinitiative&logoColor=white)
 
-QingYan 是一个面向内容站点的第一方评论后端，当前基线服务于 FangYuan 一类内容站点的评论、验证码、页面点赞和后台管理需求。
+清言（QingYan）是一个很干净、API-first 的评论与对话基础设施。当前基线聚焦后端接口与后台管理能力，服务于 方圆（FangYuan） 一类内容站点的评论、验证码、页面点赞和管理需求。
 
-它不是论坛系统、评论 SaaS，也不是第三方 provider 网关。当前仓库提供的是一个可自部署、可继续演进的最小后端基线。
+它不是论坛系统、评论 SaaS，也不是强调自有前端体验的完整评论产品。当前仓库提供的是一个可自部署、可继续演进、低噪声的评论后端基线。
 
 ## 当前能力
 
