@@ -1,0 +1,52 @@
+{
+	"name": "qingyan",
+	"version": "0.1.0",
+	"private": true,
+	"description": "面向内容站点的第一方评论后端。",
+	"packageManager": "pnpm@10.33.0",
+	"engines": {
+		"node": ">=24.0.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"better-sqlite3",
+			"esbuild"
+		]
+	},
+	"scripts": {
+		"clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+		"dev": "tsx watch src/server.ts",
+		"build": "pnpm run clean && tsc -p tsconfig.build.json",
+		"start": "node dist/server.js",
+		"lint": "biome lint src tests scripts package.json tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts",
+		"format": "biome format --write src tests scripts package.json tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts",
+		"format:check": "biome format src tests scripts package.json tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts",
+		"check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run config:check",
+		"dev:smoke": "tsx scripts/dev-smoke.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "vitest run --config vitest.config.ts",
+		"config:check": "tsx src/config/check-config.ts config/qingyan.example.yml",
+		"config:check:local": "tsx src/config/check-config.ts",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit migrate",
+		"db:studio": "drizzle-kit studio"
+	},
+	"dependencies": {
+		"@fastify/cookie": "^11.0.2",
+		"better-sqlite3": "^12.9.0",
+		"drizzle-orm": "^0.45.2",
+		"fastify": "^5.8.5",
+		"fastify-plugin": "^5.1.0",
+		"yaml": "^2.8.3",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.12",
+		"@types/better-sqlite3": "^7.6.13",
+		"@types/node": "^25.6.0",
+		"drizzle-kit": "^0.31.10",
+		"tsx": "^4.21.0",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.4"
+	}
+}

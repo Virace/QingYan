@@ -1,0 +1,27 @@
+services:
+  qingyan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qingyan
+    ports:
+      - "4401:4401"
+    environment:
+      NODE_ENV: production
+      QINGYAN_CONFIG_PATH: /app/config/qingyan.yml
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4401/healthz').then((res)=>{if(!res.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
