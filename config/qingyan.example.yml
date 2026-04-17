@@ -47,6 +47,12 @@ captcha:
     height: 60
     ttlSec: 600
 
+logging:
+  directory: ./logs
+  defaults:
+    level: info
+    retentionDays: 7
+
 mail:
   enabled: false
   smtp:

@@ -12,6 +12,7 @@ const ENDPOINTS = {
 	blacklist: "/api/admin/blacklist",
 	sites: "/api/admin/sites",
 	settings: "/api/admin/settings",
+	systemSettings: "/api/admin/system-settings",
 };
 
 const COMMENT_REQUIRE_FIELDS = ["nickname", "email", "website"];
@@ -26,6 +27,7 @@ const state = {
 	blacklist: null,
 	sitesSummary: null,
 	settings: null,
+	systemSettings: null,
 	commentFilters: {
 		limit: 20,
 		offset: 0,
@@ -108,6 +110,7 @@ function resetCollections() {
 	state.blacklist = null;
 	state.sitesSummary = null;
 	state.settings = null;
+	state.systemSettings = null;
 }
 
 function setLoginState(message) {
@@ -272,6 +275,8 @@ async function loadActiveTab() {
 			);
 		} else if (state.activeTab === "sites") {
 			state.sitesSummary = await request(ENDPOINTS.sites);
+		} else if (state.activeTab === "system") {
+			state.systemSettings = await request(ENDPOINTS.systemSettings);
 		} else {
 			state.settings = await request(
 				ENDPOINTS.settings +
@@ -393,6 +398,19 @@ async function saveSettings(formData) {
 			}),
 		},
 	);
+	await loadActiveTab();
+}
+
+async function saveSystemSettings(formData) {
+	await request(ENDPOINTS.systemSettings, {
+		method: "PUT",
+		body: JSON.stringify({
+			logging: {
+				level: String(formData.get("level") ?? "info"),
+				retentionDays: Number(formData.get("retentionDays") ?? 7),
+			},
+		}),
+	});
 	await loadActiveTab();
 }
 
@@ -998,7 +1016,58 @@ function renderSettingsSection() {
 	);
 }
 
+function renderSystemSettingsSection() {
+	const settings = state.systemSettings;
+	if (state.tabLoading && !settings) {
+		return '<section class="admin-panel"><p class="admin-empty">系统设置加载中...</p></section>';
+	}
+
+	if (!settings) {
+		return '<section class="admin-panel"><p class="admin-empty">未加载到系统设置。</p></section>';
+	}
+
+	return (
+		'<section class="admin-panel">' +
+		'<form class="admin-settings-grid" id="system-settings-form">' +
+		'<div class="admin-form-field"><label for="system-logging-level">日志等级</label><select id="system-logging-level" name="level"><option value="error"' +
+		(settings.logging.level === "error" ? " selected" : "") +
+		'>error</option><option value="warn"' +
+		(settings.logging.level === "warn" ? " selected" : "") +
+		'>warn</option><option value="info"' +
+		(settings.logging.level === "info" ? " selected" : "") +
+		'>info</option><option value="debug"' +
+		(settings.logging.level === "debug" ? " selected" : "") +
+		">debug</option></select></div>" +
+		'<div class="admin-form-field"><label for="system-retention-days">日志保留天数</label><input id="system-retention-days" name="retentionDays" type="number" min="1" max="3650" value="' +
+		escapeAttribute(settings.logging.retentionDays) +
+		'" /></div>' +
+		'<div class="admin-form-field"><label>日志目录</label><div class="admin-meta">' +
+		escapeHtml(settings.logging.directory) +
+		"</div></div>" +
+		'<div class="admin-toolbar-actions"><button class="admin-button-primary" type="submit">保存并立即生效</button></div>' +
+		"</form>" +
+		"</section>"
+	);
+}
+
 function buildStats() {
+	if (state.activeTab === "system") {
+		return [
+			{
+				label: "日志等级",
+				value: state.systemSettings?.logging?.level ?? "-",
+			},
+			{
+				label: "保留天数",
+				value: state.systemSettings?.logging?.retentionDays ?? "-",
+			},
+			{
+				label: "日志目录",
+				value: state.systemSettings?.logging?.directory ?? "-",
+			},
+		];
+	}
+
 	if (state.activeTab === "sites") {
 		return [
 			{ label: "站点数", value: state.sitesSummary?.items?.length ?? "-" },
@@ -1046,6 +1115,8 @@ function renderShell() {
 		sectionHtml = renderBlacklistSection();
 	} else if (state.activeTab === "sites") {
 		sectionHtml = renderSitesSection();
+	} else if (state.activeTab === "system") {
+		sectionHtml = renderSystemSettingsSection();
 	} else {
 		sectionHtml = renderSettingsSection();
 	}
@@ -1088,6 +1159,7 @@ function renderShell() {
 		tabButton("blacklist", "黑名单") +
 		tabButton("sites", "站点管理") +
 		tabButton("settings", "运行时设置") +
+		tabButton("system", "系统设置") +
 		"</div>" +
 		"</aside>" +
 		'<main class="admin-shell-main">' +
@@ -1248,6 +1320,18 @@ function render() {
 			event.preventDefault();
 			try {
 				await saveSettings(new FormData(event.currentTarget));
+			} catch (error) {
+				state.shellMessage = error.message;
+				render();
+			}
+		});
+
+	document
+		.getElementById("system-settings-form")
+		?.addEventListener("submit", async function (event) {
+			event.preventDefault();
+			try {
+				await saveSystemSettings(new FormData(event.currentTarget));
 			} catch (error) {
 				state.shellMessage = error.message;
 				render();

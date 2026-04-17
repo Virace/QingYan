@@ -116,3 +116,10 @@ export const adminSettingsBodySchema = z
 	.refine((value) => Object.keys(value).length > 0, {
 		message: "至少需要一个更新字段",
 	});
+
+export const adminSystemSettingsBodySchema = z.object({
+	logging: z.object({
+		level: z.enum(["error", "warn", "info", "debug"]),
+		retentionDays: z.number().int().min(1).max(3650),
+	}),
+});

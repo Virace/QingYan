@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { applyInitialMigration } from "../support/test-fixtures";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -45,6 +45,7 @@ describe("initial migration", () => {
 					"blacklist_rules",
 					"admin_sessions",
 					"runtime_settings",
+					"system_settings",
 					"audit_logs",
 				]),
 			);
@@ -55,10 +56,15 @@ describe("initial migration", () => {
 
 	it("keeps runtime settings unique per site and avoids provider fields", () => {
 		const fixture = createMigratedDatabase();
-		const initialMigrationSql = readFileSync(
-			path.resolve(process.cwd(), "drizzle/0000_initial.sql"),
-			"utf-8",
-		);
+		const combinedMigrationSql = readdirSync(
+			path.resolve(process.cwd(), "drizzle"),
+		)
+			.filter((fileName) => fileName.endsWith(".sql"))
+			.sort()
+			.map((fileName) =>
+				readFileSync(path.resolve(process.cwd(), "drizzle", fileName), "utf-8"),
+			)
+			.join("\n");
 
 		try {
 			fixture.sqlite
@@ -75,28 +81,38 @@ describe("initial migration", () => {
 					.prepare("INSERT INTO runtime_settings (site_id) VALUES (?)")
 					.run(1),
 			).toThrow();
-			expect(initialMigrationSql).not.toContain("provider_");
-			expect(initialMigrationSql).not.toContain("artalk_");
-			expect(initialMigrationSql).not.toContain("wp_");
-			expect(initialMigrationSql).toContain("`captcha_mode` text");
-			expect(initialMigrationSql).toContain(
+			expect(combinedMigrationSql).not.toContain("provider_");
+			expect(combinedMigrationSql).not.toContain("artalk_");
+			expect(combinedMigrationSql).not.toContain("wp_");
+			expect(combinedMigrationSql).toContain("`captcha_mode` text");
+			expect(combinedMigrationSql).toContain(
 				"`captcha_threshold_window_sec` integer",
 			);
-			expect(initialMigrationSql).toContain(
+			expect(combinedMigrationSql).toContain(
 				"`captcha_threshold_max_actions` integer",
 			);
-			expect(initialMigrationSql).toContain("`abuse_guard_enabled` integer");
-			expect(initialMigrationSql).toContain("`abuse_guard_window_sec` integer");
-			expect(initialMigrationSql).toContain(
+			expect(combinedMigrationSql).toContain("`abuse_guard_enabled` integer");
+			expect(combinedMigrationSql).toContain(
+				"`abuse_guard_window_sec` integer",
+			);
+			expect(combinedMigrationSql).toContain(
 				"`abuse_guard_max_write_actions` integer",
 			);
-			expect(initialMigrationSql).toContain("`auto_blacklist_enabled` integer");
-			expect(initialMigrationSql).toContain("`auto_blacklist_scope` text");
-			expect(initialMigrationSql).toContain("`auto_blacklist_ttl_sec` integer");
-			expect(initialMigrationSql).toContain("`triggered_by` text NOT NULL");
-			expect(initialMigrationSql).toContain("`scope` text");
-			expect(initialMigrationSql).toContain("`match_mode` text");
-			expect(initialMigrationSql).toContain(
+			expect(combinedMigrationSql).toContain(
+				"`auto_blacklist_enabled` integer",
+			);
+			expect(combinedMigrationSql).toContain("`auto_blacklist_scope` text");
+			expect(combinedMigrationSql).toContain(
+				"`auto_blacklist_ttl_sec` integer",
+			);
+			expect(combinedMigrationSql).toContain("CREATE TABLE `system_settings`");
+			expect(combinedMigrationSql).toContain(
+				"CREATE UNIQUE INDEX `system_settings_category_key_idx`",
+			);
+			expect(combinedMigrationSql).toContain("`triggered_by` text NOT NULL");
+			expect(combinedMigrationSql).toContain("`scope` text");
+			expect(combinedMigrationSql).toContain("`match_mode` text");
+			expect(combinedMigrationSql).toContain(
 				'`comment_require_json` text DEFAULT \'["nickname","email"]\' NOT NULL',
 			);
 		} finally {
@@ -110,6 +126,9 @@ describe("initial migration", () => {
 		try {
 			const runtimeSettingsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(runtime_settings)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const systemSettingsColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(system_settings)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const captchaSessionColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(captcha_sessions)")
@@ -141,6 +160,9 @@ describe("initial migration", () => {
 				runtimeSettingsColumns.find((column) => column.name === "captcha_mode")
 					?.dflt_value,
 			).toBe("'threshold'");
+			expect(systemSettingsColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining(["category", "key", "value_json", "updated_at"]),
+			);
 			expect(captchaSessionColumns.map((column) => column.name)).toContain(
 				"triggered_by",
 			);

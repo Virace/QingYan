@@ -15,6 +15,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.get("/captcha", async (request) =>
 		service.createCaptcha({
 			ip: request.context?.ip,
+			requestId: request.context?.requestId,
 		}),
 	);
 
@@ -31,6 +32,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 			challengeId: parsed.data.challengeId,
 			token: parsed.data.token,
 			ip: request.context?.ip,
+			requestId: request.context?.requestId,
 			userAgent: request.context?.userAgent,
 		});
 		reply.setCookie(service.getSessionCookieName(), result.sessionToken, {

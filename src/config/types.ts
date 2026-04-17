@@ -14,6 +14,7 @@ const commentsCaptchaDefaultsSchema = z.object({
 });
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
+const logLevelSchema = z.enum(["error", "warn", "info", "debug"]);
 
 const commentsIdentitySchema = z.object({
 	require: z.array(commentIdentityFieldSchema),
@@ -103,6 +104,13 @@ export const configSchema = z.object({
 			width: z.number().int().positive(),
 			height: z.number().int().positive(),
 			ttlSec: z.number().int().positive(),
+		}),
+	}),
+	logging: z.object({
+		directory: z.string().min(1),
+		defaults: z.object({
+			level: logLevelSchema,
+			retentionDays: z.number().int().positive().max(3650),
 		}),
 	}),
 	mail: z.object({

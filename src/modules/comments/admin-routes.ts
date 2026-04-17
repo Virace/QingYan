@@ -49,10 +49,10 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return {
-			comment: await service.updateComment(
-				parsedParams.data.commentId,
-				parsedBody.data,
-			),
+			comment: await service.updateComment(parsedParams.data.commentId, {
+				...parsedBody.data,
+				requestId: request.context?.requestId,
+			}),
 		};
 	});
 
@@ -66,7 +66,10 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return {
-			comment: await service.deleteComment(parsed.data.commentId),
+			comment: await service.deleteComment(
+				parsed.data.commentId,
+				request.context?.requestId,
+			),
 		};
 	});
 };

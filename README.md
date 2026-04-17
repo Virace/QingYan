@@ -18,7 +18,10 @@ QingYan 是一个面向内容站点的第一方评论后端，当前基线服务
 - bootstrap 返回 `commentForm.allow / require`，前端可按 `nickname | email | website` 动态渲染必填项
 - 页面点赞
 - 后台登录（管理员登录验证码 + 5 次失败永久封禁 IP）
-- 后台评论审核、黑名单、页面管理、用户管理、访客管理、站点总览、运行时设置
+- 后台评论审核、黑名单、页面管理、用户管理、访客管理、站点总览、运行时设置、系统设置
+- 本地 `logs/access` 与 `logs/app` 双通道日志
+- 文本 `.log` + 结构化 `.jsonl` 双格式落盘
+- 后台可动态调整日志等级和保留天数
 - 浏览器后台入口：`GET /admin`
 - SQLite + Drizzle migration 基线
 - Docker / Compose 本地或单机部署

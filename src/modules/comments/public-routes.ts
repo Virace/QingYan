@@ -131,6 +131,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			parentCommentId: parsed.data.parentCommentId,
 			author: parsed.data.author,
 			contentRaw: parsed.data.content.raw,
+			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
@@ -166,6 +167,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsedBody.data.siteKey,
 			pageKey: parsedBody.data.pageKey,
 			choice: parsedBody.data.choice,
+			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
@@ -196,6 +198,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 
 		const result = await captchaService.getState({
 			...parsed.data,
+			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
@@ -226,6 +229,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 
 		return captchaService.verify({
 			...parsed.data,
+			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,

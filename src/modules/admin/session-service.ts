@@ -31,27 +31,50 @@ export class AdminSessionService {
 		return this.config.admin.session.cookieName;
 	}
 
-	private async assertAdminLoginAllowed(ip?: string) {
-		if (!ip) {
+	private async assertAdminLoginAllowed(input: {
+		ip?: string;
+		requestId?: string;
+	}) {
+		if (!input.ip) {
 			return;
 		}
 
-		await this.security.assertNotBlacklisted({
-			ip,
-			errorCode: "ADMIN_BLACKLISTED",
-			errorMessage: "当前来源已被永久禁止登录。",
-		});
+		try {
+			await this.security.assertNotBlacklisted({
+				requestId: input.requestId,
+				ip: input.ip,
+				errorCode: "ADMIN_BLACKLISTED",
+				errorMessage: "当前来源已被永久禁止登录。",
+			});
+		} catch (error) {
+			await this.security.writeAudit({
+				requestId: input.requestId,
+				actorType: "admin",
+				event: "admin.login.blocked",
+				level: "warn",
+				message: "管理员登录已被阻止",
+				targetType: "ip",
+				targetId: input.ip,
+			});
+			throw error;
+		}
 	}
 
 	private async recordFailedLogin(input: {
 		code: string;
 		ip?: string;
 		message: string;
+		requestId?: string;
 		statusCode: number;
 	}) {
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			actorType: "admin",
-			action: "admin.login.failure",
+			event: "admin.login.failed",
+			level: "warn",
+			message: "管理员登录失败",
+			targetType: "ip",
+			targetId: input.ip,
 			payload: {
 				ip: input.ip,
 				code: input.code,
@@ -74,6 +97,19 @@ export class AdminSessionService {
 				reason: "admin login failures",
 				source: "auto",
 			});
+			await this.security.writeAudit({
+				requestId: input.requestId,
+				actorType: "system",
+				event: "security.blacklist.added",
+				level: "error",
+				message: "已加入永久黑名单",
+				targetType: "ip",
+				targetId: input.ip,
+				payload: {
+					reason: "admin_login_failed_limit",
+					ttl: "permanent",
+				},
+			});
 			this.failedLoginCounts.delete(input.ip);
 
 			throw new AppError(
@@ -89,8 +125,8 @@ export class AdminSessionService {
 		});
 	}
 
-	public async createCaptcha(input: { ip?: string }) {
-		await this.assertAdminLoginAllowed(input.ip);
+	public async createCaptcha(input: { ip?: string; requestId?: string }) {
+		await this.assertAdminLoginAllowed(input);
 
 		const challenge = this.loginChallengeStore.create(input.ip);
 		return {
@@ -108,9 +144,10 @@ export class AdminSessionService {
 		challengeId?: string;
 		token: string;
 		ip?: string;
+		requestId?: string;
 		userAgent?: string;
 	}) {
-		await this.assertAdminLoginAllowed(input.ip);
+		await this.assertAdminLoginAllowed(input);
 
 		const captchaState = this.loginChallengeStore.verify({
 			challengeId: input.challengeId,
@@ -129,6 +166,7 @@ export class AdminSessionService {
 				code: "ADMIN_CAPTCHA_INVALID",
 				ip: input.ip,
 				message: "管理员登录验证码错误。",
+				requestId: input.requestId,
 				statusCode: 400,
 			});
 		}
@@ -139,6 +177,7 @@ export class AdminSessionService {
 				code: "ADMIN_TOKEN_INVALID",
 				ip: input.ip,
 				message: "管理员口令无效。",
+				requestId: input.requestId,
 				statusCode: 401,
 			});
 		}
@@ -160,8 +199,12 @@ export class AdminSessionService {
 		});
 
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			actorType: "admin",
-			action: "admin.login.success",
+			event: "admin.login.succeeded",
+			message: "管理员登录成功",
+			targetType: "ip",
+			targetId: input.ip,
 			payload: {
 				ip: input.ip,
 			},

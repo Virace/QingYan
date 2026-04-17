@@ -543,6 +543,45 @@ paths:
           $ref: '#/components/responses/Error401'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/admin/system-settings:
+    get:
+      tags: [Admin System Settings]
+      summary: 获取全局系统设置
+      operationId: getAdminSystemSettings
+      security:
+        - AdminSessionCookie: []
+      responses:
+        '200':
+          description: 全局系统设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSystemSettingsResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+    put:
+      tags: [Admin System Settings]
+      summary: 更新全局系统设置
+      operationId: updateAdminSystemSettings
+      security:
+        - AdminSessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSystemSettingsUpdateRequest'
+      responses:
+        '200':
+          description: 全局系统设置更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSystemSettingsResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
   /api/admin/sites:
     get:
       tags: [Admin Sites]
@@ -1738,6 +1777,40 @@ components:
           properties:
             emailEnabled:
               type: boolean
+    AdminSystemLoggingSettings:
+      type: object
+      required: [level, retentionDays, directory]
+      properties:
+        level:
+          type: string
+          enum: [error, warn, info, debug]
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+        directory:
+          type: string
+    AdminSystemSettingsResponse:
+      type: object
+      required: [logging]
+      properties:
+        logging:
+          $ref: '#/components/schemas/AdminSystemLoggingSettings'
+    AdminSystemSettingsUpdateRequest:
+      type: object
+      required: [logging]
+      properties:
+        logging:
+          type: object
+          required: [level, retentionDays]
+          properties:
+            level:
+              type: string
+              enum: [error, warn, info, debug]
+            retentionDays:
+              type: integer
+              minimum: 1
+              maximum: 3650
     AdminSiteSummaryItem:
       type: object
       required:

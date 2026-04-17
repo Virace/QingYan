@@ -44,6 +44,9 @@ export const adminSettingsRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
-		return service.updateSettings(parsedQuery.data.siteKey, parsedBody.data);
+		return service.updateSettings(parsedQuery.data.siteKey, {
+			...parsedBody.data,
+			requestId: request.context?.requestId,
+		});
 	});
 };

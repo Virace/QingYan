@@ -2,6 +2,8 @@ import fp from "fastify-plugin";
 import type { FastifyPluginAsync } from "fastify";
 import { and, eq, gte, isNull, or } from "drizzle-orm";
 
+import { sanitizeLogData } from "../logging/redaction";
+import type { AppEventName, LogLevel } from "../logging/types";
 import {
 	matchBlacklistRule,
 	type BlacklistSubject,
@@ -15,7 +17,9 @@ import { AppError } from "../modules/shared/errors";
 import { auditLogs, blacklistRules } from "../db/schema";
 
 export interface BlacklistCheckInput {
+	requestId?: string;
 	siteKey?: string;
+	pageKey?: string;
 	visitorKey?: string;
 	email?: string;
 	ip?: string;
@@ -38,9 +42,14 @@ export interface RateLimitInput extends RateLimitPeekInput {
 
 export interface AuditWriteInput {
 	siteKey?: string;
+	pageKey?: string;
+	requestId?: string;
 	actorType: string;
 	actorId?: string;
-	action: string;
+	action?: string;
+	event?: AppEventName;
+	level?: LogLevel;
+	message?: string;
 	targetType?: string;
 	targetId?: string;
 	payload?: Record<string, unknown>;
@@ -50,7 +59,9 @@ export interface SecurityToolkit {
 	assertGlobalFloodAllowed(input: { ip?: string }): Promise<void>;
 	assertNotBlacklisted(input: BlacklistCheckInput): Promise<void>;
 	recordAbuseWriteAction(input: {
+		requestId?: string;
 		siteKey: string;
+		pageKey?: string;
 		ip?: string;
 		rule: RateLimitRule;
 		scope: "post" | "all";
@@ -147,6 +158,21 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			});
 
 			if (matchedRule) {
+				await fastify.loggerManager.logApp({
+					level: "warn",
+					channel: "app",
+					event: "security.blacklist.hit",
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					message: "请求命中黑名单",
+					actorType: "system",
+					targetType: matchedRule.targetType,
+					targetId: matchedRule.targetValue,
+					data: {
+						scope: matchedRule.scope,
+					},
+				});
 				throw new AppError(403, input.errorCode, input.errorMessage, {
 					targetType: matchedRule.targetType,
 					scope: matchedRule.scope,
@@ -215,6 +241,23 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 					reason: "abuse_guard",
 					expiresAt,
 				});
+				await fastify.loggerManager.logApp({
+					level: "warn",
+					channel: "app",
+					event: "security.blacklist.added",
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					message: "已新增自动黑名单规则",
+					actorType: "system",
+					targetType: "ip",
+					targetId: input.ip,
+					data: {
+						reason: "abuse_guard",
+						scope: input.scope,
+						expiresAt,
+					},
+				});
 
 				return true;
 			}
@@ -248,15 +291,35 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		},
 		async writeAudit(input) {
 			const siteId = fastify.siteRegistry.getRegisteredSite(input.siteKey)?.id;
+			const action = input.event ?? input.action ?? "audit.logged";
+			const payload = input.payload
+				? sanitizeLogData(input.payload)
+				: undefined;
 			await fastify.db.insert(auditLogs).values({
 				siteId,
 				actorType: input.actorType,
 				actorId: input.actorId,
-				action: input.action,
+				action,
 				targetType: input.targetType,
 				targetId: input.targetId,
-				payloadJson: input.payload ? JSON.stringify(input.payload) : undefined,
+				payloadJson: payload ? JSON.stringify(payload) : undefined,
 			});
+			if (input.event && input.message) {
+				await fastify.loggerManager.logApp({
+					level: input.level ?? "info",
+					channel: "app",
+					event: input.event,
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					message: input.message,
+					actorType: input.actorType,
+					actorId: input.actorId,
+					targetType: input.targetType,
+					targetId: input.targetId,
+					data: payload,
+				});
+			}
 		},
 		clearExpiredState(now) {
 			rateLimitStore.clearExpired(now);

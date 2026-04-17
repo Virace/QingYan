@@ -47,7 +47,10 @@ export const adminBlacklistRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return {
-			rule: await service.createBlacklist(parsed.data),
+			rule: await service.createBlacklist({
+				...parsed.data,
+				requestId: request.context?.requestId,
+			}),
 		};
 	});
 
@@ -61,7 +64,10 @@ export const adminBlacklistRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return {
-			rule: await service.deleteBlacklist(parsed.data.ruleId),
+			rule: await service.deleteBlacklist(
+				parsed.data.ruleId,
+				request.context?.requestId,
+			),
 		};
 	});
 };

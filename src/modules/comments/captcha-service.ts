@@ -103,6 +103,7 @@ export class CaptchaService {
 		pageKey: string;
 		pageTitle?: string;
 		pageUrl?: string;
+		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -192,6 +193,20 @@ export class CaptchaService {
 			pageThreadId: thread.id,
 			triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
 		});
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			pageKey: input.pageKey,
+			actorType: "visitor",
+			actorId: visitor.visitorKey,
+			event: "captcha.required",
+			message: "当前页面需要验证码",
+			targetType: "page_thread",
+			targetId: String(thread.id),
+			payload: {
+				triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
+			},
+		});
 
 		return {
 			required: true,
@@ -212,6 +227,7 @@ export class CaptchaService {
 		pageTitle?: string;
 		pageUrl?: string;
 		action: CaptchaAction;
+		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -284,6 +300,21 @@ export class CaptchaService {
 				pageThreadId: thread.id,
 				triggeredBy: "threshold",
 			});
+			await this.security.writeAudit({
+				requestId: input.requestId,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				actorType: "visitor",
+				actorId: visitor.visitorKey,
+				event: "captcha.required",
+				message: "当前页面需要验证码",
+				targetType: "page_thread",
+				targetId: String(thread.id),
+				payload: {
+					triggeredBy: "threshold",
+					action: input.action,
+				},
+			});
 			throw new AppError(
 				400,
 				getCaptchaRequiredCode(input.action),
@@ -308,6 +339,7 @@ export class CaptchaService {
 		challengeId: string;
 		mode: "inline_value";
 		value: string;
+		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -381,11 +413,40 @@ export class CaptchaService {
 			activeSession.challengePayloadJson ?? "{}",
 		) as CaptchaPayload;
 		if (payload.answer !== input.value.trim()) {
+			await this.security.writeAudit({
+				requestId: input.requestId,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				actorType: "visitor",
+				actorId: visitor.visitorKey,
+				event: "captcha.failed",
+				level: "warn",
+				message: "验证码校验失败",
+				targetType: "page_thread",
+				targetId: String(thread.id),
+				payload: {
+					challengeId: input.challengeId,
+				},
+			});
 			await input.consumeRateLimit(identityKey);
 			throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "验证码错误。");
 		}
 
 		await this.writeRepository.markCaptchaVerified(activeSession.id);
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			pageKey: input.pageKey,
+			actorType: "visitor",
+			actorId: visitor.visitorKey,
+			event: "captcha.verified",
+			message: "验证码校验通过",
+			targetType: "page_thread",
+			targetId: String(thread.id),
+			payload: {
+				challengeId: input.challengeId,
+			},
+		});
 		return {
 			required: true,
 			verified: true,

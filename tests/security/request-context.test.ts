@@ -22,7 +22,7 @@ describe("request context", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/__tests/context-query?siteKey=fangyuan",
+			url: "/__tests/context-query?siteKey=fangyuan&pageKey=post:request-context",
 			cookies: {
 				qingyan_visitor: "visitor_cookie_1",
 			},
@@ -33,7 +33,9 @@ describe("request context", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
+			requestId: expect.stringMatching(/^req_/),
 			siteKey: "fangyuan",
+			pageKey: "post:request-context",
 			site: {
 				siteKey: "fangyuan",
 			},
@@ -59,12 +61,14 @@ describe("request context", () => {
 			url: "/__tests/context-body",
 			payload: {
 				siteKey: "fangyuan",
+				pageKey: "post:body-context",
 			},
 		});
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			siteKey: "fangyuan",
+			pageKey: "post:body-context",
 			site: {
 				siteKey: "fangyuan",
 			},

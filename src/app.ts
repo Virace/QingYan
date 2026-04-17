@@ -5,6 +5,7 @@ import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSettingsRoutes } from "./modules/admin/settings-routes";
+import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminUsersRoutes } from "./modules/admin/users-routes";
@@ -17,12 +18,14 @@ import { createSiteRegistry } from "./modules/shared/site-registry";
 import { loadOpenApiDocument, renderOpenApiHtml } from "./openapi/load-openapi";
 import cookiePlugin from "./plugins/cookie";
 import dbPlugin from "./plugins/db";
+import loggingPlugin from "./plugins/logging";
 import requestContextPlugin from "./plugins/request-context";
 import securityPlugin from "./plugins/security";
 
 export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 	const app = Fastify({
 		logger: true,
+		disableRequestLogging: true,
 		routerOptions: {
 			ignoreTrailingSlash: true,
 		},
@@ -35,6 +38,34 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.context?.requestId ?? request.id;
+		const accessEvent =
+			error instanceof AppError
+				? error.code === "INVALID_REQUEST"
+					? {
+							event: "request.validation_failed" as const,
+							errorCode: error.code,
+						}
+					: error.code.includes("BLACKLISTED")
+						? {
+								event: "request.blocked.blacklist" as const,
+								errorCode: error.code,
+							}
+						: error.code.includes("RATE_LIMITED")
+							? {
+									event: "request.rate_limited" as const,
+									errorCode: error.code,
+								}
+							: {
+									event: "request.failed" as const,
+									errorCode: error.code,
+								}
+				: {
+						event: "request.failed" as const,
+						errorCode: "INTERNAL_ERROR",
+					};
+		if (request.context) {
+			request.context.accessEvent = accessEvent;
+		}
 
 		if (error instanceof AppError) {
 			reply.status(error.statusCode).send({
@@ -63,6 +94,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 	await app.register(dbPlugin);
 	await app.register(requestContextPlugin);
 	await app.register(securityPlugin);
+	await app.register(loggingPlugin);
 
 	app.get("/healthz", async () => ({
 		service: "QingYan",
@@ -87,6 +119,9 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 	await app.register(adminBlacklistRoutes, { prefix: "/api/admin/blacklist" });
 	await app.register(adminSitesRoutes, { prefix: "/api/admin/sites" });
 	await app.register(adminSettingsRoutes, { prefix: "/api/admin/settings" });
+	await app.register(adminSystemSettingsRoutes, {
+		prefix: "/api/admin/system-settings",
+	});
 
 	return app;
 }

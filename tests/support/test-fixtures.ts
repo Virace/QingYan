@@ -10,10 +10,12 @@ import type { AppConfig } from "../../src/config/types";
 function createTempWorkspace() {
 	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-"));
 	const databaseFile = path.join(directory, "qingyan.db");
+	const logsDirectory = path.join(directory, "logs");
 
 	return {
 		directory,
 		databaseFile,
+		logsDirectory,
 		cleanup() {
 			rmSync(directory, { recursive: true, force: true });
 		},
@@ -35,7 +37,10 @@ export function applyInitialMigration(databaseFile: string): void {
 	sqlite.close();
 }
 
-export function createTestConfig(databaseFile: string): AppConfig {
+export function createTestConfig(
+	databaseFile: string,
+	logsDirectory = "./logs",
+): AppConfig {
 	return {
 		server: {
 			host: "127.0.0.1",
@@ -96,6 +101,13 @@ export function createTestConfig(databaseFile: string): AppConfig {
 				ttlSec: 600,
 			},
 		},
+		logging: {
+			directory: logsDirectory,
+			defaults: {
+				level: "info",
+				retentionDays: 7,
+			},
+		},
 		mail: {
 			enabled: false,
 			smtp: {
@@ -154,11 +166,14 @@ export async function createTestApp() {
 	const workspace = createTempWorkspace();
 	applyInitialMigration(workspace.databaseFile);
 
-	const app = await buildApp(createTestConfig(workspace.databaseFile));
+	const app = await buildApp(
+		createTestConfig(workspace.databaseFile, workspace.logsDirectory),
+	);
 
 	return {
 		app,
 		databaseFile: workspace.databaseFile,
+		logsDirectory: workspace.logsDirectory,
 		async cleanup() {
 			await app.close();
 			workspace.cleanup();

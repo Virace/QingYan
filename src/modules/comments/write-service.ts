@@ -35,6 +35,7 @@ export class CommentsWriteService {
 			website?: string;
 		};
 		contentRaw: string;
+		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -83,7 +84,9 @@ export class CommentsWriteService {
 		}
 
 		await this.security.assertNotBlacklisted({
+			requestId: input.requestId,
 			siteKey: input.siteKey,
+			pageKey: input.pageKey,
 			visitorKey: visitor.visitorKey,
 			email: authorEmail,
 			ip: input.ip,
@@ -103,6 +106,7 @@ export class CommentsWriteService {
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 			action: "comment_create",
+			requestId: input.requestId,
 			visitorKey: visitor.visitorKey,
 			ip: input.ip,
 			userAgent: input.userAgent,
@@ -142,10 +146,13 @@ export class CommentsWriteService {
 		});
 
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			siteKey: input.siteKey,
+			pageKey: input.pageKey,
 			actorType: "visitor",
 			actorId: visitor.visitorKey,
-			action: "comment.create",
+			event: "comments.created",
+			message: status === "pending" ? "评论已提交待审核" : "评论已发布",
 			targetType: "comment",
 			targetId: created.commentId,
 			payload: {
@@ -161,7 +168,9 @@ export class CommentsWriteService {
 			configuredSite.defaults.comments.abuseGuard.autoBlacklist.enabled;
 		if (abuseGuardEnabled && autoBlacklistEnabled) {
 			await this.security.recordAbuseWriteAction({
+				requestId: input.requestId,
 				siteKey: input.siteKey,
+				pageKey: input.pageKey,
 				ip: input.ip,
 				rule: {
 					windowSec:
@@ -200,6 +209,7 @@ export class CommentsWriteService {
 		siteKey: string;
 		pageKey: string;
 		choice: "up" | "down";
+		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -227,7 +237,9 @@ export class CommentsWriteService {
 		const settings = await this.readRepository.getRuntimeSettings(site.id);
 
 		await this.security.assertNotBlacklisted({
+			requestId: input.requestId,
 			siteKey: input.siteKey,
+			pageKey: input.pageKey,
 			visitorKey: visitor.visitorKey,
 			ip: input.ip,
 			requestScope: "write",
@@ -244,6 +256,7 @@ export class CommentsWriteService {
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
 			action: "comment_vote",
+			requestId: input.requestId,
 			visitorKey: visitor.visitorKey,
 			ip: input.ip,
 			userAgent: input.userAgent,
@@ -279,7 +292,9 @@ export class CommentsWriteService {
 		}
 
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			siteKey: input.siteKey,
+			pageKey: input.pageKey,
 			actorType: "visitor",
 			actorId: visitor.visitorKey,
 			action: "comment.vote",
@@ -297,7 +312,9 @@ export class CommentsWriteService {
 			configuredSite.defaults.comments.abuseGuard.autoBlacklist.enabled;
 		if (abuseGuardEnabled && autoBlacklistEnabled) {
 			await this.security.recordAbuseWriteAction({
+				requestId: input.requestId,
 				siteKey: input.siteKey,
+				pageKey: input.pageKey,
 				ip: input.ip,
 				rule: {
 					windowSec:

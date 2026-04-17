@@ -4,22 +4,31 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { resolveRequestId } from "../modules/shared/request-ids";
 import { resolveVisitorIdentity } from "../modules/shared/visitor";
 
-function readSiteKeyFromRecord(record: unknown): string | undefined {
+function readStringField(
+	record: unknown,
+	fieldName: "siteKey" | "pageKey",
+): string | undefined {
 	if (!record || typeof record !== "object") {
 		return undefined;
 	}
 
-	const siteKey = (record as Record<string, unknown>).siteKey;
-	return typeof siteKey === "string" && siteKey.length > 0
-		? siteKey
-		: undefined;
+	const value = (record as Record<string, unknown>)[fieldName];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function resolveSiteKey(request: FastifyRequest): string | undefined {
 	return (
-		readSiteKeyFromRecord(request.params) ??
-		readSiteKeyFromRecord(request.query) ??
-		readSiteKeyFromRecord(request.body)
+		readStringField(request.params, "siteKey") ??
+		readStringField(request.query, "siteKey") ??
+		readStringField(request.body, "siteKey")
+	);
+}
+
+function resolvePageKey(request: FastifyRequest): string | undefined {
+	return (
+		readStringField(request.params, "pageKey") ??
+		readStringField(request.query, "pageKey") ??
+		readStringField(request.body, "pageKey")
 	);
 }
 
@@ -37,6 +46,7 @@ const requestContextPlugin: FastifyPluginAsync = async (fastify) => {
 			requestId: resolveRequestId(requestId),
 			visitor: resolveVisitorIdentity(request),
 			ip: request.ip,
+			startedAt: Date.now(),
 			userAgent:
 				typeof userAgentHeader === "string" ? userAgentHeader : undefined,
 		};
@@ -48,7 +58,9 @@ const requestContextPlugin: FastifyPluginAsync = async (fastify) => {
 		}
 
 		const siteKey = resolveSiteKey(request);
+		const pageKey = resolvePageKey(request);
 		request.context.siteKey = siteKey;
+		request.context.pageKey = pageKey;
 		request.context.site = fastify.siteRegistry.getConfiguredSite(siteKey);
 	});
 };

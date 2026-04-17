@@ -168,6 +168,7 @@ export class AdminManagementService {
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
+			requestId?: string;
 		},
 	) {
 		const comment = await this.repository.updateComment(commentId, input);
@@ -176,8 +177,10 @@ export class AdminManagementService {
 		}
 
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			actorType: "admin",
-			action: "comment.updated",
+			event: input.status ? "comments.status.changed" : "comments.updated",
+			message: input.status ? "评论状态已更新" : "评论内容已更新",
 			targetType: "comment",
 			targetId: commentId,
 		});
@@ -185,15 +188,17 @@ export class AdminManagementService {
 		return comment;
 	}
 
-	public async deleteComment(commentId: string) {
+	public async deleteComment(commentId: string, requestId?: string) {
 		const comment = await this.repository.softDeleteComment(commentId);
 		if (!comment) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
 		}
 
 		await this.security.writeAudit({
+			requestId,
 			actorType: "admin",
-			action: "comment.deleted",
+			event: "comments.deleted",
+			message: "评论已删除",
 			targetType: "comment",
 			targetId: commentId,
 		});
@@ -214,6 +219,7 @@ export class AdminManagementService {
 		scope: "post" | "all";
 		reason?: string;
 		expiresAt?: string;
+		requestId?: string;
 	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
 		const rule = await this.repository.createBlacklistRule({
@@ -227,17 +233,23 @@ export class AdminManagementService {
 		});
 
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			siteKey: input.siteKey,
 			actorType: "admin",
-			action: "blacklist.created",
-			targetType: "blacklist_rule",
-			targetId: String(rule?.id),
+			event: "security.blacklist.added",
+			message: "已新增黑名单规则",
+			targetType: input.targetType,
+			targetId: input.targetValue,
+			payload: {
+				ruleId: rule?.id,
+				scope: input.scope,
+			},
 		});
 
 		return rule;
 	}
 
-	public async deleteBlacklist(ruleId: number) {
+	public async deleteBlacklist(ruleId: number, requestId?: string) {
 		const rule = await this.repository.deleteBlacklistRule(ruleId);
 		if (!rule) {
 			throw new ResourceNotFoundError(
@@ -247,6 +259,7 @@ export class AdminManagementService {
 		}
 
 		await this.security.writeAudit({
+			requestId,
 			actorType: "admin",
 			action: "blacklist.deleted",
 			targetType: "blacklist_rule",
@@ -342,6 +355,7 @@ export class AdminManagementService {
 			notifications?: {
 				emailEnabled?: boolean;
 			};
+			requestId?: string;
 		},
 	) {
 		const siteId = await this.resolveSiteId(siteKey);
@@ -372,11 +386,18 @@ export class AdminManagementService {
 		});
 
 		await this.security.writeAudit({
+			requestId: input.requestId,
 			siteKey,
 			actorType: "admin",
-			action: "settings.updated",
+			event: "settings.updated",
+			message: "站点运行时设置已更新",
 			targetType: "runtime_settings",
 			targetId: String(siteId),
+			payload: {
+				comments: input.comments,
+				pageFeedback: input.pageFeedback,
+				notifications: input.notifications,
+			},
 		});
 
 		return this.getSettings(siteKey);

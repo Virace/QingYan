@@ -64,6 +64,13 @@ describe("configSchema", () => {
 					ttlSec: 600,
 				},
 			},
+			logging: {
+				directory: "./logs",
+				defaults: {
+					level: "info",
+					retentionDays: 7,
+				},
+			},
 			mail: {
 				enabled: false,
 				smtp: {
@@ -122,6 +129,13 @@ describe("configSchema", () => {
 			enabled: false,
 			windowSec: 10,
 			maxRequests: 120,
+		});
+		expect(parsed.logging).toEqual({
+			directory: "./logs",
+			defaults: {
+				level: "info",
+				retentionDays: 7,
+			},
 		});
 		expect(parsed.sites[0]?.defaults.comments.identity).toEqual({
 			require: ["nickname", "email"],

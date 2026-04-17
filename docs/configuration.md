@@ -1,6 +1,6 @@
 # QingYan 配置说明
 
-`QingYan` 只使用 YAML 配置文件启动，运行时再叠加数据库中的 `runtime_settings` 做有限覆盖。
+`QingYan` 只使用 YAML 配置文件启动，运行时再叠加数据库中的 `runtime_settings` 与 `system_settings` 做有限覆盖。
 
 ## 配置文件路径
 
@@ -37,10 +37,16 @@ pnpm config:check:local
 - `security.globalFloodGuard.*`
 - `security.rateLimit.*`
 - `captcha.*`
+- `logging.directory`
 - `mail.*`
 - `sites[].siteKey`
 - `sites[].name`
 - `sites[].allowedOrigins`
+
+说明：
+
+- `logging.directory` 只允许在配置文件中定义，不提供后台运行时修改。
+- 日志目录固定后，后台只允许调整日志等级和保留天数。
 
 ### 可被 `runtime_settings` 覆盖的字段
 
@@ -57,7 +63,14 @@ pnpm config:check:local
 - `sites[].defaults.pageFeedback.allowLike`
 - `sites[].defaults.notifications.emailEnabled`
 
-启动时，配置文件先定义站点和默认值；运行时由数据库中的 `runtime_settings` 对上述字段做站点级覆盖。
+### 可被全局 `system_settings` 覆盖的字段
+
+这些字段属于服务全局能力，不跟某个 `siteKey` 绑定：
+
+- `logging.defaults.level`
+- `logging.defaults.retentionDays`
+
+启动时，配置文件先定义站点和默认值；运行时由数据库中的 `runtime_settings` 对站点级字段做覆盖，再由 `system_settings` 对全局日志默认值做覆盖。
 
 ## 顶层配置块
 
@@ -164,6 +177,20 @@ captcha:
 - 当前仅支持内置图片验证码
 - 返回值中的 `challenge.imageData` 是 SVG data URL
 - `ttlSec` 为 challenge 过期时间
+
+### `logging`
+
+```yaml
+logging:
+  directory: ./logs
+  defaults:
+    level: info
+    retentionDays: 7
+```
+
+- `directory`: 本地日志目录，当前版本固定为文件配置项，不支持后台修改
+- `defaults.level`: 日志默认等级，允许值为 `error | warn | info | debug`
+- `defaults.retentionDays`: 日志默认保留天数，后台可覆盖，范围建议为 `1..3650`
 
 ### `mail`
 
