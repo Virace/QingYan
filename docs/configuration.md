@@ -245,6 +245,108 @@ sites:
 - `defaults.pageFeedback.allowLike`: 是否允许页面点赞
 - `defaults.notifications.emailEnabled`: 是否启用邮件通知开关
 
+## 公开评论验证码调用流程
+
+公开评论相关验证码按“同一站点、同一页面、同一访客”维度复用。以下写操作共用同一页面验证码状态：
+
+- `POST /api/comments`
+- `POST /api/comments/{commentId}/vote`
+- `POST /api/page-feedback/like`
+
+客户端接入时需要遵守以下约束：
+
+- `bootstrap`、`captcha/state`、`captcha/verify` 与最终写接口之间必须复用同一 `qingyan_visitor` cookie
+- `captcha/state` 与 `captcha/verify` 使用的 `siteKey`、`pageKey` 必须和后续写接口保持一致
+- 写接口在需要验证码时只返回错误码，不会在错误响应中直接内联 challenge；客户端需要自行继续调用验证码接口
+
+### `mode: never`
+
+- 不要求验证码
+- `GET /api/comments/captcha/state` 返回 `required: false`
+- 评论创建、评论投票、页面点赞可直接调用各自写接口
+
+### `mode: always`
+
+`always` 模式下，页面一开始就要求验证码。推荐流程：
+
+1. 调用 `GET /api/comments/bootstrap`
+2. 读取响应中的 `captcha`
+3. 如果 `captcha.required === true` 且 `captcha.challenge !== null`，直接展示 `challenge.imageData`
+4. 用户输入答案后，调用 `POST /api/comments/captcha/verify`
+5. 收到 `{ required: true, verified: true }` 后，再调用评论创建、评论投票或页面点赞接口
+
+如果当前页面没有先走 bootstrap，也可以直接调用 `GET /api/comments/captcha/state` 获取同一份 challenge。
+
+### `mode: threshold`
+
+`threshold` 模式下，验证码不会在页面初始化时强制出现，而是在达到阈值的那次写操作开始要求。这里的阈值由：
+
+- `defaults.comments.captcha.thresholdWindowSec`
+- `defaults.comments.captcha.thresholdMaxActions`
+
+共同决定，语义是“在统计窗口内，从第 N 次写操作开始要求验证码”。
+
+推荐的客户端顺序如下：
+
+1. 正常调用写接口，例如 `POST /api/comments/{commentId}/vote`
+2. 如果响应成功，说明当前还未进入验证码阶段
+3. 如果收到以下错误码之一，说明服务端已经为当前页面创建 challenge：
+   - `COMMENT_CAPTCHA_REQUIRED`
+   - `VOTE_CAPTCHA_REQUIRED`
+4. 收到错误后，立即调用 `GET /api/comments/captcha/state?siteKey=...&pageKey=...`
+5. 从响应中读取：
+   - `challenge.challengeId`
+   - `challenge.mode`
+   - `challenge.imageData`
+6. 展示验证码图片，收集用户输入
+7. 调用 `POST /api/comments/captcha/verify`
+8. 收到 `{ required: true, verified: true }` 后，使用同一 `qingyan_visitor` cookie 重试刚才失败的写接口
+
+可以按下面的顺序理解：
+
+```text
+POST /api/comments/{commentId}/vote
+-> 400 VOTE_CAPTCHA_REQUIRED
+
+GET /api/comments/captcha/state?siteKey=...&pageKey=...
+-> 200 { required: true, verified: false, challenge: { challengeId, mode, imageData } }
+
+POST /api/comments/captcha/verify
+-> 200 { required: true, verified: true }
+
+POST /api/comments/{commentId}/vote
+-> 200
+```
+
+### 验证码校验接口
+
+`POST /api/comments/captcha/verify` 请求体：
+
+```json
+{
+  "siteKey": "fangyuan",
+  "pageKey": "post:welcome",
+  "challengeId": "cap_xxx",
+  "mode": "inline_value",
+  "value": "1234"
+}
+```
+
+校验结果说明：
+
+- 返回 `200` 且 `verified: true`：当前页面验证码已通过，可继续对应写操作
+- 返回 `400 COMMENT_CAPTCHA_INVALID`：答案错误，需要继续使用当前 challenge 或重新获取状态
+- 返回 `400 COMMENT_CAPTCHA_REQUIRED`：通常表示缺少有效 challenge、challenge 与当前页面/访客不匹配，或需要重新进入验证码流程
+- 返回 `429`：验证码尝试次数已触发限流
+
+### challenge 获取与复用规则
+
+- `challenge.imageData` 为 SVG data URL，可直接用于 `<img src="...">`
+- 已验证的 challenge 会在同一页面内被复用，直到过期或当前 session 状态变化
+- `threshold` 模式下，命中阈值的那次写请求负责“创建 challenge 并返回需要验证码”；真正的 challenge 内容要通过 `captcha/state` 获取
+- 页面切换到新的 `pageKey` 后，应视为新的验证码上下文，重新按对应页面获取状态
+- 如果客户端丢失了 `qingyan_visitor` cookie，应从 `bootstrap` 或 `captcha/state` 重新建立当前访客上下文
+
 ## 本地配置建议
 
 开发环境建议：
