@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { pageUrlInputSchema } from "../shared/page-url";
 
+export const inlineCaptchaPayloadSchema = z.object({
+	challengeId: z.string().min(1),
+	value: z.string().min(1),
+});
+
 export const bootstrapQuerySchema = z.object({
 	siteKey: z.string().min(1),
 	pageKey: z.string().min(1),
@@ -36,6 +41,7 @@ export const createCommentBodySchema = z.object({
 	options: z.object({
 		notifyOnReply: z.boolean().default(false),
 	}),
+	captcha: inlineCaptchaPayloadSchema.optional().nullable(),
 });
 
 export const voteCommentParamsSchema = z.object({
@@ -46,6 +52,7 @@ export const voteCommentBodySchema = z.object({
 	siteKey: z.string().min(1),
 	pageKey: z.string().min(1),
 	choice: z.enum(["up", "down"]),
+	captcha: inlineCaptchaPayloadSchema.optional().nullable(),
 });
 
 export const captchaStateQuerySchema = z.object({
@@ -54,6 +61,8 @@ export const captchaStateQuerySchema = z.object({
 	pageTitle: z.string().min(1).optional(),
 	pageUrl: pageUrlInputSchema.optional(),
 });
+
+export const captchaRefreshBodySchema = captchaStateQuerySchema;
 
 export const captchaVerifyBodySchema = z.object({
 	siteKey: z.string().min(1),

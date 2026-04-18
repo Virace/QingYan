@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 
 import type { SiteConfig } from "../../config/types";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import { createCaptchaChallenge } from "../shared/captcha-challenge";
 import { buildCommentForm } from "../comments/comment-form";
 import { presentComments } from "../comments/presenter";
 
@@ -11,7 +12,10 @@ type ScenarioName =
 	| "comments-seeded-thread";
 
 type VoteChoice = "up" | "down";
-type CaptchaRequiredCode = "COMMENT_CAPTCHA_REQUIRED" | "VOTE_CAPTCHA_REQUIRED";
+type CaptchaRequiredCode =
+	| "COMMENT_CAPTCHA_REQUIRED"
+	| "VOTE_CAPTCHA_REQUIRED"
+	| "PAGE_FEEDBACK_CAPTCHA_REQUIRED";
 
 type RuntimeCommentRecord = {
 	id: string;
@@ -68,15 +72,6 @@ type RuntimeCaptchaState = {
 
 function nowIso(): string {
 	return new Date().toISOString();
-}
-
-function buildSvgCaptcha(answer: string): string {
-	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="60" viewBox="0 0 160 60"><rect width="160" height="60" rx="8" fill="#f6f1e7"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="28" font-family="monospace" fill="#1f2937">${answer}</text></svg>`;
-	return `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
-}
-
-function createChallengeAnswer(): string {
-	return `${randomInt(1000, 9999)}`;
 }
 
 function createVisitorKey(): string {
@@ -205,12 +200,20 @@ export class DevMockService {
 		visitor.challengeImageData = null;
 	}
 
-	private ensureCaptcha(visitor: RuntimeVisitorState): RuntimeCaptchaState {
-		if (!visitor.challengeId || !visitor.challengeImageData || !visitor.challengeAnswer) {
-			const answer = createChallengeAnswer();
+	private ensureCaptcha(
+		visitor: RuntimeVisitorState,
+		refresh = false,
+	): RuntimeCaptchaState {
+		if (
+			refresh ||
+			!visitor.challengeId ||
+			!visitor.challengeImageData ||
+			!visitor.challengeAnswer
+		) {
+			const challenge = createCaptchaChallenge();
 			visitor.challengeId = `cap_${randomUUID()}`;
-			visitor.challengeAnswer = answer;
-			visitor.challengeImageData = buildSvgCaptcha(answer);
+			visitor.challengeAnswer = challenge.answer;
+			visitor.challengeImageData = challenge.imageData;
 		}
 
 		return {
@@ -228,6 +231,7 @@ export class DevMockService {
 	private getCaptchaStateForVisitor(
 		pageState: RuntimePageState,
 		visitor: RuntimeVisitorState,
+		refresh = false,
 	): RuntimeCaptchaState {
 		if (visitor.blacklisted) {
 			return {
@@ -248,7 +252,7 @@ export class DevMockService {
 				};
 			}
 
-			return this.ensureCaptcha(visitor);
+			return this.ensureCaptcha(visitor, refresh);
 		}
 
 		if (
@@ -264,7 +268,7 @@ export class DevMockService {
 				};
 			}
 
-			return this.ensureCaptcha(visitor);
+			return this.ensureCaptcha(visitor, refresh);
 		}
 
 		return {
@@ -282,9 +286,8 @@ export class DevMockService {
 	private getRootComments(pageState: RuntimePageState) {
 		return pageState.commentOrder
 			.map((commentId) => pageState.comments.get(commentId))
-			.filter(
-				(comment): comment is RuntimeCommentRecord =>
-					Boolean(comment && comment.parentId === null),
+			.filter((comment): comment is RuntimeCommentRecord =>
+				Boolean(comment && comment.parentId === null),
 			);
 	}
 
@@ -323,9 +326,8 @@ export class DevMockService {
 
 		const selectedComments = input.pageState.commentOrder
 			.map((commentId) => input.pageState.comments.get(commentId))
-			.filter(
-				(comment): comment is RuntimeCommentRecord =>
-					Boolean(comment && includedCommentIds.has(comment.id)),
+			.filter((comment): comment is RuntimeCommentRecord =>
+				Boolean(comment && includedCommentIds.has(comment.id)),
 			);
 
 		return {
@@ -356,7 +358,8 @@ export class DevMockService {
 			enabled: this.configuredSite.defaults.comments.enabled,
 			supportsReply: this.configuredSite.defaults.comments.maxDepth > 1,
 			supportsVote: true,
-			supportsCaptcha: this.configuredSite.defaults.comments.captcha.mode !== "never",
+			supportsCaptcha:
+				this.configuredSite.defaults.comments.captcha.mode !== "never",
 			defaultStatus: this.configuredSite.defaults.comments.defaultStatus,
 			message: null,
 		};
@@ -449,27 +452,24 @@ export class DevMockService {
 		};
 	}
 
-	public async inspect(
-		siteKey: string,
-		pageKey: string,
-		visitorKey?: string,
-	) {
+	public async inspect(siteKey: string, pageKey: string, visitorKey?: string) {
 		if (!this.ownsSite(siteKey)) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
 		const pageState = this.pages.get(pageKey);
 		const visitor = visitorKey
-			? pageState?.visitorStates.get(visitorKey) ?? null
+			? (pageState?.visitorStates.get(visitorKey) ?? null)
 			: null;
-		const captcha = pageState && visitor
-			? this.getCaptchaStateForVisitor(pageState, visitor)
-			: {
-					required: false,
-					verified: false,
-					mode: "inline_value" as const,
-					challenge: null,
-				};
+		const captcha =
+			pageState && visitor
+				? this.getCaptchaStateForVisitor(pageState, visitor)
+				: {
+						required: false,
+						verified: false,
+						mode: "inline_value" as const,
+						challenge: null,
+					};
 
 		return {
 			siteKey,
@@ -481,15 +481,20 @@ export class DevMockService {
 						rootCommentCount: this.getRootComments(pageState).length,
 						pageLikeCount:
 							pageState.baseLikeCount +
-							[...pageState.visitorStates.values()].filter((state) => state.likedPage)
-								.length,
+							[...pageState.visitorStates.values()].filter(
+								(state) => state.likedPage,
+							).length,
 					}
 				: null,
 			captcha,
 		};
 	}
 
-	private setVisitorCookieResult<T>(body: T, created: boolean, visitorKey: string) {
+	private setVisitorCookieResult<T>(
+		body: T,
+		created: boolean,
+		visitorKey: string,
+	) {
 		return {
 			body,
 			visitorKey: created ? visitorKey : undefined,
@@ -509,7 +514,10 @@ export class DevMockService {
 		const pageState = this.ensurePageState(input);
 		pageState.pageViewCount += 1;
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
-		const captcha = this.getCaptchaStateForVisitor(pageState, visitorResult.visitor);
+		const captcha = this.getCaptchaStateForVisitor(
+			pageState,
+			visitorResult.visitor,
+		);
 		const threadBody = this.buildThreadBody({
 			pageState,
 			visitor: visitorResult.visitor,
@@ -532,8 +540,9 @@ export class DevMockService {
 					supportsLike: this.configuredSite.defaults.pageFeedback.allowLike,
 					likeCount:
 						pageState.baseLikeCount +
-						[...pageState.visitorStates.values()].filter((state) => state.likedPage)
-							.length,
+						[...pageState.visitorStates.values()].filter(
+							(state) => state.likedPage,
+						).length,
 					liked: visitorResult.visitor.likedPage,
 				},
 				captcha,
@@ -575,10 +584,41 @@ export class DevMockService {
 		pageUrl?: string;
 		visitorKey?: string;
 	}) {
+		return this.readCaptchaState({
+			...input,
+			refresh: false,
+		});
+	}
+
+	public async refreshCaptcha(input: {
+		siteKey: string;
+		pageKey: string;
+		pageTitle?: string;
+		pageUrl?: string;
+		visitorKey?: string;
+	}) {
+		return this.readCaptchaState({
+			...input,
+			refresh: true,
+		});
+	}
+
+	private async readCaptchaState(input: {
+		siteKey: string;
+		pageKey: string;
+		pageTitle?: string;
+		pageUrl?: string;
+		refresh: boolean;
+		visitorKey?: string;
+	}) {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
 		return this.setVisitorCookieResult(
-			this.getCaptchaStateForVisitor(pageState, visitorResult.visitor),
+			this.getCaptchaStateForVisitor(
+				pageState,
+				visitorResult.visitor,
+				input.refresh,
+			),
 			visitorResult.created,
 			visitorResult.visitorKey,
 		);
@@ -625,6 +665,42 @@ export class DevMockService {
 			visitorResult.created,
 			visitorResult.visitorKey,
 		);
+	}
+
+	private consumeInlineCaptcha(
+		pageState: RuntimePageState,
+		visitor: RuntimeVisitorState,
+		input:
+			| {
+					challengeId: string;
+					value: string;
+			  }
+			| null
+			| undefined,
+		errorCode: CaptchaRequiredCode,
+	) {
+		if (!input) {
+			return;
+		}
+		if (visitor.blacklisted) {
+			throw new AppError(403, "COMMENT_BLACKLISTED", "当前请求已被拒绝。");
+		}
+		if (!visitor.challengeId || visitor.challengeId !== input.challengeId) {
+			throw new AppError(400, errorCode, "请先完成验证码验证。");
+		}
+		if (visitor.challengeAnswer !== input.value.trim()) {
+			visitor.captchaFailures += 1;
+			if (visitor.captchaFailures >= 2) {
+				visitor.blacklisted = true;
+				this.clearCaptcha(visitor);
+				throw new AppError(403, "COMMENT_BLACKLISTED", "当前请求已被拒绝。");
+			}
+			throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "验证码错误。");
+		}
+
+		visitor.verified = true;
+		visitor.captchaFailures = 0;
+		this.clearCaptcha(visitor);
 	}
 
 	private ensureWriteAllowed(
@@ -707,11 +783,21 @@ export class DevMockService {
 			website?: string;
 		};
 		contentRaw: string;
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		visitorKey?: string;
 	}) {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
 		const visitor = visitorResult.visitor;
+		this.consumeInlineCaptcha(
+			pageState,
+			visitor,
+			input.captcha,
+			"COMMENT_CAPTCHA_REQUIRED",
+		);
 		this.ensureWriteAllowed(pageState, visitor, "COMMENT_CAPTCHA_REQUIRED");
 
 		const created = this.addComment(pageState, {
@@ -746,11 +832,21 @@ export class DevMockService {
 		pageKey: string;
 		commentId: string;
 		choice: VoteChoice;
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		visitorKey?: string;
 	}) {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
 		const visitor = visitorResult.visitor;
+		this.consumeInlineCaptcha(
+			pageState,
+			visitor,
+			input.captcha,
+			"VOTE_CAPTCHA_REQUIRED",
+		);
 		this.ensureWriteAllowed(pageState, visitor, "VOTE_CAPTCHA_REQUIRED");
 
 		const comment = pageState.comments.get(input.commentId);
@@ -789,12 +885,26 @@ export class DevMockService {
 		pageKey: string;
 		pageTitle: string;
 		pageUrl: string;
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		visitorKey?: string;
 	}) {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
 		const visitor = visitorResult.visitor;
-		this.ensureWriteAllowed(pageState, visitor, "COMMENT_CAPTCHA_REQUIRED");
+		this.consumeInlineCaptcha(
+			pageState,
+			visitor,
+			input.captcha,
+			"PAGE_FEEDBACK_CAPTCHA_REQUIRED",
+		);
+		this.ensureWriteAllowed(
+			pageState,
+			visitor,
+			"PAGE_FEEDBACK_CAPTCHA_REQUIRED",
+		);
 
 		if (visitor.likedPage) {
 			throw new AppError(
@@ -811,8 +921,9 @@ export class DevMockService {
 					supportsLike: this.configuredSite.defaults.pageFeedback.allowLike,
 					likeCount:
 						pageState.baseLikeCount +
-						[...pageState.visitorStates.values()].filter((state) => state.likedPage)
-							.length,
+						[...pageState.visitorStates.values()].filter(
+							(state) => state.likedPage,
+						).length,
 					liked: true,
 				},
 			},

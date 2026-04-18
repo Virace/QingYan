@@ -27,6 +27,10 @@ export class PageFeedbackService {
 		pageKey: string;
 		pageTitle: string;
 		pageUrl: string;
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -74,10 +78,22 @@ export class PageFeedbackService {
 			errorCode: "VOTE_RATE_LIMITED",
 			errorMessage: "提交过于频繁，请稍后再试。",
 		});
+		if (input.captcha) {
+			await this.captchaService.consumeInlineCaptcha({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				challengeId: input.captcha.challengeId,
+				value: input.captcha.value,
+				action: "page_like",
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
+		}
 		await this.captchaService.ensureSatisfied({
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
-			action: "comment_create",
+			action: "page_like",
 			visitorKey: visitor.visitorKey,
 			ip: input.ip,
 			userAgent: input.userAgent,

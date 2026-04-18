@@ -100,7 +100,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 		});
 	});
 
-	it("reuses the same verified page captcha session for comment vote in always mode", async () => {
+	it("accepts captcha payload inline when retrying comment vote in always mode", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(runtimeSettings).set({
@@ -144,6 +144,22 @@ describe("POST /api/comments/:commentId/vote", () => {
 			updatedAt: "2026-04-17T10:00:00.000Z",
 		});
 
+		const blockedVote = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments/c_vote_captcha/vote",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:vote-captcha",
+				choice: "up",
+			},
+		});
+		expect(blockedVote.statusCode).toBe(400);
+		expect(blockedVote.json()).toMatchObject({
+			error: {
+				code: "VOTE_CAPTCHA_REQUIRED",
+			},
+		});
+
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
 			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:vote-captcha",
@@ -163,21 +179,6 @@ describe("POST /api/comments/:commentId/vote", () => {
 			answer: string;
 		};
 
-		await fixture.app.inject({
-			method: "POST",
-			url: "/api/comments/captcha/verify",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
-			payload: {
-				siteKey: "fangyuan",
-				pageKey: "post:vote-captcha",
-				challengeId,
-				mode: "inline_value",
-				value: payload.answer,
-			},
-		});
-
 		const vote = await fixture.app.inject({
 			method: "POST",
 			url: "/api/comments/c_vote_captcha/vote",
@@ -188,6 +189,10 @@ describe("POST /api/comments/:commentId/vote", () => {
 				siteKey: "fangyuan",
 				pageKey: "post:vote-captcha",
 				choice: "up",
+				captcha: {
+					challengeId,
+					value: payload.answer,
+				},
 			},
 		});
 

@@ -4,7 +4,9 @@ import {
 	pageFeedbackRecords,
 	pageThreads,
 	runtimeSettings,
+	captchaSessions,
 } from "../../src/db/schema";
+import { eq } from "drizzle-orm";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -65,60 +67,49 @@ describe("POST /api/page-feedback/like", () => {
 		});
 	});
 
-	it("reuses required page captcha state for page like without counting it toward the threshold", async () => {
+	it("accepts captcha payload inline when retrying page like", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(runtimeSettings).set({
-			captchaMode: "threshold",
-			captchaThresholdWindowSec: 60,
-			captchaThresholdMaxActions: 3,
+			captchaMode: "always",
 		});
 
-		const postComment = async (raw: string, cookieValue?: string) =>
-			fixture.app.inject({
-				method: "POST",
-				url: "/api/comments",
-				cookies: cookieValue
-					? {
-							qingyan_visitor: cookieValue,
-						}
-					: undefined,
-				payload: {
-					siteKey: "fangyuan",
-					pageKey: "post:like-threshold",
-					pageTitle: "Like Threshold",
-					pageUrl: "https://fangyuan.example.com/posts/like-threshold/",
-					parentCommentId: null,
-					author: {
-						name: "Alice",
-						email: "alice@example.com",
-					},
-					content: {
-						raw,
-					},
-					options: {
-						notifyOnReply: false,
-					},
-				},
-			});
-
-		const first = await postComment("first");
-		expect(first.statusCode).toBe(200);
-		const visitorCookie = first.cookies.find(
+		const blockedLike = await fixture.app.inject({
+			method: "POST",
+			url: "/api/page-feedback/like",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:like-threshold",
+				pageTitle: "Like Threshold",
+				pageUrl: "https://fangyuan.example.com/posts/like-threshold/",
+			},
+		});
+		expect(blockedLike.statusCode).toBe(400);
+		expect(blockedLike.json()).toMatchObject({
+			error: {
+				code: "PAGE_FEEDBACK_CAPTCHA_REQUIRED",
+			},
+		});
+		const captchaState = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:like-threshold",
+		});
+		expect(captchaState.statusCode).toBe(200);
+		const visitorCookie = captchaState.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
 		);
 		const cookieValue = visitorCookie?.value ?? "";
-
-		const second = await postComment("second", cookieValue);
-		expect(second.statusCode).toBe(200);
-
-		const third = await postComment("third", cookieValue);
-		expect(third.statusCode).toBe(400);
-		expect(third.json()).toMatchObject({
-			error: {
-				code: "COMMENT_CAPTCHA_REQUIRED",
-			},
-		});
+		const challengeId = captchaState.json().challenge.challengeId as string;
+		const [session] = await fixture.app.db
+			.select()
+			.from(captchaSessions)
+			.where(eq(captchaSessions.id, challengeId));
+		if (!session) {
+			throw new Error("Expected captcha session to exist");
+		}
+		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
+			answer: string;
+		};
 
 		const like = await fixture.app.inject({
 			method: "POST",
@@ -131,13 +122,19 @@ describe("POST /api/page-feedback/like", () => {
 				pageKey: "post:like-threshold",
 				pageTitle: "Like Threshold",
 				pageUrl: "https://fangyuan.example.com/posts/like-threshold/",
+				captcha: {
+					challengeId,
+					value: payload.answer,
+				},
 			},
 		});
 
-		expect(like.statusCode).toBe(400);
+		expect(like.statusCode).toBe(200);
 		expect(like.json()).toMatchObject({
-			error: {
-				code: "COMMENT_CAPTCHA_REQUIRED",
+			pageFeedback: {
+				supportsLike: true,
+				likeCount: 1,
+				liked: true,
 			},
 		});
 	});

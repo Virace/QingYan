@@ -11,7 +11,7 @@ import {
 } from "../../db/schema";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 
-export type CaptchaAction = "comment_create" | "comment_vote";
+export type CaptchaAction = "comment_create" | "comment_vote" | "page_like";
 
 function createEntityId(prefix: "c" | "cap"): string {
 	return `${prefix}_${randomUUID().replaceAll("-", "")}`;
@@ -85,6 +85,15 @@ export class CommentsWriteRepository {
 			.set({
 				verified: true,
 				verifiedAt: new Date().toISOString(),
+			})
+			.where(eq(captchaSessions.id, sessionId));
+	}
+
+	public async expireCaptchaSession(sessionId: string, nowIso = new Date().toISOString()) {
+		await this.db
+			.update(captchaSessions)
+			.set({
+				expiresAt: nowIso,
 			})
 			.where(eq(captchaSessions.id, sessionId));
 	}

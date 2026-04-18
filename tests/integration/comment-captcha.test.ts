@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { captchaSessions, runtimeSettings } from "../../src/db/schema";
+import { decodeSvgDataUrl } from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -103,6 +104,132 @@ describe("comment captcha", () => {
 		});
 		expect(verifiedResponse.statusCode).toBe(200);
 		expect(verifiedResponse.json()).toEqual({
+			required: true,
+			verified: true,
+		});
+	});
+
+	it("refreshes an unresolved challenge and does not expose the plaintext answer in svg payload", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(runtimeSettings).set({
+			captchaMode: "always",
+		});
+
+		const initialState = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
+		});
+		expect(initialState.statusCode).toBe(200);
+
+		const visitorCookie = initialState.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		const initialChallenge = initialState.json().challenge as {
+			challengeId: string;
+			imageData: string;
+		};
+		const [initialSession] = await fixture.app.db
+			.select()
+			.from(captchaSessions)
+			.where(eq(captchaSessions.id, initialChallenge.challengeId));
+		if (!initialSession) {
+			throw new Error("Expected initial captcha session to exist");
+		}
+		const initialPayload = JSON.parse(
+			initialSession.challengePayloadJson ?? "{}",
+		) as {
+			answer: string;
+		};
+		expect(decodeSvgDataUrl(initialChallenge.imageData)).not.toContain(
+			initialPayload.answer,
+		);
+
+		const repeatedState = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+		});
+		expect(repeatedState.statusCode).toBe(200);
+		expect(repeatedState.json().challenge).toEqual(initialChallenge);
+
+		const refreshedState = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments/captcha/refresh",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:captcha-refresh",
+			},
+		});
+		expect(refreshedState.statusCode).toBe(200);
+
+		const refreshedChallenge = refreshedState.json().challenge as {
+			challengeId: string;
+			imageData: string;
+		};
+		expect(refreshedChallenge.challengeId).not.toBe(
+			initialChallenge.challengeId,
+		);
+		expect(refreshedChallenge.imageData).not.toBe(initialChallenge.imageData);
+
+		const [refreshedSession] = await fixture.app.db
+			.select()
+			.from(captchaSessions)
+			.where(eq(captchaSessions.id, refreshedChallenge.challengeId));
+		if (!refreshedSession) {
+			throw new Error("Expected refreshed captcha session to exist");
+		}
+		const refreshedPayload = JSON.parse(
+			refreshedSession.challengePayloadJson ?? "{}",
+		) as {
+			answer: string;
+		};
+		expect(decodeSvgDataUrl(refreshedChallenge.imageData)).not.toContain(
+			refreshedPayload.answer,
+		);
+
+		const staleVerify = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments/captcha/verify",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:captcha-refresh",
+				challengeId: initialChallenge.challengeId,
+				mode: "inline_value",
+				value: initialPayload.answer,
+			},
+		});
+		expect(staleVerify.statusCode).toBe(400);
+		expect(staleVerify.json()).toMatchObject({
+			error: {
+				code: "COMMENT_CAPTCHA_REQUIRED",
+			},
+		});
+
+		const refreshedVerify = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments/captcha/verify",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:captcha-refresh",
+				challengeId: refreshedChallenge.challengeId,
+				mode: "inline_value",
+				value: refreshedPayload.answer,
+			},
+		});
+		expect(refreshedVerify.statusCode).toBe(200);
+		expect(refreshedVerify.json()).toEqual({
 			required: true,
 			verified: true,
 		});

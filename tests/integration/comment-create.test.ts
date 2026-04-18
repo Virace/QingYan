@@ -55,11 +55,39 @@ describe("POST /api/comments", () => {
 		});
 	});
 
-	it("creates a pending comment after captcha verification", async () => {
+	it("creates a pending comment when captcha is submitted with the write action", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(runtimeSettings).set({
 			captchaMode: "always",
+		});
+
+		const blocked = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:create-comment",
+				pageTitle: "Create Comment",
+				pageUrl: "https://fangyuan.example.com/posts/create-comment/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "hello qingyan",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+		expect(blocked.statusCode).toBe(400);
+		expect(blocked.json()).toMatchObject({
+			error: {
+				code: "COMMENT_CAPTCHA_REQUIRED",
+			},
 		});
 
 		const stateResponse = await fixture.app.inject({
@@ -80,21 +108,6 @@ describe("POST /api/comments", () => {
 		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
 			answer: string;
 		};
-
-		await fixture.app.inject({
-			method: "POST",
-			url: "/api/comments/captcha/verify",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
-			payload: {
-				siteKey: "fangyuan",
-				pageKey: "post:create-comment",
-				challengeId,
-				mode: "inline_value",
-				value: payload.answer,
-			},
-		});
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -117,6 +130,10 @@ describe("POST /api/comments", () => {
 				},
 				options: {
 					notifyOnReply: false,
+				},
+				captcha: {
+					challengeId,
+					value: payload.answer,
 				},
 			},
 		});

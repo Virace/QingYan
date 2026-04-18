@@ -1,8 +1,7 @@
-import { randomInt } from "node:crypto";
-
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import { createCaptchaChallenge } from "../shared/captcha-challenge";
 import type { CommentsRepository } from "./repository";
 import type {
 	CaptchaAction,
@@ -15,15 +14,6 @@ interface CaptchaPayload {
 	imageData: string;
 }
 
-function createSvgDataUrl(answer: string): string {
-	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="60" viewBox="0 0 160 60"><rect width="160" height="60" rx="8" fill="#f6f1e7"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="28" font-family="monospace" fill="#1f2937">${answer}</text></svg>`;
-	return `data:image/svg+xml;base64,${Buffer.from(svg, "utf-8").toString("base64")}`;
-}
-
-function createChallengeAnswer(): string {
-	return `${randomInt(1000, 9999)}`;
-}
-
 function resolveCaptchaPolicy(settings: {
 	captchaMode: "never" | "always" | "threshold";
 	captchaThresholdWindowSec: number;
@@ -33,15 +23,23 @@ function resolveCaptchaPolicy(settings: {
 }
 
 function getCaptchaRequiredCode(action: CaptchaAction): string {
-	return action === "comment_create"
-		? "COMMENT_CAPTCHA_REQUIRED"
-		: "VOTE_CAPTCHA_REQUIRED";
+	if (action === "comment_create") {
+		return "COMMENT_CAPTCHA_REQUIRED";
+	}
+	if (action === "comment_vote") {
+		return "VOTE_CAPTCHA_REQUIRED";
+	}
+	return "PAGE_FEEDBACK_CAPTCHA_REQUIRED";
 }
 
 function getCaptchaRateLimitCode(action: CaptchaAction): string {
-	return action === "comment_create"
-		? "COMMENT_RATE_LIMITED"
-		: "VOTE_RATE_LIMITED";
+	if (action === "comment_create") {
+		return "COMMENT_RATE_LIMITED";
+	}
+	if (action === "comment_vote") {
+		return "VOTE_RATE_LIMITED";
+	}
+	return "PAGE_FEEDBACK_RATE_LIMITED";
 }
 
 function resolveStateMode(
@@ -75,8 +73,7 @@ export class CaptchaService {
 		pageThreadId: number;
 		triggeredBy: "always" | "threshold";
 	}) {
-		const answer = createChallengeAnswer();
-		const imageData = createSvgDataUrl(answer);
+		const challenge = createCaptchaChallenge();
 		const challengeId = await this.writeRepository.createCaptchaSession({
 			siteId: input.siteId,
 			visitorId: input.visitorId,
@@ -84,8 +81,8 @@ export class CaptchaService {
 			triggeredBy: input.triggeredBy,
 			mode: "inline_value",
 			challengePayloadJson: JSON.stringify({
-				answer,
-				imageData,
+				answer: challenge.answer,
+				imageData: challenge.imageData,
 			} satisfies CaptchaPayload),
 			expiresAt: new Date(
 				Date.now() + this.config.captcha.image.ttlSec * 1000,
@@ -94,7 +91,7 @@ export class CaptchaService {
 
 		return {
 			challengeId,
-			imageData,
+			imageData: challenge.imageData,
 		};
 	}
 
@@ -104,6 +101,39 @@ export class CaptchaService {
 		pageTitle?: string;
 		pageUrl?: string;
 		requestId?: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+	}) {
+		return this.readState({
+			...input,
+			refresh: false,
+		});
+	}
+
+	public async refreshState(input: {
+		siteKey: string;
+		pageKey: string;
+		pageTitle?: string;
+		pageUrl?: string;
+		requestId?: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+	}) {
+		return this.readState({
+			...input,
+			refresh: true,
+		});
+	}
+
+	private async readState(input: {
+		siteKey: string;
+		pageKey: string;
+		pageTitle?: string;
+		pageUrl?: string;
+		requestId?: string;
+		refresh: boolean;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
@@ -170,7 +200,11 @@ export class CaptchaService {
 			};
 		}
 
-		if (activeSession?.challengePayloadJson) {
+		if (activeSession && input.refresh) {
+			await this.writeRepository.expireCaptchaSession(activeSession.id);
+		}
+
+		if (activeSession?.challengePayloadJson && !input.refresh) {
 			const payload = JSON.parse(
 				activeSession.challengePayloadJson,
 			) as CaptchaPayload;
@@ -451,6 +485,52 @@ export class CaptchaService {
 			required: true,
 			verified: true,
 		};
+	}
+
+	public async consumeInlineCaptcha(input: {
+		siteKey: string;
+		pageKey: string;
+		challengeId: string;
+		value: string;
+		action: CaptchaAction;
+		requestId?: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+	}) {
+		const rule = this.config.security.rateLimit.captchaVerify;
+		return this.verify({
+			siteKey: input.siteKey,
+			pageKey: input.pageKey,
+			challengeId: input.challengeId,
+			mode: "inline_value",
+			value: input.value,
+			requestId: input.requestId,
+			visitorKey: input.visitorKey,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			checkRateLimit: (identityKey) => {
+				const snapshot = this.security.peekRateLimit({
+					key: `public:${input.siteKey}:${identityKey}:captcha_verify`,
+					rule,
+				});
+				if (snapshot.limit !== null && snapshot.count >= snapshot.limit) {
+					throw new AppError(
+						429,
+						getCaptchaRateLimitCode(input.action),
+						"请求过于频繁，请稍后再试。",
+					);
+				}
+			},
+			consumeRateLimit: async (identityKey) => {
+				await this.security.consumeRateLimit({
+					key: `public:${input.siteKey}:${identityKey}:captcha_verify`,
+					rule,
+					errorCode: getCaptchaRateLimitCode(input.action),
+					errorMessage: "请求过于频繁，请稍后再试。",
+				});
+			},
+		});
 	}
 
 	public async ensureSatisfied(input: {

@@ -158,6 +158,28 @@ paths:
           $ref: '#/components/responses/Error400'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/comments/captcha/refresh:
+    post:
+      tags: [Captcha]
+      summary: 刷新当前页面验证码 challenge
+      operationId: refreshCaptcha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptchaRefreshRequest'
+      responses:
+        '200':
+          description: 验证码 challenge 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaStateResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
   /api/comments/captcha/verify:
     post:
       tags: [Captcha]
@@ -1117,6 +1139,23 @@ components:
           enum: [inline_value]
         value:
           type: string
+    CaptchaRefreshRequest:
+      type: object
+      required: [siteKey, pageKey]
+      properties:
+        siteKey:
+          type: string
+        pageKey:
+          type: string
+        pageTitle:
+          type: string
+        pageUrl:
+          oneOf:
+            - type: string
+              format: uri
+            - type: string
+              pattern: ^/
+          description: 完整页面 URL，或去掉域名后的页面路径
     PageLikeRequest:
       type: object
       required: [siteKey, pageKey, pageTitle, pageUrl]

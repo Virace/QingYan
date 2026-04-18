@@ -35,6 +35,10 @@ export class CommentsWriteService {
 			website?: string;
 		};
 		contentRaw: string;
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
@@ -111,6 +115,19 @@ export class CommentsWriteService {
 			ip: input.ip,
 			userAgent: input.userAgent,
 		});
+		if (input.captcha) {
+			await this.captchaService.consumeInlineCaptcha({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				challengeId: input.captcha.challengeId,
+				value: input.captcha.value,
+				action: "comment_create",
+				requestId: input.requestId,
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
+		}
 		await this.captchaService.ensureSatisfied({
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
@@ -209,6 +226,10 @@ export class CommentsWriteService {
 		siteKey: string;
 		pageKey: string;
 		choice: "up" | "down";
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		requestId?: string;
 		visitorKey?: string;
 		ip?: string;
@@ -261,6 +282,19 @@ export class CommentsWriteService {
 			ip: input.ip,
 			userAgent: input.userAgent,
 		});
+		if (input.captcha) {
+			await this.captchaService.consumeInlineCaptcha({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				challengeId: input.captcha.challengeId,
+				value: input.captcha.value,
+				action: "comment_vote",
+				requestId: input.requestId,
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
+		}
 		await this.captchaService.ensureSatisfied({
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,

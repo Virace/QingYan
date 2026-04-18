@@ -282,8 +282,8 @@ sites:
 
 客户端接入时需要遵守以下约束：
 
-- `bootstrap`、`captcha/state`、`captcha/verify` 与最终写接口之间必须复用同一 `qingyan_visitor` cookie
-- `captcha/state` 与 `captcha/verify` 使用的 `siteKey`、`pageKey` 必须和后续写接口保持一致
+- `bootstrap`、`captcha/state`、`captcha/refresh`、`captcha/verify` 与最终写接口之间必须复用同一 `qingyan_visitor` cookie
+- `captcha/state`、`captcha/refresh` 与 `captcha/verify` 使用的 `siteKey`、`pageKey` 必须和后续写接口保持一致
 - 写接口在需要验证码时只返回错误码，不会在错误响应中直接内联 challenge；客户端需要自行继续调用验证码接口
 
 ### `mode: never`
@@ -303,6 +303,7 @@ sites:
 5. 收到 `{ required: true, verified: true }` 后，再调用评论创建、评论投票或页面点赞接口
 
 如果当前页面没有先走 bootstrap，也可以直接调用 `GET /api/comments/captcha/state` 获取同一份 challenge。
+如果用户想显式换一张验证码图，应调用 `POST /api/comments/captcha/refresh`，不要再对 `captcha/state` 追加刷新参数。
 
 ### `mode: threshold`
 
@@ -369,6 +370,8 @@ POST /api/comments/{commentId}/vote
 ### challenge 获取与复用规则
 
 - `challenge.imageData` 为 SVG data URL，可直接用于 `<img src="...">`
+- `GET /api/comments/captcha/state` 只负责读取当前 challenge，不会隐式刷新
+- 需要更换 challenge 时，调用 `POST /api/comments/captcha/refresh`
 - 已验证的 challenge 会在同一页面内被复用，直到过期或当前 session 状态变化
 - `threshold` 模式下，命中阈值的那次写请求负责“创建 challenge 并返回需要验证码”；真正的 challenge 内容要通过 `captcha/state` 获取
 - 页面切换到新的 `pageKey` 后，应视为新的验证码上下文，重新按对应页面获取状态

@@ -5,6 +5,7 @@ import { presentComments } from "./presenter";
 import { CommentsRepository } from "./repository";
 import {
 	bootstrapQuerySchema,
+	captchaRefreshBodySchema,
 	captchaStateQuerySchema,
 	captchaVerifyBodySchema,
 	createCommentBodySchema,
@@ -166,6 +167,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				parentCommentId: parsed.data.parentCommentId,
 				author: parsed.data.author,
 				contentRaw: parsed.data.content.raw,
+				captcha: parsed.data.captcha,
 				visitorKey: request.context?.visitor?.key,
 			});
 			if (result.visitorKey) {
@@ -187,6 +189,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			parentCommentId: parsed.data.parentCommentId,
 			author: parsed.data.author,
 			contentRaw: parsed.data.content.raw,
+			captcha: parsed.data.captcha,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
@@ -224,6 +227,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				pageKey: parsedBody.data.pageKey,
 				commentId: parsedParams.data.commentId,
 				choice: parsedBody.data.choice,
+				captcha: parsedBody.data.captcha,
 				visitorKey: request.context?.visitor?.key,
 			});
 			if (result.visitorKey) {
@@ -242,6 +246,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsedBody.data.siteKey,
 			pageKey: parsedBody.data.pageKey,
 			choice: parsedBody.data.choice,
+			captcha: parsedBody.data.captcha,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
@@ -288,6 +293,53 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		const result = await captchaService.getState({
+			...parsed.data,
+			requestId: request.context?.requestId,
+			visitorKey: request.context?.visitor?.key,
+			ip: request.context?.ip,
+			userAgent: request.context?.userAgent,
+		});
+		if (result.visitorKey) {
+			reply.setCookie("qingyan_visitor", result.visitorKey, {
+				path: "/",
+				sameSite: "lax",
+				httpOnly: true,
+			});
+		}
+
+		return {
+			required: result.required,
+			verified: result.verified,
+			mode: result.mode,
+			challenge: result.challenge,
+		};
+	});
+
+	fastify.post("/comments/captcha/refresh", async (request, reply) => {
+		const parsed = captchaRefreshBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.refreshCaptcha({
+				...parsed.data,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
+		}
+
+		const result = await captchaService.refreshState({
 			...parsed.data,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
