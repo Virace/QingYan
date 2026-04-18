@@ -66,6 +66,9 @@ describe("comment captcha", () => {
 
 		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
 			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
 		};
 		const invalidResponse = await fixture.app.inject({
 			method: "POST",
@@ -140,6 +143,9 @@ describe("comment captcha", () => {
 			initialSession.challengePayloadJson ?? "{}",
 		) as {
 			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
 		};
 		expect(decodeSvgDataUrl(initialChallenge.imageData)).not.toContain(
 			initialPayload.answer,
@@ -188,6 +194,9 @@ describe("comment captcha", () => {
 			refreshedSession.challengePayloadJson ?? "{}",
 		) as {
 			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
 		};
 		expect(decodeSvgDataUrl(refreshedChallenge.imageData)).not.toContain(
 			refreshedPayload.answer,

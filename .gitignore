@@ -4,6 +4,7 @@ coverage/
 .DS_Store
 .serena/
 .superpowers/
+docs/superpowers/
 .temp/
 .idea/
 .vscode/

@@ -109,6 +109,9 @@ describe("POST /api/page-feedback/like", () => {
 		}
 		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
 			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
 		};
 
 		const like = await fixture.app.inject({

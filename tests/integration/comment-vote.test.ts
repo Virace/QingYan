@@ -177,6 +177,9 @@ describe("POST /api/comments/:commentId/vote", () => {
 		}
 		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
 			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
 		};
 
 		const vote = await fixture.app.inject({

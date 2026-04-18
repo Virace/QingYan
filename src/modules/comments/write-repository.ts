@@ -20,6 +20,10 @@ function createEntityId(prefix: "c" | "cap"): string {
 export class CommentsWriteRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
+	public createCaptchaSessionId() {
+		return createEntityId("cap");
+	}
+
 	public async getCommentById(commentId: string) {
 		const [comment] = await this.db
 			.select()
@@ -56,15 +60,18 @@ export class CommentsWriteRepository {
 	}
 
 	public async createCaptchaSession(input: {
+		id?: string;
 		siteId: number;
 		visitorId: number;
 		pageThreadId: number;
 		triggeredBy: "always" | "threshold";
-		mode: "inline_value";
+		mode: "inline_value" | "iframe_widget";
+		providerKind?: string;
 		challengePayloadJson: string;
+		providerStateJson?: string;
 		expiresAt: string;
 	}) {
-		const id = createEntityId("cap");
+		const id = input.id ?? createEntityId("cap");
 		await this.db.insert(captchaSessions).values({
 			id,
 			siteId: input.siteId,
@@ -72,7 +79,9 @@ export class CommentsWriteRepository {
 			pageThreadId: input.pageThreadId,
 			triggeredBy: input.triggeredBy,
 			mode: input.mode,
+			providerKind: input.providerKind,
 			challengePayloadJson: input.challengePayloadJson,
+			providerStateJson: input.providerStateJson,
 			expiresAt: input.expiresAt,
 		});
 

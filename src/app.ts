@@ -15,6 +15,7 @@ import { adminUsersRoutes } from "./modules/admin/users-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
 import { CaptchaService } from "./modules/comments/captcha-service";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
+import { captchaWidgetRoutes } from "./modules/comments/captcha-widget-routes";
 import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { CommentsRepository } from "./modules/comments/repository";
 import { CommentsWriteRepository } from "./modules/comments/write-repository";
@@ -138,6 +139,7 @@ export async function buildApp(
 
 	await app.register(adminUiRoutes);
 	await app.register(adminSessionRoutes, { prefix: "/api/admin/session" });
+	await app.register(captchaWidgetRoutes, { prefix: "/api" });
 
 	if (runtimeOptions.devMode.enabled) {
 		const defaultSite = devDefaultSite;

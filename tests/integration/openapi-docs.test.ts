@@ -32,6 +32,9 @@ describe("openapi docs", () => {
 		expect(yaml.headers["content-type"]).toContain("application/yaml");
 		expect(yaml.body).toContain("openapi: 3.1.0");
 		expect(yaml.body).toContain("/api/comments/bootstrap");
+		expect(yaml.body).toContain("/api/comments/captcha/widget");
+		expect(yaml.body).toContain("/api/comments/captcha/complete");
+		expect(yaml.body).toContain("iframe_widget");
 
 		expect(json.statusCode).toBe(200);
 		expect(json.json()).toMatchObject({

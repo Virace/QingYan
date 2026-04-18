@@ -180,6 +180,54 @@ paths:
           $ref: '#/components/responses/Error400'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/comments/captcha/widget:
+    get:
+      tags: [Captcha]
+      summary: 返回当前 challenge 的验证码组件宿主页
+      operationId: getCaptchaWidget
+      parameters:
+        - $ref: '#/components/parameters/SiteKey'
+        - $ref: '#/components/parameters/PageKey'
+        - name: challengeId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 验证码组件 HTML
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /api/comments/captcha/complete:
+    post:
+      tags: [Captcha]
+      summary: 完成 iframe 组件验证码并写回当前 captcha session
+      operationId: completeCaptcha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptchaCompleteRequest'
+      responses:
+        '200':
+          description: iframe 验证码校验成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaVerifyResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '429':
+          $ref: '#/components/responses/Error429'
   /api/comments/captcha/verify:
     post:
       tags: [Captcha]
@@ -948,7 +996,7 @@ components:
           type: integer
         liked:
           type: boolean
-    CaptchaChallenge:
+    InlineValueCaptchaChallenge:
       type: object
       required: [challengeId, mode, imageData]
       properties:
@@ -956,10 +1004,29 @@ components:
           type: string
         mode:
           type: string
-          enum: [inline_value]
+          const: inline_value
         imageData:
           type: string
           description: data URL 形式的 SVG 图片
+    IframeWidgetCaptchaChallenge:
+      type: object
+      required: [challengeId, mode, iframeSrc, width, height]
+      properties:
+        challengeId:
+          type: string
+        mode:
+          type: string
+          const: iframe_widget
+        iframeSrc:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+    CaptchaChallenge:
+      oneOf:
+        - $ref: '#/components/schemas/InlineValueCaptchaChallenge'
+        - $ref: '#/components/schemas/IframeWidgetCaptchaChallenge'
     CaptchaStateResponse:
       type: object
       required: [required, verified, mode, challenge]
@@ -970,7 +1037,7 @@ components:
           type: boolean
         mode:
           type: string
-          enum: [inline_value]
+          enum: [inline_value, iframe_widget]
         challenge:
           oneOf:
             - $ref: '#/components/schemas/CaptchaChallenge'
@@ -1077,6 +1144,10 @@ components:
           properties:
             notifyOnReply:
               type: boolean
+        captcha:
+          oneOf:
+            - $ref: '#/components/schemas/InlineCaptchaPayload'
+            - type: 'null'
     CreateCommentResponse:
       type: object
       required: [comment, thread]
@@ -1111,6 +1182,10 @@ components:
         choice:
           type: string
           enum: [up, down]
+        captcha:
+          oneOf:
+            - $ref: '#/components/schemas/InlineCaptchaPayload'
+            - type: 'null'
     VoteCommentResponse:
       type: object
       required: [commentId, voteUp, voteDown, viewerVote]
@@ -1139,6 +1214,14 @@ components:
           enum: [inline_value]
         value:
           type: string
+    InlineCaptchaPayload:
+      type: object
+      required: [challengeId, value]
+      properties:
+        challengeId:
+          type: string
+        value:
+          type: string
     CaptchaRefreshRequest:
       type: object
       required: [siteKey, pageKey]
@@ -1156,6 +1239,26 @@ components:
             - type: string
               pattern: ^/
           description: 完整页面 URL，或去掉域名后的页面路径
+    CaptchaCompleteRequest:
+      type: object
+      required: [siteKey, pageKey, challengeId]
+      properties:
+        siteKey:
+          type: string
+        pageKey:
+          type: string
+        challengeId:
+          type: string
+        token:
+          type: string
+        lotNumber:
+          type: string
+        captchaOutput:
+          type: string
+        passToken:
+          type: string
+        genTime:
+          type: string
     PageLikeRequest:
       type: object
       required: [siteKey, pageKey, pageTitle, pageUrl]
@@ -1173,6 +1276,10 @@ components:
             - type: string
               pattern: ^/
           description: 完整页面 URL，或去掉域名后的页面路径
+        captcha:
+          oneOf:
+            - $ref: '#/components/schemas/InlineCaptchaPayload'
+            - type: 'null'
     PageLikeResponse:
       type: object
       required: [pageFeedback]

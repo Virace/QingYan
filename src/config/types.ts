@@ -15,6 +15,13 @@ const commentsCaptchaDefaultsSchema = z.object({
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
 const logLevelSchema = z.enum(["error", "warn", "info", "debug"]);
+const captchaProviderSchema = z.enum([
+	"image",
+	"turnstile",
+	"hcaptcha",
+	"recaptcha",
+	"geetest",
+]);
 
 const commentsIdentitySchema = z.object({
 	require: z.array(commentIdentityFieldSchema),
@@ -98,14 +105,81 @@ export const configSchema = z.object({
 			pageLike: rateLimitRuleSchema.optional(),
 		}),
 	}),
-	captcha: z.object({
-		provider: z.literal("image"),
-		image: z.object({
-			width: z.number().int().positive(),
-			height: z.number().int().positive(),
-			ttlSec: z.number().int().positive(),
+	captcha: z
+		.object({
+			provider: captchaProviderSchema,
+			image: z.object({
+				width: z.number().int().positive(),
+				height: z.number().int().positive(),
+				ttlSec: z.number().int().positive(),
+			}),
+			turnstile: z
+				.object({
+					siteKey: z.string().min(1),
+					secretKey: z.string().min(1),
+					expectedAction: z.string().min(1).default("COMMENT_SUBMIT"),
+					expectedHostname: z.string().min(1).optional(),
+				})
+				.optional(),
+			hcaptcha: z
+				.object({
+					siteKey: z.string().min(1),
+					secretKey: z.string().min(1),
+					expectedHostname: z.string().min(1).optional(),
+				})
+				.optional(),
+			recaptcha: z
+				.object({
+					variant: z.enum(["score_based", "policy_based_challenge"]),
+					projectId: z.string().min(1),
+					siteKey: z.string().min(1),
+					apiKey: z.string().min(1),
+					expectedAction: z.string().min(1).default("COMMENT_SUBMIT"),
+					expectedHostname: z.string().min(1).optional(),
+					minScore: z.number().min(0).max(1).default(0.5),
+				})
+				.optional(),
+			geetest: z
+				.object({
+					captchaId: z.string().min(1),
+					captchaKey: z.string().min(1),
+					apiServer: z
+						.string()
+						.url()
+						.default("https://gcaptcha4.geetest.com"),
+				})
+				.optional(),
+		})
+		.superRefine((captcha, ctx) => {
+			if (captcha.provider === "turnstile" && !captcha.turnstile) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "captcha.turnstile is required when provider is turnstile",
+					path: ["turnstile"],
+				});
+			}
+			if (captcha.provider === "hcaptcha" && !captcha.hcaptcha) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "captcha.hcaptcha is required when provider is hcaptcha",
+					path: ["hcaptcha"],
+				});
+			}
+			if (captcha.provider === "recaptcha" && !captcha.recaptcha) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "captcha.recaptcha is required when provider is recaptcha",
+					path: ["recaptcha"],
+				});
+			}
+			if (captcha.provider === "geetest" && !captcha.geetest) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "captcha.geetest is required when provider is geetest",
+					path: ["geetest"],
+				});
+			}
 		}),
-	}),
 	logging: z.object({
 		directory: z.string().min(1),
 		defaults: z.object({

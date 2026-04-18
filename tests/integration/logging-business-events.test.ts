@@ -123,6 +123,9 @@ describe("logging business events", () => {
 		}
 		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
 			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
 		};
 
 		const validVerify = await fixture.app.inject({

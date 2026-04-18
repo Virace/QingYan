@@ -41,11 +41,32 @@ security:
       maxRequests: 10
 
 captcha:
-  provider: image
   image:
     width: 160
     height: 60
     ttlSec: 600
+  provider: image
+  # turnstile:
+  #   siteKey: "1x00000000000000000000AA"
+  #   secretKey: "<turnstile-secret>"
+  #   expectedAction: COMMENT_SUBMIT
+  #   expectedHostname: comments.example.com
+  # hcaptcha:
+  #   siteKey: "<hcaptcha-site-key>"
+  #   secretKey: "<hcaptcha-secret>"
+  #   expectedHostname: comments.example.com
+  # recaptcha:
+  #   variant: score_based
+  #   projectId: "<gcp-project>"
+  #   siteKey: "<recaptcha-site-key>"
+  #   apiKey: "<gcp-api-key>"
+  #   expectedAction: COMMENT_SUBMIT
+  #   expectedHostname: comments.example.com
+  #   minScore: 0.5
+  # geetest:
+  #   captchaId: "<captcha-id>"
+  #   captchaKey: "<captcha-key>"
+  #   apiServer: https://gcaptcha4.geetest.com
 
 logging:
   directory: ./logs

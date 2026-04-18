@@ -71,3 +71,20 @@ export const captchaVerifyBodySchema = z.object({
 	mode: z.literal("inline_value"),
 	value: z.string().min(1),
 });
+
+export const captchaWidgetQuerySchema = z.object({
+	siteKey: z.string().min(1),
+	pageKey: z.string().min(1),
+	challengeId: z.string().min(1),
+});
+
+export const captchaCompleteBodySchema = z.object({
+	siteKey: z.string().min(1),
+	pageKey: z.string().min(1),
+	challengeId: z.string().min(1),
+	token: z.string().min(1).optional(),
+	lotNumber: z.string().min(1).optional(),
+	captchaOutput: z.string().min(1).optional(),
+	passToken: z.string().min(1).optional(),
+	genTime: z.string().min(1).optional(),
+});

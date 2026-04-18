@@ -1,18 +1,43 @@
-import type { AppConfig } from "../../config/types";
+import type { AppConfig, SiteConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
-import { createCaptchaChallenge } from "../shared/captcha-challenge";
 import type { CommentsRepository } from "./repository";
 import type {
 	CaptchaAction,
 	CommentsWriteRepository,
 } from "./write-repository";
+import {
+	isInlineCaptchaSessionPayload,
+	resolveCaptchaHostMode,
+	type CaptchaSessionPayload,
+	type PublicCaptchaChallenge,
+	type PublicCaptchaProviderKind,
+} from "./captcha-provider-types";
 import { requiresCaptchaForAttempt } from "./captcha-threshold";
-
-interface CaptchaPayload {
-	answer: string;
-	imageData: string;
-}
+import {
+	createImageCaptchaChallenge,
+	verifyImageCaptchaValue,
+} from "./providers/image-provider";
+import {
+	createTurnstileChallenge,
+	renderTurnstileWidgetHtml,
+	verifyTurnstileToken,
+} from "./providers/turnstile-provider";
+import {
+	createHCaptchaChallenge,
+	renderHCaptchaWidgetHtml,
+	verifyHCaptchaToken,
+} from "./providers/hcaptcha-provider";
+import {
+	createRecaptchaChallenge,
+	renderRecaptchaWidgetHtml,
+	verifyRecaptchaToken,
+} from "./providers/recaptcha-provider";
+import {
+	createGeeTestChallenge,
+	renderGeeTestWidgetHtml,
+	verifyGeeTestToken,
+} from "./providers/geetest-provider";
 
 function resolveCaptchaPolicy(settings: {
 	captchaMode: "never" | "always" | "threshold";
@@ -67,31 +92,209 @@ export class CaptchaService {
 		private readonly writeRepository: CommentsWriteRepository,
 	) {}
 
+	private getCaptchaTtlSec() {
+		return this.config.captcha.image.ttlSec;
+	}
+
+	private getCurrentProviderKind(): PublicCaptchaProviderKind {
+		return this.config.captcha.provider;
+	}
+
+	private getCurrentHostMode() {
+		return resolveCaptchaHostMode(this.getCurrentProviderKind());
+	}
+
+	private requireTurnstileConfig() {
+		if (!this.config.captcha.turnstile) {
+			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
+		}
+		return this.config.captcha.turnstile;
+	}
+
+	private requireHCaptchaConfig() {
+		if (!this.config.captcha.hcaptcha) {
+			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
+		}
+		return this.config.captcha.hcaptcha;
+	}
+
+	private requireRecaptchaConfig() {
+		if (!this.config.captcha.recaptcha) {
+			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
+		}
+		return this.config.captcha.recaptcha;
+	}
+
+	private requireGeeTestConfig() {
+		if (!this.config.captcha.geetest) {
+			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
+		}
+		return this.config.captcha.geetest;
+	}
+
+	private parseSessionPayload(session: {
+		challengePayloadJson: string | null;
+	}) {
+		if (!session.challengePayloadJson) {
+			throw new AppError(500, "CAPTCHA_SESSION_INVALID", "验证码会话数据损坏。");
+		}
+		return JSON.parse(session.challengePayloadJson) as CaptchaSessionPayload;
+	}
+
+	private async resolvePolicy(input: {
+		siteId: number;
+		configuredSite: SiteConfig;
+	}) {
+		const settings = await this.commentsRepository.getRuntimeSettings(input.siteId);
+		return resolveCaptchaPolicy({
+			captchaMode:
+				(settings?.captchaMode as
+					| "never"
+					| "always"
+					| "threshold"
+					| undefined) ?? input.configuredSite.defaults.comments.captcha.mode,
+			captchaThresholdWindowSec:
+				settings?.captchaThresholdWindowSec ??
+				input.configuredSite.defaults.comments.captcha.thresholdWindowSec,
+			captchaThresholdMaxActions:
+				settings?.captchaThresholdMaxActions ??
+				input.configuredSite.defaults.comments.captcha.thresholdMaxActions,
+		});
+	}
+
+	private buildIdleState(visitorKey?: string) {
+		return {
+			required: false,
+			verified: false,
+			mode: this.getCurrentHostMode(),
+			challenge: null,
+			visitorKey,
+		};
+	}
+
+	private buildVerifiedState(input: {
+		mode: "inline_value" | "iframe_widget";
+		visitorKey?: string;
+	}) {
+		return {
+			required: true,
+			verified: true,
+			mode: input.mode,
+			challenge: null,
+			visitorKey: input.visitorKey,
+		};
+	}
+
 	private async createChallengeSession(input: {
 		siteId: number;
 		visitorId: number;
 		pageThreadId: number;
+		siteKey: string;
+		pageKey: string;
 		triggeredBy: "always" | "threshold";
 	}) {
-		const challenge = createCaptchaChallenge();
-		const challengeId = await this.writeRepository.createCaptchaSession({
+		const challengeId = this.writeRepository.createCaptchaSessionId();
+		const expiresAt = new Date(
+			Date.now() + this.getCaptchaTtlSec() * 1000,
+		).toISOString();
+
+		let created:
+			| ReturnType<typeof createImageCaptchaChallenge>
+			| ReturnType<typeof createTurnstileChallenge>
+			| ReturnType<typeof createHCaptchaChallenge>
+			| ReturnType<typeof createRecaptchaChallenge>
+			| ReturnType<typeof createGeeTestChallenge>;
+
+		switch (this.getCurrentProviderKind()) {
+			case "image":
+				created = createImageCaptchaChallenge({
+					challengeId,
+					ttlSec: this.getCaptchaTtlSec(),
+				});
+				break;
+			case "turnstile":
+				created = createTurnstileChallenge({
+					challengeId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+				});
+				break;
+			case "hcaptcha":
+				created = createHCaptchaChallenge({
+					challengeId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+				});
+				break;
+			case "recaptcha":
+				created = createRecaptchaChallenge({
+					challengeId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+				});
+				break;
+			case "geetest":
+				created = createGeeTestChallenge({
+					challengeId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+				});
+				break;
+			default:
+				throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
+		}
+
+		await this.writeRepository.createCaptchaSession({
+			id: challengeId,
 			siteId: input.siteId,
 			visitorId: input.visitorId,
 			pageThreadId: input.pageThreadId,
 			triggeredBy: input.triggeredBy,
-			mode: "inline_value",
-			challengePayloadJson: JSON.stringify({
-				answer: challenge.answer,
-				imageData: challenge.imageData,
-			} satisfies CaptchaPayload),
-			expiresAt: new Date(
-				Date.now() + this.config.captcha.image.ttlSec * 1000,
-			).toISOString(),
+			mode: created.mode,
+			providerKind: created.providerKind,
+			challengePayloadJson: created.challengePayloadJson,
+			expiresAt:
+				created.expiresAt && created.expiresAt.length > 0
+					? created.expiresAt
+					: expiresAt,
+		});
+
+		return created.publicChallenge;
+	}
+
+	private async resolveContext(input: {
+		siteKey: string;
+		pageKey: string;
+		pageTitle?: string;
+		pageUrl?: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+	}) {
+		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
+		const configuredSite = this.commentsRepository.getConfiguredSite(input.siteKey);
+		if (!site || !configuredSite) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+
+		const visitor = await this.commentsRepository.getOrCreateVisitor({
+			siteId: site.id,
+			visitorKey: input.visitorKey,
+			ip: input.ip,
+			userAgent: input.userAgent,
+		});
+		const thread = await this.commentsRepository.getOrCreatePageThread({
+			siteId: site.id,
+			pageKey: input.pageKey,
+			pageTitle: input.pageTitle,
+			pageUrl: input.pageUrl,
 		});
 
 		return {
-			challengeId,
-			imageData: challenge.imageData,
+			site,
+			configuredSite,
+			visitor,
+			thread,
 		};
 	}
 
@@ -138,66 +341,31 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
-			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
-		}
-
-		const settings = await this.commentsRepository.getRuntimeSettings(site.id);
-		const policy = resolveCaptchaPolicy({
-			captchaMode:
-				(settings?.captchaMode as
-					| "never"
-					| "always"
-					| "threshold"
-					| undefined) ?? configuredSite.defaults.comments.captcha.mode,
-			captchaThresholdWindowSec:
-				settings?.captchaThresholdWindowSec ??
-				configuredSite.defaults.comments.captcha.thresholdWindowSec,
-			captchaThresholdMaxActions:
-				settings?.captchaThresholdMaxActions ??
-				configuredSite.defaults.comments.captcha.thresholdMaxActions,
+		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy({
+			siteId: site.id,
+			configuredSite,
 		});
 
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
-		const thread = await this.commentsRepository.getOrCreatePageThread({
-			siteId: site.id,
-			pageKey: input.pageKey,
-			pageTitle: input.pageTitle,
-			pageUrl: input.pageUrl,
-		});
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,
 			pageThreadId: thread.id,
 		});
+		const publicVisitorKey = visitor.created ? visitor.visitorKey : undefined;
 		const required = resolveStateMode(activeSession, policy.captchaMode);
 		if (!required) {
-			return {
-				required: false,
-				verified: false,
-				mode: "inline_value" as const,
-				challenge: null,
-				visitorKey: visitor.created ? visitor.visitorKey : undefined,
-			};
+			return this.buildIdleState(publicVisitorKey);
 		}
 
+		const activeMode =
+			(activeSession?.mode as "inline_value" | "iframe_widget" | undefined) ??
+			this.getCurrentHostMode();
 		if (activeSession?.verified) {
-			return {
-				required: true,
-				verified: true,
-				mode: "inline_value" as const,
-				challenge: null,
-				visitorKey: visitor.created ? visitor.visitorKey : undefined,
-			};
+			return this.buildVerifiedState({
+				mode: activeMode,
+				visitorKey: publicVisitorKey,
+			});
 		}
 
 		if (activeSession && input.refresh) {
@@ -205,19 +373,13 @@ export class CaptchaService {
 		}
 
 		if (activeSession?.challengePayloadJson && !input.refresh) {
-			const payload = JSON.parse(
-				activeSession.challengePayloadJson,
-			) as CaptchaPayload;
+			const payload = this.parseSessionPayload(activeSession);
 			return {
 				required: true,
 				verified: false,
-				mode: "inline_value" as const,
-				challenge: {
-					challengeId: activeSession.id,
-					mode: "inline_value" as const,
-					imageData: payload.imageData,
-				},
-				visitorKey: visitor.created ? visitor.visitorKey : undefined,
+				mode: payload.publicChallenge.mode,
+				challenge: payload.publicChallenge,
+				visitorKey: publicVisitorKey,
 			};
 		}
 
@@ -225,6 +387,8 @@ export class CaptchaService {
 			siteId: site.id,
 			visitorId: visitor.id,
 			pageThreadId: thread.id,
+			siteKey: input.siteKey,
+			pageKey: input.pageKey,
 			triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
 		});
 		await this.security.writeAudit({
@@ -239,19 +403,17 @@ export class CaptchaService {
 			targetId: String(thread.id),
 			payload: {
 				triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
+				mode: challenge.mode,
+				provider: this.getCurrentProviderKind(),
 			},
 		});
 
 		return {
 			required: true,
 			verified: false,
-			mode: "inline_value" as const,
-			challenge: {
-				challengeId: challenge.challengeId,
-				mode: "inline_value" as const,
-				imageData: challenge.imageData,
-			},
-			visitorKey: visitor.created ? visitor.visitorKey : undefined,
+			mode: challenge.mode,
+			challenge,
+			visitorKey: publicVisitorKey,
 		};
 	}
 
@@ -266,45 +428,15 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
-			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
-		}
-
-		const settings = await this.commentsRepository.getRuntimeSettings(site.id);
-		const policy = resolveCaptchaPolicy({
-			captchaMode:
-				(settings?.captchaMode as
-					| "never"
-					| "always"
-					| "threshold"
-					| undefined) ?? configuredSite.defaults.comments.captcha.mode,
-			captchaThresholdWindowSec:
-				settings?.captchaThresholdWindowSec ??
-				configuredSite.defaults.comments.captcha.thresholdWindowSec,
-			captchaThresholdMaxActions:
-				settings?.captchaThresholdMaxActions ??
-				configuredSite.defaults.comments.captcha.thresholdMaxActions,
+		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy({
+			siteId: site.id,
+			configuredSite,
 		});
 		if (policy.captchaMode !== "threshold") {
 			return;
 		}
 
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
-		const thread = await this.commentsRepository.getOrCreatePageThread({
-			siteId: site.id,
-			pageKey: input.pageKey,
-			pageTitle: input.pageTitle,
-			pageUrl: input.pageUrl,
-		});
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,
@@ -332,6 +464,8 @@ export class CaptchaService {
 				siteId: site.id,
 				visitorId: visitor.id,
 				pageThreadId: thread.id,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
 				triggeredBy: "threshold",
 			});
 			await this.security.writeAudit({
@@ -347,6 +481,8 @@ export class CaptchaService {
 				payload: {
 					triggeredBy: "threshold",
 					action: input.action,
+					mode: this.getCurrentHostMode(),
+					provider: this.getCurrentProviderKind(),
 				},
 			});
 			throw new AppError(
@@ -380,53 +516,31 @@ export class CaptchaService {
 		consumeRateLimit: (key: string) => Promise<void>;
 		checkRateLimit: (key: string) => void;
 	}) {
-		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
-			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
-		}
-
-		const settings = await this.commentsRepository.getRuntimeSettings(site.id);
-		const policy = resolveCaptchaPolicy({
-			captchaMode:
-				(settings?.captchaMode as
-					| "never"
-					| "always"
-					| "threshold"
-					| undefined) ?? configuredSite.defaults.comments.captcha.mode,
-			captchaThresholdWindowSec:
-				settings?.captchaThresholdWindowSec ??
-				configuredSite.defaults.comments.captcha.thresholdWindowSec,
-			captchaThresholdMaxActions:
-				settings?.captchaThresholdMaxActions ??
-				configuredSite.defaults.comments.captcha.thresholdMaxActions,
+		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy({
+			siteId: site.id,
+			configuredSite,
 		});
-		const required = policy.captchaMode !== "never";
-		if (!required) {
+		if (policy.captchaMode === "never") {
 			return {
 				required: false,
 				verified: true,
 			};
 		}
 
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
-		const thread = await this.commentsRepository.getOrCreatePageThread({
-			siteId: site.id,
-			pageKey: input.pageKey,
-		});
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,
 			pageThreadId: thread.id,
 		});
 		if (!activeSession || activeSession.id !== input.challengeId) {
+			throw new AppError(
+				400,
+				"COMMENT_CAPTCHA_REQUIRED",
+				"请先完成验证码验证。",
+			);
+		}
+		if (activeSession.mode !== "inline_value") {
 			throw new AppError(
 				400,
 				"COMMENT_CAPTCHA_REQUIRED",
@@ -443,10 +557,11 @@ export class CaptchaService {
 		const identityKey = visitor.visitorKey || input.ip || "anonymous";
 		input.checkRateLimit(identityKey);
 
-		const payload = JSON.parse(
-			activeSession.challengePayloadJson ?? "{}",
-		) as CaptchaPayload;
-		if (payload.answer !== input.value.trim()) {
+		const payload = this.parseSessionPayload(activeSession);
+		if (
+			!isInlineCaptchaSessionPayload(payload) ||
+			!verifyImageCaptchaValue(payload, input.value)
+		) {
 			await this.security.writeAudit({
 				requestId: input.requestId,
 				siteKey: input.siteKey,
@@ -460,6 +575,7 @@ export class CaptchaService {
 				targetId: String(thread.id),
 				payload: {
 					challengeId: input.challengeId,
+					provider: activeSession.providerKind ?? "image",
 				},
 			});
 			await input.consumeRateLimit(identityKey);
@@ -479,8 +595,287 @@ export class CaptchaService {
 			targetId: String(thread.id),
 			payload: {
 				challengeId: input.challengeId,
+				provider: activeSession.providerKind ?? "image",
 			},
 		});
+		return {
+			required: true,
+			verified: true,
+		};
+	}
+
+	public async getWidgetHtml(input: {
+		siteKey: string;
+		pageKey: string;
+		challengeId: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+	}) {
+		const { site, visitor, thread } = await this.resolveContext(input);
+		const activeSession = await this.writeRepository.getActiveCaptchaSession({
+			siteId: site.id,
+			visitorId: visitor.id,
+			pageThreadId: thread.id,
+		});
+
+		if (!activeSession || activeSession.id !== input.challengeId) {
+			throw new AppError(
+				400,
+				"COMMENT_CAPTCHA_REQUIRED",
+				"请先完成验证码验证。",
+			);
+		}
+		if (activeSession.mode !== "iframe_widget" || activeSession.verified) {
+			throw new AppError(
+				400,
+				"COMMENT_CAPTCHA_REQUIRED",
+				"请先完成验证码验证。",
+			);
+		}
+
+		const providerKind =
+			(activeSession.providerKind as PublicCaptchaProviderKind | null) ??
+			this.getCurrentProviderKind();
+		const completePath = "/api/comments/captcha/complete";
+
+		switch (providerKind) {
+			case "turnstile": {
+				const config = this.requireTurnstileConfig();
+				return renderTurnstileWidgetHtml({
+					challengeId: input.challengeId,
+					commentsSiteKey: input.siteKey,
+					pageKey: input.pageKey,
+					turnstileSiteKey: config.siteKey,
+					completePath,
+					expectedAction: config.expectedAction,
+				});
+			}
+			case "hcaptcha": {
+				const config = this.requireHCaptchaConfig();
+				return renderHCaptchaWidgetHtml({
+					challengeId: input.challengeId,
+					commentsSiteKey: input.siteKey,
+					pageKey: input.pageKey,
+					hcaptchaSiteKey: config.siteKey,
+					completePath,
+				});
+			}
+			case "recaptcha": {
+				const config = this.requireRecaptchaConfig();
+				return renderRecaptchaWidgetHtml({
+					challengeId: input.challengeId,
+					commentsSiteKey: input.siteKey,
+					pageKey: input.pageKey,
+					recaptchaSiteKey: config.siteKey,
+					expectedAction: config.expectedAction,
+					variant: config.variant,
+					completePath,
+				});
+			}
+			case "geetest": {
+				const config = this.requireGeeTestConfig();
+				return renderGeeTestWidgetHtml({
+					challengeId: input.challengeId,
+					commentsSiteKey: input.siteKey,
+					pageKey: input.pageKey,
+					captchaId: config.captchaId,
+					completePath,
+				});
+			}
+			default:
+				throw new AppError(
+					400,
+					"COMMENT_CAPTCHA_REQUIRED",
+					"当前验证码不支持组件模式。",
+				);
+		}
+	}
+
+	public async completeWidgetChallenge(input: {
+		siteKey: string;
+		pageKey: string;
+		challengeId: string;
+		token?: string;
+		lotNumber?: string;
+		captchaOutput?: string;
+		passToken?: string;
+		genTime?: string;
+		requestId?: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+	}) {
+		const { site, visitor, thread } = await this.resolveContext(input);
+		const activeSession = await this.writeRepository.getActiveCaptchaSession({
+			siteId: site.id,
+			visitorId: visitor.id,
+			pageThreadId: thread.id,
+		});
+
+		if (!activeSession || activeSession.id !== input.challengeId) {
+			throw new AppError(
+				400,
+				"COMMENT_CAPTCHA_REQUIRED",
+				"请先完成验证码验证。",
+			);
+		}
+		if (activeSession.mode !== "iframe_widget") {
+			throw new AppError(
+				400,
+				"COMMENT_CAPTCHA_REQUIRED",
+				"请先完成验证码验证。",
+			);
+		}
+		if (activeSession.verified) {
+			return {
+				required: true,
+				verified: true,
+			};
+		}
+
+		const rule = this.config.security.rateLimit.captchaVerify;
+		const identityKey = visitor.visitorKey || input.ip || "anonymous";
+		const snapshot = this.security.peekRateLimit({
+			key: `public:${input.siteKey}:${identityKey}:captcha_verify`,
+			rule,
+		});
+		if (snapshot.limit !== null && snapshot.count >= snapshot.limit) {
+			throw new AppError(
+				429,
+				"COMMENT_RATE_LIMITED",
+				"验证码尝试次数过多，请稍后再试。",
+				{
+					resetAt: snapshot.resetAt,
+				},
+			);
+		}
+
+		const providerKind =
+			(activeSession.providerKind as PublicCaptchaProviderKind | null) ??
+			this.getCurrentProviderKind();
+
+		try {
+			switch (providerKind) {
+				case "turnstile": {
+					const config = this.requireTurnstileConfig();
+					if (!input.token) {
+						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码令牌。");
+					}
+					await verifyTurnstileToken({
+						secretKey: config.secretKey,
+						token: input.token,
+						remoteIp: input.ip,
+						expectedAction: config.expectedAction,
+						expectedHostname: config.expectedHostname,
+					});
+					break;
+				}
+				case "hcaptcha": {
+					const config = this.requireHCaptchaConfig();
+					if (!input.token) {
+						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码令牌。");
+					}
+					await verifyHCaptchaToken({
+						secretKey: config.secretKey,
+						siteKey: config.siteKey,
+						token: input.token,
+						remoteIp: input.ip,
+						expectedHostname: config.expectedHostname,
+					});
+					break;
+				}
+				case "recaptcha": {
+					const config = this.requireRecaptchaConfig();
+					if (!input.token) {
+						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码令牌。");
+					}
+					await verifyRecaptchaToken({
+						projectId: config.projectId,
+						apiKey: config.apiKey,
+						siteKey: config.siteKey,
+						token: input.token,
+						expectedAction: config.expectedAction,
+						minScore: config.minScore,
+						userAgent: input.userAgent,
+						userIpAddress: input.ip,
+						expectedHostname: config.expectedHostname,
+					});
+					break;
+				}
+				case "geetest": {
+					const config = this.requireGeeTestConfig();
+					if (
+						!input.lotNumber ||
+						!input.captchaOutput ||
+						!input.passToken ||
+						!input.genTime
+					) {
+						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码结果。");
+					}
+					await verifyGeeTestToken({
+						apiServer: config.apiServer,
+						captchaId: config.captchaId,
+						captchaKey: config.captchaKey,
+						lotNumber: input.lotNumber,
+						captchaOutput: input.captchaOutput,
+						passToken: input.passToken,
+						genTime: input.genTime,
+					});
+					break;
+				}
+				default:
+					throw new AppError(
+						400,
+						"COMMENT_CAPTCHA_REQUIRED",
+						"当前验证码不支持组件模式。",
+					);
+			}
+		} catch (error) {
+			if (error instanceof AppError && error.code === "COMMENT_CAPTCHA_INVALID") {
+				await this.security.writeAudit({
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					actorType: "visitor",
+					actorId: visitor.visitorKey,
+					event: "captcha.failed",
+					level: "warn",
+					message: "验证码校验失败",
+					targetType: "page_thread",
+					targetId: String(thread.id),
+					payload: {
+						challengeId: input.challengeId,
+						provider: providerKind,
+					},
+				});
+				await this.security.consumeRateLimit({
+					key: `public:${input.siteKey}:${identityKey}:captcha_verify`,
+					rule,
+					errorCode: "COMMENT_RATE_LIMITED",
+					errorMessage: "验证码尝试次数过多，请稍后再试。",
+				});
+			}
+			throw error;
+		}
+
+		await this.writeRepository.markCaptchaVerified(activeSession.id);
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			pageKey: input.pageKey,
+			actorType: "visitor",
+			actorId: visitor.visitorKey,
+			event: "captcha.verified",
+			message: "验证码校验通过",
+			targetType: "page_thread",
+			targetId: String(thread.id),
+			payload: {
+				challengeId: input.challengeId,
+				provider: providerKind,
+			},
+		});
+
 		return {
 			required: true,
 			verified: true,
@@ -541,43 +936,15 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
-			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
-		}
-
-		const settings = await this.commentsRepository.getRuntimeSettings(site.id);
-		const policy = resolveCaptchaPolicy({
-			captchaMode:
-				(settings?.captchaMode as
-					| "never"
-					| "always"
-					| "threshold"
-					| undefined) ?? configuredSite.defaults.comments.captcha.mode,
-			captchaThresholdWindowSec:
-				settings?.captchaThresholdWindowSec ??
-				configuredSite.defaults.comments.captcha.thresholdWindowSec,
-			captchaThresholdMaxActions:
-				settings?.captchaThresholdMaxActions ??
-				configuredSite.defaults.comments.captcha.thresholdMaxActions,
+		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy({
+			siteId: site.id,
+			configuredSite,
 		});
 		if (policy.captchaMode === "never") {
 			return;
 		}
 
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
-		const thread = await this.commentsRepository.getOrCreatePageThread({
-			siteId: site.id,
-			pageKey: input.pageKey,
-		});
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,

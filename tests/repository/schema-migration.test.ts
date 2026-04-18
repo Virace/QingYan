@@ -54,7 +54,7 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("keeps runtime settings unique per site and avoids provider fields", () => {
+	it("keeps runtime settings unique per site and avoids provider-specific runtime settings", () => {
 		const fixture = createMigratedDatabase();
 		const combinedMigrationSql = readdirSync(
 			path.resolve(process.cwd(), "drizzle"),
@@ -81,7 +81,7 @@ describe("initial migration", () => {
 					.prepare("INSERT INTO runtime_settings (site_id) VALUES (?)")
 					.run(1),
 			).toThrow();
-			expect(combinedMigrationSql).not.toContain("provider_");
+			expect(combinedMigrationSql).not.toContain("runtime_provider");
 			expect(combinedMigrationSql).not.toContain("artalk_");
 			expect(combinedMigrationSql).not.toContain("wp_");
 			expect(combinedMigrationSql).toContain("`captcha_mode` text");
@@ -165,6 +165,9 @@ describe("initial migration", () => {
 			);
 			expect(captchaSessionColumns.map((column) => column.name)).toContain(
 				"triggered_by",
+			);
+			expect(captchaSessionColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining(["provider_kind", "provider_state_json"]),
 			);
 			expect(captchaSessionColumns.map((column) => column.name)).not.toContain(
 				"action",

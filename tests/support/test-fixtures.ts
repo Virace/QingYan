@@ -166,6 +166,7 @@ export function createTestConfig(
 export async function createTestApp(options?: {
 	devMode?: boolean;
 	devAdminToken?: string;
+	mutateConfig?: (config: AppConfig) => void;
 }) {
 	const workspace = createTempWorkspace();
 	applyInitialMigration(workspace.databaseFile);
@@ -174,6 +175,7 @@ export async function createTestApp(options?: {
 		workspace.databaseFile,
 		workspace.logsDirectory,
 	);
+	options?.mutateConfig?.(baseConfig);
 	const resolved = resolveRuntimeOptions(baseConfig, {
 		QINGYAN_DEV_MODE: options?.devMode ? "true" : "false",
 		QINGYAN_DEV_ADMIN_TOKEN: options?.devAdminToken,

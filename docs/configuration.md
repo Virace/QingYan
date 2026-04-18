@@ -167,16 +167,45 @@ security:
 
 ```yaml
 captcha:
-  provider: image
   image:
     width: 160
     height: 60
     ttlSec: 600
+  provider: image
+  turnstile:
+    siteKey: "<site-key>"
+    secretKey: "<secret>"
+    expectedAction: COMMENT_SUBMIT
+    expectedHostname: comments.example.com
+  hcaptcha:
+    siteKey: "<site-key>"
+    secretKey: "<secret>"
+    expectedHostname: comments.example.com
+  recaptcha:
+    variant: score_based
+    projectId: "<gcp-project>"
+    siteKey: "<site-key>"
+    apiKey: "<api-key>"
+    expectedAction: COMMENT_SUBMIT
+    expectedHostname: comments.example.com
+    minScore: 0.5
+  geetest:
+    captchaId: "<captcha-id>"
+    captchaKey: "<captcha-key>"
+    apiServer: https://gcaptcha4.geetest.com
 ```
 
-- 当前仅支持内置图片验证码
-- 返回值中的 `challenge.imageData` 是 SVG data URL
-- `ttlSec` 为 challenge 过期时间
+- `image` 始终保留，用于：
+  - 公共评论图片验证码的 `provider: image`
+  - admin 登录本地图形验证码的共享 TTL / 尺寸配置
+- `provider` 允许值：
+  - `image`
+  - `turnstile`
+  - `hcaptcha`
+  - `recaptcha`
+  - `geetest`
+- `recaptcha` 当前按 Google Cloud reCAPTCHA 文档实现，后端校验走 `projects.assessments.create`
+- `ttlSec` 为 QingYan 本地 captcha session 的有效期
 
 ### `logging`
 
@@ -282,8 +311,8 @@ sites:
 
 客户端接入时需要遵守以下约束：
 
-- `bootstrap`、`captcha/state`、`captcha/refresh`、`captcha/verify` 与最终写接口之间必须复用同一 `qingyan_visitor` cookie
-- `captcha/state`、`captcha/refresh` 与 `captcha/verify` 使用的 `siteKey`、`pageKey` 必须和后续写接口保持一致
+- `bootstrap`、`captcha/state`、`captcha/refresh`、`captcha/verify`、`captcha/complete` 与最终写接口之间必须复用同一 `qingyan_visitor` cookie
+- `captcha/state`、`captcha/refresh`、`captcha/verify`、`captcha/complete` 使用的 `siteKey`、`pageKey` 必须和后续写接口保持一致
 - 写接口在需要验证码时只返回错误码，不会在错误响应中直接内联 challenge；客户端需要自行继续调用验证码接口
 
 ### `mode: never`
@@ -298,9 +327,12 @@ sites:
 
 1. 调用 `GET /api/comments/bootstrap`
 2. 读取响应中的 `captcha`
-3. 如果 `captcha.required === true` 且 `captcha.challenge !== null`，直接展示 `challenge.imageData`
-4. 用户输入答案后，调用 `POST /api/comments/captcha/verify`
-5. 收到 `{ required: true, verified: true }` 后，再调用评论创建、评论投票或页面点赞接口
+3. 如果 `captcha.required === true` 且 `captcha.challenge !== null`：
+   - 当 `challenge.mode === "inline_value"` 时，直接展示 `challenge.imageData`
+   - 当 `challenge.mode === "iframe_widget"` 时，嵌入 `challenge.iframeSrc`
+4. 对 `inline_value`，用户输入答案后调用 `POST /api/comments/captcha/verify`
+5. 对 `iframe_widget`，iframe 宿主页会调用 `POST /api/comments/captcha/complete`
+6. 收到 `{ required: true, verified: true }` 后，再调用评论创建、评论投票或页面点赞接口
 
 如果当前页面没有先走 bootstrap，也可以直接调用 `GET /api/comments/captcha/state` 获取同一份 challenge。
 如果用户想显式换一张验证码图，应调用 `POST /api/comments/captcha/refresh`，不要再对 `captcha/state` 追加刷新参数。
@@ -325,10 +357,11 @@ sites:
 5. 从响应中读取：
    - `challenge.challengeId`
    - `challenge.mode`
-   - `challenge.imageData`
-6. 展示验证码图片，收集用户输入
-7. 调用 `POST /api/comments/captcha/verify`
-8. 收到 `{ required: true, verified: true }` 后，使用同一 `qingyan_visitor` cookie 重试刚才失败的写接口
+   - `challenge.imageData` 或 `challenge.iframeSrc`
+6. 根据 `challenge.mode` 选择：
+   - `inline_value`：展示验证码图片并收集输入，然后调用 `POST /api/comments/captcha/verify`
+   - `iframe_widget`：嵌入 QingYan 返回的 `iframeSrc`，由同源宿主页完成第三方验证码校验并调用 `POST /api/comments/captcha/complete`
+7. 收到 `{ required: true, verified: true }` 后，使用同一 `qingyan_visitor` cookie 重试刚才失败的写接口
 
 可以按下面的顺序理解：
 
@@ -348,7 +381,7 @@ POST /api/comments/{commentId}/vote
 
 ### 验证码校验接口
 
-`POST /api/comments/captcha/verify` 请求体：
+`POST /api/comments/captcha/verify` 请求体仅用于 `inline_value`：
 
 ```json
 {
@@ -369,7 +402,8 @@ POST /api/comments/{commentId}/vote
 
 ### challenge 获取与复用规则
 
-- `challenge.imageData` 为 SVG data URL，可直接用于 `<img src="...">`
+- `challenge.mode === "inline_value"` 时，`challenge.imageData` 为 SVG data URL，可直接用于 `<img src="...">`
+- `challenge.mode === "iframe_widget"` 时，`challenge.iframeSrc` 为 QingYan 同源 iframe 宿主页地址；第三方 SDK 由该宿主页负责加载
 - `GET /api/comments/captcha/state` 只负责读取当前 challenge，不会隐式刷新
 - 需要更换 challenge 时，调用 `POST /api/comments/captcha/refresh`
 - 已验证的 challenge 会在同一页面内被复用，直到过期或当前 session 状态变化
