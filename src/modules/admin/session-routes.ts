@@ -10,6 +10,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.config,
 		fastify.security,
 		new AdminRepository(fastify.db),
+		fastify.siteRegistry,
 	);
 
 	fastify.get("/captcha", async (request) =>

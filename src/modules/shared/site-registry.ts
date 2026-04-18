@@ -4,6 +4,7 @@ import type { SiteConfig } from "../../config/types";
 import type { AppDatabase } from "../../db/client";
 import { runtimeSettings } from "../../db/schema/settings";
 import { sites } from "../../db/schema/sites";
+import { buildRuntimeSettingsDefaults } from "./runtime-settings-defaults";
 
 export interface RegisteredSiteRecord {
 	id: number;
@@ -23,33 +24,6 @@ function parseAllowedOrigins(payload: string): string[] {
 		: [];
 }
 
-function buildRuntimeSettingsInsert(siteId: number, site: SiteConfig) {
-	return {
-		siteId,
-		commentsEnabled: site.defaults.comments.enabled,
-		defaultStatus: site.defaults.comments.defaultStatus,
-		maxDepth: site.defaults.comments.maxDepth,
-		rootLimit: site.defaults.comments.rootLimit,
-		commentRequireJson: JSON.stringify(site.defaults.comments.identity.require),
-		allowWebsite: site.defaults.comments.allowWebsite,
-		allowPageLike: site.defaults.pageFeedback.allowLike,
-		captchaMode: site.defaults.comments.captcha.mode,
-		captchaThresholdWindowSec:
-			site.defaults.comments.captcha.thresholdWindowSec,
-		captchaThresholdMaxActions:
-			site.defaults.comments.captcha.thresholdMaxActions,
-		abuseGuardEnabled: site.defaults.comments.abuseGuard.enabled,
-		abuseGuardWindowSec: site.defaults.comments.abuseGuard.windowSec,
-		abuseGuardMaxWriteActions:
-			site.defaults.comments.abuseGuard.maxWriteActions,
-		autoBlacklistEnabled:
-			site.defaults.comments.abuseGuard.autoBlacklist.enabled,
-		autoBlacklistScope: site.defaults.comments.abuseGuard.autoBlacklist.scope,
-		autoBlacklistTtlSec: site.defaults.comments.abuseGuard.autoBlacklist.ttlSec,
-		emailNotificationsEnabled: site.defaults.notifications.emailEnabled,
-	};
-}
-
 export class SiteRegistry {
 	private readonly configuredSites = new Map<string, SiteConfig>();
 
@@ -67,6 +41,14 @@ export class SiteRegistry {
 
 	public getRegisteredSite(siteKey?: string): RegisteredSiteRecord | undefined {
 		return siteKey ? this.registeredSites.get(siteKey) : undefined;
+	}
+
+	public listConfiguredSites(): SiteConfig[] {
+		return [...this.configuredSites.values()];
+	}
+
+	public listRegisteredSites(): RegisteredSiteRecord[] {
+		return [...this.registeredSites.values()];
 	}
 
 	public async sync(db: AppDatabase): Promise<RegisteredSiteRecord[]> {
@@ -122,7 +104,7 @@ export class SiteRegistry {
 
 			await db
 				.insert(runtimeSettings)
-				.values(buildRuntimeSettingsInsert(registeredSite.id, site))
+				.values(buildRuntimeSettingsDefaults(registeredSite.id, site))
 				.onConflictDoNothing({
 					target: runtimeSettings.siteId,
 				});

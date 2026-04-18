@@ -1,3 +1,4 @@
+import type { AppRuntimeOptions } from "../config/runtime-options";
 import type { AppConfig, SiteConfig } from "../config/types";
 import type { AppDatabase, SqliteClient } from "../db/client";
 import type { LoggerManager } from "../logging/logger-manager";
@@ -30,6 +31,7 @@ declare module "fastify" {
 		config: AppConfig;
 		db: AppDatabase;
 		loggerManager: LoggerManager;
+		runtimeOptions: AppRuntimeOptions;
 		sqlite: SqliteClient;
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;

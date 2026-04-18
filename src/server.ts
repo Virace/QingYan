@@ -1,9 +1,11 @@
 import { buildApp } from "./app";
 import { loadConfig } from "./config/load-config";
+import { resolveRuntimeOptions } from "./config/runtime-options";
 
 async function main(): Promise<void> {
-	const config = await loadConfig();
-	const app = await buildApp(config);
+	const loadedConfig = await loadConfig();
+	const { config, runtimeOptions } = resolveRuntimeOptions(loadedConfig);
+	const app = await buildApp(config, runtimeOptions);
 
 	await app.listen({
 		host: config.server.host,
@@ -20,6 +22,13 @@ async function main(): Promise<void> {
 			port: config.server.port,
 		},
 	});
+
+	if (
+		runtimeOptions.devMode.enabled &&
+		runtimeOptions.devMode.tokenSource === "generated"
+	) {
+		console.log(`dev.admin.token=${runtimeOptions.devMode.adminToken ?? ""}`);
+	}
 }
 
 void main().catch((error: unknown) => {

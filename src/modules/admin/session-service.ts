@@ -3,6 +3,7 @@ import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError } from "../shared/errors";
+import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminRepository } from "./repository";
 import { AdminLoginChallengeStore } from "./login-challenge-store";
 import {
@@ -21,6 +22,7 @@ export class AdminSessionService {
 		private readonly config: AppConfig,
 		private readonly security: SecurityToolkit,
 		private readonly repository: AdminRepository,
+		private readonly siteRegistry?: SiteRegistry,
 	) {
 		this.loginChallengeStore = new AdminLoginChallengeStore(
 			this.config.captcha.image.ttlSec,
@@ -29,6 +31,48 @@ export class AdminSessionService {
 
 	public getSessionCookieName() {
 		return this.config.admin.session.cookieName;
+	}
+
+	public async createDevSession(input: {
+		expectedToken: string;
+		devToken: string;
+		ip?: string;
+		requestId?: string;
+		userAgent?: string;
+	}) {
+		if (input.devToken !== input.expectedToken) {
+			throw new AppError(401, "DEV_AUTH_REQUIRED", "开发模式认证失败。");
+		}
+
+		const sessionToken = createSessionToken();
+		const expiresAt = new Date(
+			Date.now() + this.config.admin.session.ttlMinutes * 60 * 1000,
+		).toISOString();
+		await this.repository.createAdminSession({
+			id: createSessionToken(),
+			tokenHash: hashSessionToken(sessionToken),
+			ip: input.ip,
+			userAgent: input.userAgent,
+			expiresAt,
+		});
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			actorType: "admin",
+			event: "admin.login.succeeded",
+			message: "开发模式管理员会话已创建",
+			targetType: "ip",
+			targetId: input.ip,
+			payload: {
+				bootstrap: "dev",
+				ip: input.ip,
+			},
+		});
+
+		return {
+			sessionToken,
+			expiresAt,
+		};
 	}
 
 	private async assertAdminLoginAllowed(input: {
@@ -265,7 +309,7 @@ export class AdminSessionService {
 
 	public async getMe(request: FastifyRequest) {
 		const session = await this.requireSession(request);
-		const sites = await this.repository.listSites();
+		const sites = this.siteRegistry?.listRegisteredSites() ?? (await this.repository.listSites());
 
 		return {
 			authenticated: true,

@@ -137,3 +137,22 @@ pnpm dev:smoke
 ```
 
 `pnpm check` 会串行执行格式检查、lint、typecheck、测试、构建和示例配置校验。
+
+## 本地 Dev Mode
+
+需要快速联调验证码、评论 seed 或后台场景时，可使用：
+
+```bash
+QINGYAN_DEV_MODE=true pnpm dev
+```
+
+可选环境变量：
+
+```bash
+QINGYAN_DEV_ADMIN_TOKEN=dev-token
+QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
+```
+
+dev mode 只新增 `/api/dev/*` 控制面；正常业务接口仍然是 `/api/*` 与 `/admin`。前端在 dev mode 下依然需要显式传 `siteKey: "default"`。
+
+更详细的下游联调方式、场景调用顺序、错误处理与 UI 对接建议见 [docs/dev-mode-integration.md](docs/dev-mode-integration.md)。

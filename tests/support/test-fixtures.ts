@@ -5,6 +5,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import { buildApp } from "../../src/app";
+import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
 
 function createTempWorkspace() {
@@ -162,18 +163,29 @@ export function createTestConfig(
 	};
 }
 
-export async function createTestApp() {
+export async function createTestApp(options?: {
+	devMode?: boolean;
+	devAdminToken?: string;
+}) {
 	const workspace = createTempWorkspace();
 	applyInitialMigration(workspace.databaseFile);
 
-	const app = await buildApp(
-		createTestConfig(workspace.databaseFile, workspace.logsDirectory),
+	const baseConfig = createTestConfig(
+		workspace.databaseFile,
+		workspace.logsDirectory,
 	);
+	const resolved = resolveRuntimeOptions(baseConfig, {
+		QINGYAN_DEV_MODE: options?.devMode ? "true" : "false",
+		QINGYAN_DEV_ADMIN_TOKEN: options?.devAdminToken,
+		QINGYAN_DEV_ALLOWED_ORIGIN: "http://localhost:4321",
+	});
+	const app = await buildApp(resolved.config, resolved.runtimeOptions);
 
 	return {
 		app,
 		databaseFile: workspace.databaseFile,
 		logsDirectory: workspace.logsDirectory,
+		runtimeOptions: resolved.runtimeOptions,
 		async cleanup() {
 			await app.close();
 			workspace.cleanup();

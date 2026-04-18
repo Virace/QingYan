@@ -383,6 +383,31 @@ POST /api/comments/{commentId}/vote
 - `sites[].allowedOrigins`: 包含前端开发地址，例如 `http://localhost:4321`
 - SQLite 文件放到 `./data/qingyan.db`
 
+## Dev Mode
+
+`QingYan` 支持一个只面向本地联调和自动化测试的 dev mode。
+
+环境变量：
+
+- `QINGYAN_DEV_MODE=true`
+- `QINGYAN_DEV_ADMIN_TOKEN=<fixed token>`（可选）
+- `QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321`（可选）
+
+行为说明：
+
+- dev mode 下系统自动提供单站点 `default`
+- 前端仍然必须显式传 `siteKey: "default"`
+- 真实业务 API 路径不变，仍然使用 `/api/*` 与 `/admin`
+- 只新增 `/api/dev/*` 控制接口
+- 生产环境不会暴露 `/api/dev/*`
+
+注意：
+
+- `/api/dev/*` 不属于正式对外产品契约，不写入公开 OpenAPI
+- `/api/dev/*` 只负责控制真实系统状态，不伪造业务响应
+- `/api/dev/session` 会创建正常的 `qingyan_admin` 会话，便于自动化测试复用后台权限边界
+- 详细调用方式、前端流程和错误处理见 [docs/dev-mode-integration.md](dev-mode-integration.md)
+
 ## 部署建议
 
 - 使用 `config/qingyan.yml` 作为正式配置

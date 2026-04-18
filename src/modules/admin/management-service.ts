@@ -128,15 +128,19 @@ export class AdminManagementService {
 		const items = await this.repository.listSitesSummary();
 
 		return {
-			items: items.map((item) => {
+			items: items.flatMap((item) => {
 				const configuredSite = this.siteRegistry.getConfiguredSite(
 					item.siteKey,
 				);
+				const registeredSite = this.siteRegistry.getRegisteredSite(item.siteKey);
 				if (!configuredSite) {
-					throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+					return [];
+				}
+				if (!registeredSite) {
+					return [];
 				}
 
-				return {
+				return [{
 					siteKey: item.siteKey,
 					name: item.name,
 					allowedOrigins: item.allowedOrigins,
@@ -156,7 +160,7 @@ export class AdminManagementService {
 					commentCount: item.commentCount,
 					userCount: item.userCount,
 					visitorCount: item.visitorCount,
-				};
+				}];
 			}),
 		};
 	}

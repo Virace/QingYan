@@ -1,8 +1,11 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
+import type { AppRuntimeOptions } from "./config/runtime-options";
 import type { AppConfig } from "./config/types";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
+import { AdminRepository } from "./modules/admin/repository";
+import { AdminSessionService } from "./modules/admin/session-service";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSettingsRoutes } from "./modules/admin/settings-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
@@ -10,10 +13,20 @@ import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminUsersRoutes } from "./modules/admin/users-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
+import { CaptchaService } from "./modules/comments/captcha-service";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import { commentsPublicRoutes } from "./modules/comments/public-routes";
+import { CommentsRepository } from "./modules/comments/repository";
+import { CommentsWriteRepository } from "./modules/comments/write-repository";
+import {
+	devResetBodySchema,
+	devScenarioBodySchema,
+	devSessionBodySchema,
+	devStateQuerySchema,
+} from "./modules/dev/schemas";
+import { DevModeService } from "./modules/dev/service";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
-import { AppError } from "./modules/shared/errors";
+import { AppError, InvalidRequestError } from "./modules/shared/errors";
 import { createSiteRegistry } from "./modules/shared/site-registry";
 import { loadOpenApiDocument, renderOpenApiHtml } from "./openapi/load-openapi";
 import cookiePlugin from "./plugins/cookie";
@@ -22,7 +35,14 @@ import loggingPlugin from "./plugins/logging";
 import requestContextPlugin from "./plugins/request-context";
 import securityPlugin from "./plugins/security";
 
-export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
+export async function buildApp(
+	config: AppConfig,
+	runtimeOptions: AppRuntimeOptions = {
+		devMode: {
+			enabled: false,
+		},
+	},
+): Promise<FastifyInstance> {
 	const app = Fastify({
 		logger: true,
 		disableRequestLogging: true,
@@ -34,6 +54,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 	const openApi = await loadOpenApiDocument();
 
 	app.decorate("config", config);
+	app.decorate("runtimeOptions", runtimeOptions);
 	app.decorate("siteRegistry", createSiteRegistry(config.sites));
 
 	app.setErrorHandler((error, request, reply) => {
@@ -110,6 +131,107 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
 	await app.register(adminUiRoutes);
 	await app.register(adminSessionRoutes, { prefix: "/api/admin/session" });
+
+	if (runtimeOptions.devMode.enabled) {
+		const commentsRepository = new CommentsRepository(app.db, app.siteRegistry);
+		const adminSessionService = new AdminSessionService(
+			app.config,
+			app.security,
+			new AdminRepository(app.db),
+			app.siteRegistry,
+		);
+		const devService = new DevModeService(
+			app.db,
+			commentsRepository,
+			new CaptchaService(
+				app.config,
+				app.security,
+				commentsRepository,
+				new CommentsWriteRepository(app.db),
+			),
+			adminSessionService,
+		);
+
+		app.post("/api/dev/session", async (request, reply) => {
+			const parsed = devSessionBodySchema.safeParse(request.body);
+			if (!parsed.success) {
+				throw new InvalidRequestError({
+					issues: parsed.error.issues,
+				});
+			}
+
+			const result = await adminSessionService.createDevSession({
+				expectedToken: runtimeOptions.devMode.adminToken ?? "",
+				devToken: parsed.data.token,
+				ip: request.context?.ip,
+				requestId: request.context?.requestId,
+				userAgent: request.context?.userAgent,
+			});
+			reply.setCookie(
+				adminSessionService.getSessionCookieName(),
+				result.sessionToken,
+				{
+					path: "/",
+					sameSite: app.config.admin.session.sameSite,
+					httpOnly: true,
+					secure: app.config.admin.session.secure,
+				},
+			);
+
+			return {
+				authenticated: true,
+				session: {
+					expiresAt: result.expiresAt,
+				},
+			};
+		});
+
+		app.get("/api/dev/state", async (request) => {
+			await devService.requireAdminSession(request);
+			const parsed = devStateQuerySchema.safeParse(request.query);
+			if (!parsed.success) {
+				throw new InvalidRequestError({
+					issues: parsed.error.issues,
+				});
+			}
+
+			return devService.inspect(
+				parsed.data.siteKey,
+				parsed.data.pageKey,
+				parsed.data.visitorKey,
+				{
+					requestId: request.context?.requestId,
+					ip: request.context?.ip,
+					userAgent: request.context?.userAgent,
+				},
+			);
+		});
+
+		app.post("/api/dev/reset", async (request) => {
+			await devService.requireAdminSession(request);
+			const parsed = devResetBodySchema.safeParse(request.body);
+			if (!parsed.success) {
+				throw new InvalidRequestError({
+					issues: parsed.error.issues,
+				});
+			}
+
+			return devService.resetPageState(parsed.data.siteKey, parsed.data.pageKey);
+		});
+
+		app.post("/api/dev/scenario", async (request) => {
+			await devService.requireAdminSession(request);
+			const parsed = devScenarioBodySchema.safeParse(request.body);
+			if (!parsed.success) {
+				throw new InvalidRequestError({
+					issues: parsed.error.issues,
+				});
+			}
+
+			return devService.applyScenario(parsed.data);
+		});
+	}
+
 	await app.register(commentsPublicRoutes, { prefix: "/api" });
 	await app.register(pageFeedbackPublicRoutes, { prefix: "/api" });
 	await app.register(commentsAdminRoutes, { prefix: "/api/admin/comments" });
