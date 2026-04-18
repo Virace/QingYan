@@ -25,6 +25,7 @@ import {
 	devStateQuerySchema,
 } from "./modules/dev/schemas";
 import { DevModeService } from "./modules/dev/service";
+import { DevMockService } from "./modules/dev/mock-service";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import { AppError, InvalidRequestError } from "./modules/shared/errors";
 import { createSiteRegistry } from "./modules/shared/site-registry";
@@ -52,10 +53,16 @@ export async function buildApp(
 		trustProxy: config.server.trustProxy,
 	});
 	const openApi = await loadOpenApiDocument();
+	const devDefaultSite = runtimeOptions.devMode.defaultSite;
 
 	app.decorate("config", config);
 	app.decorate("runtimeOptions", runtimeOptions);
-	app.decorate("siteRegistry", createSiteRegistry(config.sites));
+	app.decorate(
+		"siteRegistry",
+		createSiteRegistry(devDefaultSite ? [devDefaultSite] : config.sites, {
+			runtimeOnlySiteKeys: devDefaultSite ? [devDefaultSite.siteKey] : [],
+		}),
+	);
 
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.context?.requestId ?? request.id;
@@ -133,6 +140,10 @@ export async function buildApp(
 	await app.register(adminSessionRoutes, { prefix: "/api/admin/session" });
 
 	if (runtimeOptions.devMode.enabled) {
+		const defaultSite = devDefaultSite;
+		const devMockService = defaultSite ? new DevMockService(defaultSite) : undefined;
+		app.decorate("devMockService", devMockService);
+
 		const commentsRepository = new CommentsRepository(app.db, app.siteRegistry);
 		const adminSessionService = new AdminSessionService(
 			app.config,
@@ -195,6 +206,14 @@ export async function buildApp(
 				});
 			}
 
+			if (app.devMockService?.ownsSite(parsed.data.siteKey)) {
+				return app.devMockService.inspect(
+					parsed.data.siteKey,
+					parsed.data.pageKey,
+					parsed.data.visitorKey,
+				);
+			}
+
 			return devService.inspect(
 				parsed.data.siteKey,
 				parsed.data.pageKey,
@@ -216,6 +235,13 @@ export async function buildApp(
 				});
 			}
 
+			if (app.devMockService?.ownsSite(parsed.data.siteKey)) {
+				return app.devMockService.resetPageState(
+					parsed.data.siteKey,
+					parsed.data.pageKey,
+				);
+			}
+
 			return devService.resetPageState(parsed.data.siteKey, parsed.data.pageKey);
 		});
 
@@ -226,6 +252,10 @@ export async function buildApp(
 				throw new InvalidRequestError({
 					issues: parsed.error.issues,
 				});
+			}
+
+			if (app.devMockService?.ownsSite(parsed.data.siteKey)) {
+				return app.devMockService.applyScenario(parsed.data);
 			}
 
 			return devService.applyScenario(parsed.data);

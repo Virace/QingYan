@@ -2,6 +2,7 @@ import type { AppRuntimeOptions } from "../config/runtime-options";
 import type { AppConfig, SiteConfig } from "../config/types";
 import type { AppDatabase, SqliteClient } from "../db/client";
 import type { LoggerManager } from "../logging/logger-manager";
+import type { DevMockService } from "../modules/dev/mock-service";
 import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
 import type { SiteRegistry } from "../modules/shared/site-registry";
@@ -35,6 +36,7 @@ declare module "fastify" {
 		sqlite: SqliteClient;
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
+		devMockService?: DevMockService;
 	}
 
 	interface FastifyRequest {

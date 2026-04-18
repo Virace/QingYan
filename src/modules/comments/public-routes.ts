@@ -46,6 +46,22 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.getBootstrap({
+				...parsed.data,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
+		}
+
 		const result = await readService.getBootstrap({
 			...parsed.data,
 			visitorKey: request.context?.visitor?.key,
@@ -87,6 +103,24 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.getThread({
+				...parsed.data,
+				pageTitle: undefined,
+				pageUrl: undefined,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
+		}
+
 		const result = await readService.getThread({
 			...parsed.data,
 			visitorKey: request.context?.visitor?.key,
@@ -121,6 +155,28 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			throw new InvalidRequestError({
 				issues: parsed.error.issues,
 			});
+		}
+
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.createComment({
+				siteKey: parsed.data.siteKey,
+				pageKey: parsed.data.pageKey,
+				pageTitle: parsed.data.pageTitle,
+				pageUrl: parsed.data.pageUrl,
+				parentCommentId: parsed.data.parentCommentId,
+				author: parsed.data.author,
+				contentRaw: parsed.data.content.raw,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
 		}
 
 		const result = await writeService.createComment({
@@ -162,6 +218,25 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		if (fastify.devMockService?.ownsSite(parsedBody.data.siteKey)) {
+			const result = await fastify.devMockService.castVote({
+				siteKey: parsedBody.data.siteKey,
+				pageKey: parsedBody.data.pageKey,
+				commentId: parsedParams.data.commentId,
+				choice: parsedBody.data.choice,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
+		}
+
 		const result = await writeService.castVote({
 			commentId: parsedParams.data.commentId,
 			siteKey: parsedBody.data.siteKey,
@@ -196,6 +271,22 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.getCaptchaState({
+				...parsed.data,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
+		}
+
 		const result = await captchaService.getState({
 			...parsed.data,
 			requestId: request.context?.requestId,
@@ -225,6 +316,17 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			throw new InvalidRequestError({
 				issues: parsed.error.issues,
 			});
+		}
+
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.verifyCaptcha({
+				siteKey: parsed.data.siteKey,
+				pageKey: parsed.data.pageKey,
+				challengeId: parsed.data.challengeId,
+				value: parsed.data.value,
+				visitorKey: request.context?.visitor?.key,
+			});
+			return result.body;
 		}
 
 		return captchaService.verify({

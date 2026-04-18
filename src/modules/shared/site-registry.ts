@@ -11,6 +11,7 @@ export interface RegisteredSiteRecord {
 	siteKey: string;
 	name: string;
 	allowedOrigins: string[];
+	runtimeOnly?: boolean;
 }
 
 function serializeAllowedOrigins(allowedOrigins: string[]): string {
@@ -29,7 +30,16 @@ export class SiteRegistry {
 
 	private readonly registeredSites = new Map<string, RegisteredSiteRecord>();
 
-	public constructor(sitesConfig: SiteConfig[]) {
+	private readonly runtimeOnlySiteKeys = new Set<string>();
+
+	public constructor(
+		sitesConfig: SiteConfig[],
+		runtimeOnlySiteKeys: Iterable<string> = [],
+	) {
+		for (const siteKey of runtimeOnlySiteKeys) {
+			this.runtimeOnlySiteKeys.add(siteKey);
+		}
+
 		for (const site of sitesConfig) {
 			this.configuredSites.set(site.siteKey, site);
 		}
@@ -53,12 +63,30 @@ export class SiteRegistry {
 
 	public async sync(db: AppDatabase): Promise<RegisteredSiteRecord[]> {
 		const configuredSites = [...this.configuredSites.values()];
-		if (configuredSites.length === 0) {
-			this.registeredSites.clear();
-			return [];
+		const persistentSites = configuredSites.filter(
+			(site) => !this.runtimeOnlySiteKeys.has(site.siteKey),
+		);
+
+		this.registeredSites.clear();
+		if (persistentSites.length === 0) {
+			for (const site of configuredSites) {
+				if (!this.runtimeOnlySiteKeys.has(site.siteKey)) {
+					continue;
+				}
+
+				this.registeredSites.set(site.siteKey, {
+					id: 0,
+					siteKey: site.siteKey,
+					name: site.name,
+					allowedOrigins: [...site.allowedOrigins],
+					runtimeOnly: true,
+				});
+			}
+
+			return [...this.registeredSites.values()];
 		}
 
-		for (const site of configuredSites) {
+		for (const site of persistentSites) {
 			await db
 				.insert(sites)
 				.values({
@@ -82,11 +110,10 @@ export class SiteRegistry {
 			.where(
 				inArray(
 					sites.siteKey,
-					configuredSites.map((site) => site.siteKey),
+					persistentSites.map((site) => site.siteKey),
 				),
 			);
 
-		this.registeredSites.clear();
 		for (const site of registeredSites) {
 			this.registeredSites.set(site.siteKey, {
 				id: site.id,
@@ -96,7 +123,7 @@ export class SiteRegistry {
 			});
 		}
 
-		for (const site of configuredSites) {
+		for (const site of persistentSites) {
 			const registeredSite = this.getRegisteredSite(site.siteKey);
 			if (!registeredSite) {
 				continue;
@@ -110,10 +137,29 @@ export class SiteRegistry {
 				});
 		}
 
+		for (const site of configuredSites) {
+			if (!this.runtimeOnlySiteKeys.has(site.siteKey)) {
+				continue;
+			}
+
+			this.registeredSites.set(site.siteKey, {
+				id: 0,
+				siteKey: site.siteKey,
+				name: site.name,
+				allowedOrigins: [...site.allowedOrigins],
+				runtimeOnly: true,
+			});
+		}
+
 		return [...this.registeredSites.values()];
 	}
 }
 
-export function createSiteRegistry(sitesConfig: SiteConfig[]): SiteRegistry {
-	return new SiteRegistry(sitesConfig);
+export function createSiteRegistry(
+	sitesConfig: SiteConfig[],
+	options?: {
+		runtimeOnlySiteKeys?: Iterable<string>;
+	},
+): SiteRegistry {
+	return new SiteRegistry(sitesConfig, options?.runtimeOnlySiteKeys);
 }

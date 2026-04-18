@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+	comments,
+	pageFeedbackRecords,
+	pageThreads,
+	runtimeSettings,
+	sites,
+} from "../../src/db/schema";
+
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -129,6 +137,10 @@ describe("dev control routes", () => {
 				verified: false,
 			},
 		});
+
+		expect(await fixture.app.db.select().from(sites)).toEqual([]);
+		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
 
 	it("forces the next write in threshold mode to require captcha", async () => {
@@ -207,6 +219,9 @@ describe("dev control routes", () => {
 				verified: false,
 			},
 		});
+
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(comments)).toEqual([]);
 	});
 
 	it("seeds a basic thread visible from bootstrap", async () => {
@@ -246,5 +261,10 @@ describe("dev control routes", () => {
 				likeCount: 1,
 			},
 		});
+
+		const commentRows = await fixture.app.db.select().from(comments);
+		expect(commentRows).toHaveLength(0);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
 	});
 });

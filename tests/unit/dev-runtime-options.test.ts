@@ -4,7 +4,7 @@ import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import { createTestConfig } from "../support/test-fixtures";
 
 describe("resolveRuntimeOptions", () => {
-	it("replaces configured sites with a single default site in dev mode", () => {
+	it("keeps config untouched and exposes a runtime-only default site in dev mode", () => {
 		const config = createTestConfig("./data/test.db");
 
 		const resolved = resolveRuntimeOptions(config, {
@@ -17,12 +17,16 @@ describe("resolveRuntimeOptions", () => {
 			enabled: true,
 			adminToken: "dev-token",
 			tokenSource: "env",
+			defaultSite: expect.objectContaining({
+				siteKey: "default",
+				name: "Default",
+				allowedOrigins: ["http://localhost:4321"],
+			}),
 		});
 		expect(resolved.config.sites).toHaveLength(1);
 		expect(resolved.config.sites[0]).toMatchObject({
-			siteKey: "default",
-			name: "Default",
-			allowedOrigins: ["http://localhost:4321"],
+			siteKey: "fangyuan",
+			name: "FangYuan",
 		});
 	});
 

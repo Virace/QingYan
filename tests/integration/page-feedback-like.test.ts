@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runtimeSettings } from "../../src/db/schema";
+import {
+	pageFeedbackRecords,
+	pageThreads,
+	runtimeSettings,
+} from "../../src/db/schema";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -136,5 +140,54 @@ describe("POST /api/page-feedback/like", () => {
 				code: "COMMENT_CAPTCHA_REQUIRED",
 			},
 		});
+	});
+
+	it("uses runtime-only overlay for default site likes in dev mode", async () => {
+		const fixture = await createTestApp({
+			devMode: true,
+			devAdminToken: "dev-token",
+		});
+		cleanups.push(fixture.cleanup);
+
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/api/page-feedback/like",
+			payload: {
+				siteKey: "default",
+				pageKey: "post:dev-like",
+				pageTitle: "Dev Like",
+				pageUrl: "https://example.test/posts/dev-like",
+			},
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+		expect(firstLike.json()).toMatchObject({
+			pageFeedback: {
+				supportsLike: true,
+				likeCount: 1,
+				liked: true,
+			},
+		});
+
+		const visitorCookie = firstLike.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		const secondLike = await fixture.app.inject({
+			method: "POST",
+			url: "/api/page-feedback/like",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "default",
+				pageKey: "post:dev-like",
+				pageTitle: "Dev Like",
+				pageUrl: "https://example.test/posts/dev-like",
+			},
+		});
+
+		expect(secondLike.statusCode).toBe(409);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
 	});
 });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sites } from "../../src/db/schema";
+import { runtimeSettings, sites } from "../../src/db/schema";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -99,5 +99,16 @@ describe("dev session bootstrap", () => {
 
 		expect(me.statusCode).toBe(200);
 		expect(me.json().sites).toEqual([{ siteKey: "default", name: "Default" }]);
+	});
+
+	it("does not persist the virtual default site or runtime settings into sqlite", async () => {
+		const fixture = await createTestApp({
+			devMode: true,
+			devAdminToken: "dev-token",
+		});
+		cleanups.push(fixture.cleanup);
+
+		expect(await fixture.app.db.select().from(sites)).toEqual([]);
+		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([]);
 	});
 });

@@ -7,6 +7,7 @@ export interface AppRuntimeOptions {
 		enabled: boolean;
 		adminToken?: string;
 		tokenSource?: "env" | "generated";
+		defaultSite?: SiteConfig;
 	};
 }
 
@@ -50,15 +51,13 @@ export function resolveRuntimeOptions(
 	const tokenSource = environment.QINGYAN_DEV_ADMIN_TOKEN ? "env" : "generated";
 
 	return {
-		config: {
-			...config,
-			sites: [buildDefaultDevSite(firstSite, allowedOrigin)],
-		},
+		config,
 		runtimeOptions: {
 			devMode: {
 				enabled: true,
 				adminToken,
 				tokenSource,
+				defaultSite: buildDefaultDevSite(firstSite, allowedOrigin),
 			},
 		},
 	};

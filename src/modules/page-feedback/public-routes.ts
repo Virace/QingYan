@@ -35,6 +35,22 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
+			const result = await fastify.devMockService.likePage({
+				...parsed.data,
+				visitorKey: request.context?.visitor?.key,
+			});
+			if (result.visitorKey) {
+				reply.setCookie("qingyan_visitor", result.visitorKey, {
+					path: "/",
+					sameSite: "lax",
+					httpOnly: true,
+				});
+			}
+
+			return result.body;
+		}
+
 		const result = await service.likePage({
 			...parsed.data,
 			visitorKey: request.context?.visitor?.key,
