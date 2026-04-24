@@ -6,7 +6,10 @@ import { eq } from "drizzle-orm";
 
 import { captchaSessions, runtimeSettings } from "../../src/db/schema";
 import { loginAsAdmin } from "../support/admin-login";
-import { getForcedTestCaptchaAnswer, withForcedTestCaptchaAnswer } from "../support/captcha";
+import {
+	getForcedTestCaptchaAnswer,
+	withForcedTestCaptchaAnswer,
+} from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];

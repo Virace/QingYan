@@ -45,6 +45,14 @@ QINGYAN_DEV_ADMIN_TOKEN=dev-token
 QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
 ```
 
+只需要运行内置 mock、发布前验证部署链路或给下游前端做无数据库联调时，可使用：
+
+```bash
+QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
+```
+
+无数据库模式会自动启用 dev mode，不连接 SQLite，也不要求先执行迁移。它仍然提供 `/api/dev/*` 控制面、`/api/*` 前台业务接口，以及用于自动化联调的最小后台会话接口。mock 状态只保存在运行时内存中，进程重启后会重置。
+
 ### dev mode 的固定语义
 
 开启后，系统自动进入以下语义：

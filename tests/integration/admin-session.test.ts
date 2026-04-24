@@ -133,9 +133,9 @@ describe("admin session", () => {
 					imageData: string;
 				};
 			};
-			expect(decodeSvgDataUrl(invalidChallenge.challenge.imageData)).not.toContain(
-				getForcedTestCaptchaAnswer(),
-			);
+			expect(
+				decodeSvgDataUrl(invalidChallenge.challenge.imageData),
+			).not.toContain(getForcedTestCaptchaAnswer());
 
 			const invalidLogin = await fixture.app.inject({
 				method: "POST",

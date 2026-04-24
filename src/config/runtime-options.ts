@@ -8,6 +8,7 @@ export interface AppRuntimeOptions {
 		adminToken?: string;
 		tokenSource?: "env" | "generated";
 		defaultSite?: SiteConfig;
+		storage?: "memory";
 	};
 }
 
@@ -27,7 +28,8 @@ export function resolveRuntimeOptions(
 	config: AppConfig,
 	environment: NodeJS.ProcessEnv = process.env,
 ): { config: AppConfig; runtimeOptions: AppRuntimeOptions } {
-	const enabled = environment.QINGYAN_DEV_MODE === "true";
+	const useMemoryStorage = environment.QINGYAN_DATABASE_MODE === "none";
+	const enabled = environment.QINGYAN_DEV_MODE === "true" || useMemoryStorage;
 	if (!enabled) {
 		return {
 			config,
@@ -49,16 +51,20 @@ export function resolveRuntimeOptions(
 	const adminToken =
 		environment.QINGYAN_DEV_ADMIN_TOKEN ?? `qy_dev_${randomUUID()}`;
 	const tokenSource = environment.QINGYAN_DEV_ADMIN_TOKEN ? "env" : "generated";
+	const devMode: AppRuntimeOptions["devMode"] = {
+		enabled: true,
+		adminToken,
+		tokenSource,
+		defaultSite: buildDefaultDevSite(firstSite, allowedOrigin),
+	};
+	if (useMemoryStorage) {
+		devMode.storage = "memory";
+	}
 
 	return {
 		config,
 		runtimeOptions: {
-			devMode: {
-				enabled: true,
-				adminToken,
-				tokenSource,
-				defaultSite: buildDefaultDevSite(firstSite, allowedOrigin),
-			},
+			devMode,
 		},
 	};
 }

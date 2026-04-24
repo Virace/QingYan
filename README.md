@@ -10,9 +10,11 @@
 ![SQLite](https://img.shields.io/badge/sqlite-3-003b57?logo=sqlite&logoColor=white)
 ![OpenAPI](https://img.shields.io/badge/openapi-3.1-6ba539?logo=openapiinitiative&logoColor=white)
 
-清言（QingYan）是一个很干净、API-first 的评论与对话基础设施。当前基线聚焦后端接口与后台管理能力，服务于 方圆（FangYuan） 一类内容站点的评论、验证码、页面点赞和管理需求。
+清言（QingYan）是一个很干净、API-first 的评论与对话基础设施。当前基线聚焦后端接口与后台管理能力，可服务于 FangYuan 等内容站点的评论、验证码、页面点赞和管理需求。
 
 它不是论坛系统、评论 SaaS，也不是强调自有前端体验的完整评论产品。当前仓库提供的是一个可自部署、可继续演进、低噪声的评论后端基线。
+
+QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
 ## 当前能力
 
@@ -152,6 +154,14 @@ QINGYAN_DEV_MODE=true pnpm dev
 QINGYAN_DEV_ADMIN_TOKEN=dev-token
 QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
 ```
+
+如果只需要运行内置 mock，不希望连接或初始化 SQLite，可使用无数据库模式：
+
+```bash
+QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
+```
+
+无数据库模式会自动启用 dev mode，并使用运行时内存状态提供完整 dev mock 控制面和前台业务 API；进程重启后 mock 状态会丢失。
 
 dev mode 只新增 `/api/dev/*` 控制面；正常业务接口仍然是 `/api/*` 与 `/admin`。前端在 dev mode 下依然需要显式传 `siteKey: "default"`。
 

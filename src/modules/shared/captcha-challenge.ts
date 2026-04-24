@@ -2,7 +2,14 @@ import { randomInt, randomUUID } from "node:crypto";
 
 const TEST_CAPTCHA_ENV = "QINGYAN_TEST_CAPTCHA_ANSWER";
 
-type SegmentName = "top" | "upperLeft" | "upperRight" | "middle" | "lowerLeft" | "lowerRight" | "bottom";
+type SegmentName =
+	| "top"
+	| "upperLeft"
+	| "upperRight"
+	| "middle"
+	| "lowerLeft"
+	| "lowerRight"
+	| "bottom";
 
 const DIGIT_SEGMENTS: Record<string, SegmentName[]> = {
 	"0": ["top", "upperLeft", "upperRight", "lowerLeft", "lowerRight", "bottom"],
@@ -65,11 +72,17 @@ function renderNoise(seed: string): string {
 	);
 	const topPath = values
 		.slice(0, 8)
-		.map((value, index) => `${index === 0 ? "M" : "L"} ${10 + index * 20} ${8 + value}`)
+		.map(
+			(value, index) =>
+				`${index === 0 ? "M" : "L"} ${10 + index * 20} ${8 + value}`,
+		)
 		.join(" ");
 	const bottomPath = values
 		.slice(8, 16)
-		.map((value, index) => `${index === 0 ? "M" : "L"} ${10 + index * 20} ${40 + value}`)
+		.map(
+			(value, index) =>
+				`${index === 0 ? "M" : "L"} ${10 + index * 20} ${40 + value}`,
+		)
 		.join(" ");
 
 	return [

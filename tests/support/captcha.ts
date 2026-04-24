@@ -1,7 +1,9 @@
 const FORCED_TEST_CAPTCHA_ANSWER = "2468";
 const TEST_CAPTCHA_ENV = "QINGYAN_TEST_CAPTCHA_ANSWER";
 
-export function withForcedTestCaptchaAnswer<T>(run: () => Promise<T>): Promise<T> {
+export function withForcedTestCaptchaAnswer<T>(
+	run: () => Promise<T>,
+): Promise<T> {
 	const previous = process.env[TEST_CAPTCHA_ENV];
 	process.env[TEST_CAPTCHA_ENV] = FORCED_TEST_CAPTCHA_ANSWER;
 

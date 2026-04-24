@@ -16,10 +16,10 @@ import {
 	voteRecords,
 } from "../../db/schema";
 import type { CaptchaService } from "../comments/captcha-service";
-import { CommentsRepository } from "../comments/repository";
+import type { CommentsRepository } from "../comments/repository";
+import type { AdminSessionService } from "../admin/session-service";
 import { AppError } from "../shared/errors";
 import { buildRuntimeSettingsDefaults } from "../shared/runtime-settings-defaults";
-import { AdminSessionService } from "../admin/session-service";
 
 export class DevModeService {
 	public constructor(
@@ -54,10 +54,7 @@ export class DevModeService {
 			.select()
 			.from(pageThreads)
 			.where(
-				and(
-					eq(pageThreads.siteId, site.id),
-					eq(pageThreads.pageKey, pageKey),
-				),
+				and(eq(pageThreads.siteId, site.id), eq(pageThreads.pageKey, pageKey)),
 			)
 			.limit(1);
 
@@ -83,7 +80,9 @@ export class DevModeService {
 			await this.db
 				.delete(pageViewSessions)
 				.where(eq(pageViewSessions.pageThreadId, thread.id));
-			await this.db.delete(comments).where(eq(comments.pageThreadId, thread.id));
+			await this.db
+				.delete(comments)
+				.where(eq(comments.pageThreadId, thread.id));
 			await this.db.delete(pageThreads).where(eq(pageThreads.id, thread.id));
 		}
 
@@ -213,10 +212,7 @@ export class DevModeService {
 			.select()
 			.from(visitors)
 			.where(
-				and(
-					eq(visitors.siteId, site.id),
-					eq(visitors.visitorKey, visitorKey),
-				),
+				and(eq(visitors.siteId, site.id), eq(visitors.visitorKey, visitorKey)),
 			)
 			.limit(1);
 		if (!visitor) {

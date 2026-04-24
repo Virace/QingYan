@@ -4,10 +4,7 @@ import { InvalidRequestError } from "../shared/errors";
 import { CommentsRepository } from "./repository";
 import { CaptchaService } from "./captcha-service";
 import { CommentsWriteRepository } from "./write-repository";
-import {
-	captchaCompleteBodySchema,
-	captchaWidgetQuerySchema,
-} from "./schemas";
+import { captchaCompleteBodySchema, captchaWidgetQuerySchema } from "./schemas";
 
 export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new CommentsRepository(fastify.db, fastify.siteRegistry);

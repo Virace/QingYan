@@ -143,10 +143,7 @@ export const configSchema = z.object({
 				.object({
 					captchaId: z.string().min(1),
 					captchaKey: z.string().min(1),
-					apiServer: z
-						.string()
-						.url()
-						.default("https://gcaptcha4.geetest.com"),
+					apiServer: z.string().url().default("https://gcaptcha4.geetest.com"),
 				})
 				.optional(),
 		})

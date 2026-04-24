@@ -309,7 +309,9 @@ export class AdminSessionService {
 
 	public async getMe(request: FastifyRequest) {
 		const session = await this.requireSession(request);
-		const sites = this.siteRegistry?.listRegisteredSites() ?? (await this.repository.listSites());
+		const sites =
+			this.siteRegistry?.listRegisteredSites() ??
+			(await this.repository.listSites());
 
 		return {
 			authenticated: true,

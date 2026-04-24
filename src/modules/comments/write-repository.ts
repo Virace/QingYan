@@ -98,7 +98,10 @@ export class CommentsWriteRepository {
 			.where(eq(captchaSessions.id, sessionId));
 	}
 
-	public async expireCaptchaSession(sessionId: string, nowIso = new Date().toISOString()) {
+	public async expireCaptchaSession(
+		sessionId: string,
+		nowIso = new Date().toISOString(),
+	) {
 		await this.db
 			.update(captchaSessions)
 			.set({

@@ -1,10 +1,10 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import type { SiteConfig } from "../../config/types";
-import { AppError, ResourceNotFoundError } from "../shared/errors";
-import { createCaptchaChallenge } from "../shared/captcha-challenge";
 import { buildCommentForm } from "../comments/comment-form";
 import { presentComments } from "../comments/presenter";
+import { createCaptchaChallenge } from "../shared/captcha-challenge";
+import { AppError, ResourceNotFoundError } from "../shared/errors";
 
 type ScenarioName =
 	| "comments-captcha-always"
@@ -16,6 +16,7 @@ type CaptchaRequiredCode =
 	| "COMMENT_CAPTCHA_REQUIRED"
 	| "VOTE_CAPTCHA_REQUIRED"
 	| "PAGE_FEEDBACK_CAPTCHA_REQUIRED";
+type MockVoteMode = "captcha" | "blacklist" | null;
 
 type RuntimeCommentRecord = {
 	id: string;
@@ -30,6 +31,7 @@ type RuntimeCommentRecord = {
 	replyCount: number;
 	voteUpCount: number;
 	voteDownCount: number;
+	mockVoteMode: MockVoteMode;
 	createdAt: string;
 	updatedAt: string | null;
 };
@@ -78,21 +80,23 @@ function createVisitorKey(): string {
 	return `dev_visitor_${randomUUID()}`;
 }
 
-function toPublicTimestamp(value: string | null): string | null {
-	if (!value) {
-		return null;
-	}
-
-	const timestamp = new Date(value);
-	return Number.isNaN(timestamp.getTime()) ? value : timestamp.toISOString();
-}
-
 function normalizePageUrl(value?: string): string {
 	if (!value) {
 		return "https://example.test/";
 	}
 
 	return value;
+}
+
+function buildStableCommentId(
+	pageKey: string,
+	kind: "root" | "reply",
+	index: number,
+): string {
+	const segment = pageKey
+		.replace(/[^A-Za-z0-9_-]+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	return `dev_${segment || "page"}_${kind}_${index}`;
 }
 
 function cloneSiteForDefault(baseSite: SiteConfig): SiteConfig {
@@ -156,6 +160,7 @@ export class DevMockService {
 			comments: new Map(),
 			visitorStates: new Map(),
 		};
+		this.createDefaultThread(created);
 		this.pages.set(input.pageKey, created);
 		return created;
 	}
@@ -240,6 +245,10 @@ export class DevMockService {
 				mode: "inline_value",
 				challenge: null,
 			};
+		}
+
+		if (visitor.challengeId) {
+			return this.ensureCaptcha(visitor, refresh);
 		}
 
 		if (pageState.scenario === "comments-captcha-always") {
@@ -387,6 +396,7 @@ export class DevMockService {
 			replyCount: 1,
 			voteUpCount: 0,
 			voteDownCount: 0,
+			mockVoteMode: null,
 			createdAt,
 			updatedAt: null,
 		});
@@ -403,10 +413,121 @@ export class DevMockService {
 			replyCount: 0,
 			voteUpCount: 0,
 			voteDownCount: 0,
+			mockVoteMode: null,
 			createdAt,
 			updatedAt: null,
 		});
 		pageState.commentOrder = [rootId, replyId];
+	}
+
+	private createDefaultThread(pageState: RuntimePageState) {
+		pageState.comments.clear();
+		pageState.commentOrder = [];
+		pageState.baseLikeCount = 0;
+
+		const addComment = (input: {
+			id: string;
+			parentId: string | null;
+			authorName: string;
+			authorWebsite?: string | null;
+			contentRaw: string;
+			replyCount?: number;
+			voteUpCount?: number;
+			voteDownCount?: number;
+			mockVoteMode?: MockVoteMode;
+			minute: number;
+		}) => {
+			pageState.comments.set(input.id, {
+				id: input.id,
+				parentId: input.parentId,
+				authorName: input.authorName,
+				authorWebsite: input.authorWebsite ?? null,
+				contentRaw: input.contentRaw,
+				contentHtml: null,
+				status: "approved",
+				isPinned: false,
+				isFolded: false,
+				replyCount: input.replyCount ?? 0,
+				voteUpCount: input.voteUpCount ?? 0,
+				voteDownCount: input.voteDownCount ?? 0,
+				mockVoteMode: input.mockVoteMode ?? null,
+				createdAt: new Date(
+					Date.UTC(2026, 3, 18, 9, input.minute, 0),
+				).toISOString(),
+				updatedAt: null,
+			});
+			pageState.commentOrder.push(input.id);
+		};
+
+		const rootIds = Array.from({ length: 6 }, (_, index) =>
+			buildStableCommentId(pageState.pageKey, "root", index + 1),
+		);
+		const replyIds = Array.from({ length: 3 }, (_, index) =>
+			buildStableCommentId(pageState.pageKey, "reply", index + 1),
+		);
+
+		addComment({
+			id: rootIds[0],
+			parentId: null,
+			authorName: "青砚",
+			authorWebsite: "https://qingyan.example.test",
+			contentRaw: "这是一条默认开发评论。给这条评论投票会稳定触发验证码。",
+			replyCount: 2,
+			voteUpCount: 3,
+			mockVoteMode: "captcha",
+			minute: 59,
+		});
+		addComment({
+			id: replyIds[0],
+			parentId: rootIds[0],
+			authorName: "前端调试",
+			contentRaw: "第一层回复用于观察嵌套评论布局。",
+			replyCount: 1,
+			voteUpCount: 1,
+			minute: 58,
+		});
+		addComment({
+			id: replyIds[1],
+			parentId: replyIds[0],
+			authorName: "清言 Mock",
+			contentRaw: "第二层回复用于确认多级嵌套表现。",
+			minute: 57,
+		});
+		addComment({
+			id: rootIds[1],
+			parentId: null,
+			authorName: "调试访客",
+			contentRaw: "这条评论的投票会稳定触发黑名单错误，用于测试失败态。",
+			voteUpCount: 1,
+			voteDownCount: 1,
+			mockVoteMode: "blacklist",
+			minute: 56,
+		});
+		addComment({
+			id: rootIds[2],
+			parentId: null,
+			authorName: "Demo Visitor",
+			contentRaw: "普通评论用于观察默认列表、分页和回复布局。",
+			replyCount: 1,
+			minute: 55,
+		});
+		addComment({
+			id: replyIds[2],
+			parentId: rootIds[2],
+			authorName: "青砚",
+			contentRaw: "另一条回复用于让首屏同时出现多个嵌套区域。",
+			minute: 54,
+		});
+		for (let index = 3; index < rootIds.length; index += 1) {
+			addComment({
+				id: rootIds[index],
+				parentId: null,
+				authorName: `分页访客 ${index + 1}`,
+				contentRaw: `第 ${index + 1} 条首层评论，用于稳定撑出第二页。`,
+				voteUpCount: index % 2,
+				minute: 53 - index,
+			});
+		}
 	}
 
 	public async applyScenario(input: {
@@ -668,7 +789,7 @@ export class DevMockService {
 	}
 
 	private consumeInlineCaptcha(
-		pageState: RuntimePageState,
+		_pageState: RuntimePageState,
 		visitor: RuntimeVisitorState,
 		input:
 			| {
@@ -751,6 +872,7 @@ export class DevMockService {
 			replyCount: 0,
 			voteUpCount: 0,
 			voteDownCount: 0,
+			mockVoteMode: null,
 			createdAt,
 			updatedAt: null,
 		});
@@ -852,6 +974,13 @@ export class DevMockService {
 		const comment = pageState.comments.get(input.commentId);
 		if (!comment) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+		if (comment.mockVoteMode === "blacklist") {
+			throw new AppError(403, "COMMENT_BLACKLISTED", "当前请求已被拒绝。");
+		}
+		if (comment.mockVoteMode === "captcha" && !visitor.verified) {
+			this.ensureCaptcha(visitor);
+			throw new AppError(400, "VOTE_CAPTCHA_REQUIRED", "请先完成验证码验证。");
 		}
 		if (visitor.votes.has(input.commentId)) {
 			throw new AppError(

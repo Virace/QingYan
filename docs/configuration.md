@@ -429,6 +429,7 @@ POST /api/comments/{commentId}/vote
 - `QINGYAN_DEV_MODE=true`
 - `QINGYAN_DEV_ADMIN_TOKEN=<fixed token>`（可选）
 - `QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321`（可选）
+- `QINGYAN_DATABASE_MODE=none`（可选；无数据库 dev mock 模式）
 
 行为说明：
 
@@ -437,6 +438,7 @@ POST /api/comments/{commentId}/vote
 - 真实业务 API 路径不变，仍然使用 `/api/*` 与 `/admin`
 - 只新增 `/api/dev/*` 控制接口
 - 生产环境不会暴露 `/api/dev/*`
+- 设置 `QINGYAN_DATABASE_MODE=none` 时会自动启用 dev mode，不连接 SQLite，所有 mock 状态仅保存在当前进程内存中
 
 注意：
 

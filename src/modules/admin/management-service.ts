@@ -132,7 +132,9 @@ export class AdminManagementService {
 				const configuredSite = this.siteRegistry.getConfiguredSite(
 					item.siteKey,
 				);
-				const registeredSite = this.siteRegistry.getRegisteredSite(item.siteKey);
+				const registeredSite = this.siteRegistry.getRegisteredSite(
+					item.siteKey,
+				);
 				if (!configuredSite) {
 					return [];
 				}
@@ -140,27 +142,29 @@ export class AdminManagementService {
 					return [];
 				}
 
-				return [{
-					siteKey: item.siteKey,
-					name: item.name,
-					allowedOrigins: item.allowedOrigins,
-					comments: {
-						enabled: item.comments.enabled,
-						defaultStatus: item.comments.defaultStatus,
-						identity: buildCommentForm(configuredSite, {
+				return [
+					{
+						siteKey: item.siteKey,
+						name: item.name,
+						allowedOrigins: item.allowedOrigins,
+						comments: {
+							enabled: item.comments.enabled,
+							defaultStatus: item.comments.defaultStatus,
+							identity: buildCommentForm(configuredSite, {
+								allowWebsite: item.comments.allowWebsite,
+								commentRequireJson: item.comments.commentRequireJson,
+							}),
 							allowWebsite: item.comments.allowWebsite,
-							commentRequireJson: item.comments.commentRequireJson,
-						}),
-						allowWebsite: item.comments.allowWebsite,
-						captcha: item.comments.captcha,
+							captcha: item.comments.captcha,
+						},
+						pageFeedback: item.pageFeedback,
+						notifications: item.notifications,
+						pageCount: item.pageCount,
+						commentCount: item.commentCount,
+						userCount: item.userCount,
+						visitorCount: item.visitorCount,
 					},
-					pageFeedback: item.pageFeedback,
-					notifications: item.notifications,
-					pageCount: item.pageCount,
-					commentCount: item.commentCount,
-					userCount: item.userCount,
-					visitorCount: item.visitorCount,
-				}];
+				];
 			}),
 		};
 	}

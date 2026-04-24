@@ -10,7 +10,6 @@ import {
 	isInlineCaptchaSessionPayload,
 	resolveCaptchaHostMode,
 	type CaptchaSessionPayload,
-	type PublicCaptchaChallenge,
 	type PublicCaptchaProviderKind,
 } from "./captcha-provider-types";
 import { requiresCaptchaForAttempt } from "./captcha-threshold";
@@ -136,7 +135,11 @@ export class CaptchaService {
 		challengePayloadJson: string | null;
 	}) {
 		if (!session.challengePayloadJson) {
-			throw new AppError(500, "CAPTCHA_SESSION_INVALID", "验证码会话数据损坏。");
+			throw new AppError(
+				500,
+				"CAPTCHA_SESSION_INVALID",
+				"验证码会话数据损坏。",
+			);
 		}
 		return JSON.parse(session.challengePayloadJson) as CaptchaSessionPayload;
 	}
@@ -145,7 +148,9 @@ export class CaptchaService {
 		siteId: number;
 		configuredSite: SiteConfig;
 	}) {
-		const settings = await this.commentsRepository.getRuntimeSettings(input.siteId);
+		const settings = await this.commentsRepository.getRuntimeSettings(
+			input.siteId,
+		);
 		return resolveCaptchaPolicy({
 			captchaMode:
 				(settings?.captchaMode as
@@ -272,7 +277,9 @@ export class CaptchaService {
 		userAgent?: string;
 	}) {
 		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(input.siteKey);
+		const configuredSite = this.commentsRepository.getConfiguredSite(
+			input.siteKey,
+		);
 		if (!site || !configuredSite) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
@@ -341,7 +348,8 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const { site, configuredSite, visitor, thread } =
+			await this.resolveContext(input);
 		const policy = await this.resolvePolicy({
 			siteId: site.id,
 			configuredSite,
@@ -428,7 +436,8 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const { site, configuredSite, visitor, thread } =
+			await this.resolveContext(input);
 		const policy = await this.resolvePolicy({
 			siteId: site.id,
 			configuredSite,
@@ -516,7 +525,8 @@ export class CaptchaService {
 		consumeRateLimit: (key: string) => Promise<void>;
 		checkRateLimit: (key: string) => void;
 	}) {
-		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const { site, configuredSite, visitor, thread } =
+			await this.resolveContext(input);
 		const policy = await this.resolvePolicy({
 			siteId: site.id,
 			configuredSite,
@@ -760,7 +770,11 @@ export class CaptchaService {
 				case "turnstile": {
 					const config = this.requireTurnstileConfig();
 					if (!input.token) {
-						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码令牌。");
+						throw new AppError(
+							400,
+							"COMMENT_CAPTCHA_INVALID",
+							"缺少验证码令牌。",
+						);
 					}
 					await verifyTurnstileToken({
 						secretKey: config.secretKey,
@@ -774,7 +788,11 @@ export class CaptchaService {
 				case "hcaptcha": {
 					const config = this.requireHCaptchaConfig();
 					if (!input.token) {
-						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码令牌。");
+						throw new AppError(
+							400,
+							"COMMENT_CAPTCHA_INVALID",
+							"缺少验证码令牌。",
+						);
 					}
 					await verifyHCaptchaToken({
 						secretKey: config.secretKey,
@@ -788,7 +806,11 @@ export class CaptchaService {
 				case "recaptcha": {
 					const config = this.requireRecaptchaConfig();
 					if (!input.token) {
-						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码令牌。");
+						throw new AppError(
+							400,
+							"COMMENT_CAPTCHA_INVALID",
+							"缺少验证码令牌。",
+						);
 					}
 					await verifyRecaptchaToken({
 						projectId: config.projectId,
@@ -811,7 +833,11 @@ export class CaptchaService {
 						!input.passToken ||
 						!input.genTime
 					) {
-						throw new AppError(400, "COMMENT_CAPTCHA_INVALID", "缺少验证码结果。");
+						throw new AppError(
+							400,
+							"COMMENT_CAPTCHA_INVALID",
+							"缺少验证码结果。",
+						);
 					}
 					await verifyGeeTestToken({
 						apiServer: config.apiServer,
@@ -832,7 +858,10 @@ export class CaptchaService {
 					);
 			}
 		} catch (error) {
-			if (error instanceof AppError && error.code === "COMMENT_CAPTCHA_INVALID") {
+			if (
+				error instanceof AppError &&
+				error.code === "COMMENT_CAPTCHA_INVALID"
+			) {
 				await this.security.writeAudit({
 					requestId: input.requestId,
 					siteKey: input.siteKey,
@@ -936,7 +965,8 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, configuredSite, visitor, thread } = await this.resolveContext(input);
+		const { site, configuredSite, visitor, thread } =
+			await this.resolveContext(input);
 		const policy = await this.resolvePolicy({
 			siteId: site.id,
 			configuredSite,
