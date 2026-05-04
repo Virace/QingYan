@@ -1,5 +1,3 @@
-import { inArray } from "drizzle-orm";
-
 import type { SiteConfig } from "../../config/types";
 import type { AppDatabase } from "../../db/client";
 import { runtimeSettings } from "../../db/schema/settings";
@@ -12,6 +10,12 @@ export interface RegisteredSiteRecord {
 	name: string;
 	allowedOrigins: string[];
 	runtimeOnly?: boolean;
+}
+
+function cloneDefaults(
+	defaults: SiteConfig["defaults"],
+): SiteConfig["defaults"] {
+	return JSON.parse(JSON.stringify(defaults)) as SiteConfig["defaults"];
 }
 
 function serializeAllowedOrigins(allowedOrigins: string[]): string {
@@ -51,6 +55,15 @@ export class SiteRegistry {
 
 	public getRegisteredSite(siteKey?: string): RegisteredSiteRecord | undefined {
 		return siteKey ? this.registeredSites.get(siteKey) : undefined;
+	}
+
+	public getDefaultSiteTemplate(): SiteConfig {
+		const [site] = this.configuredSites.values();
+		if (!site) {
+			throw new Error("At least one configured site is required.");
+		}
+
+		return site;
 	}
 
 	public listConfiguredSites(): SiteConfig[] {
@@ -104,15 +117,8 @@ export class SiteRegistry {
 				});
 		}
 
-		const registeredSites = await db
-			.select()
-			.from(sites)
-			.where(
-				inArray(
-					sites.siteKey,
-					persistentSites.map((site) => site.siteKey),
-				),
-			);
+		const registeredSites = await db.select().from(sites);
+		const defaultTemplate = this.getDefaultSiteTemplate();
 
 		for (const site of registeredSites) {
 			this.registeredSites.set(site.siteKey, {
@@ -121,9 +127,22 @@ export class SiteRegistry {
 				name: site.name,
 				allowedOrigins: parseAllowedOrigins(site.allowedOriginsJson),
 			});
+
+			if (!this.configuredSites.has(site.siteKey)) {
+				this.configuredSites.set(site.siteKey, {
+					siteKey: site.siteKey,
+					name: site.name,
+					allowedOrigins: parseAllowedOrigins(site.allowedOriginsJson),
+					defaults: cloneDefaults(defaultTemplate.defaults),
+				});
+			}
 		}
 
-		for (const site of persistentSites) {
+		for (const site of this.configuredSites.values()) {
+			if (this.runtimeOnlySiteKeys.has(site.siteKey)) {
+				continue;
+			}
+
 			const registeredSite = this.getRegisteredSite(site.siteKey);
 			if (!registeredSite) {
 				continue;

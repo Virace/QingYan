@@ -68,6 +68,15 @@ export const adminPagesQuerySchema = adminCollectionQuerySchema;
 export const adminUsersQuerySchema = adminCollectionQuerySchema;
 export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
 
+export const adminSiteCreateBodySchema = z.object({
+	siteKey: z
+		.string()
+		.min(1)
+		.regex(/^[a-z0-9][a-z0-9_-]*$/i),
+	name: z.string().min(1),
+	allowedOrigins: z.array(z.string().url()).min(1),
+});
+
 export const adminCommentParamsSchema = z.object({
 	commentId: z.string().min(1),
 });
@@ -99,6 +108,13 @@ export const adminBlacklistBodySchema = z.object({
 
 export const adminBlacklistParamsSchema = z.object({
 	ruleId: z.coerce.number().int().positive(),
+});
+
+export const adminBlacklistTargetBodySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	targetType: z.enum(["ip", "email", "visitor"]),
+	matchMode: z.enum(["exact", "cidr", "wildcard"]).default("exact"),
+	targetValue: z.string().min(1),
 });
 
 export const adminSettingsQuerySchema = z.object({

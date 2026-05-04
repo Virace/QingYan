@@ -1,6 +1,6 @@
 import type { SiteConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
-import { ResourceNotFoundError } from "../shared/errors";
+import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { buildCommentForm } from "../comments/comment-form";
 import { buildRuntimeSettingsDefaults } from "../shared/runtime-settings-defaults";
 import type { SiteRegistry } from "../shared/site-registry";
@@ -260,6 +260,49 @@ export class AdminManagementService {
 		};
 	}
 
+	public async createSite(input: {
+		siteKey: string;
+		name: string;
+		allowedOrigins: string[];
+		requestId?: string;
+	}) {
+		const existingSite = await this.repository.getSiteByKey(input.siteKey);
+		if (existingSite) {
+			throw new InvalidRequestError({
+				code: "SITE_KEY_EXISTS",
+				message: "站点标识已存在。",
+			});
+		}
+
+		const template = this.siteRegistry.getDefaultSiteTemplate();
+		const site = await this.repository.createSite({
+			siteKey: input.siteKey,
+			name: input.name,
+			allowedOrigins: input.allowedOrigins,
+			defaults: template.defaults,
+		});
+		if (!site) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+
+		await this.siteRegistry.sync(this.repository.database);
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			actorType: "admin",
+			event: "sites.created",
+			message: "站点已创建",
+			targetType: "site",
+			targetId: input.siteKey,
+			payload: {
+				name: input.name,
+				allowedOrigins: input.allowedOrigins,
+			},
+		});
+
+		return this.listSitesSummary();
+	}
+
 	public async getOverview(input: {
 		consolePath: string;
 		devMode: boolean;
@@ -389,6 +432,44 @@ export class AdminManagementService {
 		});
 
 		return rule;
+	}
+
+	public async deleteBlacklistTarget(input: {
+		siteKey?: string;
+		targetType: "ip" | "email" | "visitor";
+		matchMode: "exact" | "cidr" | "wildcard";
+		targetValue: string;
+		requestId?: string;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const rules = await this.repository.deleteBlacklistRulesByTarget({
+			siteId,
+			targetType: input.targetType,
+			matchMode: input.matchMode,
+			targetValue: input.targetValue,
+		});
+		if (rules.length === 0) {
+			throw new ResourceNotFoundError(
+				"BLACKLIST_RULE_NOT_FOUND",
+				"黑名单规则不存在。",
+			);
+		}
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			actorType: "admin",
+			event: "security.blacklist.deleted",
+			message: "已删除黑名单规则",
+			targetType: input.targetType,
+			targetId: input.targetValue,
+			payload: {
+				ruleIds: rules.map((rule) => rule.id),
+				matchMode: input.matchMode,
+			},
+		});
+
+		return rules;
 	}
 
 	public async getSettings(siteKey: string) {

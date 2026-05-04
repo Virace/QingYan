@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { comments, pageThreads, sites, visitors } from "../../src/db/schema";
+import {
+	comments,
+	pageThreads,
+	runtimeSettings,
+	sites,
+	visitors,
+} from "../../src/db/schema";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -14,6 +20,76 @@ afterEach(async () => {
 });
 
 describe("admin sites", () => {
+	it("creates a site with default runtime settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const createResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/sites",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "docs",
+				name: "Docs",
+				allowedOrigins: ["http://localhost:4322"],
+			},
+		});
+
+		expect(createResponse.statusCode).toBe(200);
+		expect(createResponse.json()).toMatchObject({
+			items: expect.arrayContaining([
+				expect.objectContaining({
+					siteKey: "docs",
+					name: "Docs",
+					allowedOrigins: ["http://localhost:4322"],
+					comments: expect.objectContaining({
+						enabled: true,
+						defaultStatus: "pending",
+					}),
+				}),
+			]),
+		});
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "docs"));
+		expect(site).toMatchObject({
+			siteKey: "docs",
+			name: "Docs",
+			allowedOriginsJson: '["http://localhost:4322"]',
+		});
+
+		const [settings] = await fixture.app.db
+			.select()
+			.from(runtimeSettings)
+			.where(eq(runtimeSettings.siteId, site?.id ?? 0));
+		expect(settings).toMatchObject({
+			commentsEnabled: true,
+			defaultStatus: "pending",
+			rootLimit: 20,
+		});
+
+		const settingsResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/settings?siteKey=docs",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(settingsResponse.statusCode).toBe(200);
+		expect(settingsResponse.json()).toMatchObject({
+			siteKey: "docs",
+			comments: {
+				enabled: true,
+				rootLimit: 20,
+			},
+		});
+	});
+
 	it("lists site summaries with runtime settings and counts", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

@@ -26,6 +26,8 @@ import {
 import { resolvePublicPageUrl } from "../shared/page-url";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
+import { buildRuntimeSettingsDefaults } from "../shared/runtime-settings-defaults";
+import type { SiteConfig } from "../../config/types";
 
 function parseStringArray(payload?: string | null): string[] {
 	if (!payload) {
@@ -62,6 +64,10 @@ function toCountMap<T extends number | null | undefined>(
 
 export class AdminRepository {
 	public constructor(private readonly db: AppDatabase) {}
+
+	public get database(): AppDatabase {
+		return this.db;
+	}
 
 	public async listSites() {
 		return this.db.select().from(sites);
@@ -128,7 +134,10 @@ export class AdminRepository {
 		};
 	}
 
-	private async listActiveBlacklistRules(targetType: "email" | "visitor") {
+	private async listActiveBlacklistRules(
+		targetType: "email" | "ip" | "visitor",
+		siteId?: number,
+	) {
 		const nowIso = new Date().toISOString();
 
 		return this.db
@@ -137,6 +146,12 @@ export class AdminRepository {
 			.where(
 				and(
 					eq(blacklistRules.targetType, targetType),
+					siteId === undefined
+						? undefined
+						: or(
+								isNull(blacklistRules.siteId),
+								eq(blacklistRules.siteId, siteId),
+							),
 					or(
 						isNull(blacklistRules.expiresAt),
 						gte(blacklistRules.expiresAt, nowIso),
@@ -151,6 +166,41 @@ export class AdminRepository {
 			.from(sites)
 			.where(eq(sites.siteKey, siteKey))
 			.limit(1);
+
+		return site;
+	}
+
+	public async createSite(input: {
+		siteKey: string;
+		name: string;
+		allowedOrigins: string[];
+		defaults: SiteConfig["defaults"];
+	}) {
+		const allowedOriginsJson = JSON.stringify(input.allowedOrigins);
+		await this.db.insert(sites).values({
+			siteKey: input.siteKey,
+			name: input.name,
+			allowedOriginsJson,
+		});
+
+		const site = await this.getSiteByKey(input.siteKey);
+		if (!site) {
+			return undefined;
+		}
+
+		await this.db
+			.insert(runtimeSettings)
+			.values(
+				buildRuntimeSettingsDefaults(site.id, {
+					siteKey: input.siteKey,
+					name: input.name,
+					allowedOrigins: input.allowedOrigins,
+					defaults: input.defaults,
+				}),
+			)
+			.onConflictDoNothing({
+				target: runtimeSettings.siteId,
+			});
 
 		return site;
 	}
@@ -223,6 +273,8 @@ export class AdminRepository {
 				status: comments.status,
 				authorName: comments.authorName,
 				authorEmail: comments.authorEmail,
+				authorIp: comments.authorIp,
+				authorUserAgent: comments.authorUserAgent,
 				contentRaw: comments.contentRaw,
 				isPinned: comments.isPinned,
 				isFolded: comments.isFolded,
@@ -251,29 +303,63 @@ export class AdminRepository {
 			.from(comments)
 			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 			.where(whereCondition);
+		const emailRules = await this.listActiveBlacklistRules(
+			"email",
+			input.siteId,
+		);
+		const ipRules = await this.listActiveBlacklistRules("ip", input.siteId);
 
 		return {
-			items: rows.map((row) => ({
-				id: row.id,
-				parentId: row.parentId,
-				status: row.status,
-				authorName: row.authorName,
-				authorEmail: row.authorEmail,
-				contentRaw: row.contentRaw,
-				isPinned: row.isPinned,
-				isFolded: row.isFolded,
-				replyCount: row.replyCount,
-				voteUpCount: row.voteUpCount,
-				voteDownCount: row.voteDownCount,
-				createdAt: row.createdAt,
-				updatedAt: row.updatedAt,
-				pageKey: row.pageKey,
-				pageTitle: row.pageTitle,
-				pageUrl: resolvePublicPageUrl(
-					row.pageUrl,
-					parseStringArray(row.allowedOriginsJson),
-				),
-			})),
+			items: rows.map((row) => {
+				const emailBlacklisted = emailRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ email: row.authorEmail ?? undefined },
+					),
+				);
+				const ipBlacklisted = ipRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ ip: row.authorIp ?? undefined },
+					),
+				);
+
+				return {
+					id: row.id,
+					parentId: row.parentId,
+					status: row.status,
+					authorName: row.authorName,
+					authorEmail: row.authorEmail,
+					authorIp: row.authorIp,
+					authorUserAgent: row.authorUserAgent,
+					blacklist: {
+						email: emailBlacklisted,
+						ip: ipBlacklisted,
+					},
+					contentRaw: row.contentRaw,
+					isPinned: row.isPinned,
+					isFolded: row.isFolded,
+					replyCount: row.replyCount,
+					voteUpCount: row.voteUpCount,
+					voteDownCount: row.voteDownCount,
+					createdAt: row.createdAt,
+					updatedAt: row.updatedAt,
+					pageKey: row.pageKey,
+					pageTitle: row.pageTitle,
+					pageUrl: resolvePublicPageUrl(
+						row.pageUrl,
+						parseStringArray(row.allowedOriginsJson),
+					),
+				};
+			}),
 			totalCount: total?.value ?? 0,
 		};
 	}
@@ -389,6 +475,8 @@ export class AdminRepository {
 				lastCommentAt: sql<string>`MAX(${comments.createdAt})`,
 				pageCount: sql<number>`COUNT(DISTINCT ${comments.pageThreadId})`,
 				siteCount: sql<number>`COUNT(DISTINCT ${comments.siteId})`,
+				ipsJson: sql<string>`json_group_array(DISTINCT ${comments.authorIp})`,
+				userAgentsJson: sql<string>`json_group_array(DISTINCT ${comments.authorUserAgent})`,
 			})
 			.from(comments)
 			.where(
@@ -405,18 +493,14 @@ export class AdminRepository {
 				),
 			)
 			.groupBy(comments.authorEmail);
-		const emailRules = await this.listActiveBlacklistRules("email");
+		const emailRules = await this.listActiveBlacklistRules(
+			"email",
+			input.siteId,
+		);
 		const items = rows
-			.map((row) => ({
-				email: row.email ?? "",
-				names: parseStringArray(row.namesJson),
-				commentCount: Number(row.commentCount ?? 0),
-				pendingCount: Number(row.pendingCount ?? 0),
-				approvedCount: Number(row.approvedCount ?? 0),
-				lastCommentAt: row.lastCommentAt,
-				pageCount: Number(row.pageCount ?? 0),
-				siteCount: Number(row.siteCount ?? 0),
-				isBlacklisted: emailRules.some((rule) =>
+			.map((row) => {
+				const ips = parseStringArray(row.ipsJson);
+				const emailBlacklisted = emailRules.some((rule) =>
 					matchBlacklistRule(
 						{
 							targetType: rule.targetType,
@@ -425,8 +509,25 @@ export class AdminRepository {
 						},
 						{ email: row.email ?? undefined },
 					),
-				),
-			}))
+				);
+
+				return {
+					email: row.email ?? "",
+					names: parseStringArray(row.namesJson),
+					commentCount: Number(row.commentCount ?? 0),
+					pendingCount: Number(row.pendingCount ?? 0),
+					approvedCount: Number(row.approvedCount ?? 0),
+					lastCommentAt: row.lastCommentAt,
+					pageCount: Number(row.pageCount ?? 0),
+					siteCount: Number(row.siteCount ?? 0),
+					ips,
+					userAgents: parseStringArray(row.userAgentsJson),
+					blacklist: {
+						email: emailBlacklisted,
+					},
+					isBlacklisted: emailBlacklisted,
+				};
+			})
 			.sort((left, right) =>
 				(right.lastCommentAt ?? "").localeCompare(left.lastCommentAt ?? ""),
 			);
@@ -477,6 +578,8 @@ export class AdminRepository {
 				commentCount: count(),
 				emailCount: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
 				emailsJson: sql<string>`json_group_array(DISTINCT ${comments.authorEmail})`,
+				ipsJson: sql<string>`json_group_array(DISTINCT ${comments.authorIp})`,
+				userAgentsJson: sql<string>`json_group_array(DISTINCT ${comments.authorUserAgent})`,
 			})
 			.from(comments)
 			.where(
@@ -504,7 +607,13 @@ export class AdminRepository {
 		);
 		const commentStatsMap = new Map<
 			number,
-			{ commentCount: number; emailCount: number; emails: string[] }
+			{
+				commentCount: number;
+				emailCount: number;
+				emails: string[];
+				ips: string[];
+				userAgents: string[];
+			}
 		>();
 		for (const row of commentStatsRows) {
 			if (row.visitorId === null) {
@@ -515,14 +624,19 @@ export class AdminRepository {
 				commentCount: Number(row.commentCount ?? 0),
 				emailCount: Number(row.emailCount ?? 0),
 				emails: parseStringArray(row.emailsJson),
+				ips: parseStringArray(row.ipsJson),
+				userAgents: parseStringArray(row.userAgentsJson),
 			});
 		}
 
-		const visitorRules = await this.listActiveBlacklistRules("visitor");
-
+		const visitorRules = await this.listActiveBlacklistRules(
+			"visitor",
+			input.siteId,
+		);
 		return {
 			items: rows.slice(input.offset, input.offset + input.limit).map((row) => {
 				const commentStats = commentStatsMap.get(row.id);
+				const ips = commentStats?.ips ?? [];
 				return {
 					siteKey: row.siteKey,
 					visitorKey: row.visitorKey,
@@ -532,6 +646,8 @@ export class AdminRepository {
 					pageCount: pageCountMap.get(row.id) ?? 0,
 					emailCount: commentStats?.emailCount ?? 0,
 					emails: commentStats?.emails ?? [],
+					ips,
+					userAgents: commentStats?.userAgents ?? [],
 					blacklist: {
 						visitor: visitorRules.some((rule) =>
 							matchBlacklistRule(
@@ -543,7 +659,6 @@ export class AdminRepository {
 								{ visitorKey: row.visitorKey },
 							),
 						),
-						ip: null,
 					},
 				};
 			}),
@@ -777,6 +892,46 @@ export class AdminRepository {
 
 		await this.db.delete(blacklistRules).where(eq(blacklistRules.id, ruleId));
 		return rule;
+	}
+
+	public async deleteBlacklistRulesByTarget(input: {
+		siteId?: number;
+		targetType: "ip" | "email" | "visitor";
+		targetValue: string;
+		matchMode: "exact" | "cidr" | "wildcard";
+	}) {
+		const targetValue =
+			input.targetType === "email"
+				? input.targetValue.trim().toLowerCase()
+				: input.targetValue;
+		const rules = await this.db
+			.select()
+			.from(blacklistRules)
+			.where(
+				and(
+					input.siteId === undefined
+						? isNull(blacklistRules.siteId)
+						: or(
+								isNull(blacklistRules.siteId),
+								eq(blacklistRules.siteId, input.siteId),
+							),
+					eq(blacklistRules.targetType, input.targetType),
+					eq(blacklistRules.targetValue, targetValue),
+					eq(blacklistRules.matchMode, input.matchMode),
+				),
+			);
+		if (rules.length === 0) {
+			return [];
+		}
+
+		await this.db.delete(blacklistRules).where(
+			inArray(
+				blacklistRules.id,
+				rules.map((rule) => rule.id),
+			),
+		);
+
+		return rules;
 	}
 
 	public async getRuntimeSettings(siteId: number) {

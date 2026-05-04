@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { comments, pageThreads, sites } from "../../src/db/schema";
+import {
+	blacklistRules,
+	comments,
+	pageThreads,
+	sites,
+} from "../../src/db/schema";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -52,6 +57,8 @@ describe("admin comments", () => {
 			status: "pending",
 			authorName: "Admin Test",
 			authorEmail: "admin@example.com",
+			authorIp: "203.0.113.10",
+			authorUserAgent: "QingYan Test Browser",
 			contentRaw: "pending comment",
 			contentHtml: "<p>pending comment</p>",
 			replyCount: 0,
@@ -60,6 +67,24 @@ describe("admin comments", () => {
 			createdAt: "2026-04-17T10:00:00.000Z",
 			updatedAt: "2026-04-17T10:00:00.000Z",
 		});
+		await fixture.app.db.insert(blacklistRules).values([
+			{
+				siteId: site.id,
+				scope: "post",
+				targetType: "email",
+				targetValue: "admin@example.com",
+				matchMode: "exact",
+				source: "manual",
+			},
+			{
+				siteId: site.id,
+				scope: "post",
+				targetType: "ip",
+				targetValue: "203.0.113.10",
+				matchMode: "exact",
+				source: "manual",
+			},
+		]);
 
 		const listResponse = await fixture.app.inject({
 			method: "GET",
@@ -75,6 +100,12 @@ describe("admin comments", () => {
 					id: "c_admin_1",
 					status: "pending",
 					authorEmail: "admin@example.com",
+					authorIp: "203.0.113.10",
+					authorUserAgent: "QingYan Test Browser",
+					blacklist: {
+						email: true,
+						ip: true,
+					},
 					pageUrl: "http://localhost:4321/posts/admin-comments/",
 				},
 			],

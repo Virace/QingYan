@@ -60,6 +60,8 @@ describe("admin users", () => {
 				status: "approved",
 				authorName: "Alice",
 				authorEmail: "alice@example.com",
+				authorIp: "203.0.113.20",
+				authorUserAgent: "QingYan User Browser",
 				contentRaw: "hello 1",
 				contentHtml: "<p>hello 1</p>",
 				replyCount: 0,
@@ -113,6 +115,11 @@ describe("admin users", () => {
 					approvedCount: 1,
 					pageCount: 2,
 					siteCount: 1,
+					ips: ["203.0.113.20"],
+					userAgents: ["QingYan User Browser"],
+					blacklist: {
+						email: true,
+					},
 					isBlacklisted: true,
 				},
 			],
@@ -120,5 +127,60 @@ describe("admin users", () => {
 				totalCount: 1,
 			},
 		});
+	});
+
+	it("adds and removes email blacklist rules by target", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const createResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/blacklist",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				targetType: "email",
+				targetValue: "BLOCKED@example.com",
+				matchMode: "exact",
+				scope: "post",
+			},
+		});
+		expect(createResponse.statusCode).toBe(200);
+		expect(createResponse.json()).toMatchObject({
+			rule: {
+				targetType: "email",
+				targetValue: "blocked@example.com",
+				matchMode: "exact",
+			},
+		});
+
+		const deleteResponse = await fixture.app.inject({
+			method: "DELETE",
+			url: "/api/admin/blacklist/target",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				targetType: "email",
+				targetValue: "blocked@example.com",
+				matchMode: "exact",
+			},
+		});
+		expect(deleteResponse.statusCode).toBe(200);
+		expect(deleteResponse.json()).toMatchObject({
+			rules: [
+				{
+					targetType: "email",
+					targetValue: "blocked@example.com",
+				},
+			],
+		});
+
+		const rules = await fixture.app.db.select().from(blacklistRules);
+		expect(rules).toHaveLength(0);
 	});
 });

@@ -2,6 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+	createBlacklist,
+	createSite,
+	deleteBlacklistTarget,
 	deleteComment,
 	listComments,
 	listPages,
@@ -122,6 +125,40 @@ export function CommentsPage({
 		mutationFn: deleteComment,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
 	});
+	const createBlacklistMutation = useMutation({
+		mutationFn: createBlacklist,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const deleteBlacklistMutation = useMutation({
+		mutationFn: deleteBlacklistTarget,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const toggleCommentBlacklist = (input: {
+		targetType: "email" | "ip";
+		targetValue: string;
+		isBlacklisted: boolean;
+	}) => {
+		if (input.isBlacklisted) {
+			deleteBlacklistMutation.mutate({
+				siteKey,
+				targetType: input.targetType,
+				matchMode: "exact",
+				targetValue: input.targetValue,
+			});
+			return;
+		}
+
+		createBlacklistMutation.mutate({
+			siteKey,
+			targetType: input.targetType,
+			matchMode: "exact",
+			targetValue: input.targetValue,
+			scope: "post",
+			reason: "admin_quick_action",
+		});
+	};
+	const blacklistMutationPending =
+		createBlacklistMutation.isPending || deleteBlacklistMutation.isPending;
 
 	return (
 		<Card>
@@ -175,6 +212,20 @@ export function CommentsPage({
 											<p className="text-xs text-muted-foreground">
 												{comment.authorEmail ?? "-"}
 											</p>
+											<p className="text-xs text-muted-foreground">
+												IP {comment.authorIp ?? "-"}
+											</p>
+											<p className="max-w-48 truncate text-xs text-muted-foreground">
+												UA {comment.authorUserAgent ?? "-"}
+											</p>
+											<div className="mt-2 flex flex-wrap gap-1">
+												{comment.blacklist.email ? (
+													<Badge variant="destructive">邮箱黑名单</Badge>
+												) : null}
+												{comment.blacklist.ip ? (
+													<Badge variant="destructive">IP 黑名单</Badge>
+												) : null}
+											</div>
 										</td>
 										<td className="max-w-56 p-3">
 											<p className="truncate">{comment.pageTitle ?? "-"}</p>
@@ -232,6 +283,46 @@ export function CommentsPage({
 												>
 													{comment.isFolded ? "展开" : "折叠"}
 												</Button>
+												{comment.authorEmail ? (
+													<Button
+														type="button"
+														size="sm"
+														variant={
+															comment.blacklist.email
+																? "destructive"
+																: "outline"
+														}
+														disabled={blacklistMutationPending}
+														onClick={() =>
+															toggleCommentBlacklist({
+																targetType: "email",
+																targetValue: comment.authorEmail ?? "",
+																isBlacklisted: comment.blacklist.email,
+															})
+														}
+													>
+														{comment.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
+													</Button>
+												) : null}
+												{comment.authorIp ? (
+													<Button
+														type="button"
+														size="sm"
+														variant={
+															comment.blacklist.ip ? "destructive" : "outline"
+														}
+														disabled={blacklistMutationPending}
+														onClick={() =>
+															toggleCommentBlacklist({
+																targetType: "ip",
+																targetValue: comment.authorIp ?? "",
+																isBlacklisted: comment.blacklist.ip,
+															})
+														}
+													>
+														{comment.blacklist.ip ? "解除 IP" : "拉黑 IP"}
+													</Button>
+												) : null}
 												<Button
 													type="button"
 													size="sm"
@@ -322,10 +413,42 @@ export function UsersPage({
 	openComments: (input: { pageKey?: string; search?: string }) => void;
 }) {
 	const [search, setSearch] = useState("");
+	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: ["admin", "users", siteKey, search],
 		queryFn: () => listUsers({ siteKey, search, limit: 50, offset: 0 }),
 	});
+	const createBlacklistMutation = useMutation({
+		mutationFn: createBlacklist,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const deleteBlacklistMutation = useMutation({
+		mutationFn: deleteBlacklistTarget,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const toggleUserBlacklist = (input: {
+		targetValue: string;
+		isBlacklisted: boolean;
+	}) => {
+		if (input.isBlacklisted) {
+			deleteBlacklistMutation.mutate({
+				siteKey,
+				targetType: "email",
+				matchMode: "exact",
+				targetValue: input.targetValue,
+			});
+			return;
+		}
+
+		createBlacklistMutation.mutate({
+			siteKey,
+			targetType: "email",
+			matchMode: "exact",
+			targetValue: input.targetValue,
+			scope: "post",
+			reason: "admin_quick_action",
+		});
+	};
 
 	return (
 		<Card>
@@ -351,27 +474,56 @@ export function UsersPage({
 							{query.data?.items.map((user) => (
 								<tr key={user.email} className="border-t">
 									<td className="p-3">{user.email}</td>
-									<td className="p-3">{user.names.join(", ")}</td>
+									<td className="p-3">
+										<p>{user.names.join(", ")}</p>
+										<p className="text-xs text-muted-foreground">
+											IP {user.ips.join(", ") || "-"}
+										</p>
+										<p className="max-w-64 truncate text-xs text-muted-foreground">
+											UA {user.userAgents.join(" | ") || "-"}
+										</p>
+									</td>
 									<td className="p-3">
 										{user.commentCount}，待审 {user.pendingCount}
 									</td>
 									<td className="p-3">{user.pageCount}</td>
 									<td className="p-3">
-										{user.isBlacklisted ? (
+										{user.blacklist.email ? (
 											<Badge variant="destructive">黑名单</Badge>
 										) : (
 											<Badge variant="secondary">正常</Badge>
 										)}
 									</td>
 									<td className="p-3">
-										<Button
-											type="button"
-											size="sm"
-											variant="outline"
-											onClick={() => openComments({ search: user.email })}
-										>
-											查看评论
-										</Button>
+										<div className="flex flex-wrap gap-2">
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												onClick={() => openComments({ search: user.email })}
+											>
+												查看评论
+											</Button>
+											<Button
+												type="button"
+												size="sm"
+												variant={
+													user.blacklist.email ? "destructive" : "outline"
+												}
+												disabled={
+													createBlacklistMutation.isPending ||
+													deleteBlacklistMutation.isPending
+												}
+												onClick={() =>
+													toggleUserBlacklist({
+														targetValue: user.email,
+														isBlacklisted: user.blacklist.email,
+													})
+												}
+											>
+												{user.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
+											</Button>
+										</div>
 									</td>
 								</tr>
 							))}
@@ -391,10 +543,42 @@ export function VisitorsPage({
 	openComments: (input: { pageKey?: string; search?: string }) => void;
 }) {
 	const [search, setSearch] = useState("");
+	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: ["admin", "visitors", siteKey, search],
 		queryFn: () => listVisitors({ siteKey, search, limit: 50, offset: 0 }),
 	});
+	const createBlacklistMutation = useMutation({
+		mutationFn: createBlacklist,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const deleteBlacklistMutation = useMutation({
+		mutationFn: deleteBlacklistTarget,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const toggleVisitorBlacklist = (input: {
+		targetValue: string;
+		isBlacklisted: boolean;
+	}) => {
+		if (input.isBlacklisted) {
+			deleteBlacklistMutation.mutate({
+				siteKey,
+				targetType: "visitor",
+				matchMode: "exact",
+				targetValue: input.targetValue,
+			});
+			return;
+		}
+
+		createBlacklistMutation.mutate({
+			siteKey,
+			targetType: "visitor",
+			matchMode: "exact",
+			targetValue: input.targetValue,
+			scope: "post",
+			reason: "admin_quick_action",
+		});
+	};
 
 	return (
 		<Card>
@@ -413,12 +597,18 @@ export function VisitorsPage({
 									<p className="text-xs text-muted-foreground">
 										{visitor.emails.join(", ") || "无邮箱"}
 									</p>
+									<p className="text-xs text-muted-foreground">
+										IP {visitor.ips.join(", ") || "-"}
+									</p>
+									<p className="max-w-xl truncate text-xs text-muted-foreground">
+										UA {visitor.userAgents.join(" | ") || "-"}
+									</p>
 								</div>
 								<div className="flex flex-wrap gap-2">
 									<Badge variant="secondary">评论 {visitor.commentCount}</Badge>
 									<Badge variant="outline">页面 {visitor.pageCount}</Badge>
 									{visitor.blacklist.visitor ? (
-										<Badge variant="destructive">黑名单</Badge>
+										<Badge variant="destructive">访客黑名单</Badge>
 									) : null}
 									<Button
 										type="button"
@@ -427,6 +617,25 @@ export function VisitorsPage({
 										onClick={() => openComments({ search: visitor.visitorKey })}
 									>
 										查看评论
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant={
+											visitor.blacklist.visitor ? "destructive" : "outline"
+										}
+										disabled={
+											createBlacklistMutation.isPending ||
+											deleteBlacklistMutation.isPending
+										}
+										onClick={() =>
+											toggleVisitorBlacklist({
+												targetValue: visitor.visitorKey,
+												isBlacklisted: visitor.blacklist.visitor,
+											})
+										}
+									>
+										{visitor.blacklist.visitor ? "解除访客" : "拉黑访客"}
 									</Button>
 								</div>
 							</div>
@@ -446,68 +655,133 @@ export function SitesPage({
 }: {
 	openSite: (siteKey: string, view: AdminView) => void;
 }) {
+	const queryClient = useQueryClient();
+	const [siteKey, setSiteKey] = useState("");
+	const [name, setName] = useState("");
+	const [allowedOriginsText, setAllowedOriginsText] = useState("");
 	const query = useQuery({
 		queryKey: ["admin", "sites"],
 		queryFn: listSites,
 	});
+	const createMutation = useMutation({
+		mutationFn: createSite,
+		onSuccess: () => {
+			setSiteKey("");
+			setName("");
+			setAllowedOriginsText("");
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
+	});
+	const allowedOrigins = allowedOriginsText
+		.split(/\r?\n|,/)
+		.map((value) => value.trim())
+		.filter(Boolean);
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle className="text-lg">站点</CardTitle>
-				<CardDescription>配置站点和运行时摘要。</CardDescription>
-			</CardHeader>
-			<CardContent className="grid gap-3 md:grid-cols-2">
-				{query.data?.items.map((site) => (
-					<div key={site.siteKey} className="rounded-md border p-4">
-						<p className="font-medium">{site.name}</p>
-						<p className="text-xs text-muted-foreground">{site.siteKey}</p>
-						<div className="mt-3 flex flex-wrap gap-2">
-							<Badge variant="secondary">页面 {site.pageCount}</Badge>
-							<Badge variant="outline">评论 {site.commentCount}</Badge>
-							<Badge variant="outline">用户 {site.userCount}</Badge>
-							<Badge variant="outline">访客 {site.visitorCount}</Badge>
+		<div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-lg">新增站点</CardTitle>
+					<CardDescription>创建站点后可继续配置运行时参数。</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<form
+						className="flex flex-col gap-3"
+						onSubmit={(event) => {
+							event.preventDefault();
+							if (
+								!siteKey.trim() ||
+								!name.trim() ||
+								allowedOrigins.length === 0
+							) {
+								return;
+							}
+							createMutation.mutate({
+								siteKey: siteKey.trim(),
+								name: name.trim(),
+								allowedOrigins,
+							});
+						}}
+					>
+						<Input
+							placeholder="siteKey"
+							value={siteKey}
+							onChange={(event) => setSiteKey(event.target.value)}
+						/>
+						<Input
+							placeholder="站点名称"
+							value={name}
+							onChange={(event) => setName(event.target.value)}
+						/>
+						<textarea
+							className={`${inputClass} min-h-24`}
+							placeholder="允许来源，每行一个 URL"
+							value={allowedOriginsText}
+							onChange={(event) => setAllowedOriginsText(event.target.value)}
+						/>
+						<Button type="submit" disabled={createMutation.isPending}>
+							创建站点
+						</Button>
+					</form>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-lg">站点</CardTitle>
+					<CardDescription>配置站点和运行时摘要。</CardDescription>
+				</CardHeader>
+				<CardContent className="grid gap-3 md:grid-cols-2">
+					{query.data?.items.map((site) => (
+						<div key={site.siteKey} className="rounded-md border p-4">
+							<p className="font-medium">{site.name}</p>
+							<p className="text-xs text-muted-foreground">{site.siteKey}</p>
+							<div className="mt-3 flex flex-wrap gap-2">
+								<Badge variant="secondary">页面 {site.pageCount}</Badge>
+								<Badge variant="outline">评论 {site.commentCount}</Badge>
+								<Badge variant="outline">用户 {site.userCount}</Badge>
+								<Badge variant="outline">访客 {site.visitorCount}</Badge>
+							</div>
+							<p className="mt-3 text-xs text-muted-foreground">
+								{site.allowedOrigins.join(", ")}
+							</p>
+							<div className="mt-4 flex flex-wrap gap-2">
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "settings")}
+								>
+									运行时设置
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "pages")}
+								>
+									页面
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "users")}
+								>
+									用户
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "visitors")}
+								>
+									访客
+								</Button>
+							</div>
 						</div>
-						<p className="mt-3 text-xs text-muted-foreground">
-							{site.allowedOrigins.join(", ")}
-						</p>
-						<div className="mt-4 flex flex-wrap gap-2">
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								onClick={() => openSite(site.siteKey, "settings")}
-							>
-								运行时设置
-							</Button>
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								onClick={() => openSite(site.siteKey, "pages")}
-							>
-								页面
-							</Button>
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								onClick={() => openSite(site.siteKey, "users")}
-							>
-								用户
-							</Button>
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								onClick={() => openSite(site.siteKey, "visitors")}
-							>
-								访客
-							</Button>
-						</div>
-					</div>
-				))}
-			</CardContent>
-		</Card>
+					))}
+				</CardContent>
+			</Card>
+		</div>
 	);
 }

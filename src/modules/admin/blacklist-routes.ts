@@ -7,6 +7,7 @@ import {
 	adminBlacklistBodySchema,
 	adminBlacklistParamsSchema,
 	adminBlacklistQuerySchema,
+	adminBlacklistTargetBodySchema,
 } from "./schemas";
 import { AdminSessionService } from "./session-service";
 
@@ -49,6 +50,23 @@ export const adminBlacklistRoutes: FastifyPluginAsync = async (fastify) => {
 
 		return {
 			rule: await service.createBlacklist({
+				...parsed.data,
+				requestId: request.context?.requestId,
+			}),
+		};
+	});
+
+	fastify.delete("/target", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = adminBlacklistTargetBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+
+		return {
+			rules: await service.deleteBlacklistTarget({
 				...parsed.data,
 				requestId: request.context?.requestId,
 			}),

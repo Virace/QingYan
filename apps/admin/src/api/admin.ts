@@ -15,6 +15,12 @@ export interface AdminComment {
 	status: "pending" | "approved";
 	authorName: string;
 	authorEmail: string | null;
+	authorIp: string | null;
+	authorUserAgent: string | null;
+	blacklist: {
+		email: boolean;
+		ip: boolean;
+	};
 	contentRaw: string;
 	isPinned: boolean;
 	isFolded: boolean;
@@ -50,6 +56,11 @@ export interface AdminUser {
 	lastCommentAt: string | null;
 	pageCount: number;
 	siteCount: number;
+	ips: string[];
+	userAgents: string[];
+	blacklist: {
+		email: boolean;
+	};
 	isBlacklisted: boolean;
 }
 
@@ -62,9 +73,10 @@ export interface AdminVisitor {
 	pageCount: number;
 	emailCount: number;
 	emails: string[];
+	ips: string[];
+	userAgents: string[];
 	blacklist: {
 		visitor: boolean;
-		ip: boolean | null;
 	};
 }
 
@@ -288,8 +300,34 @@ export function deleteBlacklist(ruleId: number) {
 	);
 }
 
+export function deleteBlacklistTarget(input: {
+	siteKey?: string;
+	targetType: "ip" | "email" | "visitor";
+	matchMode: "exact" | "cidr" | "wildcard";
+	targetValue: string;
+}) {
+	return requestJson<{ rules: AdminBlacklistRule[] }>(
+		"/api/admin/blacklist/target",
+		{
+			method: "DELETE",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
 export function listSites() {
 	return requestJson<{ items: AdminSite[] }>("/api/admin/sites");
+}
+
+export function createSite(input: {
+	siteKey: string;
+	name: string;
+	allowedOrigins: string[];
+}) {
+	return requestJson<{ items: AdminSite[] }>("/api/admin/sites", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
 }
 
 export function getSettings(siteKey: string) {
