@@ -920,6 +920,38 @@ components:
           type: string
         html:
           type: string
+    CommentDisplayLocation:
+      type: object
+      required: [label, precision]
+      properties:
+        label:
+          type: string
+        precision:
+          type: string
+          enum: [country, province, city]
+    CommentDisplayDevice:
+      type: object
+      required: [browser, os, type, icon]
+      properties:
+        browser:
+          type: string
+          enum: [chrome, edge, firefox, safari, opera, samsung, wechat, unknown]
+        os:
+          type: string
+          enum: [windows, macos, ios, android, linux, unknown]
+        type:
+          type: string
+          enum: [desktop, mobile, tablet, bot, unknown]
+        icon:
+          type: string
+          enum: [chrome, edge, firefox, safari, android, apple, windows, linux, bot, unknown]
+    CommentDisplayMeta:
+      type: object
+      properties:
+        location:
+          $ref: '#/components/schemas/CommentDisplayLocation'
+        device:
+          $ref: '#/components/schemas/CommentDisplayDevice'
     PublicComment:
       type: object
       required:
@@ -948,6 +980,8 @@ components:
           $ref: '#/components/schemas/CommentAuthor'
         content:
           $ref: '#/components/schemas/CommentContent'
+        displayMeta:
+          $ref: '#/components/schemas/CommentDisplayMeta'
         status:
           type: string
           enum: [pending, approved]
@@ -1615,6 +1649,25 @@ components:
         - authorEmail
         - authorEmailHash
         - authorWebsite
+        - authorIp
+        - authorUserAgent
+        - authorIpCountry
+        - authorIpRegion
+        - authorIpCity
+        - authorIpIsp
+        - authorIpLocationRaw
+        - authorIpLocationSource
+        - authorIpLocationDbHash
+        - authorIpLocationUpdatedAt
+        - authorIpLocationError
+        - authorDeviceBrowser
+        - authorDeviceOs
+        - authorDeviceType
+        - authorDeviceIcon
+        - authorDeviceSource
+        - authorDeviceParserVersion
+        - authorDeviceUpdatedAt
+        - authorDeviceError
         - contentRaw
         - contentHtml
         - isPinned
@@ -1658,6 +1711,82 @@ components:
             - string
             - 'null'
           format: uri
+        authorIp:
+          type:
+            - string
+            - 'null'
+        authorUserAgent:
+          type:
+            - string
+            - 'null'
+        authorIpCountry:
+          type:
+            - string
+            - 'null'
+        authorIpRegion:
+          type:
+            - string
+            - 'null'
+        authorIpCity:
+          type:
+            - string
+            - 'null'
+        authorIpIsp:
+          type:
+            - string
+            - 'null'
+        authorIpLocationRaw:
+          type:
+            - string
+            - 'null'
+        authorIpLocationSource:
+          type:
+            - string
+            - 'null'
+        authorIpLocationDbHash:
+          type:
+            - string
+            - 'null'
+        authorIpLocationUpdatedAt:
+          type:
+            - string
+            - 'null'
+        authorIpLocationError:
+          type:
+            - string
+            - 'null'
+        authorDeviceBrowser:
+          type:
+            - string
+            - 'null'
+        authorDeviceOs:
+          type:
+            - string
+            - 'null'
+        authorDeviceType:
+          type:
+            - string
+            - 'null'
+        authorDeviceIcon:
+          type:
+            - string
+            - 'null'
+        authorDeviceSource:
+          type:
+            - string
+            - 'null'
+        authorDeviceParserVersion:
+          type:
+            - string
+            - 'null'
+        authorDeviceUpdatedAt:
+          type:
+            - string
+            - 'null'
+        authorDeviceError:
+          type:
+            - string
+            - 'null'
         contentRaw:
           type: string
         contentHtml:

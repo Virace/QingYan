@@ -124,6 +124,9 @@ describe("initial migration", () => {
 		const fixture = createMigratedDatabase();
 
 		try {
+			const commentsColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(comments)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const runtimeSettingsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(runtime_settings)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -137,6 +140,29 @@ describe("initial migration", () => {
 				.prepare("PRAGMA table_info(blacklist_rules)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
 
+			expect(commentsColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"author_ip",
+					"author_user_agent",
+					"author_ip_country",
+					"author_ip_region",
+					"author_ip_city",
+					"author_ip_isp",
+					"author_ip_location_raw",
+					"author_ip_location_source",
+					"author_ip_location_db_hash",
+					"author_ip_location_updated_at",
+					"author_ip_location_error",
+					"author_device_browser",
+					"author_device_os",
+					"author_device_type",
+					"author_device_icon",
+					"author_device_source",
+					"author_device_parser_version",
+					"author_device_updated_at",
+					"author_device_error",
+				]),
+			);
 			expect(runtimeSettingsColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
 					"comment_require_json",
@@ -179,6 +205,61 @@ describe("initial migration", () => {
 				blacklistRuleColumns.find((column) => column.name === "scope")
 					?.dflt_value,
 			).toBe("'post'");
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+	it("applies comment request metadata state tables", () => {
+		const fixture = createMigratedDatabase();
+
+		try {
+			const stateColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(ip_region_database_state)")
+				.all() as Array<{ name: string }>;
+			const updateRunColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(ip_region_update_runs)")
+				.all() as Array<{ name: string }>;
+			const indexes = fixture.sqlite
+				.prepare("PRAGMA index_list(ip_region_database_state)")
+				.all() as Array<{ name: string; unique: number }>;
+
+			expect(stateColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"ip_version",
+					"file_path",
+					"file_hash",
+					"source_url",
+					"cache_policy",
+					"activated_at",
+					"updated_at",
+				]),
+			);
+			expect(updateRunColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"ip_version",
+					"source_url",
+					"status",
+					"previous_hash",
+					"next_hash",
+					"downloaded_at",
+					"activated_at",
+					"refreshed_comments",
+					"error_message",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(indexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "ip_region_database_state_version_idx",
+						unique: 1,
+					}),
+				]),
+			);
 		} finally {
 			fixture.cleanup();
 		}

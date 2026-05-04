@@ -10,6 +10,7 @@ import {
 	voteRecords,
 } from "../../db/schema";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
+import type { CommentMetadataSnapshot } from "./metadata/resolver";
 
 export type CaptchaAction = "comment_create" | "comment_vote" | "page_like";
 
@@ -118,6 +119,9 @@ export class CommentsWriteRepository {
 		authorName: string;
 		authorEmail?: string;
 		authorWebsite?: string;
+		authorIp?: string;
+		authorUserAgent?: string;
+		metadata?: CommentMetadataSnapshot;
 		contentRaw: string;
 		status: "pending" | "approved";
 	}) {
@@ -134,6 +138,25 @@ export class CommentsWriteRepository {
 			authorEmail: input.authorEmail,
 			authorEmailHash: hashCommentEmail(input.authorEmail),
 			authorWebsite: input.authorWebsite,
+			authorIp: input.authorIp,
+			authorUserAgent: input.authorUserAgent,
+			authorIpCountry: input.metadata?.authorIpCountry,
+			authorIpRegion: input.metadata?.authorIpRegion,
+			authorIpCity: input.metadata?.authorIpCity,
+			authorIpIsp: input.metadata?.authorIpIsp,
+			authorIpLocationRaw: input.metadata?.authorIpLocationRaw,
+			authorIpLocationSource: input.metadata?.authorIpLocationSource,
+			authorIpLocationDbHash: input.metadata?.authorIpLocationDbHash,
+			authorIpLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
+			authorIpLocationError: input.metadata?.authorIpLocationError,
+			authorDeviceBrowser: input.metadata?.authorDeviceBrowser,
+			authorDeviceOs: input.metadata?.authorDeviceOs,
+			authorDeviceType: input.metadata?.authorDeviceType,
+			authorDeviceIcon: input.metadata?.authorDeviceIcon,
+			authorDeviceSource: input.metadata?.authorDeviceSource,
+			authorDeviceParserVersion: input.metadata?.authorDeviceParserVersion,
+			authorDeviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
+			authorDeviceError: input.metadata?.authorDeviceError,
 			contentRaw: input.contentRaw,
 			contentHtml: renderCommentHtml(input.contentRaw),
 			replyCount: 0,

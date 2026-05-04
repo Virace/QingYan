@@ -30,6 +30,20 @@ function buildCapability(
 	};
 }
 
+function buildCommentDisplayOptions(site: SiteConfig) {
+	const metadata = site.defaults.comments.metadata;
+
+	return {
+		location: {
+			enabled: metadata.ipRegion.enabled,
+			precision: metadata.ipRegion.precision,
+		},
+		device: {
+			enabled: metadata.device.enabled && metadata.device.display.enabled,
+		},
+	};
+}
+
 export interface BootstrapInput {
 	siteKey: string;
 	pageKey: string;
@@ -131,6 +145,7 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
+			commentDisplay: buildCommentDisplayOptions(configuredSite),
 			pageMetrics: {
 				pageViewCount: refreshedThread.pageViewCount,
 			},
@@ -153,7 +168,8 @@ export class CommentsService {
 
 	public async getThread(input: BootstrapInput) {
 		const site = this.repository.getRegisteredSite(input.siteKey);
-		if (!site) {
+		const configuredSite = this.repository.getConfiguredSite(input.siteKey);
+		if (!site || !configuredSite) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -188,6 +204,7 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
+			commentDisplay: buildCommentDisplayOptions(configuredSite),
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 		};
 	}

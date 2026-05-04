@@ -167,11 +167,120 @@ describe("GET /api/comments/bootstrap", () => {
 			id: "c_root",
 			viewerVote: "up",
 		});
+		expect(payload.comments[0].displayMeta).toBeUndefined();
 		expect(payload.comments[0].children).toHaveLength(1);
 		expect(payload.comments[0].children[0]).toMatchObject({
 			id: "c_child",
 			parentId: "c_root",
 		});
+	});
+
+	it("returns configured display metadata without raw request metadata", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				const metadata = config.sites[0]?.defaults.comments.metadata;
+				if (!metadata) {
+					throw new Error("Expected metadata config to exist");
+				}
+				metadata.ipRegion.enabled = true;
+				metadata.ipRegion.precision = "city";
+				metadata.device.display.enabled = true;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_metadata",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_metadata"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:metadata-display",
+			pageTitle: "Metadata Display",
+			pageUrl: "/posts/metadata-display/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:metadata-display"));
+		if (!pageThread) {
+			throw new Error("Expected page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_metadata",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			status: "approved",
+			authorName: "Alice",
+			authorIp: "203.0.113.8",
+			authorUserAgent: "Mozilla/5.0 metadata-test",
+			authorIpCountry: "中国",
+			authorIpRegion: "广东省",
+			authorIpCity: "深圳市",
+			authorIpLocationRaw: "中国|广东省|深圳市|移动|CN",
+			authorDeviceBrowser: "chrome",
+			authorDeviceOs: "windows",
+			authorDeviceType: "desktop",
+			authorDeviceIcon: "chrome",
+			contentRaw: "metadata",
+			contentHtml: "<p>metadata</p>",
+			replyCount: 0,
+			voteUpCount: 0,
+			voteDownCount: 0,
+			createdAt: "2026-05-05T10:00:00.000Z",
+			updatedAt: "2026-05-05T10:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:metadata-display&pageTitle=Metadata&pageUrl=https://fangyuan.example.com/posts/metadata-display/",
+			cookies: {
+				qingyan_visitor: "viewer_metadata",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const payload = response.json();
+		expect(payload.comments[0]).toMatchObject({
+			id: "c_metadata",
+			displayMeta: {
+				location: {
+					label: "广东深圳",
+					precision: "city",
+				},
+				device: {
+					browser: "chrome",
+					os: "windows",
+					type: "desktop",
+					icon: "chrome",
+				},
+			},
+		});
+		const publicBody = JSON.stringify(payload);
+		expect(publicBody).not.toContain("203.0.113.8");
+		expect(publicBody).not.toContain("Mozilla/5.0 metadata-test");
+		expect(publicBody).not.toContain("中国|广东省|深圳市|移动|CN");
 	});
 
 	it("inlines captcha challenge in bootstrap when captcha mode is always", async () => {

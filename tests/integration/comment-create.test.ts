@@ -205,6 +205,164 @@ describe("POST /api/comments", () => {
 		expect(thread?.pageUrl).toBe("/posts/path-only-comment/");
 	});
 
+	it("stores request ip and user agent without exposing them in the public response", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(runtimeSettings).set({
+			captchaMode: "never",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			headers: {
+				"user-agent": "Mozilla/5.0 metadata-test",
+				"x-forwarded-for": "203.0.113.8",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:request-metadata",
+				pageTitle: "Request Metadata",
+				pageUrl: "https://fangyuan.example.com/posts/request-metadata/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "request metadata",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "request metadata"));
+		expect(comment?.authorIp).toBe("203.0.113.8");
+		expect(comment?.authorUserAgent).toBe("Mozilla/5.0 metadata-test");
+		expect(comment?.authorDeviceSource).toBe("ua-parser-js");
+		expect(comment?.authorDeviceError).toBeNull();
+		const publicBody = JSON.stringify(response.json());
+		expect(publicBody).not.toContain("203.0.113.8");
+		expect(publicBody).not.toContain("Mozilla/5.0 metadata-test");
+	});
+
+	it("honors raw request metadata collection switches", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+				const metadata = config.sites[0]?.defaults.comments.metadata;
+				if (!metadata) {
+					throw new Error("Expected metadata config to exist");
+				}
+				metadata.collectIp = false;
+				metadata.collectUserAgent = false;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(runtimeSettings).set({
+			captchaMode: "never",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			headers: {
+				"user-agent": "Mozilla/5.0 disabled-metadata-test",
+				"x-forwarded-for": "203.0.113.9",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:request-metadata-disabled",
+				pageTitle: "Request Metadata Disabled",
+				pageUrl:
+					"https://fangyuan.example.com/posts/request-metadata-disabled/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "request metadata disabled",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "request metadata disabled"));
+		expect(comment?.authorIp).toBeNull();
+		expect(comment?.authorUserAgent).toBeNull();
+		expect(comment?.authorDeviceSource).toBeNull();
+	});
+
+	it("keeps comment creation available when ip region database is missing", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+				const metadata = config.sites[0]?.defaults.comments.metadata;
+				if (!metadata) {
+					throw new Error("Expected metadata config to exist");
+				}
+				metadata.ipRegion.enabled = true;
+				metadata.ipRegion.ipv4.dbPath = "./data/missing-ip2region-v4.xdb";
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(runtimeSettings).set({
+			captchaMode: "never",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			headers: {
+				"user-agent": "Mozilla/5.0 metadata-test",
+				"x-forwarded-for": "203.0.113.10",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:missing-region-db",
+				pageTitle: "Missing Region DB",
+				pageUrl: "https://fangyuan.example.com/posts/missing-region-db/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "missing region db",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "missing region db"));
+		expect(comment?.authorIp).toBe("203.0.113.10");
+		expect(comment?.authorIpLocationError).toBe("xdb_not_found");
+		expect(comment?.authorIpCountry).toBeNull();
+	});
+
 	it("requires captcha on the third write attempt in threshold mode", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

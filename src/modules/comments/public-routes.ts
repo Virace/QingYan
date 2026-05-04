@@ -15,6 +15,7 @@ import {
 } from "./schemas";
 import { CommentsService } from "./service";
 import { CaptchaService } from "./captcha-service";
+import { DefaultCommentMetadataResolver } from "./metadata/resolver";
 import { CommentsWriteRepository } from "./write-repository";
 import { CommentsWriteService } from "./write-service";
 
@@ -30,6 +31,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		readRepository,
 		writeRepository,
 	);
+	const metadataResolver = new DefaultCommentMetadataResolver();
+	fastify.addHook("onClose", async () => {
+		metadataResolver.close();
+	});
 	const readService = new CommentsService(readRepository, captchaService);
 	const writeService = new CommentsWriteService(
 		fastify.config,
@@ -37,6 +42,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		readRepository,
 		writeRepository,
 		captchaService,
+		metadataResolver,
 	);
 
 	fastify.get("/comments/bootstrap", async (request, reply) => {
@@ -89,6 +95,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			comments: presentComments(
 				result.commentBundle.comments,
 				result.commentBundle.viewerVoteMap,
+				result.commentDisplay,
 			),
 			pageMetrics: result.pageMetrics,
 			pageFeedback: result.pageFeedback,
@@ -146,6 +153,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			comments: presentComments(
 				result.commentBundle.comments,
 				result.commentBundle.viewerVoteMap,
+				result.commentDisplay,
 			),
 		};
 	});

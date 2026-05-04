@@ -1,4 +1,5 @@
 export * from "./captcha";
+export * from "./comment-metadata";
 export * from "./comments";
 export * from "./engagement";
 export * from "./page-threads";

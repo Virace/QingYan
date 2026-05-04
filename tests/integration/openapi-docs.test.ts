@@ -35,6 +35,8 @@ describe("openapi docs", () => {
 		expect(yaml.body).toContain("/api/comments/captcha/widget");
 		expect(yaml.body).toContain("/api/comments/captcha/complete");
 		expect(yaml.body).toContain("iframe_widget");
+		expect(yaml.body).toContain("CommentDisplayMeta");
+		expect(yaml.body).toContain("authorUserAgent");
 
 		expect(json.statusCode).toBe(200);
 		expect(json.json()).toMatchObject({

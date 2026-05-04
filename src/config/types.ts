@@ -45,6 +45,68 @@ const commentsAbuseGuardDefaultsSchema = z.object({
 	autoBlacklist: commentsAutoBlacklistDefaultsSchema,
 });
 
+const ipRegionSourceDefaults = [
+	"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+	"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb",
+];
+const ipv6RegionSourceDefaults = [
+	"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb",
+	"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v6.xdb",
+];
+
+const commentsMetadataSchema = z.preprocess(
+	(value) => value ?? {},
+	z.object({
+		collectIp: z.boolean().default(true),
+		collectUserAgent: z.boolean().default(true),
+		ipRegion: z.preprocess(
+			(value) => value ?? {},
+			z.object({
+				enabled: z.boolean().default(false),
+				cachePolicy: z
+					.enum(["file", "vectorIndex", "content"])
+					.default("vectorIndex"),
+				precision: z.enum(["country", "province", "city"]).default("province"),
+				autoUpdate: z.preprocess(
+					(value) => value ?? {},
+					z.object({
+						enabled: z.boolean().default(false),
+						schedule: z.literal("monthly").default("monthly"),
+					}),
+				),
+				ipv4: z.preprocess(
+					(value) => value ?? {},
+					z.object({
+						dbPath: z.string().min(1).default("./data/ip2region_v4.xdb"),
+						sources: z.array(z.string().url()).default(ipRegionSourceDefaults),
+					}),
+				),
+				ipv6: z.preprocess(
+					(value) => value ?? {},
+					z.object({
+						dbPath: z.string().min(1).default("./data/ip2region_v6.xdb"),
+						sources: z
+							.array(z.string().url())
+							.default(ipv6RegionSourceDefaults),
+					}),
+				),
+			}),
+		),
+		device: z.preprocess(
+			(value) => value ?? {},
+			z.object({
+				enabled: z.boolean().default(true),
+				display: z.preprocess(
+					(value) => value ?? {},
+					z.object({
+						enabled: z.boolean().default(false),
+					}),
+				),
+			}),
+		),
+	}),
+);
+
 const commentsDefaultsSchema = z.object({
 	enabled: z.boolean(),
 	defaultStatus: z.enum(["pending", "approved"]),
@@ -53,6 +115,7 @@ const commentsDefaultsSchema = z.object({
 	identity: commentsIdentitySchema,
 	captcha: commentsCaptchaDefaultsSchema,
 	abuseGuard: commentsAbuseGuardDefaultsSchema,
+	metadata: commentsMetadataSchema,
 	allowWebsite: z.boolean().default(true),
 });
 

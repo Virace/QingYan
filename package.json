@@ -10,7 +10,8 @@
 	"pnpm": {
 		"onlyBuiltDependencies": [
 			"better-sqlite3",
-			"esbuild"
+			"esbuild",
+			"ts-ip2region2"
 		]
 	},
 	"scripts": {
@@ -27,6 +28,7 @@
 		"test": "vitest run --config vitest.config.ts",
 		"config:check": "tsx src/config/check-config.ts config/qingyan.example.yml",
 		"config:check:local": "tsx src/config/check-config.ts",
+		"ip-region:update": "tsx scripts/ip-region.ts update",
 		"wp-comments": "tsx scripts/wp-comments.ts",
 		"wp-comments:analyze": "tsx scripts/wp-comments.ts analyze",
 		"wp-comments:convert": "tsx scripts/wp-comments.ts convert",
@@ -41,6 +43,8 @@
 		"fast-xml-parser": "^5.7.2",
 		"fastify": "^5.8.5",
 		"fastify-plugin": "^5.1.0",
+		"ts-ip2region2": "^1.5.0",
+		"ua-parser-js": "^2.0.9",
 		"yaml": "^2.8.3",
 		"zod": "^4.3.6"
 	},
@@ -49,6 +53,7 @@
 		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^25.6.0",
 		"drizzle-kit": "^0.31.10",
+		"node-gyp": "^12.3.0",
 		"tsx": "^4.21.0",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.4"

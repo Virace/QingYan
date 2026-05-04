@@ -88,7 +88,7 @@ server:
 - `host`: Fastify 监听地址
 - `port`: Fastify 监听端口
 - `publicBaseUrl`: 对外公开基础地址，文档和部署入口应与实际网关一致
-- `trustProxy`: 部署在反向代理后时设为 `true`
+- `trustProxy`: 部署在反向代理后时设为 `true`。如果 QingYan 部署在 CDN、Nginx 或 Docker 反向代理后，必须正确配置该项或等价真实 IP 解析策略，否则评论 IP 属地可能显示代理、网关或 Docker 网桥地址
 
 ### `database`
 
@@ -279,6 +279,30 @@ sites:
             enabled: true
             scope: post
             ttlSec: 1800
+        metadata:
+          collectIp: true
+          collectUserAgent: true
+          ipRegion:
+            enabled: false
+            cachePolicy: vectorIndex
+            precision: province
+            autoUpdate:
+              enabled: false
+              schedule: monthly
+            ipv4:
+              dbPath: ./data/ip2region_v4.xdb
+              sources:
+                - https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb
+                - https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb
+            ipv6:
+              dbPath: ./data/ip2region_v6.xdb
+              sources:
+                - https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb
+                - https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v6.xdb
+          device:
+            enabled: true
+            display:
+              enabled: false
         allowWebsite: true
       pageFeedback:
         allowLike: true
@@ -306,9 +330,30 @@ sites:
 - `defaults.comments.abuseGuard.autoBlacklist.enabled`: 是否自动拉黑
 - `defaults.comments.abuseGuard.autoBlacklist.scope`: `post | all`
 - `defaults.comments.abuseGuard.autoBlacklist.ttlSec`: 自动黑名单有效期
+- `defaults.comments.metadata.collectIp`: 评论写入时是否采集 raw IP，默认 `true`
+- `defaults.comments.metadata.collectUserAgent`: 评论写入时是否采集 raw `User-Agent`，默认 `true`
+- `defaults.comments.metadata.ipRegion.enabled`: 是否启用 IP 属地快照和公开属地展示，默认 `false`
+- `defaults.comments.metadata.ipRegion.cachePolicy`: xdb 查询缓存策略，允许 `file | vectorIndex | content`，默认 `vectorIndex`
+- `defaults.comments.metadata.ipRegion.precision`: 公开属地展示精度，允许 `country | province | city`，默认 `province`
+- `defaults.comments.metadata.ipRegion.autoUpdate.enabled`: 是否启用 xdb 自动更新，默认 `false`
+- `defaults.comments.metadata.ipRegion.autoUpdate.schedule`: 自动更新频率，当前支持 `monthly`
+- `defaults.comments.metadata.ipRegion.ipv4.dbPath` / `ipv6.dbPath`: 本地 xdb 文件路径
+- `defaults.comments.metadata.ipRegion.ipv4.sources` / `ipv6.sources`: xdb 下载源列表，按顺序 fallback
+- `defaults.comments.metadata.device.enabled`: 是否启用设备快照解析，默认 `true`
+- `defaults.comments.metadata.device.display.enabled`: 是否在公开评论接口展示设备信息，默认 `false`
 - `defaults.comments.allowWebsite`: 是否允许评论作者提交个人网站
 - `defaults.pageFeedback.allowLike`: 是否允许页面点赞
 - `defaults.notifications.emailEnabled`: 是否启用邮件通知开关
+
+评论请求环境信息属于用户信息收集。站点应在评论区或隐私说明中声明：提交评论时，本站会记录必要的请求环境信息，包括 IP 地址和浏览器 User-Agent，用于反垃圾、滥用排查、IP 属地与设备类型展示。公开页面不会展示完整 IP 地址或完整 User-Agent。启用 IP 属地展示时，还应说明公开页面可能展示经过处理的 IP 属地，例如国家、省份或城市，具体精度由站点配置决定。
+
+IP 属地 xdb 可以手动更新：
+
+```bash
+pnpm ip-region:update
+```
+
+该命令会按配置的 IPv4 / IPv6 sources 顺序下载，校验通过后激活本地 xdb，并刷新已有 raw IP 且 hash 过期的历史评论。若 `metadata.ipRegion.autoUpdate.enabled` 为 `true`，服务运行时会按 `monthly` 语义在每月 1 日 04:00 自动执行同样的更新流程；下载、校验或刷新失败不会阻塞评论写入主链路。
 
 ## 公开评论验证码调用流程
 

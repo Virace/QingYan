@@ -4,6 +4,7 @@ import type { SecurityToolkit } from "../../plugins/security";
 import type { CommentsRepository } from "./repository";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
+import type { CommentMetadataResolver } from "./metadata/resolver";
 import type { CommentsWriteRepository } from "./write-repository";
 
 function resolveIdentity(
@@ -21,6 +22,7 @@ export class CommentsWriteService {
 		private readonly readRepository: CommentsRepository,
 		private readonly writeRepository: CommentsWriteRepository,
 		private readonly captchaService: CaptchaService,
+		private readonly metadataResolver?: CommentMetadataResolver,
 	) {}
 
 	public async createComment(input: {
@@ -148,6 +150,16 @@ export class CommentsWriteService {
 
 		const status = (settings?.defaultStatus ??
 			configuredSite.defaults.comments.defaultStatus) as "pending" | "approved";
+		const metadataConfig = configuredSite.defaults.comments.metadata;
+		const requestMetadata = this.metadataResolver
+			? await this.metadataResolver.resolve({
+					ip: metadataConfig.collectIp ? input.ip : undefined,
+					userAgent: metadataConfig.collectUserAgent
+						? input.userAgent
+						: undefined,
+					metadata: metadataConfig,
+				})
+			: undefined;
 		const created = await this.writeRepository.createComment({
 			siteId: site.id,
 			pageThreadId: thread.id,
@@ -158,6 +170,11 @@ export class CommentsWriteService {
 			authorWebsite: commentForm.allow.includes("website")
 				? authorWebsite
 				: undefined,
+			authorIp: metadataConfig.collectIp ? input.ip : undefined,
+			authorUserAgent: metadataConfig.collectUserAgent
+				? input.userAgent
+				: undefined,
+			metadata: requestMetadata,
 			contentRaw: input.contentRaw,
 			status,
 		});
