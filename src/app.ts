@@ -4,6 +4,8 @@ import type { AppRuntimeOptions } from "./config/runtime-options";
 import type { AppConfig } from "./config/types";
 import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
+import { createPasswordHash } from "./modules/admin/password-hash";
+import { adminOverviewRoutes } from "./modules/admin/overview-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSettingsRoutes } from "./modules/admin/settings-routes";
@@ -77,9 +79,7 @@ export async function buildApp(
 	app.decorate("runtimeOptions", runtimeOptions);
 	app.decorate(
 		"siteRegistry",
-		createSiteRegistry(devDefaultSite ? [devDefaultSite] : config.sites, {
-			runtimeOnlySiteKeys: devDefaultSite ? [devDefaultSite.siteKey] : [],
-		}),
+		createSiteRegistry(devDefaultSite ? [devDefaultSite] : config.sites),
 	);
 
 	app.setErrorHandler((error, request, reply) => {
@@ -146,6 +146,14 @@ export async function buildApp(
 		const devMockService = new DevMockService(devDefaultSite);
 		app.decorate("devMockService", devMockService);
 		app.decorate("loggerManager", createMemoryLoggerManager(config));
+		app.decorate("adminBootstrap", {
+			consolePath: config.admin.console.path ?? "/admin",
+			username: runtimeOptions.devMode.adminUsername ?? "admin",
+			passwordHash: createPasswordHash(
+				runtimeOptions.devMode.adminPassword ?? "admin",
+			),
+			generatedPassword: runtimeOptions.devMode.adminPassword ?? "admin",
+		});
 		await app.register(requestContextPlugin);
 		registerBaseRoutes(app, openApi);
 		await app.register(adminUiRoutes);
@@ -173,6 +181,7 @@ export async function buildApp(
 		registerDatabaseDevRoutes(app, runtimeOptions);
 	}
 
+	await app.register(adminOverviewRoutes, { prefix: "/api/admin/overview" });
 	await app.register(commentsPublicRoutes, { prefix: "/api" });
 	await app.register(pageFeedbackPublicRoutes, { prefix: "/api" });
 	await app.register(commentsAdminRoutes, { prefix: "/api/admin/comments" });

@@ -1,3 +1,4 @@
+export * from "./admin-bootstrap";
 export * from "./captcha";
 export * from "./comment-metadata";
 export * from "./comments";

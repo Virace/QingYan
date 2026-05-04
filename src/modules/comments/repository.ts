@@ -32,6 +32,8 @@ export interface ThreadRecordInput {
 	pageUrl?: string;
 }
 
+type CommentMetadataSettings = SiteConfig["defaults"]["comments"]["metadata"];
+
 export interface PublicCommentsQueryInput {
 	pageThreadId: number;
 	sortBy: "newest" | "oldest";
@@ -78,6 +80,51 @@ export class CommentsRepository {
 			.limit(1);
 
 		return settings;
+	}
+
+	public resolveCommentMetadata(
+		site: SiteConfig,
+		settings?: { commentMetadataJson: string | null },
+	): CommentMetadataSettings {
+		if (!settings?.commentMetadataJson) {
+			return site.defaults.comments.metadata;
+		}
+
+		try {
+			const parsed = JSON.parse(
+				settings.commentMetadataJson,
+			) as Partial<CommentMetadataSettings>;
+			return {
+				...site.defaults.comments.metadata,
+				...parsed,
+				ipRegion: {
+					...site.defaults.comments.metadata.ipRegion,
+					...parsed.ipRegion,
+					autoUpdate: {
+						...site.defaults.comments.metadata.ipRegion.autoUpdate,
+						...parsed.ipRegion?.autoUpdate,
+					},
+					ipv4: {
+						...site.defaults.comments.metadata.ipRegion.ipv4,
+						...parsed.ipRegion?.ipv4,
+					},
+					ipv6: {
+						...site.defaults.comments.metadata.ipRegion.ipv6,
+						...parsed.ipRegion?.ipv6,
+					},
+				},
+				device: {
+					...site.defaults.comments.metadata.device,
+					...parsed.device,
+					display: {
+						...site.defaults.comments.metadata.device.display,
+						...parsed.device?.display,
+					},
+				},
+			};
+		} catch {
+			return site.defaults.comments.metadata;
+		}
 	}
 
 	public async getOrCreateVisitor(input: {

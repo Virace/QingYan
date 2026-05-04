@@ -2,6 +2,7 @@ import type { AppRuntimeOptions } from "../config/runtime-options";
 import type { AppConfig, SiteConfig } from "../config/types";
 import type { AppDatabase, SqliteClient } from "../db/client";
 import type { LoggerManager } from "../logging/logger-manager";
+import type { AdminBootstrap } from "../modules/admin/bootstrap-service";
 import type { DevMockService } from "../modules/dev/mock-service";
 import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
@@ -30,6 +31,7 @@ export interface RequestContext {
 declare module "fastify" {
 	interface FastifyInstance {
 		config: AppConfig;
+		adminBootstrap: AdminBootstrap;
 		db: AppDatabase;
 		loggerManager: LoggerManager;
 		runtimeOptions: AppRuntimeOptions;

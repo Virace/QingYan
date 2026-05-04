@@ -23,41 +23,73 @@ describe("admin ui", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.headers["content-type"]).toContain("text/html");
 		expect(response.body).toContain("QingYan Admin");
-		expect(response.body).toContain("Admin Token");
-		expect(response.body).toContain("评论管理");
-		expect(response.body).toContain("页面管理");
-		expect(response.body).toContain("用户管理");
-		expect(response.body).toContain("访客管理");
-		expect(response.body).toContain("站点管理");
+		expect(
+			response.body.includes('id="root"') ||
+				response.body.includes('id="admin-root"'),
+		).toBe(true);
+		expect(response.body).toContain("window.__QINGYAN_ADMIN__");
+		expect(response.body).toContain('"basePath":"/admin"');
 	});
 
-	it("inlines admin login captcha flow and management endpoints", async () => {
+	it("serves built admin assets when build output exists", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const shell = await fixture.app.inject({
+			method: "GET",
+			url: "/admin",
+		});
+		const assetMatch = shell.body.match(/src="\.\/assets\/([^"]+\.js)"/);
+		if (!assetMatch?.[1]) {
+			expect(shell.body).toContain('id="admin-root"');
+			return;
+		}
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: `/admin/assets/${assetMatch[1]}`,
+		});
+		expect(response.statusCode).toBe(200);
+		expect(response.headers["content-type"]).toContain("text/javascript");
+	});
+
+	it("rejects admin asset path traversal", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/admin",
+			url: "/admin/assets/%2e%2e%2findex.html",
 		});
 
+		expect(response.statusCode).toBe(404);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "ADMIN_ASSET_NOT_FOUND",
+			},
+		});
+	});
+
+	it("serves deep admin routes from the configured console path", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.admin.console.path = "/qy-console";
+			},
+		});
+		cleanups.push(fixture.cleanup);
+
+		const oldRoute = await fixture.app.inject({
+			method: "GET",
+			url: "/admin",
+		});
+		expect(oldRoute.statusCode).toBe(404);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qy-console/comments",
+		});
 		expect(response.statusCode).toBe(200);
-		expect(response.body).toContain("/api/admin/session/me");
-		expect(response.body).toContain("/api/admin/session/captcha");
-		expect(response.body).toContain("/api/admin/session/login");
-		expect(response.body).toContain("/api/admin/comments");
-		expect(response.body).toContain("/api/admin/pages");
-		expect(response.body).toContain("/api/admin/users");
-		expect(response.body).toContain("/api/admin/visitors");
-		expect(response.body).toContain("/api/admin/blacklist");
-		expect(response.body).toContain("/api/admin/sites");
-		expect(response.body).toContain("/api/admin/settings");
-		expect(response.body).toContain("管理员登录验证码");
-		expect(response.body).toContain("从第 N 次写操作开始要求验证码");
-		expect(response.body).toContain("pageUrl");
-		expect(response.body).toContain("identity.require");
-		expect(response.body).toContain("开启评论功能");
-		expect(response.body).toContain("允许作者提交站点链接");
-		expect(response.body).toContain("开启邮件通知");
-		expect(response.body).toContain("用于通知、回访和用户聚合");
+		expect(response.body).toContain("QingYan Admin");
+		expect(response.body).toContain('"basePath":"/qy-console"');
 	});
 });

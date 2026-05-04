@@ -18,7 +18,13 @@ describe("configSchema", () => {
 				},
 			},
 			admin: {
-				tokenHash: "replace-me",
+				console: {
+					path: "/admin",
+				},
+				auth: {
+					username: "admin",
+					passwordHash: "scrypt:salt:hash",
+				},
 				session: {
 					cookieName: "qingyan_admin",
 					ttlMinutes: 1440,
@@ -198,6 +204,136 @@ describe("configSchema", () => {
 		});
 	});
 
+	it("rejects reserved admin console paths", () => {
+		const parsed = configSchema.safeParse({
+			server: {
+				host: "0.0.0.0",
+				port: 4401,
+				publicBaseUrl: "http://localhost:4401",
+				trustProxy: false,
+			},
+			database: {
+				client: "sqlite",
+				sqlite: {
+					file: "./data/qingyan.db",
+				},
+			},
+			admin: {
+				console: {
+					path: "/api/admin",
+				},
+				auth: {
+					username: "admin",
+					passwordHash: "scrypt:salt:hash",
+				},
+				session: {
+					cookieName: "qingyan_admin",
+					ttlMinutes: 1440,
+					sameSite: "lax",
+					secure: false,
+				},
+			},
+			security: {
+				requestIdHeader: "x-request-id",
+				globalFloodGuard: {
+					enabled: false,
+					windowSec: 10,
+					maxRequests: 120,
+				},
+				publicOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: false,
+				},
+				rateLimit: {
+					adminLogin: {
+						windowSec: 600,
+						maxFailures: 5,
+					},
+					commentCreate: {
+						windowSec: 300,
+						maxRequests: 5,
+					},
+					commentVote: {
+						windowSec: 300,
+						maxRequests: 15,
+					},
+					captchaVerify: {
+						windowSec: 300,
+						maxFailures: 8,
+					},
+				},
+			},
+			captcha: {
+				provider: "image",
+				image: {
+					width: 160,
+					height: 60,
+					ttlSec: 600,
+				},
+			},
+			logging: {
+				directory: "./logs",
+				defaults: {
+					level: "info",
+					retentionDays: 7,
+				},
+			},
+			mail: {
+				enabled: false,
+				smtp: {
+					host: "smtp.example.com",
+					port: 465,
+					secure: true,
+					username: "notify@example.com",
+					password: "secret",
+					from: "notify@example.com",
+				},
+			},
+			sites: [
+				{
+					siteKey: "fangyuan",
+					name: "FangYuan",
+					allowedOrigins: ["http://localhost:4321"],
+					defaults: {
+						comments: {
+							enabled: true,
+							defaultStatus: "pending",
+							maxDepth: 3,
+							rootLimit: 20,
+							identity: {
+								require: ["nickname", "email"],
+							},
+							captcha: {
+								mode: "threshold",
+								thresholdWindowSec: 60,
+								thresholdMaxActions: 3,
+							},
+							abuseGuard: {
+								enabled: true,
+								windowSec: 600,
+								maxWriteActions: 100,
+								autoBlacklist: {
+									enabled: true,
+									scope: "post",
+									ttlSec: 1800,
+								},
+							},
+							allowWebsite: true,
+						},
+						pageFeedback: {
+							allowLike: true,
+						},
+						notifications: {
+							emailEnabled: false,
+						},
+					},
+				},
+			],
+		});
+
+		expect(parsed.success).toBe(false);
+	});
+
 	it("accepts a turnstile captcha configuration while preserving shared image settings", () => {
 		const parsed = configSchema.parse({
 			server: {
@@ -213,7 +349,13 @@ describe("configSchema", () => {
 				},
 			},
 			admin: {
-				tokenHash: "replace-me",
+				console: {
+					path: "/admin",
+				},
+				auth: {
+					username: "admin",
+					passwordHash: "scrypt:salt:hash",
+				},
 				session: {
 					cookieName: "qingyan_admin",
 					ttlMinutes: 1440,
@@ -352,7 +494,13 @@ describe("configSchema", () => {
 				},
 			},
 			admin: {
-				tokenHash: "replace-me",
+				console: {
+					path: "/admin",
+				},
+				auth: {
+					username: "admin",
+					passwordHash: "scrypt:salt:hash",
+				},
 				session: {
 					cookieName: "qingyan_admin",
 					ttlMinutes: 1440,

@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { buildApp } from "../../src/app";
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
 
 function createTempWorkspace() {
 	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-"));
@@ -56,7 +57,13 @@ export function createTestConfig(
 			},
 		},
 		admin: {
-			tokenHash: "replace-me",
+			console: {
+				path: "/admin",
+			},
+			auth: {
+				username: "admin",
+				passwordHash: createPasswordHash("replace-me"),
+			},
 			session: {
 				cookieName: "qingyan_admin",
 				ttlMinutes: 1440,

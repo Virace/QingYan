@@ -67,6 +67,67 @@ export class AdminRepository {
 		return this.db.select().from(sites);
 	}
 
+	public async getOverviewStats() {
+		const [
+			siteTotal,
+			pageTotal,
+			commentTotal,
+			pendingCommentTotal,
+			userTotal,
+			visitorTotal,
+			blacklistTotal,
+		] = await Promise.all([
+			this.db
+				.select({
+					value: count(),
+				})
+				.from(sites),
+			this.db
+				.select({
+					value: count(),
+				})
+				.from(pageThreads),
+			this.db
+				.select({
+					value: count(),
+				})
+				.from(comments)
+				.where(isNull(comments.deletedAt)),
+			this.db
+				.select({
+					value: count(),
+				})
+				.from(comments)
+				.where(and(isNull(comments.deletedAt), eq(comments.status, "pending"))),
+			this.db
+				.select({
+					value: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
+				})
+				.from(comments)
+				.where(isNotNull(comments.authorEmail)),
+			this.db
+				.select({
+					value: count(),
+				})
+				.from(visitors),
+			this.db
+				.select({
+					value: count(),
+				})
+				.from(blacklistRules),
+		]);
+
+		return {
+			siteCount: Number(siteTotal[0]?.value ?? 0),
+			pageCount: Number(pageTotal[0]?.value ?? 0),
+			commentCount: Number(commentTotal[0]?.value ?? 0),
+			pendingCommentCount: Number(pendingCommentTotal[0]?.value ?? 0),
+			userCount: Number(userTotal[0]?.value ?? 0),
+			visitorCount: Number(visitorTotal[0]?.value ?? 0),
+			blacklistRuleCount: Number(blacklistTotal[0]?.value ?? 0),
+		};
+	}
+
 	private async listActiveBlacklistRules(targetType: "email" | "visitor") {
 		const nowIso = new Date().toISOString();
 
@@ -747,6 +808,7 @@ export class AdminRepository {
 			autoBlacklistEnabled?: boolean;
 			autoBlacklistScope?: "post" | "all";
 			autoBlacklistTtlSec?: number;
+			commentMetadataJson?: string;
 			emailNotificationsEnabled?: boolean;
 		},
 	) {
@@ -769,6 +831,7 @@ export class AdminRepository {
 				autoBlacklistEnabled: input.autoBlacklistEnabled,
 				autoBlacklistScope: input.autoBlacklistScope,
 				autoBlacklistTtlSec: input.autoBlacklistTtlSec,
+				commentMetadataJson: input.commentMetadataJson,
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})

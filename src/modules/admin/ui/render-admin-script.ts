@@ -163,9 +163,15 @@ async function bootstrap() {
 	}
 }
 
-async function login(token, captchaValue) {
-	if (!token.trim()) {
-		state.loginMessage = "请输入 Admin Token。";
+async function login(username, password, captchaValue) {
+	if (!username.trim()) {
+		state.loginMessage = "请输入管理员用户名。";
+		render();
+		return;
+	}
+
+	if (!password.trim()) {
+		state.loginMessage = "请输入管理员密码。";
 		render();
 		return;
 	}
@@ -180,7 +186,8 @@ async function login(token, captchaValue) {
 		await request(ENDPOINTS.login, {
 			method: "POST",
 			body: JSON.stringify({
-				token,
+				username,
+				password,
 				challengeId: state.loginChallenge?.challengeId,
 				captchaValue,
 			}),
@@ -443,8 +450,12 @@ function renderLogin() {
 		renderMessage(state.loginMessage, "error") +
 		'<div class="admin-form-grid">' +
 		'<div class="admin-form-field">' +
-		'<label for="admin-token">Admin Token</label>' +
-		'<input id="admin-token" name="token" type="password" autocomplete="current-password" />' +
+		'<label for="admin-username">管理员用户名</label>' +
+		'<input id="admin-username" name="username" type="text" autocomplete="username" />' +
+		"</div>" +
+		'<div class="admin-form-field">' +
+		'<label for="admin-password">管理员密码</label>' +
+		'<input id="admin-password" name="password" type="password" autocomplete="current-password" />' +
 		"</div>" +
 		'<div class="admin-form-field">' +
 		"<label>管理员登录验证码</label>" +
@@ -1197,9 +1208,14 @@ function render() {
 		document
 			.getElementById("admin-login-button")
 			?.addEventListener("click", async function () {
-				const tokenInput = document.getElementById("admin-token");
+				const usernameInput = document.getElementById("admin-username");
+				const passwordInput = document.getElementById("admin-password");
 				const captchaInput = document.getElementById("admin-captcha-value");
-				await login(tokenInput?.value ?? "", captchaInput?.value ?? "");
+				await login(
+					usernameInput?.value ?? "",
+					passwordInput?.value ?? "",
+					captchaInput?.value ?? "",
+				);
 			});
 		document
 			.getElementById("admin-refresh-captcha")

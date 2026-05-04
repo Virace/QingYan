@@ -31,7 +31,9 @@ pnpm config:check:local
 
 - `server.*`
 - `database.*`
-- `admin.tokenHash`
+- `admin.console.path`
+- `admin.auth.username`
+- `admin.auth.passwordHash`
 - `admin.session.*`
 - `security.requestIdHeader`
 - `security.globalFloodGuard.*`
@@ -106,7 +108,11 @@ database:
 
 ```yaml
 admin:
-  tokenHash: "sha256:<hex>" # 或开发期明文
+  console:
+    path: /admin
+  auth:
+    username: admin
+    passwordHash: "scrypt:<salt>:<hash>"
   session:
     cookieName: qingyan_admin
     ttlMinutes: 1440
@@ -114,7 +120,9 @@ admin:
     secure: false
 ```
 
-- `tokenHash`: 后台登录口令
+- `console.path`: 后台管理端入口路径；省略时由启动流程生成随机路径并持久化
+- `auth.username`: 唯一管理员用户名；省略时由启动流程生成
+- `auth.passwordHash`: 唯一管理员密码 hash；省略时由启动流程生成一次性初始密码并持久化 hash
   - 支持明文直接比较，主要用于本地开发
   - 支持 `sha256:<hex>` 格式，适合部署环境
 - 后台登录每次都需要先完成管理员登录验证码
@@ -345,6 +353,8 @@ sites:
 - `defaults.pageFeedback.allowLike`: 是否允许页面点赞
 - `defaults.notifications.emailEnabled`: 是否启用邮件通知开关
 
+`defaults.comments.metadata.*` 会作为每个站点的初始运行时配置。后台管理端修改请求元数据设置后，会写入运行时设置并持久化；评论写入、评论列表 bootstrap 和评论线程读取会优先使用运行时值，再回退到 YAML 默认值。
+
 评论请求环境信息属于用户信息收集。站点应在评论区或隐私说明中声明：提交评论时，本站会记录必要的请求环境信息，包括 IP 地址和浏览器 User-Agent，用于反垃圾、滥用排查、IP 属地与设备类型展示。公开页面不会展示完整 IP 地址或完整 User-Agent。启用 IP 属地展示时，还应说明公开页面可能展示经过处理的 IP 属地，例如国家、省份或城市，具体精度由站点配置决定。
 
 IP 属地 xdb 可以手动更新：
@@ -481,7 +491,11 @@ POST /api/comments/{commentId}/vote
 
 环境变量：
 
+- `pnpm dev` 会自动启用 dev mode
 - `QINGYAN_DEV_MODE=true`
+- `QINGYAN_DEV_ADMIN_USERNAME=admin`（可选，默认 `admin`）
+- `QINGYAN_DEV_ADMIN_PASSWORD=admin`（可选，默认 `admin`）
+- `QINGYAN_DEV_CAPTCHA_ANSWER=2468`（可选，默认 `2468`）
 - `QINGYAN_DEV_ADMIN_TOKEN=<fixed token>`（可选）
 - `QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321`（可选）
 - `QINGYAN_DATABASE_MODE=none`（可选；无数据库 dev mock 模式）
@@ -489,6 +503,8 @@ POST /api/comments/{commentId}/vote
 行为说明：
 
 - dev mode 下系统自动提供单站点 `default`
+- dev mode 下默认提供固定开发管理员账号 `admin / admin`
+- dev mode 下 `pnpm dev` 默认提供固定验证码答案 `2468`
 - 前端仍然必须显式传 `siteKey: "default"`
 - 真实业务 API 路径不变，仍然使用 `/api/*` 与 `/admin`
 - 只新增 `/api/dev/*` 控制接口

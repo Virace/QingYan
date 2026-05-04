@@ -10,6 +10,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.config,
 		fastify.security,
 		new AdminRepository(fastify.db),
+		fastify.adminBootstrap,
 		fastify.siteRegistry,
 	);
 
@@ -31,7 +32,8 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 		const result = await service.login({
 			captchaValue: parsed.data.captchaValue,
 			challengeId: parsed.data.challengeId,
-			token: parsed.data.token,
+			username: parsed.data.username,
+			password: parsed.data.password,
 			ip: request.context?.ip,
 			requestId: request.context?.requestId,
 			userAgent: request.context?.userAgent,
@@ -41,6 +43,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 			sameSite: fastify.config.admin.session.sameSite,
 			httpOnly: true,
 			secure: fastify.config.admin.session.secure,
+			maxAge: fastify.config.admin.session.ttlMinutes * 60,
 		});
 
 		return {

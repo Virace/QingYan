@@ -16,6 +16,7 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.config,
 		fastify.security,
 		repository,
+		fastify.adminBootstrap,
 	);
 	const service = new AdminManagementService(
 		fastify.security,

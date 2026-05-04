@@ -1,9 +1,49 @@
 import { z } from "zod";
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
+const commentMetadataSchema = z.object({
+	collectIp: z.boolean().optional(),
+	collectUserAgent: z.boolean().optional(),
+	ipRegion: z
+		.object({
+			enabled: z.boolean().optional(),
+			cachePolicy: z.enum(["file", "vectorIndex", "content"]).optional(),
+			precision: z.enum(["country", "province", "city"]).optional(),
+			autoUpdate: z
+				.object({
+					enabled: z.boolean().optional(),
+					schedule: z.literal("monthly").optional(),
+				})
+				.optional(),
+			ipv4: z
+				.object({
+					dbPath: z.string().min(1).optional(),
+					sources: z.array(z.string().url()).optional(),
+				})
+				.optional(),
+			ipv6: z
+				.object({
+					dbPath: z.string().min(1).optional(),
+					sources: z.array(z.string().url()).optional(),
+				})
+				.optional(),
+		})
+		.optional(),
+	device: z
+		.object({
+			enabled: z.boolean().optional(),
+			display: z
+				.object({
+					enabled: z.boolean().optional(),
+				})
+				.optional(),
+		})
+		.optional(),
+});
 
 export const adminLoginBodySchema = z.object({
-	token: z.string().min(1),
+	username: z.string().min(1),
+	password: z.string().min(1),
 	challengeId: z.string().min(1).optional(),
 	captchaValue: z.string().min(1).optional(),
 });
@@ -100,6 +140,7 @@ export const adminSettingsBodySchema = z
 							.optional(),
 					})
 					.optional(),
+				metadata: commentMetadataSchema.optional(),
 			})
 			.optional(),
 		pageFeedback: z

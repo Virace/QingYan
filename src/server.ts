@@ -2,6 +2,10 @@ import { buildApp } from "./app";
 import { loadConfig } from "./config/load-config";
 import { resolveRuntimeOptions } from "./config/runtime-options";
 
+function resolveAdminUrl(publicBaseUrl: string, consolePath: string): string {
+	return new URL(consolePath, publicBaseUrl).toString();
+}
+
 async function main(): Promise<void> {
 	const loadedConfig = await loadConfig();
 	const { config, runtimeOptions } = resolveRuntimeOptions(loadedConfig);
@@ -22,6 +26,18 @@ async function main(): Promise<void> {
 			port: config.server.port,
 		},
 	});
+
+	console.log(
+		`admin.console.url=${resolveAdminUrl(config.server.publicBaseUrl, app.adminBootstrap.consolePath)}`,
+	);
+	console.log(`admin.username=${app.adminBootstrap.username}`);
+	if (app.adminBootstrap.generatedPassword) {
+		console.log(`admin.password=${app.adminBootstrap.generatedPassword}`);
+	} else {
+		console.log(
+			"admin.password=<configured password for admin.auth.passwordHash>",
+		);
+	}
 
 	if (
 		runtimeOptions.devMode.enabled &&

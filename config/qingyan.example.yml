@@ -10,7 +10,11 @@ database:
     file: ./data/qingyan.db
 
 admin:
-  tokenHash: "<replace-with-argon2id-hash>"
+  console:
+    path: /admin
+  auth:
+    username: admin
+    passwordHash: "<replace-with-scrypt-hash>"
   session:
     cookieName: qingyan_admin
     ttlMinutes: 1440

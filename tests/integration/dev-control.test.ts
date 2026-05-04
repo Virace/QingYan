@@ -138,8 +138,17 @@ describe("dev control routes", () => {
 			},
 		});
 
-		expect(await fixture.app.db.select().from(sites)).toEqual([]);
-		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([]);
+		expect(await fixture.app.db.select().from(sites)).toEqual([
+			expect.objectContaining({
+				siteKey: "default",
+				name: "Default",
+			}),
+		]);
+		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([
+			expect.objectContaining({
+				siteId: 1,
+			}),
+		]);
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
 

@@ -35,14 +35,31 @@ dev mode 的核心原则只有两条：
 启动 `QingYan` 时开启 dev mode：
 
 ```bash
-QINGYAN_DEV_MODE=true pnpm dev
+pnpm dev
 ```
 
 可选环境变量：
 
 ```bash
+QINGYAN_DEV_ADMIN_USERNAME=admin
+QINGYAN_DEV_ADMIN_PASSWORD=admin
+QINGYAN_DEV_CAPTCHA_ANSWER=2468
 QINGYAN_DEV_ADMIN_TOKEN=dev-token
 QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
+```
+
+`pnpm dev` 默认自动启用 dev mode，并提供固定开发管理员账号：
+
+```text
+username: admin
+password: admin
+captcha: 2468
+```
+
+如果只启动后端，可使用：
+
+```bash
+QINGYAN_DEV_MODE=true pnpm dev:api
 ```
 
 只需要运行内置 mock、发布前验证部署链路或给下游前端做无数据库联调时，可使用：

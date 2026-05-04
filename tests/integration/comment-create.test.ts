@@ -310,6 +310,58 @@ describe("POST /api/comments", () => {
 		expect(comment?.authorDeviceSource).toBeNull();
 	});
 
+	it("honors runtime request metadata collection switches", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(runtimeSettings).set({
+			captchaMode: "never",
+			commentMetadataJson: JSON.stringify({
+				collectIp: false,
+				collectUserAgent: false,
+			}),
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			headers: {
+				"user-agent": "Mozilla/5.0 runtime-disabled-metadata-test",
+				"x-forwarded-for": "203.0.113.42",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:runtime-metadata-disabled",
+				pageTitle: "Runtime Metadata Disabled",
+				pageUrl:
+					"https://fangyuan.example.com/posts/runtime-metadata-disabled/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "runtime metadata disabled",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "runtime metadata disabled"));
+		expect(comment?.authorIp).toBeNull();
+		expect(comment?.authorUserAgent).toBeNull();
+		expect(comment?.authorDeviceSource).toBeNull();
+	});
+
 	it("keeps comment creation available when ip region database is missing", async () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { validateAdminConsolePath } from "./admin-console-path";
+
 const rateLimitRuleSchema = z.object({
 	windowSec: z.number().int().positive(),
 	maxRequests: z.number().int().positive().optional(),
@@ -150,7 +152,24 @@ export const configSchema = z.object({
 		}),
 	}),
 	admin: z.object({
-		tokenHash: z.string().min(1),
+		console: z
+			.object({
+				path: z
+					.string()
+					.min(1)
+					.refine((value) => validateAdminConsolePath(value) === null, {
+						message: "admin.console.path must be a safe non-reserved path",
+					})
+					.optional(),
+			})
+			.default({}),
+		auth: z
+			.object({
+				username: z.string().min(1).optional(),
+				passwordHash: z.string().min(1).optional(),
+			})
+			.default({}),
+		tokenHash: z.string().min(1).optional(),
 		session: z.object({
 			cookieName: z.string().min(1),
 			ttlMinutes: z.number().int().positive(),

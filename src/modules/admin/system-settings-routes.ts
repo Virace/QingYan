@@ -14,6 +14,7 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 		fastify.config,
 		fastify.security,
 		new AdminRepository(fastify.db),
+		fastify.adminBootstrap,
 	);
 	const service = new AdminSystemSettingsService(
 		new AdminSystemSettingsRepository(fastify.db),

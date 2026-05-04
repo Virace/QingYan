@@ -101,14 +101,23 @@ describe("dev session bootstrap", () => {
 		expect(me.json().sites).toEqual([{ siteKey: "default", name: "Default" }]);
 	});
 
-	it("does not persist the virtual default site or runtime settings into sqlite", async () => {
+	it("persists the dev default site and runtime settings into sqlite", async () => {
 		const fixture = await createTestApp({
 			devMode: true,
 			devAdminToken: "dev-token",
 		});
 		cleanups.push(fixture.cleanup);
 
-		expect(await fixture.app.db.select().from(sites)).toEqual([]);
-		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([]);
+		expect(await fixture.app.db.select().from(sites)).toEqual([
+			expect.objectContaining({
+				siteKey: "default",
+				name: "Default",
+			}),
+		]);
+		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([
+			expect.objectContaining({
+				siteId: 1,
+			}),
+		]);
 	});
 });

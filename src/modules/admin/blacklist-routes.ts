@@ -16,6 +16,7 @@ export const adminBlacklistRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.config,
 		fastify.security,
 		repository,
+		fastify.adminBootstrap,
 	);
 	const service = new AdminManagementService(
 		fastify.security,

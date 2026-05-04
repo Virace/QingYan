@@ -5,6 +5,8 @@ import fp from "fastify-plugin";
 import type { FastifyPluginAsync } from "fastify";
 
 import { createDatabaseClients } from "../db/client";
+import { applyDatabaseMigrations } from "../db/migrations";
+import { resolveAdminBootstrap } from "../modules/admin/bootstrap-service";
 import { IpRegionAutoUpdateScheduler } from "../modules/comments/metadata/ip-region-scheduler";
 
 const dbPlugin: FastifyPluginAsync = async (fastify) => {
@@ -15,8 +17,13 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	await mkdir(path.dirname(databaseFile), { recursive: true });
 
 	const { db, sqlite } = createDatabaseClients(databaseFile);
+	applyDatabaseMigrations(sqlite);
 	fastify.decorate("db", db);
 	fastify.decorate("sqlite", sqlite);
+	fastify.decorate(
+		"adminBootstrap",
+		await resolveAdminBootstrap(fastify.config, db, fastify.runtimeOptions),
+	);
 
 	await fastify.siteRegistry.sync(db);
 	const ipRegionScheduler = new IpRegionAutoUpdateScheduler(db, fastify.config);

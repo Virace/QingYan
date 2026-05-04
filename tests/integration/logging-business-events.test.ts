@@ -59,7 +59,8 @@ describe("logging business events", () => {
 						"x-request-id": `req_admin_${index}`,
 					},
 					payload: {
-						token: "wrong-token",
+						username: "admin",
+						password: "wrong-password",
 						challengeId: challenge.challengeId,
 						captchaValue: forcedAnswer,
 					},

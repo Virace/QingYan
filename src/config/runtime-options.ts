@@ -5,12 +5,17 @@ import type { AppConfig, SiteConfig } from "./types";
 export interface AppRuntimeOptions {
 	devMode: {
 		enabled: boolean;
+		adminUsername?: string;
+		adminPassword?: string;
 		adminToken?: string;
 		tokenSource?: "env" | "generated";
 		defaultSite?: SiteConfig;
 		storage?: "memory";
 	};
 }
+
+const DEFAULT_DEV_ADMIN_USERNAME = "admin";
+const DEFAULT_DEV_ADMIN_PASSWORD = "admin";
 
 function buildDefaultDevSite(
 	baseSite: SiteConfig,
@@ -53,6 +58,10 @@ export function resolveRuntimeOptions(
 	const tokenSource = environment.QINGYAN_DEV_ADMIN_TOKEN ? "env" : "generated";
 	const devMode: AppRuntimeOptions["devMode"] = {
 		enabled: true,
+		adminUsername:
+			environment.QINGYAN_DEV_ADMIN_USERNAME ?? DEFAULT_DEV_ADMIN_USERNAME,
+		adminPassword:
+			environment.QINGYAN_DEV_ADMIN_PASSWORD ?? DEFAULT_DEV_ADMIN_PASSWORD,
 		adminToken,
 		tokenSource,
 		defaultSite: buildDefaultDevSite(firstSite, allowedOrigin),

@@ -25,7 +25,8 @@ describe("admin session", () => {
 			method: "POST",
 			url: "/api/admin/session/login",
 			payload: {
-				token: "replace-me",
+				username: "admin",
+				password: "replace-me",
 			},
 		});
 
@@ -37,7 +38,7 @@ describe("admin session", () => {
 		});
 	});
 
-	it("permanently blacklists an ip after five invalid token submissions", async () => {
+	it("permanently blacklists an ip after five invalid password submissions", async () => {
 		await withForcedTestCaptchaAnswer(async () => {
 			const fixture = await createTestApp();
 			cleanups.push(fixture.cleanup);
@@ -63,7 +64,8 @@ describe("admin session", () => {
 					method: "POST",
 					url: "/api/admin/session/login",
 					payload: {
-						token: "wrong-token",
+						username: "admin",
+						password: "wrong-password",
 						challengeId: challenge.challengeId,
 						captchaValue: getForcedTestCaptchaAnswer(),
 					},
@@ -141,7 +143,8 @@ describe("admin session", () => {
 				method: "POST",
 				url: "/api/admin/session/login",
 				payload: {
-					token: "wrong-token",
+					username: "admin",
+					password: "wrong-password",
 					challengeId: invalidChallenge.challenge.challengeId,
 					captchaValue: getForcedTestCaptchaAnswer(),
 				},
@@ -149,7 +152,7 @@ describe("admin session", () => {
 			expect(invalidLogin.statusCode).toBe(401);
 			expect(invalidLogin.json()).toMatchObject({
 				error: {
-					code: "ADMIN_TOKEN_INVALID",
+					code: "ADMIN_CREDENTIALS_INVALID",
 				},
 			});
 
@@ -172,7 +175,8 @@ describe("admin session", () => {
 				method: "POST",
 				url: "/api/admin/session/login",
 				payload: {
-					token: "replace-me",
+					username: "admin",
+					password: "replace-me",
 					challengeId: challenge.challenge.challengeId,
 					captchaValue: getForcedTestCaptchaAnswer(),
 				},
@@ -184,6 +188,7 @@ describe("admin session", () => {
 			const adminCookie = loginResponse.cookies.find(
 				(cookie) => cookie.name === "qingyan_admin",
 			);
+			expect(adminCookie?.maxAge).toBe(86_400);
 
 			const meResponse = await fixture.app.inject({
 				method: "GET",
@@ -223,6 +228,46 @@ describe("admin session", () => {
 					code: "ADMIN_AUTH_REQUIRED",
 				},
 			});
+		});
+	});
+
+	it("uses the fixed dev password for admin login in dev mode", async () => {
+		await withForcedTestCaptchaAnswer(async () => {
+			const fixture = await createTestApp({
+				devMode: true,
+				mutateConfig(config) {
+					config.admin.auth.username = undefined;
+					config.admin.auth.passwordHash = undefined;
+				},
+			});
+			cleanups.push(fixture.cleanup);
+
+			const captchaResponse = await fixture.app.inject({
+				method: "GET",
+				url: "/api/admin/session/captcha",
+			});
+			expect(captchaResponse.statusCode).toBe(200);
+			const challenge = captchaResponse.json() as {
+				challenge: {
+					challengeId: string;
+				};
+			};
+
+			const loginResponse = await fixture.app.inject({
+				method: "POST",
+				url: "/api/admin/session/login",
+				payload: {
+					username: "admin",
+					password: "admin",
+					challengeId: challenge.challenge.challengeId,
+					captchaValue: getForcedTestCaptchaAnswer(),
+				},
+			});
+
+			expect(loginResponse.statusCode).toBe(200);
+			expect(
+				loginResponse.cookies.some((cookie) => cookie.name === "qingyan_admin"),
+			).toBe(true);
 		});
 	});
 });

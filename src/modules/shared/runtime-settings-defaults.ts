@@ -23,6 +23,7 @@ export function buildRuntimeSettingsDefaults(siteId: number, site: SiteConfig) {
 			site.defaults.comments.abuseGuard.autoBlacklist.enabled,
 		autoBlacklistScope: site.defaults.comments.abuseGuard.autoBlacklist.scope,
 		autoBlacklistTtlSec: site.defaults.comments.abuseGuard.autoBlacklist.ttlSec,
+		commentMetadataJson: JSON.stringify(site.defaults.comments.metadata),
 		emailNotificationsEnabled: site.defaults.notifications.emailEnabled,
 	};
 }

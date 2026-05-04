@@ -4,13 +4,11 @@ import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError } from "../shared/errors";
 import type { SiteRegistry } from "../shared/site-registry";
+import type { AdminBootstrap } from "./bootstrap-service";
+import { verifyPasswordHash } from "./password-hash";
 import type { AdminRepository } from "./repository";
 import { AdminLoginChallengeStore } from "./login-challenge-store";
-import {
-	createSessionToken,
-	hashSessionToken,
-	verifyAdminToken,
-} from "./session-utils";
+import { createSessionToken, hashSessionToken } from "./session-utils";
 
 const ADMIN_LOGIN_BLACKLIST_THRESHOLD = 5;
 
@@ -22,6 +20,7 @@ export class AdminSessionService {
 		private readonly config: AppConfig,
 		private readonly security: SecurityToolkit,
 		private readonly repository: AdminRepository,
+		private readonly adminBootstrap: AdminBootstrap,
 		private readonly siteRegistry?: SiteRegistry,
 	) {
 		this.loginChallengeStore = new AdminLoginChallengeStore(
@@ -186,7 +185,8 @@ export class AdminSessionService {
 	public async login(input: {
 		captchaValue?: string;
 		challengeId?: string;
-		token: string;
+		username: string;
+		password: string;
 		ip?: string;
 		requestId?: string;
 		userAgent?: string;
@@ -215,12 +215,14 @@ export class AdminSessionService {
 			});
 		}
 
-		const isValid = verifyAdminToken(input.token, this.config.admin.tokenHash);
+		const isValid =
+			input.username === this.adminBootstrap.username &&
+			verifyPasswordHash(input.password, this.adminBootstrap.passwordHash);
 		if (!isValid) {
 			await this.recordFailedLogin({
-				code: "ADMIN_TOKEN_INVALID",
+				code: "ADMIN_CREDENTIALS_INVALID",
 				ip: input.ip,
-				message: "管理员口令无效。",
+				message: "管理员用户名或密码无效。",
 				requestId: input.requestId,
 				statusCode: 401,
 			});

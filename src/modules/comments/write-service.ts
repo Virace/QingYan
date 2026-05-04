@@ -150,7 +150,10 @@ export class CommentsWriteService {
 
 		const status = (settings?.defaultStatus ??
 			configuredSite.defaults.comments.defaultStatus) as "pending" | "approved";
-		const metadataConfig = configuredSite.defaults.comments.metadata;
+		const metadataConfig = this.readRepository.resolveCommentMetadata(
+			configuredSite,
+			settings,
+		);
 		const requestMetadata = this.metadataResolver
 			? await this.metadataResolver.resolve({
 					ip: metadataConfig.collectIp ? input.ip : undefined,

@@ -30,9 +30,10 @@ function buildCapability(
 	};
 }
 
-function buildCommentDisplayOptions(site: SiteConfig) {
-	const metadata = site.defaults.comments.metadata;
-
+function buildCommentDisplayOptions(
+	site: SiteConfig,
+	metadata = site.defaults.comments.metadata,
+) {
 	return {
 		location: {
 			enabled: metadata.ipRegion.enabled,
@@ -145,7 +146,13 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay: buildCommentDisplayOptions(configuredSite),
+			commentDisplay: buildCommentDisplayOptions(
+				configuredSite,
+				this.repository.resolveCommentMetadata(
+					configuredSite,
+					settings ?? undefined,
+				),
+			),
 			pageMetrics: {
 				pageViewCount: refreshedThread.pageViewCount,
 			},
@@ -193,6 +200,7 @@ export class CommentsService {
 			offset: pagination.offset,
 			visitorId: visitor.id,
 		});
+		const settings = await this.repository.getRuntimeSettings(site.id);
 
 		return {
 			thread,
@@ -204,7 +212,13 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay: buildCommentDisplayOptions(configuredSite),
+			commentDisplay: buildCommentDisplayOptions(
+				configuredSite,
+				this.repository.resolveCommentMetadata(
+					configuredSite,
+					settings ?? undefined,
+				),
+			),
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 		};
 	}

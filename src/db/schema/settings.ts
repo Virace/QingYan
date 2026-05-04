@@ -55,6 +55,7 @@ export const runtimeSettings = sqliteTable(
 		autoBlacklistTtlSec: integer("auto_blacklist_ttl_sec")
 			.notNull()
 			.default(1800),
+		commentMetadataJson: text("comment_metadata_json"),
 		emailNotificationsEnabled: integer("email_notifications_enabled", {
 			mode: "boolean",
 		})

@@ -5,7 +5,12 @@ import {
 	withForcedTestCaptchaAnswer,
 } from "./captcha";
 
-export async function loginAsAdmin(app: FastifyInstance) {
+export async function loginAsAdmin(
+	app: FastifyInstance,
+	options?: {
+		password?: string;
+	},
+) {
 	return withForcedTestCaptchaAnswer(async () => {
 		const captchaResponse = await app.inject({
 			method: "GET",
@@ -28,7 +33,8 @@ export async function loginAsAdmin(app: FastifyInstance) {
 			method: "POST",
 			url: "/api/admin/session/login",
 			payload: {
-				token: "replace-me",
+				username: "admin",
+				password: options?.password ?? "replace-me",
 				challengeId: challenge.challengeId,
 				captchaValue: getForcedTestCaptchaAnswer(),
 			},

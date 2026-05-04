@@ -31,6 +31,7 @@ export function registerDatabaseDevRoutes(
 		app.config,
 		app.security,
 		new AdminRepository(app.db),
+		app.adminBootstrap,
 		app.siteRegistry,
 	);
 	const devService = new DevModeService(

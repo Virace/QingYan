@@ -77,9 +77,36 @@ pnpm dev
 默认监听地址：
 
 - API: `http://localhost:4401`
+- Admin: `http://localhost:5173/admin`
 - OpenAPI JSON: `http://localhost:4401/openapi.json`
 - OpenAPI YAML: `http://localhost:4401/openapi.yaml`
 - API Docs: `http://localhost:4401/docs`
+
+`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按配置中的 `admin.console.path` 生成入口路径，并把 `/api/*` 代理到后端。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm admin:dev`。
+
+`pnpm dev` 默认启用快速开发模式，Admin 登录固定为：
+
+```text
+username: admin
+password: admin
+captcha: 2468
+```
+
+需要临时覆盖时可设置：
+
+```bash
+QINGYAN_DEV_ADMIN_USERNAME=admin QINGYAN_DEV_ADMIN_PASSWORD=secret QINGYAN_DEV_CAPTCHA_ANSWER=1357 pnpm dev
+```
+
+后端启动完成后会在 shell 中输出：
+
+```text
+admin.console.url=...
+admin.username=...
+admin.password=...
+```
+
+在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。非 dev 启动时，如果管理员密码由首次启动自动生成，`admin.password` 会显示一次性初始密码；如果配置文件提供了 `admin.auth.passwordHash`，明文密码无法从 hash 反推，启动输出会提示使用该 hash 对应的原始密码。
 
 ## 配置文档
 
@@ -136,6 +163,8 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm check
+pnpm dev:api
+pnpm admin:dev
 pnpm dev:smoke
 ```
 
@@ -146,14 +175,30 @@ pnpm dev:smoke
 需要快速联调验证码、评论 seed 或后台场景时，可使用：
 
 ```bash
-QINGYAN_DEV_MODE=true pnpm dev
+pnpm dev
+```
+
+`pnpm dev` 会自动启用 dev mode，并提供固定开发管理员账号：
+
+```text
+username: admin
+password: admin
 ```
 
 可选环境变量：
 
 ```bash
+QINGYAN_DEV_ADMIN_USERNAME=admin
+QINGYAN_DEV_ADMIN_PASSWORD=admin
+QINGYAN_DEV_CAPTCHA_ANSWER=2468
 QINGYAN_DEV_ADMIN_TOKEN=dev-token
 QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
+```
+
+只启动后端且需要 dev mode 时：
+
+```bash
+QINGYAN_DEV_MODE=true pnpm dev:api
 ```
 
 如果只需要运行内置 mock，不希望连接或初始化 SQLite，可使用无数据库模式：
