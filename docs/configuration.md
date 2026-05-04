@@ -35,6 +35,7 @@ pnpm config:check:local
 - `admin.session.*`
 - `security.requestIdHeader`
 - `security.globalFloodGuard.*`
+- `security.publicOriginGuard.*`
 - `security.rateLimit.*`
 - `captcha.*`
 - `logging.directory`
@@ -132,6 +133,9 @@ security:
     enabled: false
     windowSec: 10
     maxRequests: 120
+  publicOriginGuard:
+    enabled: true
+    allowMissingOrigin: false
   rateLimit:
     adminLogin:
       windowSec: 600
@@ -152,6 +156,9 @@ security:
 
 - `requestIdHeader`: 外部请求链路传入 request id 时使用的 header 名
 - `globalFloodGuard`: 进程级总请求洪峰保护
+- `publicOriginGuard`: 公开写接口浏览器来源保护
+  - `enabled`: 是否启用来源保护
+  - `allowMissingOrigin`: 是否允许缺少 `Origin` 的公开写请求。生产环境建议为 `false`；本地脚本、服务端代理或特殊集成确实不会发送 `Origin` 时才设为 `true`
 - `rateLimit.adminLogin`: 保留后台登录相关兼容配置结构；当前实现使用管理员登录验证码和 5 次失败永久封 IP 作为主保护逻辑
 - `rateLimit.commentCreate`: 评论创建限流
 - `rateLimit.commentVote`: 评论投票限流
@@ -162,6 +169,8 @@ security:
 
 - `maxRequests` 用于请求次数限流
 - `maxFailures` 用于失败次数限流
+- `publicOriginGuard` 使用请求中的 `siteKey` 查找对应 `sites[].allowedOrigins`，只允许这些来源调用公开写接口。它会同时处理浏览器 CORS preflight，使 `http://localhost:4321` 这类不同端口的本地前端可以访问 `http://localhost:4401` 的 QingYan API。
+- `Origin` / CORS 是浏览器侧来源门禁，不是 API 密钥。它可以阻止普通跨站网页滥用，但不能阻止 curl、Postman 或脚本直接调用 API。公开写接口仍然需要依赖验证码、限流、黑名单和审核策略承受直接调用。
 
 ### `captcha`
 
@@ -281,7 +290,7 @@ sites:
 
 - `siteKey`: API 请求使用的站点标识
 - `name`: 后台展示名称
-- `allowedOrigins`: 跨域允许来源
+- `allowedOrigins`: 允许调用当前站点公开接口的前端来源，必须写完整 origin，例如 `https://example.com` 或 `http://localhost:4321`，不包含 path
 - `defaults.comments.enabled`: 是否默认启用评论
 - `defaults.comments.defaultStatus`: 新评论默认状态，`pending` 或 `approved`
 - `defaults.comments.maxDepth`: 评论最大嵌套深度
@@ -418,6 +427,7 @@ POST /api/comments/{commentId}/vote
 - `server.publicBaseUrl`: `http://localhost:4401`
 - `admin.session.secure`: `false`
 - `sites[].allowedOrigins`: 包含前端开发地址，例如 `http://localhost:4321`
+- `security.publicOriginGuard.allowMissingOrigin`: 默认保持 `false`，浏览器联调只要 `allowedOrigins` 写入前端 origin 即可；只有本地脚本或非浏览器代理无法发送 `Origin` 时才临时设为 `true`
 - SQLite 文件放到 `./data/qingyan.db`
 
 ## Dev Mode
@@ -438,6 +448,7 @@ POST /api/comments/{commentId}/vote
 - 真实业务 API 路径不变，仍然使用 `/api/*` 与 `/admin`
 - 只新增 `/api/dev/*` 控制接口
 - 生产环境不会暴露 `/api/dev/*`
+- dev mode 下允许缺少 `Origin` 的公开写请求，便于本地脚本、API 测试和无数据库 mock 模式联调；带 `Origin` 的浏览器请求仍应使用 `QINGYAN_DEV_ALLOWED_ORIGIN` 或 `sites[].allowedOrigins` 指向前端开发地址
 - 设置 `QINGYAN_DATABASE_MODE=none` 时会自动启用 dev mode，不连接 SQLite，所有 mock 状态仅保存在当前进程内存中
 
 注意：

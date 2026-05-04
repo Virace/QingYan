@@ -51,6 +51,7 @@ cp config/qingyan.example.yml config/qingyan.yml
 - `server.publicBaseUrl`
 - `admin.tokenHash`
 - `sites[].allowedOrigins`
+- `security.publicOriginGuard.allowMissingOrigin`
 - `database.sqlite.file`
 
 ### 3. 校验配置

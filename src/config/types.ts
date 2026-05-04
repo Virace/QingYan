@@ -23,6 +23,11 @@ const captchaProviderSchema = z.enum([
 	"geetest",
 ]);
 
+const publicOriginGuardSchema = z.object({
+	enabled: z.boolean().default(true),
+	allowMissingOrigin: z.boolean().default(false),
+});
+
 const commentsIdentitySchema = z.object({
 	require: z.array(commentIdentityFieldSchema),
 });
@@ -96,6 +101,10 @@ export const configSchema = z.object({
 			enabled: z.boolean(),
 			windowSec: z.number().int().positive(),
 			maxRequests: z.number().int().positive(),
+		}),
+		publicOriginGuard: publicOriginGuardSchema.default({
+			enabled: true,
+			allowMissingOrigin: false,
 		}),
 		rateLimit: z.object({
 			adminLogin: rateLimitRuleSchema,

@@ -71,6 +71,10 @@ export function createTestConfig(
 				windowSec: 10,
 				maxRequests: 120,
 			},
+			publicOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: true,
+			},
 			rateLimit: {
 				adminLogin: {
 					windowSec: 600,

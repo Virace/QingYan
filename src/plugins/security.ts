@@ -16,6 +16,15 @@ import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
 import { AppError } from "../modules/shared/errors";
 import { auditLogs, blacklistRules } from "../db/schema";
 
+const PUBLIC_WRITE_ROUTES = [
+	{ method: "POST", pattern: /^\/api\/comments$/ },
+	{ method: "POST", pattern: /^\/api\/comments\/[^/]+\/vote$/ },
+	{ method: "POST", pattern: /^\/api\/comments\/captcha\/refresh$/ },
+	{ method: "POST", pattern: /^\/api\/comments\/captcha\/verify$/ },
+	{ method: "POST", pattern: /^\/api\/comments\/captcha\/complete$/ },
+	{ method: "POST", pattern: /^\/api\/page-feedback\/like$/ },
+];
+
 export interface BlacklistCheckInput {
 	requestId?: string;
 	siteKey?: string;
@@ -72,6 +81,46 @@ export interface SecurityToolkit {
 	peekRateLimit(input: RateLimitPeekInput): RateLimitSnapshot;
 	writeAudit(input: AuditWriteInput): Promise<void>;
 	clearExpiredState(now?: number): void;
+}
+
+function resolvePathname(rawUrl: string): string {
+	try {
+		return new URL(rawUrl, "http://qingyan.local").pathname;
+	} catch {
+		return rawUrl.split("?")[0] ?? rawUrl;
+	}
+}
+
+function isPublicWriteRequest(method: string, rawUrl: string): boolean {
+	const pathname = resolvePathname(rawUrl);
+	return PUBLIC_WRITE_ROUTES.some(
+		(route) => route.method === method && route.pattern.test(pathname),
+	);
+}
+
+function readOrigin(
+	requestOrigin: string | string[] | undefined,
+): string | undefined {
+	return typeof requestOrigin === "string" && requestOrigin.length > 0
+		? requestOrigin
+		: undefined;
+}
+
+function setCorsHeaders(
+	reply: {
+		header(name: string, value: string): unknown;
+	},
+	origin: string,
+	requestedHeaders?: string,
+): void {
+	reply.header("Access-Control-Allow-Origin", origin);
+	reply.header("Vary", "Origin");
+	reply.header("Access-Control-Allow-Credentials", "true");
+	reply.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+	reply.header(
+		"Access-Control-Allow-Headers",
+		requestedHeaders || "content-type,x-request-id,x-qingyan-visitor",
+	);
 }
 
 const securityPlugin: FastifyPluginAsync = async (fastify) => {
@@ -327,7 +376,29 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 	};
 
 	fastify.decorate("security", security);
-	fastify.addHook("onRequest", async (request) => {
+	fastify.options("/api/*", async (request, reply) => {
+		const origin = readOrigin(request.headers.origin);
+		if (!origin) {
+			return reply.status(204).send();
+		}
+
+		const originAllowed = fastify.siteRegistry
+			.listRegisteredSites()
+			.some((site) => site.allowedOrigins.includes(origin));
+		if (originAllowed) {
+			const requestedHeaders =
+				request.headers["access-control-request-headers"];
+			setCorsHeaders(
+				reply,
+				origin,
+				typeof requestedHeaders === "string" ? requestedHeaders : undefined,
+			);
+		}
+
+		return reply.status(204).send();
+	});
+
+	fastify.addHook("preHandler", async (request, reply) => {
 		const url = request.raw.url ?? "";
 		if (!url.startsWith("/api")) {
 			return;
@@ -336,6 +407,44 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		await security.assertGlobalFloodAllowed({
 			ip: request.context?.ip ?? request.ip,
 		});
+
+		const origin = readOrigin(request.headers.origin);
+		const site = fastify.siteRegistry.getRegisteredSite(
+			request.context?.siteKey,
+		);
+		if (origin && site?.allowedOrigins.includes(origin)) {
+			setCorsHeaders(reply, origin);
+		}
+
+		if (
+			!fastify.config.security.publicOriginGuard.enabled ||
+			!isPublicWriteRequest(request.method, url)
+		) {
+			return;
+		}
+
+		if (!origin) {
+			if (
+				fastify.config.security.publicOriginGuard.allowMissingOrigin ||
+				fastify.runtimeOptions.devMode.enabled
+			) {
+				return;
+			}
+
+			throw new AppError(
+				403,
+				"PUBLIC_ORIGIN_REQUIRED",
+				"公开写接口需要浏览器来源信息。",
+			);
+		}
+
+		if (!site?.allowedOrigins.includes(origin)) {
+			throw new AppError(
+				403,
+				"PUBLIC_ORIGIN_FORBIDDEN",
+				"请求来源不在站点允许列表中。",
+			);
+		}
 	});
 };
 

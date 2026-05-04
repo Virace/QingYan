@@ -23,6 +23,9 @@ security:
     enabled: false
     windowSec: 10
     maxRequests: 120
+  publicOriginGuard:
+    enabled: true
+    allowMissingOrigin: false
   rateLimit:
     adminLogin:
       windowSec: 600

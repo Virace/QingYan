@@ -33,6 +33,10 @@ describe("configSchema", () => {
 					windowSec: 10,
 					maxRequests: 120,
 				},
+				publicOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: false,
+				},
 				rateLimit: {
 					adminLogin: {
 						windowSec: 600,
@@ -130,6 +134,10 @@ describe("configSchema", () => {
 			windowSec: 10,
 			maxRequests: 120,
 		});
+		expect(parsed.security.publicOriginGuard).toEqual({
+			enabled: true,
+			allowMissingOrigin: false,
+		});
 		expect(parsed.logging).toEqual({
 			directory: "./logs",
 			defaults: {
@@ -186,6 +194,10 @@ describe("configSchema", () => {
 					enabled: false,
 					windowSec: 10,
 					maxRequests: 120,
+				},
+				publicOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: false,
 				},
 				rateLimit: {
 					adminLogin: {
@@ -321,6 +333,10 @@ describe("configSchema", () => {
 					enabled: false,
 					windowSec: 10,
 					maxRequests: 120,
+				},
+				publicOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: false,
 				},
 				rateLimit: {
 					adminLogin: {
