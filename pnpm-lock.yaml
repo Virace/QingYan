@@ -17,6 +17,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.9.0)
+      fast-xml-parser:
+        specifier: ^5.7.2
+        version: 5.7.2
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
@@ -605,6 +608,9 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
+  '@nodable/entities@2.1.0':
+    resolution: {integrity: sha512-nyT7T3nbMyBI/lvr6L5TyWbFJAI9FTgVRakNoBqCD+PmID8DzFrrNdLLtHMwMszOtqZa8PAOV24ZqDnQrhQINA==}
+
   '@oxc-project/types@0.124.0':
     resolution: {integrity: sha512-VBFWMTBvHxS11Z5Lvlr3IWgrwhMTXV+Md+EQF0Xf60+wAdsGFTBx7X7K/hP4pi8N7dcm1RvcHwDxZ16Qx8keUg==}
 
@@ -976,6 +982,13 @@ packages:
   fast-uri@3.1.0:
     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
 
+  fast-xml-builder@1.1.7:
+    resolution: {integrity: sha512-Yh7/7rQuMXICNr0oMYDR2yHP6oUvmQsTToFeOWj/kIDhAwQ+c4Ol/lbcwOmEM5OHYQmh6S6EQSQ1sljCKP36bQ==}
+
+  fast-xml-parser@5.7.2:
+    resolution: {integrity: sha512-P7oW7tLbYnhOLQk/Gv7cZgzgMPP/XN03K02/Jy6Y/NHzyIAIpxuZIM/YqAkfiXFPxA2CTm7NtCijK9EDu09u2w==}
+    hasBin: true
+
   fastify-plugin@5.1.0:
     resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
 
@@ -1146,6 +1159,10 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
+  path-expression-matcher@1.5.0:
+    resolution: {integrity: sha512-cbrerZV+6rvdQrrD+iGMcZFEiiSrbv9Tfdkvnusy6y0x0GKBXREFg/Y65GhIfm0tnLntThhzCnfKwp1WRjeCyQ==}
+    engines: {node: '>=14.0.0'}
+
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
@@ -1284,6 +1301,9 @@ packages:
   strip-json-comments@2.0.1:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
+
+  strnum@2.2.3:
+    resolution: {integrity: sha512-oKx6RUCuHfT3oyVjtnrmn19H1SiCqgJSg+54XqURKp5aCMbrXrhLjRN9TjuwMjiYstZ0MzDrHqkGZ5dFTKd+zg==}
 
   tar-fs@2.1.4:
     resolution: {integrity: sha512-mDAjwmZdh7LTT6pNleZ05Yt65HC3E+NiQzl672vQG38jIrehtJk/J3mNwIg+vShQPcLF/LV7CMnDW6vjj6sfYQ==}
@@ -1761,6 +1781,8 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
+  '@nodable/entities@2.1.0': {}
+
   '@oxc-project/types@0.124.0': {}
 
   '@pinojs/redact@0.4.0': {}
@@ -2073,6 +2095,17 @@ snapshots:
 
   fast-uri@3.1.0: {}
 
+  fast-xml-builder@1.1.7:
+    dependencies:
+      path-expression-matcher: 1.5.0
+
+  fast-xml-parser@5.7.2:
+    dependencies:
+      '@nodable/entities': 2.1.0
+      fast-xml-builder: 1.1.7
+      path-expression-matcher: 1.5.0
+      strnum: 2.2.3
+
   fastify-plugin@5.1.0: {}
 
   fastify@5.8.5:
@@ -2214,6 +2247,8 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
+
+  path-expression-matcher@1.5.0: {}
 
   pathe@2.0.3: {}
 
@@ -2367,6 +2402,8 @@ snapshots:
       safe-buffer: 5.2.1
 
   strip-json-comments@2.0.1: {}
+
+  strnum@2.2.3: {}
 
   tar-fs@2.1.4:
     dependencies:
