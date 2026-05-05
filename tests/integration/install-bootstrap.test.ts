@@ -23,10 +23,13 @@ import {
 } from "../../src/db/schema";
 import { buildInstallApp } from "../../src/modules/install/install-app";
 import {
-	resolveMinimalInstallConfig,
 	type MinimalInstallConfig,
+	resolveMinimalInstallConfig,
 } from "../../src/modules/install/minimal-config";
-import { resolveInstallState } from "../../src/modules/install/state";
+import {
+	resolveInstallLockPath,
+	resolveInstallState,
+} from "../../src/modules/install/state";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -986,6 +989,7 @@ describe("install bootstrap", () => {
 			initialPassword: "adminadmin",
 			configPath: workspace.configPath,
 			databasePath: path.resolve(process.cwd(), workspace.databaseFile),
+			lockPath: resolveInstallLockPath(workspace.configPath),
 			transition: {
 				mode: "manual",
 				adminUrl: "http://localhost:4401/admin",
@@ -1007,6 +1011,13 @@ describe("install bootstrap", () => {
 		const config = await loadConfig(workspace.configPath, {});
 		expect(config.database.sqlite.file).toBe(workspace.databaseFile);
 		expect(config.server.publicBaseUrl).toBe("http://localhost:4401");
+		const lockPath = resolveInstallLockPath(workspace.configPath);
+		expect(existsSync(lockPath)).toBe(true);
+		expect(JSON.parse(await readFile(lockPath, "utf-8"))).toMatchObject({
+			configPath: workspace.configPath,
+			databasePath: path.resolve(process.cwd(), workspace.databaseFile),
+			adminConsolePath: "/admin",
+		});
 
 		const { db, sqlite } = createDatabaseClients(workspace.databaseFile);
 		try {
@@ -1385,6 +1396,7 @@ describe("install bootstrap", () => {
 		await expect(resolveInstallState(minimalConfig, {})).resolves.toMatchObject(
 			{
 				installed: true,
+				lockPath: resolveInstallLockPath(workspace.configPath),
 			},
 		);
 		const response = await app.inject({
@@ -1406,6 +1418,35 @@ describe("install bootstrap", () => {
 			payload: installPayload(workspace.databaseFile),
 		});
 		expect(plan.statusCode).toBe(410);
+	});
+
+	it("keeps install mode open when the database is initialized but the install lock is missing", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const app = buildInstallApp({ minimalConfig });
+		cleanups.push(() => app.close());
+
+		await app.inject({
+			method: "POST",
+			url: "/admin/install",
+			payload: installPayload(workspace.databaseFile),
+		});
+		rmSync(resolveInstallLockPath(workspace.configPath), { force: true });
+
+		await expect(resolveInstallState(minimalConfig, {})).resolves.toMatchObject(
+			{
+				installed: false,
+				lockPath: resolveInstallLockPath(workspace.configPath),
+				reason: "lock_missing",
+			},
+		);
+
+		const response = await app.inject({
+			method: "GET",
+			url: "/admin/install",
+		});
+		expect(response.statusCode).toBe(200);
+		expect(response.body).toContain("QingYan Install");
 	});
 
 	it("resolves disabled install mode from environment", () => {

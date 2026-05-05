@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-
-import { z } from "zod";
 import { stringify } from "yaml";
+import { z } from "zod";
 
 import {
 	applyStartupEnvOverrides,
@@ -18,28 +17,29 @@ import {
 	createInitialAdminPassword,
 	createPasswordHash,
 } from "../admin/password-hash";
-import { QingYanImportService } from "../import-export/qingyan/import-service";
-import type {
-	QingYanDryRunResult,
-	QingYanExistingStrategy,
-	QingYanImportMode,
-	QingYanSettingsStrategy,
-	QingYanApplyResult,
-} from "../import-export/qingyan/import-service";
+import { AdminSystemSettingsRepository } from "../admin/system-settings-repository";
 import {
 	parseQingYanExport,
 	type QingYanExport,
 } from "../import-export/qingyan/export-model";
+import type {
+	QingYanApplyResult,
+	QingYanDryRunResult,
+	QingYanExistingStrategy,
+	QingYanImportMode,
+	QingYanSettingsStrategy,
+} from "../import-export/qingyan/import-service";
+import { QingYanImportService } from "../import-export/qingyan/import-service";
 import { InvalidRequestError } from "../shared/errors";
 import { createSiteRegistry } from "../shared/site-registry";
-import { AdminSystemSettingsRepository } from "../admin/system-settings-repository";
 import { flattenSystemSettings } from "../system-settings/codec";
 import {
 	defaultSystemSettings,
-	systemSettingsSchema,
 	type SystemSettings,
+	systemSettingsSchema,
 } from "../system-settings/definitions";
 import type { MinimalInstallConfig } from "./minimal-config";
+import { writeInstallLock } from "./state";
 
 const installRestoreOptionsSchema = z
 	.object({
@@ -807,6 +807,11 @@ export async function applyInstall(input: {
 		systemSettings: resolved.systemSettingSeeds,
 		restore: resolved.restore,
 	});
+	const lockPath = await writeInstallLock({
+		configPath: input.minimalConfig.configPath,
+		databasePath: databaseFile,
+		adminConsolePath: resolved.admin.consolePath,
+	});
 
 	return {
 		adminUrl: new URL(
@@ -817,6 +822,7 @@ export async function applyInstall(input: {
 		initialPassword: resolved.admin.password,
 		configPath: input.minimalConfig.configPath,
 		databasePath: databaseFile,
+		lockPath,
 		backupPath,
 		systemSettings: resolved.systemSettingSeeds.map((seed) => ({
 			category: seed.category,

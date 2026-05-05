@@ -56,7 +56,7 @@ install.url=http://127.0.0.1:4401/admin/install
 
 浏览器访问 `/admin/` 或 `/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中。
 
-安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置和完整默认系统设置。安装完成后重启服务进入正常模式；已安装状态下 `/admin/install` 不再开放。安装期间不启用管理员登录，`/admin` 会跳转到安装页，正常 `/api/*` 接口不会注册；安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定。
+安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后重启服务进入正常模式；安装锁存在时不会启动 install app，正常后台中的 `${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/admin` 会跳转到安装页，正常 `/api/*` 接口不会注册；安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定。
 
 需要指定配置路径或安装 token 时可使用：
 

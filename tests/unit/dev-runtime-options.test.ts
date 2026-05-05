@@ -181,6 +181,7 @@ describe("resolveRuntimeOptions", () => {
 			expect(output).toContain(
 				"QingYan Admin dev alias: http://localhost:5173/admin",
 			);
+			expect(output).not.toContain("QINGYAN_ADMIN_DEV_PATHS");
 		} finally {
 			rmSync(workspace.directory, { recursive: true, force: true });
 		}

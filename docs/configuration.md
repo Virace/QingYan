@@ -24,7 +24,7 @@ install.url=http://127.0.0.1:4401/admin/install
 
 浏览器访问 `/admin/` 或 `/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中；脚本化安装仍可显式提交 token。
 
-安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings` 和完整默认 `system_settings`。安装期间不启用管理员登录，默认后台入口 `/admin` 会跳转到安装页 `/admin/install`，正常 `/api/*` 接口不会注册；安装完成后重启服务进入正常模式，已安装状态下 `/admin/install` 返回 410。安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定，可用于隐藏管理入口。
+安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/admin` 会跳转到安装页 `/admin/install`，正常 `/api/*` 接口不会注册；安装完成后重启服务进入正常模式，安装锁存在时不会启动 install app，正常后台中的 `${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定，可用于隐藏管理入口。
 
 startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应中不会返回明文。如果目标 startup config 已存在但无效，安装器会在替换前创建同目录 `.bak-YYYYMMDDHHmmss` 备份。
 

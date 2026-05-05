@@ -11,13 +11,26 @@ afterEach(async () => {
 });
 
 describe("admin ui", () => {
-	it("serves the admin shell at /admin", async () => {
+	it("redirects the extensionless admin entry to the slash route", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const response = await fixture.app.inject({
 			method: "GET",
 			url: "/admin",
+		});
+
+		expect(response.statusCode).toBe(302);
+		expect(response.headers.location).toBe("/admin/");
+	});
+
+	it("serves the admin shell at /admin/", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/admin/",
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -37,7 +50,7 @@ describe("admin ui", () => {
 
 		const shell = await fixture.app.inject({
 			method: "GET",
-			url: "/admin",
+			url: "/admin/",
 		});
 		const assetMatch = shell.body.match(/src="\.\/assets\/([^"]+\.js)"/);
 		if (!assetMatch?.[1]) {
@@ -70,7 +83,60 @@ describe("admin ui", () => {
 		});
 	});
 
-	it("serves deep admin routes from the configured console path", async () => {
+	it("blocks the retired install route under the configured console path", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.admin.console.path = "/qy-console";
+			},
+		});
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qy-console/install?from=install",
+		});
+
+		expect(response.statusCode).toBe(410);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "INSTALL_ROUTE_DISABLED",
+			},
+		});
+	});
+
+	it("does not register the default retired install route when admin path is customized", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.admin.console.path = "/qy-console";
+			},
+		});
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/admin/install?from=install",
+		});
+
+		expect(response.statusCode).toBe(404);
+	});
+
+	it("does not serve the admin shell from unregistered paths", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		for (const url of ["/", "/anything", "/admin/comments"]) {
+			const response = await fixture.app.inject({
+				method: "GET",
+				url,
+			});
+
+			expect(response.statusCode).toBe(404);
+			expect(response.body).not.toContain("QingYan Admin");
+			expect(response.body).not.toContain("window.__QINGYAN_ADMIN__");
+		}
+	});
+
+	it("does not serve deep admin routes from the configured console path", async () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {
 				config.admin.console.path = "/qy-console";
@@ -88,8 +154,42 @@ describe("admin ui", () => {
 			method: "GET",
 			url: "/qy-console/comments",
 		});
-		expect(response.statusCode).toBe(200);
-		expect(response.body).toContain("QingYan Admin");
-		expect(response.body).toContain('"basePath":"/qy-console"');
+		expect(response.statusCode).toBe(404);
+		expect(response.body).not.toContain("QingYan Admin");
+	});
+
+	it("keeps the dev alias strict when the configured console path differs", async () => {
+		const fixture = await createTestApp({
+			devMode: true,
+			mutateConfig(config) {
+				config.admin.console.path = "/qy-console";
+			},
+		});
+		cleanups.push(fixture.cleanup);
+
+		for (const url of ["/admin", "/admin/", "/qy-console", "/qy-console/"]) {
+			const response = await fixture.app.inject({
+				method: "GET",
+				url,
+			});
+			expect(response.statusCode).toBe(url.endsWith("/") ? 200 : 302);
+		}
+
+		for (const url of [
+			"/",
+			"/admin/install",
+			"/admin/comments",
+			"/qy-console/install",
+			"/qy-console/comments",
+			"/anything",
+		]) {
+			const response = await fixture.app.inject({
+				method: "GET",
+				url,
+			});
+			expect(response.statusCode).toBe(url.endsWith("/install") ? 410 : 404);
+			expect(response.body).not.toContain("QingYan Admin");
+			expect(response.body).not.toContain("window.__QINGYAN_ADMIN__");
+		}
 	});
 });

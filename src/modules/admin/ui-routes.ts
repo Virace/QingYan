@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { FastifyPluginAsync, FastifyReply } from "fastify";
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
 import { renderAdminPage } from "./ui/render-admin-page";
 
@@ -31,7 +31,6 @@ function registerAdminUiPath(
 	fastify: Parameters<FastifyPluginAsync>[0],
 	basePath: string,
 ): void {
-	const assetsPrefix = `${basePath}/assets/`;
 	const renderShell = async () =>
 		existsSync(ADMIN_INDEX_HTML)
 			? injectAdminRuntime(await readFile(ADMIN_INDEX_HTML, "utf-8"), basePath)
@@ -62,24 +61,41 @@ function registerAdminUiPath(
 		return reply.type(contentType).send(await readFile(assetPath));
 	});
 
-	fastify.get(basePath, async (_, reply) => {
-		setAdminNoIndexHeaders(reply);
-		return reply.type("text/html; charset=utf-8").send(await renderShell());
+	fastify.get(`${basePath}/install`, async (_, reply) => {
+		return reply.code(410).send({
+			error: {
+				code: "INSTALL_ROUTE_DISABLED",
+				message: "安装流程已关闭。请访问当前管理后台入口。",
+			},
+		});
 	});
 
-	fastify.get(`${basePath}/*`, async (request, reply) => {
-		if (request.url.startsWith(assetsPrefix)) {
-			return reply.code(404).send({
-				error: {
-					code: "ADMIN_ASSET_NOT_FOUND",
-					message: "Admin asset not found.",
-				},
-			});
+	fastify.get(basePath, async (request, reply) => {
+		const redirectUrl = resolveMissingSlashRedirect(basePath, request);
+		if (redirectUrl) {
+			return reply.redirect(redirectUrl);
 		}
 
 		setAdminNoIndexHeaders(reply);
 		return reply.type("text/html; charset=utf-8").send(await renderShell());
 	});
+}
+
+function resolveMissingSlashRedirect(
+	basePath: string,
+	request: FastifyRequest,
+): string | undefined {
+	const pathname = request.url.split("?", 1)[0];
+	return pathname === basePath
+		? buildRedirectUrl(`${basePath}/`, request.url)
+		: undefined;
+}
+
+function buildRedirectUrl(pathname: string, requestUrl: string): string {
+	const queryStart = requestUrl.indexOf("?");
+	return queryStart === -1
+		? pathname
+		: `${pathname}${requestUrl.slice(queryStart)}`;
 }
 
 function injectAdminRuntime(html: string, basePath: string): string {

@@ -100,6 +100,12 @@ function startProcess(
 	return child;
 }
 
+function buildAdminDevPaths(adminPath: string): string {
+	return adminPath === DEFAULT_ADMIN_PATH
+		? DEFAULT_ADMIN_PATH
+		: `${adminPath},${DEFAULT_ADMIN_PATH}`;
+}
+
 const devAdminUsername = process.env.QINGYAN_DEV_ADMIN_USERNAME ?? "admin";
 const devAdminPassword = process.env.QINGYAN_DEV_ADMIN_PASSWORD ?? "admin";
 const devCaptchaAnswer = process.env.QINGYAN_DEV_CAPTCHA_ANSWER ?? "2468";
@@ -182,6 +188,7 @@ async function main(): Promise<void> {
 			["exec", "vite", "--config", "apps/admin/vite.config.ts"],
 			createProcessEnv({
 				QINGYAN_ADMIN_BASE: adminBase,
+				QINGYAN_ADMIN_DEV_PATHS: buildAdminDevPaths(adminPath),
 				QINGYAN_DEV_API_ORIGIN: apiOrigin,
 			}),
 		),
