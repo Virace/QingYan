@@ -17,13 +17,27 @@ function setAdminNoIndexHeaders(reply: FastifyReply): void {
 
 export const adminUiRoutes: FastifyPluginAsync = async (fastify) => {
 	const adminPath = fastify.adminBootstrap.consolePath;
-	const assetsPrefix = `${adminPath}/assets/`;
+	const adminPaths = new Set([adminPath]);
+	if (fastify.runtimeOptions.devMode.enabled) {
+		adminPaths.add("/admin");
+	}
+
+	for (const basePath of adminPaths) {
+		registerAdminUiPath(fastify, basePath);
+	}
+};
+
+function registerAdminUiPath(
+	fastify: Parameters<FastifyPluginAsync>[0],
+	basePath: string,
+): void {
+	const assetsPrefix = `${basePath}/assets/`;
 	const renderShell = async () =>
 		existsSync(ADMIN_INDEX_HTML)
-			? injectAdminRuntime(await readFile(ADMIN_INDEX_HTML, "utf-8"), adminPath)
-			: renderAdminPage({ basePath: adminPath });
+			? injectAdminRuntime(await readFile(ADMIN_INDEX_HTML, "utf-8"), basePath)
+			: renderAdminPage({ basePath });
 
-	fastify.get(`${adminPath}/assets/*`, async (request, reply) => {
+	fastify.get(`${basePath}/assets/*`, async (request, reply) => {
 		const assetName = (request.params as { "*": string })["*"];
 		const assetPath = path.resolve(ADMIN_ASSETS_DIRECTORY, assetName);
 		if (
@@ -48,12 +62,12 @@ export const adminUiRoutes: FastifyPluginAsync = async (fastify) => {
 		return reply.type(contentType).send(await readFile(assetPath));
 	});
 
-	fastify.get(adminPath, async (_, reply) => {
+	fastify.get(basePath, async (_, reply) => {
 		setAdminNoIndexHeaders(reply);
 		return reply.type("text/html; charset=utf-8").send(await renderShell());
 	});
 
-	fastify.get(`${adminPath}/*`, async (request, reply) => {
+	fastify.get(`${basePath}/*`, async (request, reply) => {
 		if (request.url.startsWith(assetsPrefix)) {
 			return reply.code(404).send({
 				error: {
@@ -66,7 +80,7 @@ export const adminUiRoutes: FastifyPluginAsync = async (fastify) => {
 		setAdminNoIndexHeaders(reply);
 		return reply.type("text/html; charset=utf-8").send(await renderShell());
 	});
-};
+}
 
 function injectAdminRuntime(html: string, basePath: string): string {
 	const runtimeScript = `<script>window.__QINGYAN_ADMIN__=${JSON.stringify({ basePath })};</script>`;

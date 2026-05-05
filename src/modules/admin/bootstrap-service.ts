@@ -39,20 +39,9 @@ export async function resolveAdminBootstrap(
 	db: AppDatabase,
 	runtimeOptions?: AppRuntimeOptions,
 ): Promise<AdminBootstrap> {
-	if (runtimeOptions?.devMode.enabled) {
-		const username = runtimeOptions.devMode.adminUsername ?? "admin";
-		const password = runtimeOptions.devMode.adminPassword ?? "admin";
-		return {
-			consolePath: config.admin.console.path ?? "/admin",
-			username,
-			passwordHash: createPasswordHash(password),
-			generatedPassword: password,
-		};
-	}
-
 	const configured = resolveConfiguredBootstrap(config);
 	if (configured) {
-		return configured;
+		return applyDevAdminCredentials(configured, runtimeOptions);
 	}
 
 	const [existing] = await db
@@ -61,11 +50,21 @@ export async function resolveAdminBootstrap(
 		.where(eq(adminBootstrapState.id, 1))
 		.limit(1);
 	if (existing) {
-		return {
-			consolePath: config.admin.console.path ?? existing.consolePath,
-			username: config.admin.auth.username ?? existing.username,
-			passwordHash: config.admin.auth.passwordHash ?? existing.passwordHash,
-		};
+		return applyDevAdminCredentials(
+			{
+				consolePath: config.admin.console.path ?? existing.consolePath,
+				username: config.admin.auth.username ?? existing.username,
+				passwordHash: config.admin.auth.passwordHash ?? existing.passwordHash,
+			},
+			runtimeOptions,
+		);
+	}
+
+	if (runtimeOptions?.devMode.enabled) {
+		return createDevAdminBootstrap(
+			config.admin.console.path ?? "/admin",
+			runtimeOptions,
+		);
 	}
 
 	const generatedPassword = config.admin.auth.passwordHash
@@ -89,6 +88,31 @@ export async function resolveAdminBootstrap(
 	});
 
 	return bootstrap;
+}
+
+function applyDevAdminCredentials(
+	bootstrap: AdminBootstrap,
+	runtimeOptions?: AppRuntimeOptions,
+): AdminBootstrap {
+	if (!runtimeOptions?.devMode.enabled) {
+		return bootstrap;
+	}
+
+	return createDevAdminBootstrap(bootstrap.consolePath, runtimeOptions);
+}
+
+function createDevAdminBootstrap(
+	consolePath: string,
+	runtimeOptions: AppRuntimeOptions,
+): AdminBootstrap {
+	const username = runtimeOptions.devMode.adminUsername ?? "admin";
+	const password = runtimeOptions.devMode.adminPassword ?? "admin";
+	return {
+		consolePath,
+		username,
+		passwordHash: createPasswordHash(password),
+		generatedPassword: password,
+	};
 }
 
 export async function resetAdminPassword(

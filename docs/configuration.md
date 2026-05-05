@@ -272,6 +272,8 @@ QINGYAN_DATABASE_MODE=none
 - dev mode 使用显式 dev seed 创建单站点 `default`。
 - dev seed 不从 startup config 的 `sites[]` 派生。
 - DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite。
+- dev mode 会临时注入开发管理员账号，默认 `admin / admin`；安装时随机生成或用户设置的管理员用户名、密码不会用于本地 dev 登录。
+- dev mode 保留已安装的后台入口，同时额外开放 `/admin/` 作为本地开发别名；非 dev 启动不会开放这个别名。
 - `QINGYAN_DATABASE_MODE=none` 时不连接 SQLite，mock 状态只保存在当前进程内存中。
 - 前端仍然必须显式传 `siteKey: "default"`。
 - 生产环境不会暴露 `/api/dev/*`。

@@ -1,8 +1,12 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import { parse } from "yaml";
 
+import { loadConfig } from "../src/config/load-config";
+import { createDatabaseClients } from "../src/db/client";
+import { adminBootstrapState } from "../src/db/schema";
 import {
 	resolveInstallUrl,
 	resolveMinimalInstallConfig,
@@ -17,7 +21,24 @@ interface DevConfig {
 const DEFAULT_API_PORT = 4401;
 const DEFAULT_ADMIN_PATH = "/admin";
 
-function readDevConfig(): DevConfig {
+async function readAdminPathFromDatabase(
+	configPath: string,
+	environment: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+	const config = await loadConfig(configPath, environment);
+	const databaseFile = path.resolve(process.cwd(), config.database.sqlite.file);
+	const { db, sqlite } = createDatabaseClients(databaseFile);
+	try {
+		const [bootstrap] = await db.select().from(adminBootstrapState).limit(1);
+		return bootstrap?.consolePath;
+	} finally {
+		sqlite.close();
+	}
+}
+
+async function readDevConfig(
+	environment: NodeJS.ProcessEnv,
+): Promise<DevConfig> {
 	const configPath = process.env.QINGYAN_CONFIG_PATH ?? "config/qingyan.yml";
 	const fallbackPath = "config/qingyan.example.yml";
 	const sourcePath = existsSync(configPath) ? configPath : fallbackPath;
@@ -26,7 +47,12 @@ function readDevConfig(): DevConfig {
 		server?: { port?: number };
 	};
 	const apiPort = config.server?.port ?? DEFAULT_API_PORT;
-	const adminPath = config.admin?.console?.path ?? DEFAULT_ADMIN_PATH;
+	const adminPath =
+		(sourcePath === configPath
+			? await readAdminPathFromDatabase(configPath, environment)
+			: undefined) ??
+		config.admin?.console?.path ??
+		DEFAULT_ADMIN_PATH;
 
 	return {
 		adminPath,
@@ -130,11 +156,16 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const { adminPath, apiOrigin } = readDevConfig();
-	const adminBase = `${adminPath}/`;
+	const { adminPath, apiOrigin } = await readDevConfig(devEnv);
+	const adminBase = "/";
 
 	console.log(`QingYan API dev server: ${apiOrigin}`);
 	console.log(`QingYan Admin dev server: http://localhost:5173${adminPath}`);
+	if (adminPath !== DEFAULT_ADMIN_PATH) {
+		console.log(
+			`QingYan Admin dev alias: http://localhost:5173${DEFAULT_ADMIN_PATH}`,
+		);
+	}
 	console.log(`QingYan Dev Admin: ${devAdminUsername} / ${devAdminPassword}`);
 	console.log(`QingYan Dev Captcha: ${devCaptchaAnswer}`);
 

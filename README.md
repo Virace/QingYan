@@ -94,7 +94,7 @@ pnpm dev
 - OpenAPI YAML: `http://localhost:4401/openapi.yaml`
 - API Docs: `http://localhost:4401/docs`
 
-`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按配置中的 `admin.console.path` 生成入口路径，并把 `/api/*` 代理到后端。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm admin:dev`。
+`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按已安装的后台入口生成主入口，并把 `/api/*` 代理到后端。dev mode 下 `/admin/` 始终作为额外开发入口可用；如果安装时生成或设置了其他后台路径，`/admin/` 和该路径会同时可用，`/admin/` 不会在非 dev 启动中开放为别名。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm admin:dev`。
 
 `pnpm dev` 默认启用快速开发模式，Admin 登录固定为：
 
@@ -118,7 +118,7 @@ admin.username=...
 admin.password=...
 ```
 
-在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态；安装完成页会显示一次性初始密码。
+在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。即使安装时随机生成过管理员用户名和密码，dev mode 也会临时注入开发账号；非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态，安装完成页会显示一次性初始密码。
 
 ## 配置文档
 

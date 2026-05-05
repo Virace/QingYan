@@ -77,6 +77,8 @@ QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 - 只提供一个开发站点：`default`
 - `default` 来自 dev seed，不从 startup config 的 `sites[]` 派生
 - DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite
+- 后台登录临时使用 dev 管理员账号，默认 `admin / admin`
+- 后台入口保留已安装的配置路径，同时额外开放 `/admin/` 作为 dev-only 别名
 - 前端仍然必须显式传 `siteKey: "default"`
 - 页面维度继续使用真实 `pageKey`
 - 真实业务 API 路径保持不变

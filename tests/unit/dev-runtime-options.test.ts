@@ -1,7 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
@@ -9,7 +9,7 @@ import { applyInstall } from "../../src/modules/install/install-service";
 import type { MinimalInstallConfig } from "../../src/modules/install/minimal-config";
 import { createTestConfig } from "../support/test-fixtures";
 
-async function createInstalledDevWorkspace() {
+async function createInstalledDevWorkspace(adminConsolePath = "/admin") {
 	const directory = mkdtempSync(join(tmpdir(), "qingyan-dev-installed-"));
 	const databaseFile = join(directory, "data", "qingyan.db");
 	const configPath = join(directory, "config", "qingyan.yml");
@@ -35,7 +35,7 @@ async function createInstalledDevWorkspace() {
 				sqliteFile: databaseFile,
 			},
 			admin: {
-				consolePath: "/admin",
+				consolePath: adminConsolePath,
 				username: "admin",
 				password: "adminadmin",
 			},
@@ -147,6 +147,40 @@ describe("resolveRuntimeOptions", () => {
 			const output = `${result.stdout}\n${result.stderr}`;
 			expect(output).toContain("QingYan Dev Admin: admin / admin");
 			expect(output).toContain("QingYan Dev Captcha: 1357");
+		} finally {
+			rmSync(workspace.directory, { recursive: true, force: true });
+		}
+	});
+
+	it("prints the dev-only /admin alias when the configured admin path differs", async () => {
+		const workspace = await createInstalledDevWorkspace("/hidden-admin");
+		try {
+			const tsxCli = join(
+				process.cwd(),
+				"node_modules",
+				"tsx",
+				"dist",
+				"cli.mjs",
+			);
+			const result = spawnSync(process.execPath, [tsxCli, "scripts/dev.ts"], {
+				cwd: process.cwd(),
+				env: {
+					...process.env,
+					QINGYAN_CONFIG_PATH: workspace.configPath,
+					QINGYAN_DEV_API_ORIGIN: "http://127.0.0.1:9",
+					QINGYAN_DEV_PRINT_CONFIG_ONLY: "true",
+					PATH: process.env.PATH ?? "",
+				},
+				encoding: "utf-8",
+			});
+
+			const output = `${result.stdout}\n${result.stderr}`;
+			expect(output).toContain(
+				"QingYan Admin dev server: http://localhost:5173/hidden-admin",
+			);
+			expect(output).toContain(
+				"QingYan Admin dev alias: http://localhost:5173/admin",
+			);
 		} finally {
 			rmSync(workspace.directory, { recursive: true, force: true });
 		}
