@@ -1,6 +1,10 @@
 import type { AppConfig } from "../../config/types";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { SecurityToolkit } from "../../plugins/security";
+import {
+	defaultSystemSettings,
+	type SystemSettings,
+} from "../system-settings/definitions";
 import type { CommentsRepository } from "./repository";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
@@ -23,6 +27,9 @@ export class CommentsWriteService {
 		private readonly writeRepository: CommentsWriteRepository,
 		private readonly captchaService: CaptchaService,
 		private readonly metadataResolver?: CommentMetadataResolver,
+		private readonly loadIpRegionSettings?: () => Promise<
+			SystemSettings["ipRegion"]
+		>,
 	) {}
 
 	public async createComment(input: {
@@ -151,6 +158,9 @@ export class CommentsWriteService {
 		const metadataConfig = this.readRepository.resolveCommentMetadata(
 			settings ?? undefined,
 		);
+		const ipRegionSettings = this.loadIpRegionSettings
+			? await this.loadIpRegionSettings()
+			: undefined;
 		const requestMetadata = this.metadataResolver
 			? await this.metadataResolver.resolve({
 					ip: metadataConfig.collectIp ? input.ip : undefined,
@@ -158,6 +168,7 @@ export class CommentsWriteService {
 						? input.userAgent
 						: undefined,
 					metadata: metadataConfig,
+					ipRegion: ipRegionSettings ?? defaultSystemSettings.ipRegion,
 				})
 			: undefined;
 		const created = await this.writeRepository.createComment({

@@ -55,12 +55,7 @@ describe("admin settings", () => {
 					collectUserAgent: true,
 					ipRegion: {
 						enabled: false,
-						cachePolicy: "vectorIndex",
 						precision: "province",
-						autoUpdate: {
-							enabled: false,
-							schedule: "monthly",
-						},
 					},
 					device: {
 						enabled: true,
@@ -104,11 +99,7 @@ describe("admin settings", () => {
 						collectUserAgent: false,
 						ipRegion: {
 							enabled: true,
-							cachePolicy: "file",
 							precision: "city",
-							autoUpdate: {
-								enabled: true,
-							},
 						},
 						device: {
 							enabled: false,
@@ -154,12 +145,7 @@ describe("admin settings", () => {
 					collectUserAgent: false,
 					ipRegion: {
 						enabled: true,
-						cachePolicy: "file",
 						precision: "city",
-						autoUpdate: {
-							enabled: true,
-							schedule: "monthly",
-						},
 					},
 					device: {
 						enabled: false,

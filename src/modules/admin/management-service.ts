@@ -13,20 +13,7 @@ type CommentMetadataPatch = {
 	collectUserAgent?: boolean;
 	ipRegion?: {
 		enabled?: boolean;
-		cachePolicy?: "file" | "vectorIndex" | "content";
 		precision?: "country" | "province" | "city";
-		autoUpdate?: {
-			enabled?: boolean;
-			schedule?: "monthly";
-		};
-		ipv4?: {
-			dbPath?: string;
-			sources?: string[];
-		};
-		ipv6?: {
-			dbPath?: string;
-			sources?: string[];
-		};
 	};
 	device?: {
 		enabled?: boolean;
@@ -51,18 +38,6 @@ function mergeCommentMetadata(
 			ipRegion: {
 				...defaultCommentMetadata.ipRegion,
 				...parsed.ipRegion,
-				autoUpdate: {
-					...defaultCommentMetadata.ipRegion.autoUpdate,
-					...parsed.ipRegion?.autoUpdate,
-				},
-				ipv4: {
-					...defaultCommentMetadata.ipRegion.ipv4,
-					...parsed.ipRegion?.ipv4,
-				},
-				ipv6: {
-					...defaultCommentMetadata.ipRegion.ipv6,
-					...parsed.ipRegion?.ipv6,
-				},
 			},
 			device: {
 				...defaultCommentMetadata.device,

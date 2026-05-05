@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import {
 	captchaSessions,
 	comments,
@@ -372,12 +373,16 @@ describe("POST /api/comments", () => {
 			commentMetadataJson: JSON.stringify({
 				ipRegion: {
 					enabled: true,
-					ipv4: {
-						dbPath: "./data/missing-ip2region-v4.xdb",
-					},
 				},
 			}),
 		});
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert("ipRegion", "enabled", true);
+		await systemSettings.upsert(
+			"ipRegion",
+			"ipv4.dbPath",
+			"./data/missing-ip2region-v4.xdb",
+		);
 
 		const response = await fixture.app.inject({
 			method: "POST",

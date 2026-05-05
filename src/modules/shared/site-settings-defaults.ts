@@ -3,20 +3,7 @@ export type CommentMetadataSettings = {
 	collectUserAgent: boolean;
 	ipRegion: {
 		enabled: boolean;
-		cachePolicy: "file" | "vectorIndex" | "content";
 		precision: "country" | "province" | "city";
-		autoUpdate: {
-			enabled: boolean;
-			schedule: "monthly";
-		};
-		ipv4: {
-			dbPath: string;
-			sources: string[];
-		};
-		ipv6: {
-			dbPath: string;
-			sources: string[];
-		};
 	};
 	device: {
 		enabled: boolean;
@@ -36,26 +23,7 @@ export const defaultCommentMetadata: CommentMetadataSettings = {
 	collectUserAgent: true,
 	ipRegion: {
 		enabled: false,
-		cachePolicy: "vectorIndex",
 		precision: "province",
-		autoUpdate: {
-			enabled: false,
-			schedule: "monthly",
-		},
-		ipv4: {
-			dbPath: "./data/ip2region_v4.xdb",
-			sources: [
-				"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
-				"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb",
-			],
-		},
-		ipv6: {
-			dbPath: "./data/ip2region_v6.xdb",
-			sources: [
-				"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb",
-				"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v6.xdb",
-			],
-		},
 	},
 	device: {
 		enabled: true,

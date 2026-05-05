@@ -159,11 +159,13 @@ PATCH /api/admin/sites/{siteKey}
 - 评论身份字段：`nickname | email | website` 的允许和必填状态。
 - 验证码模式：`never | always | threshold` 及阈值窗口。
 - 滥用保护和自动黑名单策略。
-- 评论请求元数据采集：IP、User-Agent、IP 属地、设备解析。
+- 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
 - 邮件通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
+
+IP 库路径、下载源、缓存策略和自动更新属于全局运维配置，由系统设置维护；站点设置不再重复提供这些字段。
 
 ## DB-Owned System Settings
 

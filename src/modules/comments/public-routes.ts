@@ -36,6 +36,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				new RuntimeSystemSettingsService(fastify.db).getCaptchaSettings(),
 		},
 	);
+	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
 	const metadataResolver = new DefaultCommentMetadataResolver();
 	fastify.addHook("onClose", async () => {
 		metadataResolver.close();
@@ -48,6 +49,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		writeRepository,
 		captchaService,
 		metadataResolver,
+		() => systemSettingsService.getIpRegionSettings(),
 	);
 
 	fastify.get("/comments/bootstrap", async (request, reply) => {

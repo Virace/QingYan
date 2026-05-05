@@ -42,7 +42,7 @@ test("site settings page renders editable controls", async ({ page }) => {
 	await expect(page.getByText("评论开关")).toBeVisible();
 	await expect(page.getByText("验证码模式")).toBeVisible();
 	await expect(page.getByText("请求元数据")).toBeVisible();
-	await expect(page.getByText("IPv4 下载源")).toBeVisible();
+	await expect(page.getByText("IPv4 下载源")).toHaveCount(0);
 	await expect(
 		page.getByRole("button", { name: "保存站点设置" }),
 	).toBeVisible();

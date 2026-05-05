@@ -153,20 +153,7 @@ export interface AdminSettings {
 			collectUserAgent: boolean;
 			ipRegion: {
 				enabled: boolean;
-				cachePolicy: "file" | "vectorIndex" | "content";
 				precision: "country" | "province" | "city";
-				autoUpdate: {
-					enabled: boolean;
-					schedule: "monthly";
-				};
-				ipv4: {
-					dbPath: string;
-					sources: string[];
-				};
-				ipv6: {
-					dbPath: string;
-					sources: string[];
-				};
 			};
 			device: {
 				enabled: boolean;
@@ -189,6 +176,23 @@ export interface AdminSystemSettings {
 		level: "error" | "warn" | "info" | "debug";
 		retentionDays: number;
 		directory: string;
+	};
+	ipRegion: {
+		enabled: boolean;
+		cachePolicy: "file" | "vectorIndex" | "content";
+		precision: "country" | "province" | "city";
+		autoUpdate: {
+			enabled: boolean;
+			schedule: "monthly";
+		};
+		ipv4: {
+			dbPath: string;
+			sources: string[];
+		};
+		ipv6: {
+			dbPath: string;
+			sources: string[];
+		};
 	};
 }
 

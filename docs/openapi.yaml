@@ -2027,29 +2027,13 @@ components:
           type: boolean
         ipRegion:
           type: object
-          required: [enabled, cachePolicy, precision, autoUpdate, ipv4, ipv6]
+          required: [enabled, precision]
           properties:
             enabled:
               type: boolean
-            cachePolicy:
-              type: string
-              enum: [file, vectorIndex, content]
             precision:
               type: string
               enum: [country, province, city]
-            autoUpdate:
-              type: object
-              required: [enabled, schedule]
-              properties:
-                enabled:
-                  type: boolean
-                schedule:
-                  type: string
-                  enum: [monthly]
-            ipv4:
-              $ref: '#/components/schemas/AdminSettingsIpRegionDatabase'
-            ipv6:
-              $ref: '#/components/schemas/AdminSettingsIpRegionDatabase'
         device:
           type: object
           required: [enabled, display]
@@ -2062,17 +2046,6 @@ components:
               properties:
                 enabled:
                   type: boolean
-    AdminSettingsIpRegionDatabase:
-      type: object
-      required: [dbPath, sources]
-      properties:
-        dbPath:
-          type: string
-        sources:
-          type: array
-          items:
-            type: string
-            format: uri
     AdminSettingsPageFeedback:
       type: object
       required: [allowLike]
@@ -2171,40 +2144,9 @@ components:
                   properties:
                     enabled:
                       type: boolean
-                    cachePolicy:
-                      type: string
-                      enum: [file, vectorIndex, content]
                     precision:
                       type: string
                       enum: [country, province, city]
-                    autoUpdate:
-                      type: object
-                      properties:
-                        enabled:
-                          type: boolean
-                        schedule:
-                          type: string
-                          enum: [monthly]
-                    ipv4:
-                      type: object
-                      properties:
-                        dbPath:
-                          type: string
-                        sources:
-                          type: array
-                          items:
-                            type: string
-                            format: uri
-                    ipv6:
-                      type: object
-                      properties:
-                        dbPath:
-                          type: string
-                        sources:
-                          type: array
-                          items:
-                            type: string
-                            format: uri
                 device:
                   type: object
                   properties:
@@ -2238,12 +2180,50 @@ components:
           maximum: 3650
         directory:
           type: string
+    AdminSystemIpRegionDatabase:
+      type: object
+      required: [dbPath, sources]
+      properties:
+        dbPath:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+            format: uri
+    AdminSystemIpRegionSettings:
+      type: object
+      required: [enabled, cachePolicy, precision, autoUpdate, ipv4, ipv6]
+      properties:
+        enabled:
+          type: boolean
+        cachePolicy:
+          type: string
+          enum: [file, vectorIndex, content]
+        precision:
+          type: string
+          enum: [country, province, city]
+        autoUpdate:
+          type: object
+          required: [enabled, schedule]
+          properties:
+            enabled:
+              type: boolean
+            schedule:
+              type: string
+              enum: [monthly]
+        ipv4:
+          $ref: '#/components/schemas/AdminSystemIpRegionDatabase'
+        ipv6:
+          $ref: '#/components/schemas/AdminSystemIpRegionDatabase'
     AdminSystemSettingsResponse:
       type: object
-      required: [logging]
+      required: [logging, ipRegion]
       properties:
         logging:
           $ref: '#/components/schemas/AdminSystemLoggingSettings'
+        ipRegion:
+          $ref: '#/components/schemas/AdminSystemIpRegionSettings'
     AdminSystemSettingsUpdateRequest:
       type: object
       required: [logging]
@@ -2259,6 +2239,8 @@ components:
               type: integer
               minimum: 1
               maximum: 3650
+        ipRegion:
+          $ref: '#/components/schemas/AdminSystemIpRegionSettings'
     AdminSiteCreateRequest:
       type: object
       required: [siteKey, name, allowedOrigins]

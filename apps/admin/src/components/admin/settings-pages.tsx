@@ -643,167 +643,6 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									<option value="city">城市</option>
 								</select>
 							</Field>
-							<Field label="地域缓存策略">
-								<select
-									className={inputClass}
-									value={draft.comments.metadata.ipRegion.cachePolicy}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														cachePolicy: event.target.value as
-															| "file"
-															| "vectorIndex"
-															| "content",
-													},
-												},
-											},
-										})
-									}
-								>
-									<option value="file">file</option>
-									<option value="vectorIndex">vectorIndex</option>
-									<option value="content">content</option>
-								</select>
-							</Field>
-							<Field label="地域库自动更新">
-								<select
-									className={inputClass}
-									value={String(
-										draft.comments.metadata.ipRegion.autoUpdate.enabled,
-									)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														autoUpdate: {
-															...draft.comments.metadata.ipRegion.autoUpdate,
-															enabled: event.target.value === "true",
-														},
-													},
-												},
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="IPv4 数据库路径">
-								<Input
-									value={draft.comments.metadata.ipRegion.ipv4.dbPath}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														ipv4: {
-															...draft.comments.metadata.ipRegion.ipv4,
-															dbPath: event.target.value,
-														},
-													},
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="IPv4 下载源">
-								<textarea
-									className={textareaClass}
-									value={draft.comments.metadata.ipRegion.ipv4.sources.join(
-										"\n",
-									)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														ipv4: {
-															...draft.comments.metadata.ipRegion.ipv4,
-															sources: event.target.value
-																.split(/\r?\n/)
-																.map((value) => value.trim())
-																.filter(Boolean),
-														},
-													},
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="IPv6 数据库路径">
-								<Input
-									value={draft.comments.metadata.ipRegion.ipv6.dbPath}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														ipv6: {
-															...draft.comments.metadata.ipRegion.ipv6,
-															dbPath: event.target.value,
-														},
-													},
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="IPv6 下载源">
-								<textarea
-									className={textareaClass}
-									value={draft.comments.metadata.ipRegion.ipv6.sources.join(
-										"\n",
-									)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														ipv6: {
-															...draft.comments.metadata.ipRegion.ipv6,
-															sources: event.target.value
-																.split(/\r?\n/)
-																.map((value) => value.trim())
-																.filter(Boolean),
-														},
-													},
-												},
-											},
-										})
-									}
-								/>
-							</Field>
 							<Field label="设备解析">
 								<select
 									className={inputClass}
@@ -947,6 +786,7 @@ export function SystemSettingsPage() {
 							value={draft.logging.level}
 							onChange={(event) =>
 								setDraft({
+									...draft,
 									logging: {
 										...draft.logging,
 										level: event.target
@@ -969,6 +809,7 @@ export function SystemSettingsPage() {
 							value={draft.logging.retentionDays}
 							onChange={(event) =>
 								setDraft({
+									...draft,
 									logging: {
 										...draft.logging,
 										retentionDays: Number(event.target.value),
@@ -980,6 +821,170 @@ export function SystemSettingsPage() {
 					<Field label="日志目录">
 						<Input value={draft.logging.directory} readOnly />
 					</Field>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">IP 数据库</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="IP 地域解析">
+								<select
+									className={inputClass}
+									value={String(draft.ipRegion.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												enabled: event.target.value === "true",
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="缓存策略">
+								<select
+									className={inputClass}
+									value={draft.ipRegion.cachePolicy}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												cachePolicy: event.target.value as
+													| "file"
+													| "vectorIndex"
+													| "content",
+											},
+										})
+									}
+								>
+									<option value="file">file</option>
+									<option value="vectorIndex">vectorIndex</option>
+									<option value="content">content</option>
+								</select>
+							</Field>
+							<Field label="默认地域精度">
+								<select
+									className={inputClass}
+									value={draft.ipRegion.precision}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												precision: event.target.value as
+													| "country"
+													| "province"
+													| "city",
+											},
+										})
+									}
+								>
+									<option value="country">国家</option>
+									<option value="province">省份</option>
+									<option value="city">城市</option>
+								</select>
+							</Field>
+							<Field label="每月自动更新">
+								<select
+									className={inputClass}
+									value={String(draft.ipRegion.autoUpdate.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												autoUpdate: {
+													...draft.ipRegion.autoUpdate,
+													enabled: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="IPv4 数据库路径">
+								<Input
+									value={draft.ipRegion.ipv4.dbPath}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												ipv4: {
+													...draft.ipRegion.ipv4,
+													dbPath: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="IPv6 数据库路径">
+								<Input
+									value={draft.ipRegion.ipv6.dbPath}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												ipv6: {
+													...draft.ipRegion.ipv6,
+													dbPath: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="IPv4 下载源">
+								<textarea
+									className={textareaClass}
+									value={draft.ipRegion.ipv4.sources.join("\n")}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												ipv4: {
+													...draft.ipRegion.ipv4,
+													sources: event.target.value
+														.split(/\r?\n/)
+														.map((value) => value.trim())
+														.filter(Boolean),
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="IPv6 下载源">
+								<textarea
+									className={textareaClass}
+									value={draft.ipRegion.ipv6.sources.join("\n")}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											ipRegion: {
+												...draft.ipRegion,
+												ipv6: {
+													...draft.ipRegion.ipv6,
+													sources: event.target.value
+														.split(/\r?\n/)
+														.map((value) => value.trim())
+														.filter(Boolean),
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
+					</div>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
 							保存系统设置
