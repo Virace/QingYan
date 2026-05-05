@@ -8,6 +8,7 @@ import { createDatabaseClients } from "../db/client";
 import { applyDatabaseMigrations } from "../db/migrations";
 import { resolveAdminBootstrap } from "../modules/admin/bootstrap-service";
 import { IpRegionAutoUpdateScheduler } from "../modules/comments/metadata/ip-region-scheduler";
+import { RuntimeSystemSettingsService } from "../modules/system-settings/service";
 
 const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	const databaseFile = path.resolve(
@@ -32,8 +33,11 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		);
 	}
 	await fastify.siteRegistry.loadFromDatabase(db);
-	const ipRegionScheduler = new IpRegionAutoUpdateScheduler(db, fastify.config);
-	ipRegionScheduler.start();
+	const systemSettingsService = new RuntimeSystemSettingsService(db);
+	const ipRegionScheduler = new IpRegionAutoUpdateScheduler(db, () =>
+		systemSettingsService.getIpRegionSettings(),
+	);
+	await ipRegionScheduler.start();
 
 	fastify.addHook("onClose", async () => {
 		ipRegionScheduler.stop();

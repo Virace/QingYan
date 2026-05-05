@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { captchaSessions, siteSettings } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -26,19 +27,26 @@ afterEach(async () => {
 });
 
 describe("comment captcha providers", () => {
+	async function upsertSystemSettings(
+		fixture: Awaited<ReturnType<typeof createTestApp>>,
+		rows: Array<[string, string, unknown]>,
+	) {
+		const repository = new AdminSystemSettingsRepository(fixture.app.db);
+		for (const [category, key, value] of rows) {
+			await repository.upsert(category, key, value);
+		}
+	}
+
 	it("serves an iframe challenge and completes turnstile verification", async () => {
-		const fixture = await createTestApp({
-			mutateConfig: (config) => {
-				config.captcha.provider = "turnstile";
-				config.captcha.turnstile = {
-					siteKey: "1x00000000000000000000AA",
-					secretKey: "turnstile-secret",
-					expectedAction: "COMMENT_SUBMIT",
-					expectedHostname: "comments.example.com",
-				};
-			},
-		});
+		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await upsertSystemSettings(fixture, [
+			["captcha", "provider", "turnstile"],
+			["captcha", "turnstile.siteKey", "1x00000000000000000000AA"],
+			["captcha", "turnstile.secretKey", "turnstile-secret"],
+			["captcha", "turnstile.expectedAction", "COMMENT_SUBMIT"],
+			["captcha", "turnstile.expectedHostname", "comments.example.com"],
+		]);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
@@ -132,17 +140,14 @@ describe("comment captcha providers", () => {
 	});
 
 	it("serves an iframe challenge and completes hcaptcha verification", async () => {
-		const fixture = await createTestApp({
-			mutateConfig: (config) => {
-				config.captcha.provider = "hcaptcha";
-				config.captcha.hcaptcha = {
-					siteKey: "10000000-ffff-ffff-ffff-000000000001",
-					secretKey: "hcaptcha-secret",
-					expectedHostname: "comments.example.com",
-				};
-			},
-		});
+		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await upsertSystemSettings(fixture, [
+			["captcha", "provider", "hcaptcha"],
+			["captcha", "hcaptcha.siteKey", "10000000-ffff-ffff-ffff-000000000001"],
+			["captcha", "hcaptcha.secretKey", "hcaptcha-secret"],
+			["captcha", "hcaptcha.expectedHostname", "comments.example.com"],
+		]);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
@@ -204,21 +209,18 @@ describe("comment captcha providers", () => {
 	});
 
 	it("uses Google Cloud recaptcha assessment flow for both score and policy variants", async () => {
-		const fixture = await createTestApp({
-			mutateConfig: (config) => {
-				config.captcha.provider = "recaptcha";
-				config.captcha.recaptcha = {
-					variant: "policy_based_challenge",
-					projectId: "qingyan-project",
-					siteKey: "6L-example",
-					apiKey: "AIza-example",
-					expectedAction: "COMMENT_SUBMIT",
-					expectedHostname: "comments.example.com",
-					minScore: 0.5,
-				};
-			},
-		});
+		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await upsertSystemSettings(fixture, [
+			["captcha", "provider", "recaptcha"],
+			["captcha", "recaptcha.variant", "policy_based_challenge"],
+			["captcha", "recaptcha.projectId", "qingyan-project"],
+			["captcha", "recaptcha.siteKey", "6L-example"],
+			["captcha", "recaptcha.apiKey", "AIza-example"],
+			["captcha", "recaptcha.expectedAction", "COMMENT_SUBMIT"],
+			["captcha", "recaptcha.expectedHostname", "comments.example.com"],
+			["captcha", "recaptcha.minScore", 0.5],
+		]);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
@@ -330,17 +332,14 @@ describe("comment captcha providers", () => {
 	});
 
 	it("serves an iframe challenge and completes geetest verification", async () => {
-		const fixture = await createTestApp({
-			mutateConfig: (config) => {
-				config.captcha.provider = "geetest";
-				config.captcha.geetest = {
-					captchaId: "647f5ed2ed8acb4be36784e01556bb71",
-					captchaKey: "b09a7aafbfd83f73b35a9b530d0337bf",
-					apiServer: "https://gcaptcha4.geetest.com",
-				};
-			},
-		});
+		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await upsertSystemSettings(fixture, [
+			["captcha", "provider", "geetest"],
+			["captcha", "geetest.captchaId", "647f5ed2ed8acb4be36784e01556bb71"],
+			["captcha", "geetest.captchaKey", "b09a7aafbfd83f73b35a9b530d0337bf"],
+			["captcha", "geetest.apiServer", "https://gcaptcha4.geetest.com"],
+		]);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});

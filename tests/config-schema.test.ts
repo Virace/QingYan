@@ -174,7 +174,9 @@ describe("configSchema", () => {
 
 			expect(config.server.port).toBe(5501);
 			expect(config.database.sqlite.file).toBe("./data/env.db");
-			expect(config.sites[0]?.siteKey).toBe("fangyuan");
+			expect("sites" in config).toBe(false);
+			expect("captcha" in config).toBe(false);
+			expect("mail" in config).toBe(false);
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}

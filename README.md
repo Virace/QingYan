@@ -51,16 +51,20 @@ pnpm dev:api
 当 `config/qingyan.yml` 不存在时，后端会启动 minimal install app，并在终端输出一次性安装地址：
 
 ```text
-install.url=http://127.0.0.1:4401/install?token=...
+install.url=http://127.0.0.1:4401/admin/install
 ```
 
-安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置和基础系统设置。安装完成后重启服务进入正常模式；已安装状态下 `/install` 不再开放。
+浏览器访问 `/admin/` 或 `/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中。
+
+安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置和完整默认系统设置。安装完成后重启服务进入正常模式；已安装状态下 `/admin/install` 不再开放。安装期间不启用管理员登录，`/admin` 会跳转到安装页，正常 `/api/*` 接口不会注册；安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定。
 
 需要指定配置路径或安装 token 时可使用：
 
 ```bash
 QINGYAN_CONFIG_PATH=./config/qingyan.yml QINGYAN_INSTALL_TOKEN=change-me pnpm dev:api
 ```
+
+startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应、Admin system settings 和普通 QingYan export 都不会返回明文。
 
 ### 3. 校验配置
 
@@ -122,6 +126,7 @@ admin.password=...
 - startup config 示例见 `config/qingyan.example.yml`
 - 本地实参默认使用 `config/qingyan.yml`
 - 站点、站点设置、系统设置由数据库持久化，后台管理端维护
+- 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
 - release 后破坏性升级的预留规则见 [docs/upgrade-lifecycle.md](docs/upgrade-lifecycle.md)
 
 ## OpenAPI

@@ -6,10 +6,13 @@ import Database from "better-sqlite3";
 
 import { buildApp } from "../../src/app";
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
-import type { AppConfig, SiteConfig } from "../../src/config/types";
+import type { AppConfig } from "../../src/config/types";
 import { createDatabaseClients } from "../../src/db/client";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
-import { createSiteRegistry } from "../../src/modules/shared/site-registry";
+import {
+	createSiteRegistry,
+	type SiteSeed,
+} from "../../src/modules/shared/site-registry";
 
 function createTempWorkspace() {
 	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-"));
@@ -43,7 +46,7 @@ export function applyInitialMigration(databaseFile: string): void {
 
 async function seedTestSite(
 	databaseFile: string,
-	site: Pick<SiteConfig, "siteKey" | "name" | "allowedOrigins">,
+	site: SiteSeed,
 ): Promise<void> {
 	const { db, sqlite } = createDatabaseClients(databaseFile);
 	try {
@@ -52,6 +55,12 @@ async function seedTestSite(
 		sqlite.close();
 	}
 }
+
+export const defaultTestSite: SiteSeed = {
+	siteKey: "fangyuan",
+	name: "FangYuan",
+	allowedOrigins: ["http://localhost:4321"],
+};
 
 export function createTestConfig(
 	databaseFile: string,
@@ -119,112 +128,16 @@ export function createTestConfig(
 				},
 			},
 		},
-		captcha: {
-			provider: "image",
-			image: {
-				width: 160,
-				height: 60,
-				ttlSec: 600,
-			},
-		},
 		logging: {
 			directory: logsDirectory,
-			defaults: {
-				level: "info",
-				retentionDays: 7,
-			},
 		},
-		mail: {
-			enabled: false,
-			smtp: {
-				host: "smtp.example.com",
-				port: 465,
-				secure: true,
-				username: "notify@example.com",
-				password: "secret",
-				from: "notify@example.com",
-			},
-		},
-		sites: [
-			{
-				siteKey: "fangyuan",
-				name: "FangYuan",
-				allowedOrigins: ["http://localhost:4321"],
-				defaults: {
-					comments: {
-						enabled: true,
-						defaultStatus: "pending",
-						maxDepth: 3,
-						rootLimit: 20,
-						identity: {
-							require: ["nickname", "email"],
-						},
-						captcha: {
-							mode: "threshold",
-							thresholdWindowSec: 60,
-							thresholdMaxActions: 3,
-						},
-						abuseGuard: {
-							enabled: true,
-							windowSec: 600,
-							maxWriteActions: 100,
-							autoBlacklist: {
-								enabled: true,
-								scope: "post",
-								ttlSec: 1800,
-							},
-						},
-						metadata: {
-							collectIp: true,
-							collectUserAgent: true,
-							ipRegion: {
-								enabled: false,
-								cachePolicy: "vectorIndex",
-								precision: "province",
-								autoUpdate: {
-									enabled: false,
-									schedule: "monthly",
-								},
-								ipv4: {
-									dbPath: "./data/ip2region_v4.xdb",
-									sources: [
-										"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
-										"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb",
-									],
-								},
-								ipv6: {
-									dbPath: "./data/ip2region_v6.xdb",
-									sources: [
-										"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb",
-										"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v6.xdb",
-									],
-								},
-							},
-							device: {
-								enabled: true,
-								display: {
-									enabled: false,
-								},
-							},
-						},
-						allowWebsite: true,
-					},
-					pageFeedback: {
-						allowLike: true,
-					},
-					notifications: {
-						emailEnabled: false,
-					},
-				},
-			},
-		],
 	};
 }
 
 export async function createTestApp(options?: {
 	devMode?: boolean;
 	devAdminToken?: string;
-	seedSite?: Pick<SiteConfig, "siteKey" | "name" | "allowedOrigins"> | false;
+	seedSite?: SiteSeed | false;
 	mutateConfig?: (config: AppConfig) => void;
 }) {
 	const workspace = createTempWorkspace();
@@ -236,11 +149,10 @@ export async function createTestApp(options?: {
 	);
 	options?.mutateConfig?.(baseConfig);
 	if (!options?.devMode) {
-		const [defaultSite] = baseConfig.sites;
 		const site =
 			options?.seedSite === false
 				? undefined
-				: (options?.seedSite ?? defaultSite);
+				: (options?.seedSite ?? defaultTestSite);
 		if (!site) {
 			throw new Error("Test fixture requires a default site seed.");
 		}

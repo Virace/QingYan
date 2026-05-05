@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { SqliteClient } from "../../../db/client";
+import { secretSystemSettingPaths } from "../../system-settings/definitions";
 import {
 	InvalidRequestError,
 	ResourceNotFoundError,
@@ -99,6 +100,10 @@ const siteSettingsWritableColumns = [
 	"email_notifications_enabled",
 ] as const;
 
+function isSecretSystemSetting(row: { category: string; key: string }) {
+	return secretSystemSettingPaths.has(`${row.category}.${row.key}`);
+}
+
 function hashPayload(payload: unknown) {
 	return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
@@ -141,6 +146,7 @@ export class QingYanImportService {
 			});
 		}
 		const siteId = this.getSiteId(input.siteKey);
+		this.assertNoSecretSystemSettings(exportPayload);
 		const dryRun = this.buildDryRun(siteId, exportPayload, options);
 		const jobId = `qy_${randomUUID().replaceAll("-", "")}`;
 		const status =
@@ -210,6 +216,19 @@ export class QingYanImportService {
 			importMode: input.importMode ?? "full_site",
 			settingsStrategy: input.settingsStrategy ?? "fail_on_existing",
 		};
+	}
+
+	private assertNoSecretSystemSettings(payload: QingYanExport) {
+		for (const row of payload.data.systemSettings ?? []) {
+			if (typeof row.category !== "string" || typeof row.key !== "string") {
+				continue;
+			}
+			if (isSecretSystemSetting({ category: row.category, key: row.key })) {
+				throw new InvalidRequestError({
+					message: "普通 QingYan 导入不接受 system settings secret 字段。",
+				});
+			}
+		}
 	}
 
 	private applyInTransaction(

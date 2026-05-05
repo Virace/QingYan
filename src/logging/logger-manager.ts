@@ -5,6 +5,10 @@ import { eq } from "drizzle-orm";
 import type { AppConfig } from "../config/types";
 import type { AppDatabase } from "../db/client";
 import { systemSettings } from "../db/schema";
+import {
+	defaultSystemSettings,
+	type SystemSettings,
+} from "../modules/system-settings/definitions";
 import { LogFileSink } from "./file-sink";
 import {
 	formatAccessJsonlLine,
@@ -48,8 +52,8 @@ export class LoggerManager {
 		this.logDirectory = normalizeLogDirectory(config.logging.directory);
 		this.sink = new LogFileSink(this.logDirectory);
 		this.siteSettings = {
-			level: config.logging.defaults.level,
-			retentionDays: config.logging.defaults.retentionDays,
+			level: defaultSystemSettings.logging.level,
+			retentionDays: defaultSystemSettings.logging.retentionDays,
 		};
 	}
 
@@ -85,7 +89,7 @@ export class LoggerManager {
 			for (const row of rows) {
 				if (row.key === "level") {
 					const value = parseSystemSettingValue<
-						AppConfig["logging"]["defaults"]["level"]
+						SystemSettings["logging"]["level"]
 					>(row.valueJson);
 					if (value) {
 						nextSettings.level = value;
@@ -104,8 +108,8 @@ export class LoggerManager {
 			this.fileLoggingEnabled = true;
 		} catch (error) {
 			this.siteSettings = {
-				level: this.config.logging.defaults.level,
-				retentionDays: this.config.logging.defaults.retentionDays,
+				level: defaultSystemSettings.logging.level,
+				retentionDays: defaultSystemSettings.logging.retentionDays,
 			};
 			this.stderr.write(
 				`[qingyan-logging] failed to load runtime settings: ${String(error)}\n`,

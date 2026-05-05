@@ -192,4 +192,85 @@ export const adminSystemSettingsBodySchema = z.object({
 		level: z.enum(["error", "warn", "info", "debug"]),
 		retentionDays: z.number().int().min(1).max(3650),
 	}),
+	mail: z
+		.object({
+			enabled: z.boolean(),
+			smtp: z.object({
+				host: z.string(),
+				port: z.number().int().positive(),
+				secure: z.boolean(),
+				username: z.string(),
+				password: z.string().min(1).optional(),
+				from: z.string(),
+			}),
+		})
+		.optional(),
+	captcha: z
+		.object({
+			provider: z.enum([
+				"image",
+				"turnstile",
+				"hcaptcha",
+				"recaptcha",
+				"geetest",
+			]),
+			image: z.object({
+				width: z.number().int().positive(),
+				height: z.number().int().positive(),
+				ttlSec: z.number().int().positive(),
+			}),
+			turnstile: z
+				.object({
+					siteKey: z.string(),
+					secretKey: z.string().min(1).optional(),
+					expectedAction: z.string(),
+					expectedHostname: z.string().optional(),
+				})
+				.optional(),
+			hcaptcha: z
+				.object({
+					siteKey: z.string(),
+					secretKey: z.string().min(1).optional(),
+					expectedHostname: z.string().optional(),
+				})
+				.optional(),
+			recaptcha: z
+				.object({
+					variant: z.enum(["score_based", "policy_based_challenge"]),
+					projectId: z.string(),
+					siteKey: z.string(),
+					apiKey: z.string().min(1).optional(),
+					expectedAction: z.string(),
+					expectedHostname: z.string().optional(),
+					minScore: z.number().min(0).max(1),
+				})
+				.optional(),
+			geetest: z
+				.object({
+					captchaId: z.string(),
+					captchaKey: z.string().min(1).optional(),
+					apiServer: z.string().url(),
+				})
+				.optional(),
+		})
+		.optional(),
+	ipRegion: z
+		.object({
+			enabled: z.boolean(),
+			cachePolicy: z.enum(["file", "vectorIndex", "content"]),
+			precision: z.enum(["country", "province", "city"]),
+			autoUpdate: z.object({
+				enabled: z.boolean(),
+				schedule: z.literal("monthly"),
+			}),
+			ipv4: z.object({
+				dbPath: z.string().min(1),
+				sources: z.array(z.string().url()),
+			}),
+			ipv6: z.object({
+				dbPath: z.string().min(1),
+				sources: z.array(z.string().url()),
+			}),
+		})
+		.optional(),
 });

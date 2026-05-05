@@ -9,7 +9,7 @@ QingYan 把配置来源分成四类：
 - `startup config`：YAML 文件，包含 server、database、admin session 和基础 security 字段。修改后通常需要重启。
 - `env override`：白名单环境变量覆盖 startup config 或 install 行为。环境变量优先级高于 YAML。
 - `db site settings`：数据库中的站点记录与 `site_settings`，包含评论开关、审核默认状态、验证码模式、评论身份字段、页面点赞、通知开关、评论元数据采集等。
-- `db system settings`：数据库中的 `system_settings`，包含日志等级、日志保留天数，以及后续 mail/captcha/IP 库等不影响进程启动的全局能力设置。
+- `db system settings`：数据库中的 `system_settings`，包含日志等级、日志保留天数、mail SMTP、captcha provider/config、IP 库下载与更新等不影响进程启动的全局能力设置。
 - `generated bootstrap`：安装器生成并写入数据库的一次性后台入口、管理员用户名、密码 hash 等初始化状态。
 
 配置文件不再长期拥有 `sites[]`、`sites[].defaults`、mail、captcha provider、IP 库、日志等级或保留天数。后台管理端修改站点设置后写入数据库，重启不会被 YAML 覆盖。
@@ -19,10 +19,14 @@ QingYan 把配置来源分成四类：
 如果 `QINGYAN_CONFIG_PATH` 指向的配置文件不存在，服务会进入 minimal install app。启动日志会输出一次性安装地址：
 
 ```text
-install.url=http://127.0.0.1:4401/install?token=...
+install.url=http://127.0.0.1:4401/admin/install
 ```
 
-安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings` 和基础 `system_settings`。安装完成后重启服务进入正常模式，已安装状态下 `/install` 返回 410。
+浏览器访问 `/admin/` 或 `/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中；脚本化安装仍可显式提交 token。
+
+安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings` 和完整默认 `system_settings`。安装期间不启用管理员登录，默认后台入口 `/admin` 会跳转到安装页 `/admin/install`，正常 `/api/*` 接口不会注册；安装完成后重启服务进入正常模式，已安装状态下 `/admin/install` 返回 410。安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定，可用于隐藏管理入口。
+
+startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应中不会返回明文。如果目标 startup config 已存在但无效，安装器会在替换前创建同目录 `.bak-YYYYMMDDHHmmss` 备份。
 
 安装相关环境变量：
 
@@ -121,9 +125,17 @@ security:
 | --- | --- | --- |
 | `server.host` | `QINGYAN_SERVER_HOST` | 启动监听地址 |
 | `server.port` | `QINGYAN_SERVER_PORT` | 启动监听端口 |
+| `server.publicBaseUrl` | `QINGYAN_PUBLIC_BASE_URL` | 对外公开基础地址 |
+| `server.trustProxy` | `QINGYAN_TRUST_PROXY` | 是否信任反向代理 |
 | `database.sqlite.file` | `QINGYAN_SQLITE_FILE` | SQLite 文件路径 |
+| `admin.session.cookieName` | `QINGYAN_ADMIN_SESSION_COOKIE_NAME` | 后台会话 cookie 名 |
+| `admin.session.ttlMinutes` | `QINGYAN_ADMIN_SESSION_TTL_MINUTES` | 后台会话有效期，单位分钟 |
+| `admin.session.sameSite` | `QINGYAN_ADMIN_SESSION_SAME_SITE` | `strict | lax | none` |
+| `admin.session.secure` | `QINGYAN_ADMIN_SESSION_SECURE` | 是否仅通过 HTTPS 发送后台 cookie |
+| `mail.smtp.password` | `QINGYAN_SMTP_PASSWORD` | 首装时写入 `system_settings`，响应脱敏 |
+| `captcha.turnstile.secretKey` | `QINGYAN_TURNSTILE_SECRET_KEY` | 首装时写入 `system_settings`，响应脱敏 |
 
-环境变量管理的字段在 install 或后续配置查看中应作为 env source 展示。secret 类型字段后续只显示“已配置”，不展示明文。
+环境变量管理的字段在 install 或后续配置查看中应作为 env source 展示。secret 类型字段只显示“已配置”，不展示明文。
 
 ## DB-Owned Site Settings
 
@@ -155,12 +167,37 @@ PATCH /api/admin/sites/{siteKey}
 
 ## DB-Owned System Settings
 
-系统设置保存在 `system_settings`。当前后台已支持：
+系统设置保存在 `system_settings`。当前由 DB 长期拥有：
 
 - `logging.level`
 - `logging.retentionDays`
+- `mail.enabled`
+- `mail.smtp.host`
+- `mail.smtp.port`
+- `mail.smtp.secure`
+- `mail.smtp.username`
+- `mail.smtp.password`
+- `mail.smtp.from`
+- `captcha.provider`
+- `captcha.image.*`
+- `captcha.turnstile.*`
+- `captcha.hcaptcha.*`
+- `captcha.recaptcha.*`
+- `captcha.geetest.*`
+- `ipRegion.enabled`
+- `ipRegion.cachePolicy`
+- `ipRegion.precision`
+- `ipRegion.autoUpdate.*`
+- `ipRegion.ipv4.dbPath`
+- `ipRegion.ipv4.sources`
+- `ipRegion.ipv6.dbPath`
+- `ipRegion.ipv6.sources`
 
-日志目录仍属于部署环境，不在后台修改。后续 mail、captcha provider、IP 库下载源等不影响进程启动的全局能力也应进入 `system_settings`，而不是回到 startup config。
+首装会写入完整默认系统设置。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
+
+Admin API 会返回 logging、mail、captcha 和 ipRegion 的 typed 设置。secret 字段不会在 Admin API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+
+日志目录仍属于部署环境，不在后台修改。logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
 
 ## 评论验证码与元数据
 
@@ -192,7 +229,9 @@ PATCH /api/admin/sites/{siteKey}
 - `settings_only`: 只更新站点和站点设置，不导入评论数据。
 - `full_site`: 同时导入站点、站点设置和数据。
 
-普通 export 不包含 admin session、admin password、install token、进程环境变量、SQLite 文件路径或 server host/port。
+普通 export 不包含 admin session、admin password、install token、进程环境变量、SQLite 文件路径或 server host/port。普通 QingYan export 默认也不包含 system settings secret rows，例如 SMTP password、Turnstile secret、hCaptcha secret、reCAPTCHA API key 和 GeeTest captcha key。需要迁移 secret 时，应使用部署环境变量、重新在 Admin Console 输入，或等待未来 full backup/restore 模式。
+
+普通 QingYan import 不接受 hand-crafted system settings secret rows；dry-run 阶段会直接拒绝。当前 install restore mode 仍未实现，不能把普通 export 当作完整实例备份。
 
 ## Future Upgrade Lifecycle
 

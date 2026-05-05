@@ -36,7 +36,7 @@ export function resolveMinimalInstallConfig(
 
 export function resolveInstallUrl(input: MinimalInstallConfig): string {
 	return new URL(
-		`/install?token=${encodeURIComponent(input.token)}`,
+		"/admin/install",
 		`http://${input.host}:${input.port}`,
 	).toString();
 }

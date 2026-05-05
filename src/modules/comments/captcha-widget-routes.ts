@@ -5,6 +5,7 @@ import { CommentsRepository } from "./repository";
 import { CaptchaService } from "./captcha-service";
 import { CommentsWriteRepository } from "./write-repository";
 import { captchaCompleteBodySchema, captchaWidgetQuerySchema } from "./schemas";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 
 export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new CommentsRepository(fastify.db, fastify.siteRegistry);
@@ -13,6 +14,10 @@ export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.security,
 		repository,
 		new CommentsWriteRepository(fastify.db),
+		{
+			getSettings: () =>
+				new RuntimeSystemSettingsService(fastify.db).getCaptchaSettings(),
+		},
 	);
 
 	fastify.get("/comments/captcha/widget", async (request, reply) => {

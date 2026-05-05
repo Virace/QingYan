@@ -18,10 +18,11 @@ import {
 	calculateFileHash,
 	IpRegionUpdater,
 } from "../../src/modules/comments/metadata/ip-region-updater";
-import {
-	applyInitialMigration,
-	createTestConfig,
-} from "../support/test-fixtures";
+import { IpRegionAutoUpdateScheduler } from "../../src/modules/comments/metadata/ip-region-scheduler";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { RuntimeSystemSettingsService } from "../../src/modules/system-settings/service";
+import { applyInitialMigration } from "../support/test-fixtures";
+import { defaultSystemSettings } from "../../src/modules/system-settings/definitions";
 
 const cleanups: Array<() => void> = [];
 
@@ -44,9 +45,7 @@ async function createFixture() {
 	return {
 		...clients,
 		directory,
-		config:
-			createTestConfig(databaseFile).sites[0]?.defaults.comments.metadata
-				.ipRegion,
+		config: defaultSystemSettings.ipRegion,
 	};
 }
 
@@ -207,5 +206,45 @@ describe("IpRegionUpdater", () => {
 			.from(comments)
 			.where(eq(comments.id, "c_without_ip"));
 		expect(withoutIp?.authorIpLocationDbHash).toBeNull();
+	});
+
+	it("loads scheduler update config from database-owned system settings", async () => {
+		const fixture = await createFixture();
+		if (!fixture.config) {
+			throw new Error("Expected ip region config");
+		}
+		const repository = new AdminSystemSettingsRepository(fixture.db);
+		const dbPath = path.join(fixture.directory, "scheduler-v4.xdb");
+		await repository.upsert("ipRegion", "enabled", true);
+		await repository.upsert("ipRegion", "autoUpdate.enabled", true);
+		await repository.upsert("ipRegion", "ipv4.dbPath", dbPath);
+		await repository.upsert("ipRegion", "ipv4.sources", [
+			"https://example.com/scheduler-v4.xdb",
+		]);
+		await repository.upsert("ipRegion", "ipv6.sources", [
+			"https://example.com/scheduler-v6.xdb",
+		]);
+
+		const scheduler = new IpRegionAutoUpdateScheduler(fixture.db, () =>
+			new RuntimeSystemSettingsService(fixture.db).getIpRegionSettings(),
+		);
+
+		await scheduler.runNow();
+
+		const runs = await fixture.db.select().from(ipRegionUpdateRuns);
+		expect(runs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					ipVersion: "v4",
+					status: "failed",
+					errorMessage: "all_sources_failed",
+				}),
+				expect.objectContaining({
+					ipVersion: "v6",
+					status: "failed",
+					errorMessage: "all_sources_failed",
+				}),
+			]),
+		);
 	});
 });

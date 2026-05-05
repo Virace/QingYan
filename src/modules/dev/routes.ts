@@ -7,6 +7,7 @@ import { CaptchaService } from "../comments/captcha-service";
 import { CommentsRepository } from "../comments/repository";
 import { CommentsWriteRepository } from "../comments/write-repository";
 import { InvalidRequestError } from "../shared/errors";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { DevMockService } from "./mock-service";
 import {
 	devResetBodySchema,
@@ -40,6 +41,10 @@ export function registerDatabaseDevRoutes(
 			app.security,
 			commentsRepository,
 			new CommentsWriteRepository(app.db),
+			{
+				getSettings: () =>
+					new RuntimeSystemSettingsService(app.db).getCaptchaSettings(),
+			},
 		),
 		adminSessionService,
 	);

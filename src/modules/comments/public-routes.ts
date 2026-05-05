@@ -18,6 +18,7 @@ import { CaptchaService } from "./captcha-service";
 import { DefaultCommentMetadataResolver } from "./metadata/resolver";
 import { CommentsWriteRepository } from "./write-repository";
 import { CommentsWriteService } from "./write-service";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 
 export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	const readRepository = new CommentsRepository(
@@ -30,6 +31,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.security,
 		readRepository,
 		writeRepository,
+		{
+			getSettings: () =>
+				new RuntimeSystemSettingsService(fastify.db).getCaptchaSettings(),
+		},
 	);
 	const metadataResolver = new DefaultCommentMetadataResolver();
 	fastify.addHook("onClose", async () => {

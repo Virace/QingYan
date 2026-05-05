@@ -1,0 +1,22 @@
+import type { AppDatabase } from "../../db/client";
+import { systemSettings } from "../../db/schema";
+import { readSystemSettingsRows, type SystemSettingRow } from "./codec";
+
+export class RuntimeSystemSettingsService {
+	public constructor(private readonly db: AppDatabase) {}
+
+	public async getSettings() {
+		const rows = (await this.db
+			.select()
+			.from(systemSettings)) as SystemSettingRow[];
+		return readSystemSettingsRows(rows);
+	}
+
+	public async getCaptchaSettings() {
+		return (await this.getSettings()).captcha;
+	}
+
+	public async getIpRegionSettings() {
+		return (await this.getSettings()).ipRegion;
+	}
+}

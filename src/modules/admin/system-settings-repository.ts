@@ -13,6 +13,10 @@ export class AdminSystemSettingsRepository {
 			.where(eq(systemSettings.category, category));
 	}
 
+	public async listAll() {
+		return this.db.select().from(systemSettings);
+	}
+
 	public async upsert(category: string, key: string, value: unknown) {
 		const valueJson = JSON.stringify(value);
 		const updatedAt = new Date().toISOString();

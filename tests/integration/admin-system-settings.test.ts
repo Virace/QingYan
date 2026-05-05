@@ -27,11 +27,30 @@ describe("admin system settings", () => {
 		});
 
 		expect(getResponse.statusCode).toBe(200);
-		expect(getResponse.json()).toEqual({
+		expect(getResponse.json()).toMatchObject({
 			logging: {
 				level: "info",
 				retentionDays: 7,
 				directory: fixture.logsDirectory,
+			},
+			mail: {
+				enabled: false,
+				smtp: {
+					passwordConfigured: false,
+				},
+			},
+			captcha: {
+				provider: "image",
+				image: {
+					width: 160,
+					height: 60,
+					ttlSec: 600,
+				},
+			},
+			ipRegion: {
+				enabled: false,
+				cachePolicy: "vectorIndex",
+				precision: "province",
 			},
 		});
 
@@ -50,7 +69,7 @@ describe("admin system settings", () => {
 		});
 
 		expect(updateResponse.statusCode).toBe(200);
-		expect(updateResponse.json()).toEqual({
+		expect(updateResponse.json()).toMatchObject({
 			logging: {
 				level: "debug",
 				retentionDays: 14,
@@ -61,6 +80,137 @@ describe("admin system settings", () => {
 			level: "debug",
 			retentionDays: 14,
 		});
+	});
+
+	it("updates global mail captcha and IP settings without returning secrets", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				mail: {
+					enabled: true,
+					smtp: {
+						host: "smtp.example.test",
+						port: 587,
+						secure: false,
+						username: "notify@example.test",
+						password: "smtp-secret",
+						from: "notify@example.test",
+					},
+				},
+				captcha: {
+					provider: "turnstile",
+					image: {
+						width: 160,
+						height: 60,
+						ttlSec: 600,
+					},
+					turnstile: {
+						siteKey: "turnstile-site-key",
+						secretKey: "turnstile-secret",
+						expectedAction: "COMMENT_SUBMIT",
+						expectedHostname: "comments.example.test",
+					},
+				},
+				ipRegion: {
+					enabled: true,
+					cachePolicy: "content",
+					precision: "city",
+					autoUpdate: {
+						enabled: true,
+						schedule: "monthly",
+					},
+					ipv4: {
+						dbPath: "./data/custom-v4.xdb",
+						sources: ["https://example.test/ip2region_v4.xdb"],
+					},
+					ipv6: {
+						dbPath: "./data/custom-v6.xdb",
+						sources: ["https://example.test/ip2region_v6.xdb"],
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.body).not.toContain("smtp-secret");
+		expect(updateResponse.body).not.toContain("turnstile-secret");
+		expect(updateResponse.json()).toMatchObject({
+			mail: {
+				enabled: true,
+				smtp: {
+					host: "smtp.example.test",
+					passwordConfigured: true,
+				},
+			},
+			captcha: {
+				provider: "turnstile",
+				turnstile: {
+					siteKey: "turnstile-site-key",
+					secretKeyConfigured: true,
+					expectedAction: "COMMENT_SUBMIT",
+				},
+			},
+			ipRegion: {
+				enabled: true,
+				cachePolicy: "content",
+				precision: "city",
+			},
+		});
+
+		const afterUpdate = await fixture.app.inject({
+			method: "PUT",
+			url: "/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				logging: {
+					level: "debug",
+					retentionDays: 14,
+				},
+				mail: {
+					enabled: true,
+					smtp: {
+						host: "smtp2.example.test",
+						port: 465,
+						secure: true,
+						username: "notify2@example.test",
+						from: "notify2@example.test",
+					},
+				},
+				captcha: {
+					provider: "turnstile",
+					image: {
+						width: 180,
+						height: 64,
+						ttlSec: 300,
+					},
+					turnstile: {
+						siteKey: "turnstile-site-key-2",
+						expectedAction: "COMMENT_SUBMIT",
+					},
+				},
+			},
+		});
+
+		expect(afterUpdate.statusCode).toBe(200);
+		expect(afterUpdate.body).not.toContain("smtp-secret");
+		expect(afterUpdate.body).not.toContain("turnstile-secret");
+		expect(afterUpdate.json().mail.smtp.passwordConfigured).toBe(true);
+		expect(afterUpdate.json().captcha.turnstile.secretKeyConfigured).toBe(true);
 	});
 
 	it("rejects invalid logging values", async () => {

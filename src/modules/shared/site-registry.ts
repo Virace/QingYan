@@ -1,4 +1,3 @@
-import type { SiteConfig } from "../../config/types";
 import type { AppDatabase } from "../../db/client";
 import { eq } from "drizzle-orm";
 import { siteSettings } from "../../db/schema/settings";
@@ -7,6 +6,12 @@ import { buildDefaultSiteSettings } from "./site-settings-defaults";
 
 export interface RegisteredSiteRecord {
 	id: number;
+	siteKey: string;
+	name: string;
+	allowedOrigins: string[];
+}
+
+export interface SiteSeed {
 	siteKey: string;
 	name: string;
 	allowedOrigins: string[];
@@ -55,7 +60,7 @@ export class SiteRegistry {
 
 	public async seedSiteFromTemplate(
 		db: AppDatabase,
-		site: Pick<SiteConfig, "siteKey" | "name" | "allowedOrigins">,
+		site: SiteSeed,
 	): Promise<RegisteredSiteRecord> {
 		await db
 			.insert(sites)

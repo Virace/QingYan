@@ -132,15 +132,6 @@ describe("admin sites", () => {
 				name: "FangYuan DB",
 				allowedOrigins: ["http://db.example.test"],
 			},
-			mutateConfig(config) {
-				const [site] = config.sites;
-				if (!site) {
-					throw new Error("Expected config site to exist");
-				}
-				site.name = "FangYuan YAML";
-				site.allowedOrigins = ["http://yaml.example.test"];
-				site.defaults.comments.rootLimit = 99;
-			},
 		});
 		cleanups.push(fixture.cleanup);
 

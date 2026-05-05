@@ -3,6 +3,7 @@ import path from "node:path";
 import { loadConfig } from "../src/config/load-config";
 import { createDatabaseClients } from "../src/db/client";
 import { IpRegionUpdater } from "../src/modules/comments/metadata/ip-region-updater";
+import { RuntimeSystemSettingsService } from "../src/modules/system-settings/service";
 
 async function main(): Promise<void> {
 	const command = process.argv[2] ?? "update";
@@ -14,22 +15,17 @@ async function main(): Promise<void> {
 	const databaseFile = path.resolve(process.cwd(), config.database.sqlite.file);
 	const { db, sqlite } = createDatabaseClients(databaseFile);
 	const updater = new IpRegionUpdater(db);
+	const systemSettings = new RuntimeSystemSettingsService(db);
 
 	try {
 		const results = [];
-		for (const site of config.sites) {
-			const ipRegion = site.defaults.comments.metadata.ipRegion;
-			if (!ipRegion.autoUpdate.enabled && !ipRegion.enabled) {
-				continue;
-			}
-
+		const ipRegion = await systemSettings.getIpRegionSettings();
+		if (ipRegion.enabled) {
 			results.push({
-				siteKey: site.siteKey,
 				ipVersion: "v4",
 				result: await updater.update({ ipVersion: "v4", config: ipRegion }),
 			});
 			results.push({
-				siteKey: site.siteKey,
 				ipVersion: "v6",
 				result: await updater.update({ ipVersion: "v6", config: ipRegion }),
 			});

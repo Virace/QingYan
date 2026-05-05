@@ -5,11 +5,14 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 
 import { buildApp } from "../../src/app";
-import { comments } from "../../src/db/schema";
+import { createDatabaseClients } from "../../src/db/client";
+import { comments, siteSettings, sites } from "../../src/db/schema";
 import {
 	applyInitialMigration,
 	createTestConfig,
+	defaultTestSite,
 } from "../support/test-fixtures";
+import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -30,15 +33,29 @@ async function createCustomTestApp(options?: {
 	applyInitialMigration(databaseFile);
 
 	const config = createTestConfig(databaseFile);
-	const siteConfig = config.sites[0];
-	if (!siteConfig) {
-		throw new Error("Expected test site config");
+	const { db, sqlite } = createDatabaseClients(databaseFile);
+	try {
+		await createSiteRegistry().seedSiteFromTemplate(db, defaultTestSite);
+		const [site] = await db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, defaultTestSite.siteKey))
+			.limit(1);
+		if (!site) {
+			throw new Error("Expected test site config");
+		}
+		await db
+			.update(siteSettings)
+			.set({
+				commentRequireJson: JSON.stringify(
+					options?.require ?? ["nickname", "email"],
+				),
+				allowWebsite: options?.allowWebsite ?? true,
+			})
+			.where(eq(siteSettings.siteId, site.id));
+	} finally {
+		sqlite.close();
 	}
-	siteConfig.defaults.comments.identity.require = options?.require ?? [
-		"nickname",
-		"email",
-	];
-	siteConfig.defaults.comments.allowWebsite = options?.allowWebsite ?? true;
 
 	const app = await buildApp(config);
 

@@ -7,6 +7,7 @@ import { InvalidRequestError } from "../shared/errors";
 import { PageFeedbackRepository } from "./repository";
 import { pageLikeBodySchema } from "./schemas";
 import { PageFeedbackService } from "./service";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 
 export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	const commentsRepository = new CommentsRepository(
@@ -18,6 +19,10 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.security,
 		commentsRepository,
 		new CommentsWriteRepository(fastify.db),
+		{
+			getSettings: () =>
+				new RuntimeSystemSettingsService(fastify.db).getCaptchaSettings(),
+		},
 	);
 	const service = new PageFeedbackService(
 		fastify.config,

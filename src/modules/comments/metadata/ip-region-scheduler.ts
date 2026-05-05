@@ -1,5 +1,5 @@
-import type { AppConfig } from "../../../config/types";
 import type { AppDatabase } from "../../../db/client";
+import type { SystemSettings } from "../../system-settings/definitions";
 import { IpRegionUpdater } from "./ip-region-updater";
 
 const MONTHLY_UPDATE_HOUR = 4;
@@ -21,13 +21,15 @@ export class IpRegionAutoUpdateScheduler {
 
 	public constructor(
 		db: AppDatabase,
-		private readonly config: AppConfig,
+		private readonly loadIpRegionSettings: () => Promise<
+			SystemSettings["ipRegion"]
+		>,
 	) {
 		this.updater = new IpRegionUpdater(db);
 	}
 
-	public start(): void {
-		if (!this.hasEnabledSites()) {
+	public async start(): Promise<void> {
+		if (!(await this.hasEnabledSettings())) {
 			return;
 		}
 
@@ -41,12 +43,9 @@ export class IpRegionAutoUpdateScheduler {
 		}
 	}
 
-	private hasEnabledSites(): boolean {
-		return this.config.sites.some(
-			(site) =>
-				site.defaults.comments.metadata.ipRegion.enabled &&
-				site.defaults.comments.metadata.ipRegion.autoUpdate.enabled,
-		);
+	private async hasEnabledSettings(): Promise<boolean> {
+		const ipRegion = await this.loadIpRegionSettings();
+		return ipRegion.enabled && ipRegion.autoUpdate.enabled;
 	}
 
 	private schedule(): void {
@@ -63,19 +62,21 @@ export class IpRegionAutoUpdateScheduler {
 
 	private async runAndReschedule(): Promise<void> {
 		try {
-			for (const site of this.config.sites) {
-				const ipRegion = site.defaults.comments.metadata.ipRegion;
-				if (!ipRegion.enabled || !ipRegion.autoUpdate.enabled) {
-					continue;
-				}
-
-				await this.updater.update({ ipVersion: "v4", config: ipRegion });
-				await this.updater.update({ ipVersion: "v6", config: ipRegion });
-			}
+			await this.runNow();
 		} finally {
-			if (this.hasEnabledSites()) {
+			if (await this.hasEnabledSettings()) {
 				this.schedule();
 			}
 		}
+	}
+
+	public async runNow(): Promise<void> {
+		const ipRegion = await this.loadIpRegionSettings();
+		if (!ipRegion.enabled || !ipRegion.autoUpdate.enabled) {
+			return;
+		}
+
+		await this.updater.update({ ipVersion: "v4", config: ipRegion });
+		await this.updater.update({ ipVersion: "v6", config: ipRegion });
 	}
 }

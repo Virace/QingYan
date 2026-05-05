@@ -1,4 +1,5 @@
 import type { SqliteClient } from "../../../db/client";
+import { secretSystemSettingPaths } from "../../system-settings/definitions";
 import {
 	QINGYAN_EXPORT_FORMAT,
 	QINGYAN_EXPORT_FORMAT_VERSION,
@@ -20,6 +21,10 @@ interface SiteRow {
 	site_key: string;
 	name: string;
 	allowed_origins_json: string;
+}
+
+function isSecretSystemSetting(row: { category: string; key: string }) {
+	return secretSystemSettingPaths.has(`${row.category}.${row.key}`);
 }
 
 export class QingYanExportService {
@@ -92,13 +97,19 @@ export class QingYanExportService {
 	}
 
 	private exportSystemSettings() {
-		return this.sqlite
+		const rows = this.sqlite
 			.prepare(
 				`SELECT category, key, value_json, updated_at
 				FROM system_settings
 				ORDER BY category, key`,
 			)
-			.all();
+			.all() as Array<{
+			category: string;
+			key: string;
+			value_json: string;
+			updated_at: string;
+		}>;
+		return rows.filter((row) => !isSecretSystemSetting(row));
 	}
 
 	private exportPageThreads(siteId: number) {

@@ -2,6 +2,7 @@ import type { FastifyRequest } from "fastify";
 
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
+import { defaultSystemSettings } from "../system-settings/definitions";
 import { AppError } from "../shared/errors";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminBootstrap } from "./bootstrap-service";
@@ -24,7 +25,7 @@ export class AdminSessionService {
 		private readonly siteRegistry?: SiteRegistry,
 	) {
 		this.loginChallengeStore = new AdminLoginChallengeStore(
-			this.config.captcha.image.ttlSec,
+			defaultSystemSettings.captcha.image.ttlSec,
 		);
 	}
 

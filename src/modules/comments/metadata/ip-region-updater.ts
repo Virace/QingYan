@@ -19,10 +19,10 @@ import {
 	ipRegionDatabaseState,
 	ipRegionUpdateRuns,
 } from "../../../db/schema";
-import type { CommentMetadataSettings } from "../../shared/site-settings-defaults";
+import type { SystemSettings } from "../../system-settings/definitions";
 import { parseIpRegionText, type IpRegionSnapshot } from "./ip-region";
 
-type IpRegionConfig = CommentMetadataSettings["ipRegion"];
+type IpRegionConfig = SystemSettings["ipRegion"];
 export type IpVersion = "v4" | "v6";
 export type IpRegionUpdateStatus = "success" | "skipped" | "failed";
 

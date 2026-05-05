@@ -105,14 +105,6 @@ describe("dev session bootstrap", () => {
 		const fixture = await createTestApp({
 			devMode: true,
 			devAdminToken: "dev-token",
-			mutateConfig(config) {
-				config.sites[0] = {
-					...config.sites[0],
-					siteKey: "external",
-					name: "External",
-					allowedOrigins: ["https://external.example"],
-				};
-			},
 		});
 		cleanups.push(fixture.cleanup);
 

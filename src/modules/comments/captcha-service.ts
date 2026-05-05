@@ -1,5 +1,6 @@
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
+import type { SystemSettings } from "../system-settings/definitions";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { CommentsRepository } from "./repository";
 import type {
@@ -83,52 +84,71 @@ function resolveStateMode(
 	return false;
 }
 
+export interface CaptchaSettingsProvider {
+	getSettings(): Promise<SystemSettings["captcha"]>;
+}
+
 export class CaptchaService {
 	public constructor(
 		private readonly config: AppConfig,
 		private readonly security: SecurityToolkit,
 		private readonly commentsRepository: CommentsRepository,
 		private readonly writeRepository: CommentsWriteRepository,
+		private readonly settingsProvider: CaptchaSettingsProvider,
 	) {}
 
-	private getCaptchaTtlSec() {
-		return this.config.captcha.image.ttlSec;
+	private async getCaptchaSettings() {
+		return this.settingsProvider.getSettings();
 	}
 
-	private getCurrentProviderKind(): PublicCaptchaProviderKind {
-		return this.config.captcha.provider;
+	private getCurrentProviderKind(
+		settings: SystemSettings["captcha"],
+	): PublicCaptchaProviderKind {
+		return settings.provider;
 	}
 
-	private getCurrentHostMode() {
-		return resolveCaptchaHostMode(this.getCurrentProviderKind());
+	private getCurrentHostMode(settings: SystemSettings["captcha"]) {
+		return resolveCaptchaHostMode(this.getCurrentProviderKind(settings));
 	}
 
-	private requireTurnstileConfig() {
-		if (!this.config.captcha.turnstile) {
+	private requireTurnstileConfig(settings: SystemSettings["captcha"]) {
+		if (!settings.turnstile.siteKey || !settings.turnstile.secretKey) {
 			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
 		}
-		return this.config.captcha.turnstile;
+		return settings.turnstile as SystemSettings["captcha"]["turnstile"] & {
+			secretKey: string;
+		};
 	}
 
-	private requireHCaptchaConfig() {
-		if (!this.config.captcha.hcaptcha) {
+	private requireHCaptchaConfig(settings: SystemSettings["captcha"]) {
+		if (!settings.hcaptcha.siteKey || !settings.hcaptcha.secretKey) {
 			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
 		}
-		return this.config.captcha.hcaptcha;
+		return settings.hcaptcha as SystemSettings["captcha"]["hcaptcha"] & {
+			secretKey: string;
+		};
 	}
 
-	private requireRecaptchaConfig() {
-		if (!this.config.captcha.recaptcha) {
+	private requireRecaptchaConfig(settings: SystemSettings["captcha"]) {
+		if (
+			!settings.recaptcha.projectId ||
+			!settings.recaptcha.siteKey ||
+			!settings.recaptcha.apiKey
+		) {
 			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
 		}
-		return this.config.captcha.recaptcha;
+		return settings.recaptcha as SystemSettings["captcha"]["recaptcha"] & {
+			apiKey: string;
+		};
 	}
 
-	private requireGeeTestConfig() {
-		if (!this.config.captcha.geetest) {
+	private requireGeeTestConfig(settings: SystemSettings["captcha"]) {
+		if (!settings.geetest.captchaId || !settings.geetest.captchaKey) {
 			throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
 		}
-		return this.config.captcha.geetest;
+		return settings.geetest as SystemSettings["captcha"]["geetest"] & {
+			captchaKey: string;
+		};
 	}
 
 	private parseSessionPayload(session: {
@@ -158,13 +178,16 @@ export class CaptchaService {
 		});
 	}
 
-	private buildIdleState(visitorKey?: string) {
+	private buildIdleState(input: {
+		settings: SystemSettings["captcha"];
+		visitorKey?: string;
+	}) {
 		return {
 			required: false,
 			verified: false,
-			mode: this.getCurrentHostMode(),
+			mode: this.getCurrentHostMode(input.settings),
 			challenge: null,
-			visitorKey,
+			visitorKey: input.visitorKey,
 		};
 	}
 
@@ -188,10 +211,11 @@ export class CaptchaService {
 		siteKey: string;
 		pageKey: string;
 		triggeredBy: "always" | "threshold";
+		settings: SystemSettings["captcha"];
 	}) {
 		const challengeId = this.writeRepository.createCaptchaSessionId();
 		const expiresAt = new Date(
-			Date.now() + this.getCaptchaTtlSec() * 1000,
+			Date.now() + input.settings.image.ttlSec * 1000,
 		).toISOString();
 
 		let created:
@@ -201,11 +225,11 @@ export class CaptchaService {
 			| ReturnType<typeof createRecaptchaChallenge>
 			| ReturnType<typeof createGeeTestChallenge>;
 
-		switch (this.getCurrentProviderKind()) {
+		switch (this.getCurrentProviderKind(input.settings)) {
 			case "image":
 				created = createImageCaptchaChallenge({
 					challengeId,
-					ttlSec: this.getCaptchaTtlSec(),
+					ttlSec: input.settings.image.ttlSec,
 				});
 				break;
 			case "turnstile":
@@ -335,6 +359,7 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
+		const captchaSettings = await this.getCaptchaSettings();
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 
@@ -346,12 +371,15 @@ export class CaptchaService {
 		const publicVisitorKey = visitor.created ? visitor.visitorKey : undefined;
 		const required = resolveStateMode(activeSession, policy.captchaMode);
 		if (!required) {
-			return this.buildIdleState(publicVisitorKey);
+			return this.buildIdleState({
+				settings: captchaSettings,
+				visitorKey: publicVisitorKey,
+			});
 		}
 
 		const activeMode =
 			(activeSession?.mode as "inline_value" | "iframe_widget" | undefined) ??
-			this.getCurrentHostMode();
+			this.getCurrentHostMode(captchaSettings);
 		if (activeSession?.verified) {
 			return this.buildVerifiedState({
 				mode: activeMode,
@@ -381,6 +409,7 @@ export class CaptchaService {
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
 			triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
+			settings: captchaSettings,
 		});
 		await this.security.writeAudit({
 			requestId: input.requestId,
@@ -395,7 +424,7 @@ export class CaptchaService {
 			payload: {
 				triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
 				mode: challenge.mode,
-				provider: this.getCurrentProviderKind(),
+				provider: this.getCurrentProviderKind(captchaSettings),
 			},
 		});
 
@@ -419,6 +448,7 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
+		const captchaSettings = await this.getCaptchaSettings();
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode !== "threshold") {
@@ -455,6 +485,7 @@ export class CaptchaService {
 				siteKey: input.siteKey,
 				pageKey: input.pageKey,
 				triggeredBy: "threshold",
+				settings: captchaSettings,
 			});
 			await this.security.writeAudit({
 				requestId: input.requestId,
@@ -469,8 +500,8 @@ export class CaptchaService {
 				payload: {
 					triggeredBy: "threshold",
 					action: input.action,
-					mode: this.getCurrentHostMode(),
-					provider: this.getCurrentProviderKind(),
+					mode: this.getCurrentHostMode(captchaSettings),
+					provider: this.getCurrentProviderKind(captchaSettings),
 				},
 			});
 			throw new AppError(
@@ -504,6 +535,7 @@ export class CaptchaService {
 		consumeRateLimit: (key: string) => Promise<void>;
 		checkRateLimit: (key: string) => void;
 	}) {
+		const captchaSettings = await this.getCaptchaSettings();
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode === "never") {
@@ -597,6 +629,7 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
+		const captchaSettings = await this.getCaptchaSettings();
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
@@ -621,12 +654,12 @@ export class CaptchaService {
 
 		const providerKind =
 			(activeSession.providerKind as PublicCaptchaProviderKind | null) ??
-			this.getCurrentProviderKind();
+			this.getCurrentProviderKind(captchaSettings);
 		const completePath = "/api/comments/captcha/complete";
 
 		switch (providerKind) {
 			case "turnstile": {
-				const config = this.requireTurnstileConfig();
+				const config = this.requireTurnstileConfig(captchaSettings);
 				return renderTurnstileWidgetHtml({
 					challengeId: input.challengeId,
 					commentsSiteKey: input.siteKey,
@@ -637,7 +670,7 @@ export class CaptchaService {
 				});
 			}
 			case "hcaptcha": {
-				const config = this.requireHCaptchaConfig();
+				const config = this.requireHCaptchaConfig(captchaSettings);
 				return renderHCaptchaWidgetHtml({
 					challengeId: input.challengeId,
 					commentsSiteKey: input.siteKey,
@@ -647,7 +680,7 @@ export class CaptchaService {
 				});
 			}
 			case "recaptcha": {
-				const config = this.requireRecaptchaConfig();
+				const config = this.requireRecaptchaConfig(captchaSettings);
 				return renderRecaptchaWidgetHtml({
 					challengeId: input.challengeId,
 					commentsSiteKey: input.siteKey,
@@ -659,7 +692,7 @@ export class CaptchaService {
 				});
 			}
 			case "geetest": {
-				const config = this.requireGeeTestConfig();
+				const config = this.requireGeeTestConfig(captchaSettings);
 				return renderGeeTestWidgetHtml({
 					challengeId: input.challengeId,
 					commentsSiteKey: input.siteKey,
@@ -691,6 +724,7 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
+		const captchaSettings = await this.getCaptchaSettings();
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
@@ -738,12 +772,12 @@ export class CaptchaService {
 
 		const providerKind =
 			(activeSession.providerKind as PublicCaptchaProviderKind | null) ??
-			this.getCurrentProviderKind();
+			this.getCurrentProviderKind(captchaSettings);
 
 		try {
 			switch (providerKind) {
 				case "turnstile": {
-					const config = this.requireTurnstileConfig();
+					const config = this.requireTurnstileConfig(captchaSettings);
 					if (!input.token) {
 						throw new AppError(
 							400,
@@ -761,7 +795,7 @@ export class CaptchaService {
 					break;
 				}
 				case "hcaptcha": {
-					const config = this.requireHCaptchaConfig();
+					const config = this.requireHCaptchaConfig(captchaSettings);
 					if (!input.token) {
 						throw new AppError(
 							400,
@@ -779,7 +813,7 @@ export class CaptchaService {
 					break;
 				}
 				case "recaptcha": {
-					const config = this.requireRecaptchaConfig();
+					const config = this.requireRecaptchaConfig(captchaSettings);
 					if (!input.token) {
 						throw new AppError(
 							400,
@@ -801,7 +835,7 @@ export class CaptchaService {
 					break;
 				}
 				case "geetest": {
-					const config = this.requireGeeTestConfig();
+					const config = this.requireGeeTestConfig(captchaSettings);
 					if (
 						!input.lotNumber ||
 						!input.captchaOutput ||

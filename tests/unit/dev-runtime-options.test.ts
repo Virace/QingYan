@@ -29,21 +29,12 @@ describe("resolveRuntimeOptions", () => {
 				},
 			},
 		});
-		expect(resolved.config.sites).toHaveLength(1);
-		expect(resolved.config.sites[0]).toMatchObject({
-			siteKey: "fangyuan",
-			name: "FangYuan",
-		});
+		expect(resolved.config).toBe(config);
+		expect("sites" in resolved.config).toBe(false);
 	});
 
 	it("does not derive the dev seed from startup config sites", () => {
 		const config = createTestConfig("./data/test.db");
-		config.sites[0] = {
-			...config.sites[0],
-			siteKey: "external",
-			name: "External",
-			allowedOrigins: ["https://external.example"],
-		};
 
 		const resolved = resolveRuntimeOptions(config, {
 			QINGYAN_DEV_MODE: "true",
@@ -81,7 +72,7 @@ describe("resolveRuntimeOptions", () => {
 		});
 
 		expect(resolved.runtimeOptions.devMode.enabled).toBe(false);
-		expect(resolved.config.sites[0]?.siteKey).toBe("fangyuan");
+		expect(resolved.config).toBe(config);
 	});
 
 	it("prints fixed dev credentials and captcha from the dev script", () => {

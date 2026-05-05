@@ -1,8 +1,8 @@
-import type { AppConfig } from "../../config/types";
+import type { SystemSettings } from "../system-settings/definitions";
 
 export type CaptchaHostMode = "inline_value" | "iframe_widget";
 
-export type PublicCaptchaProviderKind = AppConfig["captcha"]["provider"];
+export type PublicCaptchaProviderKind = SystemSettings["captcha"]["provider"];
 
 export interface InlineValueCaptchaChallenge {
 	challengeId: string;
