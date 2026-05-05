@@ -55,6 +55,8 @@ describe("initial migration", () => {
 					"runtime_settings",
 					"system_settings",
 					"audit_logs",
+					"import_batches",
+					"import_records",
 				]),
 			);
 		} finally {

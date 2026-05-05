@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BadgeCheckIcon,
 	BookOpenIcon,
+	DatabaseIcon,
 	FlagIcon,
 	GlobeIcon,
 	LogOutIcon,
@@ -21,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import {
 	BlacklistPage,
 	CommentsPage,
+	DataPage,
 	OverviewPage,
 	PagesPage,
 	RuntimeSettingsPage,
@@ -39,6 +41,7 @@ export type AdminView =
 	| "visitors"
 	| "blacklist"
 	| "sites"
+	| "data"
 	| "settings"
 	| "system";
 
@@ -54,6 +57,7 @@ const navItems: Array<{
 	{ id: "visitors", label: "访客", icon: BadgeCheckIcon },
 	{ id: "blacklist", label: "黑名单", icon: ShieldIcon },
 	{ id: "sites", label: "站点", icon: GlobeIcon },
+	{ id: "data", label: "数据", icon: DatabaseIcon },
 	{ id: "settings", label: "运行时设置", icon: FlagIcon },
 	{ id: "system", label: "系统设置", icon: SettingsIcon },
 ];
@@ -126,6 +130,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return <BlacklistPage siteKey={activeSiteKey} />;
 			case "sites":
 				return <SitesPage openSite={openSite} />;
+			case "data":
+				return <DataPage siteKey={activeSiteKey} />;
 			case "settings":
 				return <RuntimeSettingsPage siteKey={activeSiteKey} />;
 			case "system":

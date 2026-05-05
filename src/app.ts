@@ -20,6 +20,7 @@ import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { createDevMemoryRoutes } from "./modules/dev/memory-routes";
 import { DevMockService } from "./modules/dev/mock-service";
 import { registerDatabaseDevRoutes } from "./modules/dev/routes";
+import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import { AppError } from "./modules/shared/errors";
 import { createSiteRegistry } from "./modules/shared/site-registry";
@@ -193,6 +194,9 @@ export async function buildApp(
 	await app.register(adminSettingsRoutes, { prefix: "/api/admin/settings" });
 	await app.register(adminSystemSettingsRoutes, {
 		prefix: "/api/admin/system-settings",
+	});
+	await app.register(adminImportExportRoutes, {
+		prefix: "/api/admin/import-export",
 	});
 
 	return app;

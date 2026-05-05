@@ -54,6 +54,9 @@ function inferAppliedMigrations(sqlite: SqliteClient): string[] {
 	if (tableHasColumn(sqlite, "runtime_settings", "comment_metadata_json")) {
 		applied.push("0005_runtime_settings_comment_metadata.sql");
 	}
+	if (tableExists(sqlite, "import_batches")) {
+		applied.push("0006_import_jobs.sql");
+	}
 
 	return applied;
 }
