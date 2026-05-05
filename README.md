@@ -127,7 +127,7 @@ admin.password=...
 - 本地实参默认使用 `config/qingyan.yml`
 - 站点、站点设置、系统设置由数据库持久化，后台管理端维护
 - 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
-- release 后破坏性升级的预留规则见 [docs/upgrade-lifecycle.md](docs/upgrade-lifecycle.md)
+- release 后破坏性升级规则由项目规范维护；开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`
 
 ## 升级预留入口
 

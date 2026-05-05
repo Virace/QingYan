@@ -235,7 +235,7 @@ Admin API 会返回 logging、mail、captcha 和 ipRegion 的 typed 设置。sec
 
 ## Future Upgrade Lifecycle
 
-当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；预留规则见 [upgrade-lifecycle.md](upgrade-lifecycle.md)。
+当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`。
 
 当前已预留 CLI 骨架：
 
