@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import {
 	comments,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	sites,
 	visitors,
 } from "../../src/db/schema";
@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 describe("admin sites", () => {
-	it("creates a site with default runtime settings", async () => {
+	it("creates a site with default site settings", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -65,8 +65,8 @@ describe("admin sites", () => {
 
 		const [settings] = await fixture.app.db
 			.select()
-			.from(runtimeSettings)
-			.where(eq(runtimeSettings.siteId, site?.id ?? 0));
+			.from(siteSettings)
+			.where(eq(siteSettings.siteId, site?.id ?? 0));
 		expect(settings).toMatchObject({
 			commentsEnabled: true,
 			defaultStatus: "pending",
@@ -75,7 +75,7 @@ describe("admin sites", () => {
 
 		const settingsResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/settings?siteKey=docs",
+			url: "/api/admin/sites/docs/settings",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -90,7 +90,86 @@ describe("admin sites", () => {
 		});
 	});
 
-	it("lists site summaries with runtime settings and counts", async () => {
+	it("updates site name and allowed origins", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/api/admin/sites/fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				name: "FangYuan Updated",
+				allowedOrigins: ["https://new.example.com"],
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			items: expect.arrayContaining([
+				expect.objectContaining({
+					siteKey: "fangyuan",
+					name: "FangYuan Updated",
+					allowedOrigins: ["https://new.example.com"],
+				}),
+			]),
+		});
+		expect(
+			fixture.app.siteRegistry.getRegisteredSite("fangyuan"),
+		).toMatchObject({
+			name: "FangYuan Updated",
+			allowedOrigins: ["https://new.example.com"],
+		});
+	});
+
+	it("loads sites from DB without overwriting them from startup config", async () => {
+		const fixture = await createTestApp({
+			seedSite: {
+				siteKey: "fangyuan",
+				name: "FangYuan DB",
+				allowedOrigins: ["http://db.example.test"],
+			},
+			mutateConfig(config) {
+				const [site] = config.sites;
+				if (!site) {
+					throw new Error("Expected config site to exist");
+				}
+				site.name = "FangYuan YAML";
+				site.allowedOrigins = ["http://yaml.example.test"];
+				site.defaults.comments.rootLimit = 99;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		expect(site).toMatchObject({
+			name: "FangYuan DB",
+			allowedOriginsJson: '["http://db.example.test"]',
+		});
+
+		const [settings] = await fixture.app.db
+			.select()
+			.from(siteSettings)
+			.where(eq(siteSettings.siteId, site?.id ?? 0));
+		expect(settings).toMatchObject({
+			rootLimit: 20,
+		});
+
+		expect(
+			fixture.app.siteRegistry.getRegisteredSite("fangyuan"),
+		).toMatchObject({
+			name: "FangYuan DB",
+			allowedOrigins: ["http://db.example.test"],
+		});
+	});
+
+	it("lists site summaries with site settings and counts", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 

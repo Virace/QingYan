@@ -13,17 +13,16 @@ import path from "node:path";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import Ip2Region from "ts-ip2region2";
 
-import type { SiteConfig } from "../../../config/types";
 import type { AppDatabase } from "../../../db/client";
 import {
 	comments,
 	ipRegionDatabaseState,
 	ipRegionUpdateRuns,
 } from "../../../db/schema";
+import type { CommentMetadataSettings } from "../../shared/site-settings-defaults";
 import { parseIpRegionText, type IpRegionSnapshot } from "./ip-region";
 
-type IpRegionConfig =
-	SiteConfig["defaults"]["comments"]["metadata"]["ipRegion"];
+type IpRegionConfig = CommentMetadataSettings["ipRegion"];
 export type IpVersion = "v4" | "v6";
 export type IpRegionUpdateStatus = "success" | "skipped" | "failed";
 

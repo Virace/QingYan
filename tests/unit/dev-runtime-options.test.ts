@@ -6,7 +6,7 @@ import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import { createTestConfig } from "../support/test-fixtures";
 
 describe("resolveRuntimeOptions", () => {
-	it("keeps config untouched and exposes a runtime-only default site in dev mode", () => {
+	it("keeps config untouched and exposes an explicit dev seed in dev mode", () => {
 		const config = createTestConfig("./data/test.db");
 
 		const resolved = resolveRuntimeOptions(config, {
@@ -21,16 +21,39 @@ describe("resolveRuntimeOptions", () => {
 			adminPassword: "admin",
 			adminToken: "dev-token",
 			tokenSource: "env",
-			defaultSite: expect.objectContaining({
-				siteKey: "default",
-				name: "Default",
-				allowedOrigins: ["http://localhost:4321"],
-			}),
+			seed: {
+				site: {
+					siteKey: "default",
+					name: "Default",
+					allowedOrigins: ["http://localhost:4321"],
+				},
+			},
 		});
 		expect(resolved.config.sites).toHaveLength(1);
 		expect(resolved.config.sites[0]).toMatchObject({
 			siteKey: "fangyuan",
 			name: "FangYuan",
+		});
+	});
+
+	it("does not derive the dev seed from startup config sites", () => {
+		const config = createTestConfig("./data/test.db");
+		config.sites[0] = {
+			...config.sites[0],
+			siteKey: "external",
+			name: "External",
+			allowedOrigins: ["https://external.example"],
+		};
+
+		const resolved = resolveRuntimeOptions(config, {
+			QINGYAN_DEV_MODE: "true",
+			QINGYAN_DEV_ALLOWED_ORIGIN: "http://localhost:5173",
+		});
+
+		expect(resolved.runtimeOptions.devMode.seed?.site).toEqual({
+			siteKey: "default",
+			name: "Default",
+			allowedOrigins: ["http://localhost:5173"],
 		});
 	});
 

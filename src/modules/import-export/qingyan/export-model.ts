@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const QINGYAN_EXPORT_FORMAT = "qingyan.export.v1";
-export const QINGYAN_EXPORT_FORMAT_VERSION = 1;
+export const QINGYAN_EXPORT_FORMAT_VERSION = 2;
 export const QINGYAN_EXPORT_SOURCE_TYPE = "qingyan-export";
 
 const sourceRefSchema = z.object({
@@ -43,7 +43,11 @@ export const qingyanExportSchema = z.object({
 			name: z.string().min(1),
 			allowedOrigins: z.array(z.string()),
 		}),
-		runtimeSettings: z.unknown().nullable().optional(),
+		siteSettings: z.record(z.string(), z.unknown()).nullable().optional(),
+		systemSettings: z
+			.array(z.record(z.string(), z.unknown()))
+			.nullable()
+			.optional(),
 		pageThreads: z.array(
 			z
 				.object({
@@ -118,6 +122,9 @@ export type QingYanExportPageThread =
 	QingYanExport["data"]["pageThreads"][number];
 export type QingYanExportVisitor = QingYanExport["data"]["visitors"][number];
 export type QingYanExportComment = QingYanExport["data"]["comments"][number];
+export type QingYanExportSiteSettings = NonNullable<
+	QingYanExport["data"]["siteSettings"]
+>;
 
 export function parseQingYanExport(payload: unknown): QingYanExport {
 	const versionCandidate = z

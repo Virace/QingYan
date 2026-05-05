@@ -1,5 +1,5 @@
 import type { AppRuntimeOptions } from "../config/runtime-options";
-import type { AppConfig, SiteConfig } from "../config/types";
+import type { AppConfig } from "../config/types";
 import type { AppDatabase, SqliteClient } from "../db/client";
 import type { LoggerManager } from "../logging/logger-manager";
 import type { AdminBootstrap } from "../modules/admin/bootstrap-service";
@@ -12,7 +12,6 @@ export interface RequestContext {
 	requestId: string;
 	siteKey?: string;
 	pageKey?: string;
-	site?: SiteConfig;
 	visitor?: VisitorIdentity;
 	ip: string;
 	startedAt: number;

@@ -20,10 +20,8 @@ export function registerDatabaseDevRoutes(
 	app: FastifyInstance,
 	runtimeOptions: AppRuntimeOptions,
 ): void {
-	const defaultSite = runtimeOptions.devMode.defaultSite;
-	const devMockService = defaultSite
-		? new DevMockService(defaultSite)
-		: undefined;
+	const seedSite = runtimeOptions.devMode.seed?.site;
+	const devMockService = seedSite ? new DevMockService(seedSite) : undefined;
 	app.decorate("devMockService", devMockService);
 
 	const commentsRepository = new CommentsRepository(app.db, app.siteRegistry);

@@ -1,12 +1,13 @@
-import type { SiteConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { buildCommentForm } from "../comments/comment-form";
-import { buildRuntimeSettingsDefaults } from "../shared/runtime-settings-defaults";
+import {
+	defaultCommentMetadata,
+	type CommentMetadataSettings,
+} from "../shared/site-settings-defaults";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminRepository } from "./repository";
 
-type CommentMetadataSettings = SiteConfig["defaults"]["comments"]["metadata"];
 type CommentMetadataPatch = {
 	collectIp?: boolean;
 	collectUserAgent?: boolean;
@@ -36,45 +37,44 @@ type CommentMetadataPatch = {
 };
 
 function mergeCommentMetadata(
-	defaults: CommentMetadataSettings,
 	payload?: string | null,
 ): CommentMetadataSettings {
 	if (!payload) {
-		return defaults;
+		return defaultCommentMetadata;
 	}
 
 	try {
 		const parsed = JSON.parse(payload) as CommentMetadataPatch;
 		return {
-			...defaults,
+			...defaultCommentMetadata,
 			...parsed,
 			ipRegion: {
-				...defaults.ipRegion,
+				...defaultCommentMetadata.ipRegion,
 				...parsed.ipRegion,
 				autoUpdate: {
-					...defaults.ipRegion.autoUpdate,
+					...defaultCommentMetadata.ipRegion.autoUpdate,
 					...parsed.ipRegion?.autoUpdate,
 				},
 				ipv4: {
-					...defaults.ipRegion.ipv4,
+					...defaultCommentMetadata.ipRegion.ipv4,
 					...parsed.ipRegion?.ipv4,
 				},
 				ipv6: {
-					...defaults.ipRegion.ipv6,
+					...defaultCommentMetadata.ipRegion.ipv6,
 					...parsed.ipRegion?.ipv6,
 				},
 			},
 			device: {
-				...defaults.device,
+				...defaultCommentMetadata.device,
 				...parsed.device,
 				display: {
-					...defaults.device.display,
+					...defaultCommentMetadata.device.display,
 					...parsed.device?.display,
 				},
 			},
 		};
 	} catch {
-		return defaults;
+		return defaultCommentMetadata;
 	}
 }
 
@@ -104,14 +104,8 @@ export class AdminManagementService {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
-		const configuredSite = this.siteRegistry.getConfiguredSite(siteKey);
-		if (!configuredSite) {
-			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
-		}
-
 		return {
 			registeredSite,
-			configuredSite,
 		};
 	}
 
@@ -220,15 +214,9 @@ export class AdminManagementService {
 
 		return {
 			items: items.flatMap((item) => {
-				const configuredSite = this.siteRegistry.getConfiguredSite(
-					item.siteKey,
-				);
 				const registeredSite = this.siteRegistry.getRegisteredSite(
 					item.siteKey,
 				);
-				if (!configuredSite) {
-					return [];
-				}
 				if (!registeredSite) {
 					return [];
 				}
@@ -241,7 +229,7 @@ export class AdminManagementService {
 						comments: {
 							enabled: item.comments.enabled,
 							defaultStatus: item.comments.defaultStatus,
-							identity: buildCommentForm(configuredSite, {
+							identity: buildCommentForm({
 								allowWebsite: item.comments.allowWebsite,
 								commentRequireJson: item.comments.commentRequireJson,
 							}),
@@ -274,24 +262,59 @@ export class AdminManagementService {
 			});
 		}
 
-		const template = this.siteRegistry.getDefaultSiteTemplate();
 		const site = await this.repository.createSite({
 			siteKey: input.siteKey,
 			name: input.name,
 			allowedOrigins: input.allowedOrigins,
-			defaults: template.defaults,
 		});
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
-		await this.siteRegistry.sync(this.repository.database);
+		await this.siteRegistry.loadFromDatabase(this.repository.database);
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
 			actorType: "admin",
 			event: "sites.created",
 			message: "站点已创建",
+			targetType: "site",
+			targetId: input.siteKey,
+			payload: {
+				name: input.name,
+				allowedOrigins: input.allowedOrigins,
+			},
+		});
+
+		return this.listSitesSummary();
+	}
+
+	public async updateSite(input: {
+		siteKey: string;
+		name?: string;
+		allowedOrigins?: string[];
+		requestId?: string;
+	}) {
+		const existingSite = await this.repository.getSiteByKey(input.siteKey);
+		if (!existingSite) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+
+		const site = await this.repository.updateSite(input.siteKey, {
+			name: input.name,
+			allowedOrigins: input.allowedOrigins,
+		});
+		if (!site) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+
+		await this.siteRegistry.loadFromDatabase(this.repository.database);
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			actorType: "admin",
+			event: "sites.updated",
+			message: "站点已更新",
 			targetType: "site",
 			targetId: input.siteKey,
 			payload: {
@@ -473,12 +496,10 @@ export class AdminManagementService {
 	}
 
 	public async getSettings(siteKey: string) {
-		const { registeredSite, configuredSite } = this.resolveSite(siteKey);
-		const settings = registeredSite.runtimeOnly
-			? buildRuntimeSettingsDefaults(registeredSite.id, configuredSite)
-			: await this.repository.getRuntimeSettings(registeredSite.id);
+		const { registeredSite } = this.resolveSite(siteKey);
+		const settings = await this.repository.getSiteSettings(registeredSite.id);
 		if (!settings) {
-			throw new ResourceNotFoundError("SETTINGS_NOT_FOUND", "运行设置不存在。");
+			throw new ResourceNotFoundError("SETTINGS_NOT_FOUND", "站点设置不存在。");
 		}
 
 		return {
@@ -488,7 +509,7 @@ export class AdminManagementService {
 				defaultStatus: settings.defaultStatus,
 				maxDepth: settings.maxDepth,
 				rootLimit: settings.rootLimit,
-				identity: buildCommentForm(configuredSite, {
+				identity: buildCommentForm({
 					allowWebsite: settings.allowWebsite,
 					commentRequireJson: settings.commentRequireJson,
 				}),
@@ -508,10 +529,7 @@ export class AdminManagementService {
 						ttlSec: settings.autoBlacklistTtlSec,
 					},
 				},
-				metadata: mergeCommentMetadata(
-					configuredSite.defaults.comments.metadata,
-					settings.commentMetadataJson,
-				),
+				metadata: mergeCommentMetadata(settings.commentMetadataJson),
 			},
 			pageFeedback: {
 				allowLike: settings.allowPageLike,
@@ -561,14 +579,8 @@ export class AdminManagementService {
 		},
 	) {
 		const { registeredSite } = this.resolveSite(siteKey);
-		if (registeredSite.runtimeOnly) {
-			throw new ResourceNotFoundError(
-				"SETTINGS_NOT_PERSISTED",
-				"开发模式默认站点不支持持久化运行时设置。",
-			);
-		}
 
-		await this.repository.updateRuntimeSettings(registeredSite.id, {
+		await this.repository.updateSiteSettings(registeredSite.id, {
 			commentsEnabled: input.comments?.enabled,
 			defaultStatus: input.comments?.defaultStatus,
 			maxDepth: input.comments?.maxDepth,
@@ -598,8 +610,8 @@ export class AdminManagementService {
 			siteKey,
 			actorType: "admin",
 			event: "settings.updated",
-			message: "站点运行时设置已更新",
-			targetType: "runtime_settings",
+			message: "站点设置已更新",
+			targetType: "site_settings",
 			targetId: String(registeredSite.id),
 			payload: {
 				comments: input.comments,

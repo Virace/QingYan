@@ -1,83 +1,42 @@
 # QingYan 配置说明
 
-`QingYan` 只使用 YAML 配置文件启动，运行时再叠加数据库中的 `runtime_settings` 与 `system_settings` 做有限覆盖。
+QingYan 当前处于未发布阶段，本轮配置模型按 hard cut 收口：配置文件只负责进程启动前必须知道的部署信息；站点、站点设置、系统设置和后台 bootstrap 状态由数据库持久化。首次部署推荐走 install-first 流程，而不是手写完整业务 YAML。
 
-## 配置文件路径
+## 配置所有权
 
-- 默认读取：`config/qingyan.yml`
-- 示例模板：`config/qingyan.example.yml`
-- 可通过环境变量覆盖：
+QingYan 把配置来源分成四类：
 
-```bash
-QINGYAN_CONFIG_PATH=./config/qingyan.yml
+- `startup config`：YAML 文件，包含 server、database、admin session 和基础 security 字段。修改后通常需要重启。
+- `env override`：白名单环境变量覆盖 startup config 或 install 行为。环境变量优先级高于 YAML。
+- `db site settings`：数据库中的站点记录与 `site_settings`，包含评论开关、审核默认状态、验证码模式、评论身份字段、页面点赞、通知开关、评论元数据采集等。
+- `db system settings`：数据库中的 `system_settings`，包含日志等级、日志保留天数，以及后续 mail/captcha/IP 库等不影响进程启动的全局能力设置。
+- `generated bootstrap`：安装器生成并写入数据库的一次性后台入口、管理员用户名、密码 hash 等初始化状态。
+
+配置文件不再长期拥有 `sites[]`、`sites[].defaults`、mail、captcha provider、IP 库、日志等级或保留天数。后台管理端修改站点设置后写入数据库，重启不会被 YAML 覆盖。
+
+## 首次安装
+
+如果 `QINGYAN_CONFIG_PATH` 指向的配置文件不存在，服务会进入 minimal install app。启动日志会输出一次性安装地址：
+
+```text
+install.url=http://127.0.0.1:4401/install?token=...
 ```
 
-说明：
+安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings` 和基础 `system_settings`。安装完成后重启服务进入正常模式，已安装状态下 `/install` 返回 410。
 
-- `config/qingyan.example.yml` 应入仓库，用作示例和校验基线。
-- `config/qingyan.yml` 默认被 `.gitignore` 排除，用于本地或服务器实参。
-- 配置校验命令：
+安装相关环境变量：
 
-```bash
-pnpm config:check
-pnpm config:check:local
-```
+| 环境变量 | 作用 |
+| --- | --- |
+| `QINGYAN_CONFIG_PATH` | startup config 路径，默认 `config/qingyan.yml` |
+| `QINGYAN_INSTALL_TOKEN` | 指定安装 token；不指定时启动时随机生成 |
+| `QINGYAN_INSTALL_DISABLED=true` | 缺配置或坏配置时直接失败，不开放 install app |
+| `QINGYAN_SERVER_HOST` | install app 监听 host |
+| `QINGYAN_SERVER_PORT` | install app 监听 port |
 
-## 配置边界
+## Startup Config
 
-### 只来自配置文件的字段
-
-这些字段属于部署或敏感信息，不会被后台运行时设置覆盖：
-
-- `server.*`
-- `database.*`
-- `admin.console.path`
-- `admin.auth.username`
-- `admin.auth.passwordHash`
-- `admin.session.*`
-- `security.requestIdHeader`
-- `security.globalFloodGuard.*`
-- `security.publicOriginGuard.*`
-- `security.rateLimit.*`
-- `captcha.*`
-- `logging.directory`
-- `mail.*`
-- `sites[].siteKey`
-- `sites[].name`
-- `sites[].allowedOrigins`
-
-说明：
-
-- `logging.directory` 只允许在配置文件中定义，不提供后台运行时修改。
-- 日志目录固定后，后台只允许调整日志等级和保留天数。
-
-### 可被 `runtime_settings` 覆盖的字段
-
-这些字段既有配置文件默认值，也有数据库运行时设置：
-
-- `sites[].defaults.comments.enabled`
-- `sites[].defaults.comments.defaultStatus`
-- `sites[].defaults.comments.maxDepth`
-- `sites[].defaults.comments.rootLimit`
-- `sites[].defaults.comments.identity.*`
-- `sites[].defaults.comments.allowWebsite`
-- `sites[].defaults.comments.captcha.*`
-- `sites[].defaults.comments.abuseGuard.*`
-- `sites[].defaults.pageFeedback.allowLike`
-- `sites[].defaults.notifications.emailEnabled`
-
-### 可被全局 `system_settings` 覆盖的字段
-
-这些字段属于服务全局能力，不跟某个 `siteKey` 绑定：
-
-- `logging.defaults.level`
-- `logging.defaults.retentionDays`
-
-启动时，配置文件先定义站点和默认值；运行时由数据库中的 `runtime_settings` 对站点级字段做覆盖，再由 `system_settings` 对全局日志默认值做覆盖。
-
-## 顶层配置块
-
-### `server`
+最小 startup config 形态如下，示例文件见 `config/qingyan.example.yml`：
 
 ```yaml
 server:
@@ -85,56 +44,19 @@ server:
   port: 4401
   publicBaseUrl: http://localhost:4401
   trustProxy: false
-```
 
-- `host`: Fastify 监听地址
-- `port`: Fastify 监听端口
-- `publicBaseUrl`: 对外公开基础地址，文档和部署入口应与实际网关一致
-- `trustProxy`: 部署在反向代理后时设为 `true`。如果 QingYan 部署在 CDN、Nginx 或 Docker 反向代理后，必须正确配置该项或等价真实 IP 解析策略，否则评论 IP 属地可能显示代理、网关或 Docker 网桥地址
-
-### `database`
-
-```yaml
 database:
   client: sqlite
   sqlite:
     file: ./data/qingyan.db
-```
 
-- 当前仅支持 `sqlite`
-- `sqlite.file` 支持相对路径，解析基于仓库根目录 / 进程工作目录
-
-### `admin`
-
-```yaml
 admin:
-  console:
-    path: /admin
-  auth:
-    username: admin
-    passwordHash: "scrypt:<salt>:<hash>"
   session:
     cookieName: qingyan_admin
     ttlMinutes: 1440
     sameSite: lax
     secure: false
-```
 
-- `console.path`: 后台管理端入口路径；省略时由启动流程生成随机路径并持久化
-- `auth.username`: 唯一管理员用户名；省略时由启动流程生成
-- `auth.passwordHash`: 唯一管理员密码 hash；省略时由启动流程生成一次性初始密码并持久化 hash
-  - 支持明文直接比较，主要用于本地开发
-  - 支持 `sha256:<hex>` 格式，适合部署环境
-- 后台登录每次都需要先完成管理员登录验证码
-- 同一 IP 连续 5 次登录错误会被永久加入后台登录黑名单
-- `session.cookieName`: 后台 cookie 名
-- `session.ttlMinutes`: 会话有效期
-- `session.sameSite`: `strict | lax | none`
-- `session.secure`: HTTPS 环境建议设为 `true`
-
-### `security`
-
-```yaml
 security:
   requestIdHeader: x-request-id
   globalFloodGuard:
@@ -162,370 +84,151 @@ security:
       maxRequests: 10
 ```
 
-- `requestIdHeader`: 外部请求链路传入 request id 时使用的 header 名
-- `globalFloodGuard`: 进程级总请求洪峰保护
-- `publicOriginGuard`: 公开写接口浏览器来源保护
-  - `enabled`: 是否启用来源保护
-  - `allowMissingOrigin`: 是否允许缺少 `Origin` 的公开写请求。生产环境建议为 `false`；本地脚本、服务端代理或特殊集成确实不会发送 `Origin` 时才设为 `true`
-- `rateLimit.adminLogin`: 保留后台登录相关兼容配置结构；当前实现使用管理员登录验证码和 5 次失败永久封 IP 作为主保护逻辑
-- `rateLimit.commentCreate`: 评论创建限流
-- `rateLimit.commentVote`: 评论投票限流
-- `rateLimit.captchaVerify`: 验证码验证失败限流
-- `rateLimit.pageLike`: 页面点赞限流
+### `server`
 
-说明：
+- `host`: Fastify 监听地址。
+- `port`: Fastify 监听端口。
+- `publicBaseUrl`: 对外公开基础地址，应与实际网关或反代入口一致。
+- `trustProxy`: 部署在 CDN、Nginx、Caddy、Traefik 或 Docker 反向代理后时设为 `true`，否则真实 IP 解析可能拿到代理或网桥地址。
 
-- `maxRequests` 用于请求次数限流
-- `maxFailures` 用于失败次数限流
-- `publicOriginGuard` 使用请求中的 `siteKey` 查找对应 `sites[].allowedOrigins`，只允许这些来源调用公开写接口。它会同时处理浏览器 CORS preflight，使 `http://localhost:4321` 这类不同端口的本地前端可以访问 `http://localhost:4401` 的 QingYan API。
-- `Origin` / CORS 是浏览器侧来源门禁，不是 API 密钥。它可以阻止普通跨站网页滥用，但不能阻止 curl、Postman 或脚本直接调用 API。公开写接口仍然需要依赖验证码、限流、黑名单和审核策略承受直接调用。
+### `database`
 
-### `captcha`
+当前仅支持 SQLite。`database.sqlite.file` 支持相对路径，按进程工作目录解析。
 
-```yaml
-captcha:
-  image:
-    width: 160
-    height: 60
-    ttlSec: 600
-  provider: image
-  turnstile:
-    siteKey: "<site-key>"
-    secretKey: "<secret>"
-    expectedAction: COMMENT_SUBMIT
-    expectedHostname: comments.example.com
-  hcaptcha:
-    siteKey: "<site-key>"
-    secretKey: "<secret>"
-    expectedHostname: comments.example.com
-  recaptcha:
-    variant: score_based
-    projectId: "<gcp-project>"
-    siteKey: "<site-key>"
-    apiKey: "<api-key>"
-    expectedAction: COMMENT_SUBMIT
-    expectedHostname: comments.example.com
-    minScore: 0.5
-  geetest:
-    captchaId: "<captcha-id>"
-    captchaKey: "<captcha-key>"
-    apiServer: https://gcaptcha4.geetest.com
-```
+### `admin.session`
 
-- `image` 始终保留，用于：
-  - 公共评论图片验证码的 `provider: image`
-  - admin 登录本地图形验证码的共享 TTL / 尺寸配置
-- `provider` 允许值：
-  - `image`
-  - `turnstile`
-  - `hcaptcha`
-  - `recaptcha`
-  - `geetest`
-- `recaptcha` 当前按 Google Cloud reCAPTCHA 文档实现，后端校验走 `projects.assessments.create`
-- `ttlSec` 为 QingYan 本地 captcha session 的有效期
+- `cookieName`: 后台 cookie 名。
+- `ttlMinutes`: 会话有效期。
+- `sameSite`: `strict | lax | none`。
+- `secure`: HTTPS 环境建议设为 `true`。
 
-### `logging`
+管理员入口、用户名和密码 hash 不再写在 startup config 中，由 install 写入数据库 bootstrap 状态。
 
-```yaml
-logging:
-  directory: ./logs
-  defaults:
-    level: info
-    retentionDays: 7
-```
+### `security`
 
-- `directory`: 本地日志目录，当前版本固定为文件配置项，不支持后台修改
-- `defaults.level`: 日志默认等级，允许值为 `error | warn | info | debug`
-- `defaults.retentionDays`: 日志默认保留天数，后台可覆盖，范围建议为 `1..3650`
+- `requestIdHeader`: 外部请求链路传入 request id 时使用的 header 名。
+- `globalFloodGuard`: 进程级总请求洪峰保护。
+- `publicOriginGuard`: 公开写接口的浏览器来源保护。
+- `rateLimit`: 评论、投票、验证码和页面点赞限流参数。
 
-### `mail`
+`publicOriginGuard` 使用请求体或查询参数中的 `siteKey` 查找数据库站点 `allowedOrigins`。`Origin` / CORS 是浏览器侧来源门禁，不是 API 密钥；公开写接口仍然需要验证码、限流、黑名单和审核策略承受直接调用。
 
-```yaml
-mail:
-  enabled: false
-  smtp:
-    host: smtp.example.com
-    port: 465
-    secure: true
-    username: notify@example.com
-    password: "<secret>"
-    from: notify@example.com
-```
+## 环境变量白名单
 
-- 当前仓库保留邮件配置结构，但第一版基线不强制启用邮件发送
-- `enabled: false` 时不会启用实际邮件能力
+当前 startup config 支持的环境变量映射集中在 `src/config/env-mapping.ts`。常用变量：
 
-### `sites`
+| 配置路径 | 环境变量 | 说明 |
+| --- | --- | --- |
+| `server.host` | `QINGYAN_SERVER_HOST` | 启动监听地址 |
+| `server.port` | `QINGYAN_SERVER_PORT` | 启动监听端口 |
+| `database.sqlite.file` | `QINGYAN_SQLITE_FILE` | SQLite 文件路径 |
 
-`sites` 是站点注册表。每个站点都必须声明自己的 `siteKey`、显示名、允许来源和默认能力。
+环境变量管理的字段在 install 或后续配置查看中应作为 env source 展示。secret 类型字段后续只显示“已配置”，不展示明文。
 
-```yaml
-sites:
-  - siteKey: fangyuan
-    name: FangYuan
-    allowedOrigins:
-      - http://localhost:4321
-    defaults:
-      comments:
-        enabled: true
-        defaultStatus: pending
-        maxDepth: 3
-        rootLimit: 20
-        identity:
-          require:
-            - nickname
-            - email
-        captcha:
-          mode: threshold
-          thresholdWindowSec: 60
-          thresholdMaxActions: 3
-        abuseGuard:
-          enabled: true
-          windowSec: 600
-          maxWriteActions: 100
-          autoBlacklist:
-            enabled: true
-            scope: post
-            ttlSec: 1800
-        metadata:
-          collectIp: true
-          collectUserAgent: true
-          ipRegion:
-            enabled: false
-            cachePolicy: vectorIndex
-            precision: province
-            autoUpdate:
-              enabled: false
-              schedule: monthly
-            ipv4:
-              dbPath: ./data/ip2region_v4.xdb
-              sources:
-                - https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb
-                - https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb
-            ipv6:
-              dbPath: ./data/ip2region_v6.xdb
-              sources:
-                - https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb
-                - https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v6.xdb
-          device:
-            enabled: true
-            display:
-              enabled: false
-        allowWebsite: true
-      pageFeedback:
-        allowLike: true
-      notifications:
-        emailEnabled: false
-```
+## DB-Owned Site Settings
 
-字段说明：
+每个站点由数据库 `sites` 表持久化：
 
-- `siteKey`: API 请求使用的站点标识
-- `name`: 后台展示名称
-- `allowedOrigins`: 允许调用当前站点公开接口的前端来源，必须写完整 origin，例如 `https://example.com` 或 `http://localhost:4321`，不包含 path
-- `defaults.comments.enabled`: 是否默认启用评论
-- `defaults.comments.defaultStatus`: 新评论默认状态，`pending` 或 `approved`
-- `defaults.comments.maxDepth`: 评论最大嵌套深度
-- `defaults.comments.rootLimit`: 首层评论分页上限默认值
-- `defaults.comments.identity.require`: 评论身份字段必填集合
-  - 当前允许 key：`nickname | email | website`
-- `defaults.comments.captcha.mode`: `never | always | threshold`
-- `defaults.comments.captcha.thresholdWindowSec`: 阈值验证码统计窗口
-- `defaults.comments.captcha.thresholdMaxActions`: 从第 N 次写操作开始要求验证码
-- `defaults.comments.abuseGuard.enabled`: 是否启用滥用保护
-- `defaults.comments.abuseGuard.windowSec`: 滥用写入统计窗口
-- `defaults.comments.abuseGuard.maxWriteActions`: 达到阈值后可进入自动黑名单逻辑
-- `defaults.comments.abuseGuard.autoBlacklist.enabled`: 是否自动拉黑
-- `defaults.comments.abuseGuard.autoBlacklist.scope`: `post | all`
-- `defaults.comments.abuseGuard.autoBlacklist.ttlSec`: 自动黑名单有效期
-- `defaults.comments.metadata.collectIp`: 评论写入时是否采集 raw IP，默认 `true`
-- `defaults.comments.metadata.collectUserAgent`: 评论写入时是否采集 raw `User-Agent`，默认 `true`
-- `defaults.comments.metadata.ipRegion.enabled`: 是否启用 IP 属地快照和公开属地展示，默认 `false`
-- `defaults.comments.metadata.ipRegion.cachePolicy`: xdb 查询缓存策略，允许 `file | vectorIndex | content`，默认 `vectorIndex`
-- `defaults.comments.metadata.ipRegion.precision`: 公开属地展示精度，允许 `country | province | city`，默认 `province`
-- `defaults.comments.metadata.ipRegion.autoUpdate.enabled`: 是否启用 xdb 自动更新，默认 `false`
-- `defaults.comments.metadata.ipRegion.autoUpdate.schedule`: 自动更新频率，当前支持 `monthly`
-- `defaults.comments.metadata.ipRegion.ipv4.dbPath` / `ipv6.dbPath`: 本地 xdb 文件路径
-- `defaults.comments.metadata.ipRegion.ipv4.sources` / `ipv6.sources`: xdb 下载源列表，按顺序 fallback
-- `defaults.comments.metadata.device.enabled`: 是否启用设备快照解析，默认 `true`
-- `defaults.comments.metadata.device.display.enabled`: 是否在公开评论接口展示设备信息，默认 `false`
-- `defaults.comments.allowWebsite`: 是否允许评论作者提交个人网站
-- `defaults.pageFeedback.allowLike`: 是否允许页面点赞
-- `defaults.notifications.emailEnabled`: 是否启用邮件通知开关
+- `siteKey`
+- `name`
+- `allowedOrigins`
 
-`defaults.comments.metadata.*` 会作为每个站点的初始运行时配置。后台管理端修改请求元数据设置后，会写入运行时设置并持久化；评论写入、评论列表 bootstrap 和评论线程读取会优先使用运行时值，再回退到 YAML 默认值。
-
-评论请求环境信息属于用户信息收集。站点应在评论区或隐私说明中声明：提交评论时，本站会记录必要的请求环境信息，包括 IP 地址和浏览器 User-Agent，用于反垃圾、滥用排查、IP 属地与设备类型展示。公开页面不会展示完整 IP 地址或完整 User-Agent。启用 IP 属地展示时，还应说明公开页面可能展示经过处理的 IP 属地，例如国家、省份或城市，具体精度由站点配置决定。
-
-IP 属地 xdb 可以手动更新：
-
-```bash
-pnpm ip-region:update
-```
-
-该命令会按配置的 IPv4 / IPv6 sources 顺序下载，校验通过后激活本地 xdb，并刷新已有 raw IP 且 hash 过期的历史评论。若 `metadata.ipRegion.autoUpdate.enabled` 为 `true`，服务运行时会按 `monthly` 语义在每月 1 日 04:00 自动执行同样的更新流程；下载、校验或刷新失败不会阻塞评论写入主链路。
-
-## 公开评论验证码调用流程
-
-公开评论相关验证码按“同一站点、同一页面、同一访客”维度复用。以下写操作共用同一页面验证码状态：
-
-- `POST /api/comments`
-- `POST /api/comments/{commentId}/vote`
-- `POST /api/page-feedback/like`
-
-客户端接入时需要遵守以下约束：
-
-- `bootstrap`、`captcha/state`、`captcha/refresh`、`captcha/verify`、`captcha/complete` 与最终写接口之间必须复用同一 `qingyan_visitor` cookie
-- `captcha/state`、`captcha/refresh`、`captcha/verify`、`captcha/complete` 使用的 `siteKey`、`pageKey` 必须和后续写接口保持一致
-- 写接口在需要验证码时只返回错误码，不会在错误响应中直接内联 challenge；客户端需要自行继续调用验证码接口
-
-### `mode: never`
-
-- 不要求验证码
-- `GET /api/comments/captcha/state` 返回 `required: false`
-- 评论创建、评论投票、页面点赞可直接调用各自写接口
-
-### `mode: always`
-
-`always` 模式下，页面一开始就要求验证码。推荐流程：
-
-1. 调用 `GET /api/comments/bootstrap`
-2. 读取响应中的 `captcha`
-3. 如果 `captcha.required === true` 且 `captcha.challenge !== null`：
-   - 当 `challenge.mode === "inline_value"` 时，直接展示 `challenge.imageData`
-   - 当 `challenge.mode === "iframe_widget"` 时，嵌入 `challenge.iframeSrc`
-4. 对 `inline_value`，用户输入答案后调用 `POST /api/comments/captcha/verify`
-5. 对 `iframe_widget`，iframe 宿主页会调用 `POST /api/comments/captcha/complete`
-6. 收到 `{ required: true, verified: true }` 后，再调用评论创建、评论投票或页面点赞接口
-
-如果当前页面没有先走 bootstrap，也可以直接调用 `GET /api/comments/captcha/state` 获取同一份 challenge。
-如果用户想显式换一张验证码图，应调用 `POST /api/comments/captcha/refresh`，不要再对 `captcha/state` 追加刷新参数。
-
-### `mode: threshold`
-
-`threshold` 模式下，验证码不会在页面初始化时强制出现，而是在达到阈值的那次写操作开始要求。这里的阈值由：
-
-- `defaults.comments.captcha.thresholdWindowSec`
-- `defaults.comments.captcha.thresholdMaxActions`
-
-共同决定，语义是“在统计窗口内，从第 N 次写操作开始要求验证码”。
-
-推荐的客户端顺序如下：
-
-1. 正常调用写接口，例如 `POST /api/comments/{commentId}/vote`
-2. 如果响应成功，说明当前还未进入验证码阶段
-3. 如果收到以下错误码之一，说明服务端已经为当前页面创建 challenge：
-   - `COMMENT_CAPTCHA_REQUIRED`
-   - `VOTE_CAPTCHA_REQUIRED`
-4. 收到错误后，立即调用 `GET /api/comments/captcha/state?siteKey=...&pageKey=...`
-5. 从响应中读取：
-   - `challenge.challengeId`
-   - `challenge.mode`
-   - `challenge.imageData` 或 `challenge.iframeSrc`
-6. 根据 `challenge.mode` 选择：
-   - `inline_value`：展示验证码图片并收集输入，然后调用 `POST /api/comments/captcha/verify`
-   - `iframe_widget`：嵌入 QingYan 返回的 `iframeSrc`，由同源宿主页完成第三方验证码校验并调用 `POST /api/comments/captcha/complete`
-7. 收到 `{ required: true, verified: true }` 后，使用同一 `qingyan_visitor` cookie 重试刚才失败的写接口
-
-可以按下面的顺序理解：
+每个站点的行为由 `site_settings` 持久化，后台 API 路径为：
 
 ```text
-POST /api/comments/{commentId}/vote
--> 400 VOTE_CAPTCHA_REQUIRED
-
-GET /api/comments/captcha/state?siteKey=...&pageKey=...
--> 200 { required: true, verified: false, challenge: { challengeId, mode, imageData } }
-
-POST /api/comments/captcha/verify
--> 200 { required: true, verified: true }
-
-POST /api/comments/{commentId}/vote
--> 200
+GET /api/admin/sites/{siteKey}/settings
+PUT /api/admin/sites/{siteKey}/settings
+PATCH /api/admin/sites/{siteKey}
 ```
 
-### 验证码校验接口
+站点设置包含：
 
-`POST /api/comments/captcha/verify` 请求体仅用于 `inline_value`：
+- 评论开关、默认审核状态、最大嵌套深度、分页上限。
+- 评论身份字段：`nickname | email | website` 的允许和必填状态。
+- 验证码模式：`never | always | threshold` 及阈值窗口。
+- 滥用保护和自动黑名单策略。
+- 评论请求元数据采集：IP、User-Agent、IP 属地、设备解析。
+- 页面点赞开关。
+- 邮件通知开关。
 
-```json
-{
-  "siteKey": "fangyuan",
-  "pageKey": "post:welcome",
-  "challengeId": "cap_xxx",
-  "mode": "inline_value",
-  "value": "1234"
-}
-```
+这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
 
-校验结果说明：
+## DB-Owned System Settings
 
-- 返回 `200` 且 `verified: true`：当前页面验证码已通过，可继续对应写操作
-- 返回 `400 COMMENT_CAPTCHA_INVALID`：答案错误，需要继续使用当前 challenge 或重新获取状态
-- 返回 `400 COMMENT_CAPTCHA_REQUIRED`：通常表示缺少有效 challenge、challenge 与当前页面/访客不匹配，或需要重新进入验证码流程
-- 返回 `429`：验证码尝试次数已触发限流
+系统设置保存在 `system_settings`。当前后台已支持：
 
-### challenge 获取与复用规则
+- `logging.level`
+- `logging.retentionDays`
 
-- `challenge.mode === "inline_value"` 时，`challenge.imageData` 为 SVG data URL，可直接用于 `<img src="...">`
-- `challenge.mode === "iframe_widget"` 时，`challenge.iframeSrc` 为 QingYan 同源 iframe 宿主页地址；第三方 SDK 由该宿主页负责加载
-- `GET /api/comments/captcha/state` 只负责读取当前 challenge，不会隐式刷新
-- 需要更换 challenge 时，调用 `POST /api/comments/captcha/refresh`
-- 已验证的 challenge 会在同一页面内被复用，直到过期或当前 session 状态变化
-- `threshold` 模式下，命中阈值的那次写请求负责“创建 challenge 并返回需要验证码”；真正的 challenge 内容要通过 `captcha/state` 获取
-- 页面切换到新的 `pageKey` 后，应视为新的验证码上下文，重新按对应页面获取状态
-- 如果客户端丢失了 `qingyan_visitor` cookie，应从 `bootstrap` 或 `captcha/state` 重新建立当前访客上下文
+日志目录仍属于部署环境，不在后台修改。后续 mail、captcha provider、IP 库下载源等不影响进程启动的全局能力也应进入 `system_settings`，而不是回到 startup config。
 
-## 本地配置建议
+## 评论验证码与元数据
 
-开发环境建议：
+公开评论验证码仍按同一站点、同一页面、同一访客维度复用。配置来源从站点的 DB settings 读取：
 
-- `server.publicBaseUrl`: `http://localhost:4401`
-- `admin.session.secure`: `false`
-- `sites[].allowedOrigins`: 包含前端开发地址，例如 `http://localhost:4321`
-- `security.publicOriginGuard.allowMissingOrigin`: 默认保持 `false`，浏览器联调只要 `allowedOrigins` 写入前端 origin 即可；只有本地脚本或非浏览器代理无法发送 `Origin` 时才临时设为 `true`
-- SQLite 文件放到 `./data/qingyan.db`
+- `never`: 不要求验证码。
+- `always`: bootstrap 阶段直接返回 challenge。
+- `threshold`: 写操作达到阈值后返回 `*_CAPTCHA_REQUIRED`，客户端再拉取 captcha state。
+
+评论请求环境信息属于用户信息收集。站点应在评论区或隐私说明中声明：提交评论时，本站会记录必要的请求环境信息，包括 IP 地址和浏览器 User-Agent，用于反垃圾、滥用排查、IP 属地与设备类型展示。公开页面不会展示完整 IP 地址或完整 User-Agent。
+
+## 导入导出与迁移
+
+普通迁移推荐携带：
+
+- startup config
+- SQLite 数据库文件
+
+需要跨实例复制站点时，使用 QingYan export/import。当前 export hard cut 到 `formatVersion: 2`，可包含：
+
+- `site`
+- `siteSettings`
+- `systemSettings`（非 secret 字段）
+- 页面、访客、评论、投票、页面点赞、黑名单数据
+
+导入模式：
+
+- `data_only`: 只导入页面、评论、访客等数据，不修改设置。
+- `settings_only`: 只更新站点和站点设置，不导入评论数据。
+- `full_site`: 同时导入站点、站点设置和数据。
+
+普通 export 不包含 admin session、admin password、install token、进程环境变量、SQLite 文件路径或 server host/port。
+
+## Future Upgrade Lifecycle
+
+当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；预留规则见 [upgrade-lifecycle.md](upgrade-lifecycle.md)。
 
 ## Dev Mode
 
-`QingYan` 支持一个只面向本地联调和自动化测试的 dev mode。
+`pnpm dev` 默认启用 dev mode，并提供固定开发管理员账号：
 
-环境变量：
+```text
+username: admin
+password: admin
+captcha: 2468
+```
 
-- `pnpm dev` 会自动启用 dev mode
-- `QINGYAN_DEV_MODE=true`
-- `QINGYAN_DEV_ADMIN_USERNAME=admin`（可选，默认 `admin`）
-- `QINGYAN_DEV_ADMIN_PASSWORD=admin`（可选，默认 `admin`）
-- `QINGYAN_DEV_CAPTCHA_ANSWER=2468`（可选，默认 `2468`）
-- `QINGYAN_DEV_ADMIN_TOKEN=<fixed token>`（可选）
-- `QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321`（可选）
-- `QINGYAN_DATABASE_MODE=none`（可选；无数据库 dev mock 模式）
+可选环境变量：
+
+```bash
+QINGYAN_DEV_ADMIN_USERNAME=admin
+QINGYAN_DEV_ADMIN_PASSWORD=admin
+QINGYAN_DEV_CAPTCHA_ANSWER=2468
+QINGYAN_DEV_ADMIN_TOKEN=dev-token
+QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
+QINGYAN_DATABASE_MODE=none
+```
 
 行为说明：
 
-- dev mode 下系统自动提供单站点 `default`
-- dev mode 下默认提供固定开发管理员账号 `admin / admin`
-- dev mode 下 `pnpm dev` 默认提供固定验证码答案 `2468`
-- 前端仍然必须显式传 `siteKey: "default"`
-- 真实业务 API 路径不变，仍然使用 `/api/*` 与 `/admin`
-- 只新增 `/api/dev/*` 控制接口
-- 生产环境不会暴露 `/api/dev/*`
-- dev mode 下允许缺少 `Origin` 的公开写请求，便于本地脚本、API 测试和无数据库 mock 模式联调；带 `Origin` 的浏览器请求仍应使用 `QINGYAN_DEV_ALLOWED_ORIGIN` 或 `sites[].allowedOrigins` 指向前端开发地址
-- 设置 `QINGYAN_DATABASE_MODE=none` 时会自动启用 dev mode，不连接 SQLite，所有 mock 状态仅保存在当前进程内存中
+- dev mode 使用显式 dev seed 创建单站点 `default`。
+- dev seed 不从 startup config 的 `sites[]` 派生。
+- DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite。
+- `QINGYAN_DATABASE_MODE=none` 时不连接 SQLite，mock 状态只保存在当前进程内存中。
+- 前端仍然必须显式传 `siteKey: "default"`。
+- 生产环境不会暴露 `/api/dev/*`。
 
-注意：
-
-- `/api/dev/*` 不属于正式对外产品契约，不写入公开 OpenAPI
-- `/api/dev/*` 只负责控制真实系统状态，不伪造业务响应
-- `/api/dev/session` 会创建正常的 `qingyan_admin` 会话，便于自动化测试复用后台权限边界
-- 详细调用方式、前端流程和错误处理见 [docs/dev-mode-integration.md](dev-mode-integration.md)
-
-## 部署建议
-
-- 使用 `config/qingyan.yml` 作为正式配置
-- 通过容器卷或宿主机目录挂载 `config/` 与 `data/`
-- 后台口令优先使用 `sha256:<hex>` 形式
-- HTTPS 网关后将 `admin.session.secure` 设为 `true`
-- 如部署在代理后，将 `server.trustProxy` 设为 `true`
+详细调用方式见 [docs/dev-mode-integration.md](dev-mode-integration.md)。
 
 ## 常用命令
 

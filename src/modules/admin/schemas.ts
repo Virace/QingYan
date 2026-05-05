@@ -77,6 +77,19 @@ export const adminSiteCreateBodySchema = z.object({
 	allowedOrigins: z.array(z.string().url()).min(1),
 });
 
+export const adminSiteParamsSchema = z.object({
+	siteKey: z.string().min(1),
+});
+
+export const adminSitePatchBodySchema = z
+	.object({
+		name: z.string().min(1).optional(),
+		allowedOrigins: z.array(z.string().url()).min(1).optional(),
+	})
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
 export const adminCommentParamsSchema = z.object({
 	commentId: z.string().min(1),
 });

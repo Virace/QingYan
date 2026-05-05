@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("admin settings", () => {
-	it("reads and updates runtime settings", async () => {
+	it("reads and updates site settings", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -20,7 +20,7 @@ describe("admin settings", () => {
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/settings?siteKey=fangyuan",
+			url: "/api/admin/sites/fangyuan/settings",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -74,7 +74,7 @@ describe("admin settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/settings?siteKey=fangyuan",
+			url: "/api/admin/sites/fangyuan/settings",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -178,7 +178,7 @@ describe("admin settings", () => {
 		});
 	});
 
-	it("reads runtime settings for the dev default site", async () => {
+	it("reads site settings for the dev default site", async () => {
 		const fixture = await createTestApp({ devMode: true });
 		cleanups.push(fixture.cleanup);
 		const { adminCookie } = await loginAsAdmin(fixture.app, {
@@ -187,7 +187,7 @@ describe("admin settings", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/settings?siteKey=default",
+			url: "/api/admin/sites/default/settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -203,7 +203,7 @@ describe("admin settings", () => {
 		});
 	});
 
-	it("persists runtime settings for the dev default site", async () => {
+	it("persists site settings for the dev default site", async () => {
 		const fixture = await createTestApp({ devMode: true });
 		cleanups.push(fixture.cleanup);
 		const { adminCookie } = await loginAsAdmin(fixture.app, {
@@ -212,7 +212,7 @@ describe("admin settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/settings?siteKey=default",
+			url: "/api/admin/sites/default/settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -226,7 +226,7 @@ describe("admin settings", () => {
 
 		const readResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/settings?siteKey=default",
+			url: "/api/admin/sites/default/settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -239,5 +239,21 @@ describe("admin settings", () => {
 				enabled: false,
 			},
 		});
+	});
+
+	it("does not expose the legacy admin settings route", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/settings?siteKey=fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(404);
 	});
 });

@@ -63,13 +63,24 @@ const importJobParamsSchema = z.object({
 const dryRunBodySchema = z.object({
 	existingStrategy: z.enum(["fail_on_existing", "skip_existing"]),
 });
+const qingyanImportModeSchema = z
+	.enum(["data_only", "settings_only", "full_site"])
+	.default("full_site");
+const qingyanSettingsStrategySchema = z
+	.enum(["fail_on_existing", "replace_settings"])
+	.default("fail_on_existing");
 const applyBodySchema = dryRunBodySchema;
+const qingyanApplyBodySchema = dryRunBodySchema.extend({
+	importMode: qingyanImportModeSchema.optional(),
+	settingsStrategy: qingyanSettingsStrategySchema.optional(),
+});
 const qingyanExportBodySchema = z.object({
 	siteKey: z.string().min(1),
 	format: z.literal("qingyan.export.v1"),
 	include: z
 		.object({
-			runtimeSettings: z.boolean().optional(),
+			siteSettings: z.boolean().optional(),
+			systemSettings: z.boolean().optional(),
 			pageThreads: z.boolean().optional(),
 			comments: z.boolean().optional(),
 			visitors: z.boolean().optional(),
@@ -84,6 +95,8 @@ const qingyanDryRunBodySchema = z.object({
 	fileName: z.string().min(1),
 	payload: z.unknown(),
 	existingStrategy: z.enum(["fail_on_existing", "skip_existing"]),
+	importMode: qingyanImportModeSchema.optional(),
+	settingsStrategy: qingyanSettingsStrategySchema.optional(),
 });
 
 function parseMappingJson(mappingJson?: string) {
@@ -277,7 +290,7 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.post("/qingyan/jobs/:jobId/apply", async (request) => {
 		await sessionService.requireSession(request);
 		const parsedParams = importJobParamsSchema.safeParse(request.params);
-		const parsedBody = applyBodySchema.safeParse(request.body);
+		const parsedBody = qingyanApplyBodySchema.safeParse(request.body);
 		if (!parsedParams.success || !parsedBody.success) {
 			throw new InvalidRequestError({
 				issues: [

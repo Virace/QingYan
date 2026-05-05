@@ -5,7 +5,7 @@ import {
 	captchaSessions,
 	comments,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	sites,
 } from "../../src/db/schema";
 import { createTestApp } from "../support/test-fixtures";
@@ -103,7 +103,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 	it("accepts captcha payload inline when retrying comment vote in always mode", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 

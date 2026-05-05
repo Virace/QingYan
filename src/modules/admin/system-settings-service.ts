@@ -9,12 +9,12 @@ export class AdminSystemSettingsService {
 	) {}
 
 	public async getSettings() {
-		const runtimeSettings = this.loggerManager.getRuntimeSettings();
+		const siteSettings = this.loggerManager.getRuntimeSettings();
 
 		return {
 			logging: {
-				level: runtimeSettings.level,
-				retentionDays: runtimeSettings.retentionDays,
+				level: siteSettings.level,
+				retentionDays: siteSettings.retentionDays,
 				directory: this.loggerManager.getLogDirectory(),
 			},
 		};

@@ -5,7 +5,7 @@ import {
 	comments,
 	pageFeedbackRecords,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	sites,
 	visitors,
 	voteRecords,
@@ -176,17 +176,7 @@ describe("GET /api/comments/bootstrap", () => {
 	});
 
 	it("returns configured display metadata without raw request metadata", async () => {
-		const fixture = await createTestApp({
-			mutateConfig(config) {
-				const metadata = config.sites[0]?.defaults.comments.metadata;
-				if (!metadata) {
-					throw new Error("Expected metadata config to exist");
-				}
-				metadata.ipRegion.enabled = true;
-				metadata.ipRegion.precision = "city";
-				metadata.device.display.enabled = true;
-			},
-		});
+		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const [site] = await fixture.app.db
@@ -196,6 +186,22 @@ describe("GET /api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commentMetadataJson: JSON.stringify({
+					ipRegion: {
+						enabled: true,
+						precision: "city",
+					},
+					device: {
+						display: {
+							enabled: true,
+						},
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
 
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
@@ -286,7 +292,7 @@ describe("GET /api/comments/bootstrap", () => {
 	it("inlines captcha challenge in bootstrap when captcha mode is always", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 

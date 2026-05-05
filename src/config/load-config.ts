@@ -3,7 +3,12 @@ import path from "node:path";
 
 import { parse } from "yaml";
 
-import { configSchema, type AppConfig } from "./types";
+import { applyStartupEnvOverrides } from "./env-mapping";
+import {
+	configSchema,
+	type AppConfig,
+	withTransitionalRuntimeDefaults,
+} from "./types";
 
 const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), "config/qingyan.yml");
 
@@ -17,11 +22,14 @@ export function resolveConfigPath(
 
 export async function loadConfig(
 	configPath = process.env.QINGYAN_CONFIG_PATH,
+	environment: NodeJS.ProcessEnv = process.env,
 ): Promise<AppConfig> {
 	const resolvedPath = resolveConfigPath(configPath);
 	const fileContent = await readFile(resolvedPath, "utf-8");
 	const parsed = parse(fileContent) as unknown;
-	const validated = configSchema.safeParse(parsed);
+	const validated = configSchema.safeParse(
+		applyStartupEnvOverrides(parsed, environment),
+	);
 
 	if (!validated.success) {
 		throw new Error(
@@ -31,5 +39,5 @@ export async function loadConfig(
 		);
 	}
 
-	return validated.data;
+	return withTransitionalRuntimeDefaults(validated.data);
 }

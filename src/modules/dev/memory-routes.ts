@@ -33,9 +33,9 @@ export function createDevMemoryRoutes(input: {
 	const sessions = new DevMemorySessionStore(input.runtimeOptions);
 
 	return async (fastify) => {
-		const defaultSite = input.runtimeOptions.devMode.defaultSite;
-		if (!defaultSite) {
-			throw new Error("Dev memory mode requires a default site.");
+		const seedSite = input.runtimeOptions.devMode.seed?.site;
+		if (!seedSite) {
+			throw new Error("Dev memory mode requires a seed site.");
 		}
 
 		fastify.post("/api/dev/session", async (request, reply) => {
@@ -59,7 +59,7 @@ export function createDevMemoryRoutes(input: {
 			return {
 				authenticated: true,
 				session: { expiresAt: session.expiresAt },
-				sites: [{ siteKey: defaultSite.siteKey, name: defaultSite.name }],
+				sites: [{ siteKey: seedSite.siteKey, name: seedSite.name }],
 			};
 		});
 
@@ -71,7 +71,7 @@ export function createDevMemoryRoutes(input: {
 
 		fastify.get("/api/admin/sites", async (request) => {
 			sessions.require(request);
-			return { items: [buildSiteSummary(defaultSite)] };
+			return { items: [buildSiteSummary(seedSite)] };
 		});
 
 		fastify.get("/api/dev/state", async (request) => {

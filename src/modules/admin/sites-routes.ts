@@ -3,7 +3,12 @@ import type { FastifyPluginAsync } from "fastify";
 import { InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
-import { adminSiteCreateBodySchema } from "./schemas";
+import {
+	adminSettingsBodySchema,
+	adminSiteCreateBodySchema,
+	adminSiteParamsSchema,
+	adminSitePatchBodySchema,
+} from "./schemas";
 import { AdminSessionService } from "./session-service";
 
 export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
@@ -36,6 +41,57 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 
 		return service.createSite({
 			...parsed.data,
+			requestId: request.context?.requestId,
+		});
+	});
+
+	fastify.patch("/:siteKey", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
+		const parsedBody = adminSitePatchBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return service.updateSite({
+			siteKey: parsedParams.data.siteKey,
+			...parsedBody.data,
+			requestId: request.context?.requestId,
+		});
+	});
+
+	fastify.get("/:siteKey/settings", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
+		if (!parsedParams.success) {
+			throw new InvalidRequestError({
+				issues: parsedParams.error.issues,
+			});
+		}
+
+		return service.getSettings(parsedParams.data.siteKey);
+	});
+
+	fastify.put("/:siteKey/settings", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
+		const parsedBody = adminSettingsBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return service.updateSettings(parsedParams.data.siteKey, {
+			...parsedBody.data,
 			requestId: request.context?.requestId,
 		});
 	});

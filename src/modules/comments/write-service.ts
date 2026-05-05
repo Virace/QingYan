@@ -47,8 +47,7 @@ export class CommentsWriteService {
 		userAgent?: string;
 	}) {
 		const site = this.readRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.readRepository.getConfiguredSite(input.siteKey);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -64,16 +63,14 @@ export class CommentsWriteService {
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 		});
-		const settings = await this.readRepository.getRuntimeSettings(site.id);
-		const commentsEnabled =
-			settings?.commentsEnabled ?? configuredSite.defaults.comments.enabled;
+		const settings = await this.readRepository.getSiteSettings(site.id);
+		const commentsEnabled = settings?.commentsEnabled ?? true;
 		if (!commentsEnabled) {
 			throw new AppError(403, "COMMENTS_DISABLED", "评论功能未开启。");
 		}
 
-		const commentForm = buildCommentForm(configuredSite, {
-			allowWebsite:
-				settings?.allowWebsite ?? configuredSite.defaults.comments.allowWebsite,
+		const commentForm = buildCommentForm({
+			allowWebsite: settings?.allowWebsite,
 			commentRequireJson: settings?.commentRequireJson,
 		});
 		const authorName = input.author.name?.trim() ?? "";
@@ -148,11 +145,11 @@ export class CommentsWriteService {
 			}
 		}
 
-		const status = (settings?.defaultStatus ??
-			configuredSite.defaults.comments.defaultStatus) as "pending" | "approved";
+		const status = (settings?.defaultStatus ?? "pending") as
+			| "pending"
+			| "approved";
 		const metadataConfig = this.readRepository.resolveCommentMetadata(
-			configuredSite,
-			settings,
+			settings ?? undefined,
 		);
 		const requestMetadata = this.metadataResolver
 			? await this.metadataResolver.resolve({
@@ -197,12 +194,8 @@ export class CommentsWriteService {
 				pageKey: input.pageKey,
 			},
 		});
-		const abuseGuardEnabled =
-			settings?.abuseGuardEnabled ??
-			configuredSite.defaults.comments.abuseGuard.enabled;
-		const autoBlacklistEnabled =
-			settings?.autoBlacklistEnabled ??
-			configuredSite.defaults.comments.abuseGuard.autoBlacklist.enabled;
+		const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
+		const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
 		if (abuseGuardEnabled && autoBlacklistEnabled) {
 			await this.security.recordAbuseWriteAction({
 				requestId: input.requestId,
@@ -210,19 +203,13 @@ export class CommentsWriteService {
 				pageKey: input.pageKey,
 				ip: input.ip,
 				rule: {
-					windowSec:
-						settings?.abuseGuardWindowSec ??
-						configuredSite.defaults.comments.abuseGuard.windowSec,
-					maxRequests:
-						settings?.abuseGuardMaxWriteActions ??
-						configuredSite.defaults.comments.abuseGuard.maxWriteActions,
+					windowSec: settings?.abuseGuardWindowSec ?? 600,
+					maxRequests: settings?.abuseGuardMaxWriteActions ?? 100,
 				},
 				scope:
 					(settings?.autoBlacklistScope as "post" | "all" | undefined) ??
-					configuredSite.defaults.comments.abuseGuard.autoBlacklist.scope,
-				ttlSec:
-					settings?.autoBlacklistTtlSec ??
-					configuredSite.defaults.comments.abuseGuard.autoBlacklist.ttlSec,
+					"post",
+				ttlSec: settings?.autoBlacklistTtlSec ?? 1800,
 			});
 		}
 
@@ -256,8 +243,7 @@ export class CommentsWriteService {
 		userAgent?: string;
 	}) {
 		const site = this.readRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.readRepository.getConfiguredSite(input.siteKey);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -275,7 +261,7 @@ export class CommentsWriteService {
 		if (!comment || comment.pageThreadId !== thread.id) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
 		}
-		const settings = await this.readRepository.getRuntimeSettings(site.id);
+		const settings = await this.readRepository.getSiteSettings(site.id);
 
 		await this.security.assertNotBlacklisted({
 			requestId: input.requestId,
@@ -358,12 +344,8 @@ export class CommentsWriteService {
 				choice: input.choice,
 			},
 		});
-		const abuseGuardEnabled =
-			settings?.abuseGuardEnabled ??
-			configuredSite.defaults.comments.abuseGuard.enabled;
-		const autoBlacklistEnabled =
-			settings?.autoBlacklistEnabled ??
-			configuredSite.defaults.comments.abuseGuard.autoBlacklist.enabled;
+		const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
+		const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
 		if (abuseGuardEnabled && autoBlacklistEnabled) {
 			await this.security.recordAbuseWriteAction({
 				requestId: input.requestId,
@@ -371,19 +353,13 @@ export class CommentsWriteService {
 				pageKey: input.pageKey,
 				ip: input.ip,
 				rule: {
-					windowSec:
-						settings?.abuseGuardWindowSec ??
-						configuredSite.defaults.comments.abuseGuard.windowSec,
-					maxRequests:
-						settings?.abuseGuardMaxWriteActions ??
-						configuredSite.defaults.comments.abuseGuard.maxWriteActions,
+					windowSec: settings?.abuseGuardWindowSec ?? 600,
+					maxRequests: settings?.abuseGuardMaxWriteActions ?? 100,
 				},
 				scope:
 					(settings?.autoBlacklistScope as "post" | "all" | undefined) ??
-					configuredSite.defaults.comments.abuseGuard.autoBlacklist.scope,
-				ttlSec:
-					settings?.autoBlacklistTtlSec ??
-					configuredSite.defaults.comments.abuseGuard.autoBlacklist.ttlSec,
+					"post",
+				ttlSec: settings?.autoBlacklistTtlSec ?? 1800,
 			});
 		}
 

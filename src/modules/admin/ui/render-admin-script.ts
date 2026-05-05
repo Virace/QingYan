@@ -11,9 +11,12 @@ const ENDPOINTS = {
 	visitors: "/api/admin/visitors",
 	blacklist: "/api/admin/blacklist",
 	sites: "/api/admin/sites",
-	settings: "/api/admin/settings",
 	systemSettings: "/api/admin/system-settings",
 };
+
+function siteSettingsEndpoint(siteKey) {
+	return ENDPOINTS.sites + "/" + encodeURIComponent(siteKey) + "/settings";
+}
 
 const COMMENT_REQUIRE_FIELDS = ["nickname", "email", "website"];
 
@@ -285,12 +288,7 @@ async function loadActiveTab() {
 		} else if (state.activeTab === "system") {
 			state.systemSettings = await request(ENDPOINTS.systemSettings);
 		} else {
-			state.settings = await request(
-				ENDPOINTS.settings +
-					buildQuery({
-						siteKey: state.currentSiteKey,
-					}),
-			);
+			state.settings = await request(siteSettingsEndpoint(state.currentSiteKey));
 		}
 	} catch (error) {
 		if (error.statusCode === 401) {
@@ -358,10 +356,7 @@ async function saveSettings(formData) {
 	);
 
 	await request(
-		ENDPOINTS.settings +
-			buildQuery({
-				siteKey: state.currentSiteKey,
-			}),
+		siteSettingsEndpoint(state.currentSiteKey),
 		{
 			method: "PUT",
 			body: JSON.stringify({
@@ -809,7 +804,7 @@ function renderSitesSection() {
 						'<div class="admin-toolbar-actions">' +
 						'<button class="admin-button-secondary" type="button" data-open-site-tab="settings" data-open-site-key="' +
 						escapeAttribute(item.siteKey) +
-						'">运行时设置</button>' +
+						'">站点设置</button>' +
 						'<button class="admin-button-secondary" type="button" data-open-site-tab="pages" data-open-site-key="' +
 						escapeAttribute(item.siteKey) +
 						'">页面管理</button>' +
@@ -910,11 +905,11 @@ function renderToggleField(input) {
 function renderSettingsSection() {
 	const settings = state.settings;
 	if (state.tabLoading && !settings) {
-		return '<section class="admin-panel"><p class="admin-empty">运行时设置加载中...</p></section>';
+		return '<section class="admin-panel"><p class="admin-empty">站点设置加载中...</p></section>';
 	}
 
 	if (!settings) {
-		return '<section class="admin-panel"><p class="admin-empty">未加载到运行时设置。</p></section>';
+		return '<section class="admin-panel"><p class="admin-empty">未加载到站点设置。</p></section>';
 	}
 
 	const allowWebsite = settings.comments.allowWebsite;
@@ -1169,7 +1164,7 @@ function renderShell() {
 		tabButton("visitors", "访客管理") +
 		tabButton("blacklist", "黑名单") +
 		tabButton("sites", "站点管理") +
-		tabButton("settings", "运行时设置") +
+		tabButton("settings", "站点设置") +
 		tabButton("system", "系统设置") +
 		"</div>" +
 		"</aside>" +

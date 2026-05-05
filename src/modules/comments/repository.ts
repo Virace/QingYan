@@ -6,18 +6,21 @@ import type { AppDatabase } from "../../db/client";
 import {
 	comments,
 	pageFeedbackRecords,
+	pageViewSessions,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	visitors,
 	voteRecords,
-	pageViewSessions,
 } from "../../db/schema";
-import type { SiteConfig } from "../../config/types";
 import type {
 	RegisteredSiteRecord,
 	SiteRegistry,
 } from "../shared/site-registry";
 import { normalizePagePath } from "../shared/page-url";
+import {
+	defaultCommentMetadata,
+	type CommentMetadataSettings,
+} from "../shared/site-settings-defaults";
 
 export interface VisitorRecord {
 	id: number;
@@ -31,8 +34,6 @@ export interface ThreadRecordInput {
 	pageTitle?: string;
 	pageUrl?: string;
 }
-
-type CommentMetadataSettings = SiteConfig["defaults"]["comments"]["metadata"];
 
 export interface PublicCommentsQueryInput {
 	pageThreadId: number;
@@ -64,30 +65,25 @@ export class CommentsRepository {
 		return this.db;
 	}
 
-	public getConfiguredSite(siteKey: string): SiteConfig | undefined {
-		return this.siteRegistry.getConfiguredSite(siteKey);
-	}
-
 	public getRegisteredSite(siteKey: string): RegisteredSiteRecord | undefined {
 		return this.siteRegistry.getRegisteredSite(siteKey);
 	}
 
-	public async getRuntimeSettings(siteId: number) {
+	public async getSiteSettings(siteId: number) {
 		const [settings] = await this.db
 			.select()
-			.from(runtimeSettings)
-			.where(eq(runtimeSettings.siteId, siteId))
+			.from(siteSettings)
+			.where(eq(siteSettings.siteId, siteId))
 			.limit(1);
 
 		return settings;
 	}
 
-	public resolveCommentMetadata(
-		site: SiteConfig,
-		settings?: { commentMetadataJson: string | null },
-	): CommentMetadataSettings {
+	public resolveCommentMetadata(settings?: {
+		commentMetadataJson: string | null;
+	}): CommentMetadataSettings {
 		if (!settings?.commentMetadataJson) {
-			return site.defaults.comments.metadata;
+			return defaultCommentMetadata;
 		}
 
 		try {
@@ -95,35 +91,35 @@ export class CommentsRepository {
 				settings.commentMetadataJson,
 			) as Partial<CommentMetadataSettings>;
 			return {
-				...site.defaults.comments.metadata,
+				...defaultCommentMetadata,
 				...parsed,
 				ipRegion: {
-					...site.defaults.comments.metadata.ipRegion,
+					...defaultCommentMetadata.ipRegion,
 					...parsed.ipRegion,
 					autoUpdate: {
-						...site.defaults.comments.metadata.ipRegion.autoUpdate,
+						...defaultCommentMetadata.ipRegion.autoUpdate,
 						...parsed.ipRegion?.autoUpdate,
 					},
 					ipv4: {
-						...site.defaults.comments.metadata.ipRegion.ipv4,
+						...defaultCommentMetadata.ipRegion.ipv4,
 						...parsed.ipRegion?.ipv4,
 					},
 					ipv6: {
-						...site.defaults.comments.metadata.ipRegion.ipv6,
+						...defaultCommentMetadata.ipRegion.ipv6,
 						...parsed.ipRegion?.ipv6,
 					},
 				},
 				device: {
-					...site.defaults.comments.metadata.device,
+					...defaultCommentMetadata.device,
 					...parsed.device,
 					display: {
-						...site.defaults.comments.metadata.device.display,
+						...defaultCommentMetadata.device.display,
 						...parsed.device?.display,
 					},
 				},
 			};
 		} catch {
-			return site.defaults.comments.metadata;
+			return defaultCommentMetadata;
 		}
 	}
 

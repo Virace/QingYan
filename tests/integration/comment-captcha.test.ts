@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { eq } from "drizzle-orm";
 
-import { captchaSessions, runtimeSettings } from "../../src/db/schema";
+import { captchaSessions, siteSettings } from "../../src/db/schema";
 import { decodeSvgDataUrl } from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -36,7 +36,7 @@ describe("comment captcha", () => {
 	it("creates a challenge, rejects invalid values and accepts the right answer", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
@@ -115,7 +115,7 @@ describe("comment captcha", () => {
 	it("refreshes an unresolved challenge and does not expose the plaintext answer in svg payload", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 

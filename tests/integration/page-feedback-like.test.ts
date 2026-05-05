@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	pageFeedbackRecords,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	captchaSessions,
 } from "../../src/db/schema";
 import { eq } from "drizzle-orm";
@@ -70,7 +70,7 @@ describe("POST /api/page-feedback/like", () => {
 	it("accepts captcha payload inline when retrying page like", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 

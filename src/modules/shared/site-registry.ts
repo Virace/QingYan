@@ -1,21 +1,15 @@
 import type { SiteConfig } from "../../config/types";
 import type { AppDatabase } from "../../db/client";
-import { runtimeSettings } from "../../db/schema/settings";
+import { eq } from "drizzle-orm";
+import { siteSettings } from "../../db/schema/settings";
 import { sites } from "../../db/schema/sites";
-import { buildRuntimeSettingsDefaults } from "./runtime-settings-defaults";
+import { buildDefaultSiteSettings } from "./site-settings-defaults";
 
 export interface RegisteredSiteRecord {
 	id: number;
 	siteKey: string;
 	name: string;
 	allowedOrigins: string[];
-	runtimeOnly?: boolean;
-}
-
-function cloneDefaults(
-	defaults: SiteConfig["defaults"],
-): SiteConfig["defaults"] {
-	return JSON.parse(JSON.stringify(defaults)) as SiteConfig["defaults"];
 }
 
 function serializeAllowedOrigins(allowedOrigins: string[]): string {
@@ -30,95 +24,22 @@ function parseAllowedOrigins(payload: string): string[] {
 }
 
 export class SiteRegistry {
-	private readonly configuredSites = new Map<string, SiteConfig>();
-
 	private readonly registeredSites = new Map<string, RegisteredSiteRecord>();
-
-	private readonly runtimeOnlySiteKeys = new Set<string>();
-
-	public constructor(
-		sitesConfig: SiteConfig[],
-		runtimeOnlySiteKeys: Iterable<string> = [],
-	) {
-		for (const siteKey of runtimeOnlySiteKeys) {
-			this.runtimeOnlySiteKeys.add(siteKey);
-		}
-
-		for (const site of sitesConfig) {
-			this.configuredSites.set(site.siteKey, site);
-		}
-	}
-
-	public getConfiguredSite(siteKey?: string): SiteConfig | undefined {
-		return siteKey ? this.configuredSites.get(siteKey) : undefined;
-	}
 
 	public getRegisteredSite(siteKey?: string): RegisteredSiteRecord | undefined {
 		return siteKey ? this.registeredSites.get(siteKey) : undefined;
-	}
-
-	public getDefaultSiteTemplate(): SiteConfig {
-		const [site] = this.configuredSites.values();
-		if (!site) {
-			throw new Error("At least one configured site is required.");
-		}
-
-		return site;
-	}
-
-	public listConfiguredSites(): SiteConfig[] {
-		return [...this.configuredSites.values()];
 	}
 
 	public listRegisteredSites(): RegisteredSiteRecord[] {
 		return [...this.registeredSites.values()];
 	}
 
-	public async sync(db: AppDatabase): Promise<RegisteredSiteRecord[]> {
-		const configuredSites = [...this.configuredSites.values()];
-		const persistentSites = configuredSites.filter(
-			(site) => !this.runtimeOnlySiteKeys.has(site.siteKey),
-		);
-
+	public async loadFromDatabase(
+		db: AppDatabase,
+	): Promise<RegisteredSiteRecord[]> {
 		this.registeredSites.clear();
-		if (persistentSites.length === 0) {
-			for (const site of configuredSites) {
-				if (!this.runtimeOnlySiteKeys.has(site.siteKey)) {
-					continue;
-				}
-
-				this.registeredSites.set(site.siteKey, {
-					id: 0,
-					siteKey: site.siteKey,
-					name: site.name,
-					allowedOrigins: [...site.allowedOrigins],
-					runtimeOnly: true,
-				});
-			}
-
-			return [...this.registeredSites.values()];
-		}
-
-		for (const site of persistentSites) {
-			await db
-				.insert(sites)
-				.values({
-					siteKey: site.siteKey,
-					name: site.name,
-					allowedOriginsJson: serializeAllowedOrigins(site.allowedOrigins),
-				})
-				.onConflictDoUpdate({
-					target: sites.siteKey,
-					set: {
-						name: site.name,
-						allowedOriginsJson: serializeAllowedOrigins(site.allowedOrigins),
-						updatedAt: new Date().toISOString(),
-					},
-				});
-		}
 
 		const registeredSites = await db.select().from(sites);
-		const defaultTemplate = this.getDefaultSiteTemplate();
 
 		for (const site of registeredSites) {
 			this.registeredSites.set(site.siteKey, {
@@ -127,58 +48,51 @@ export class SiteRegistry {
 				name: site.name,
 				allowedOrigins: parseAllowedOrigins(site.allowedOriginsJson),
 			});
-
-			if (!this.configuredSites.has(site.siteKey)) {
-				this.configuredSites.set(site.siteKey, {
-					siteKey: site.siteKey,
-					name: site.name,
-					allowedOrigins: parseAllowedOrigins(site.allowedOriginsJson),
-					defaults: cloneDefaults(defaultTemplate.defaults),
-				});
-			}
-		}
-
-		for (const site of this.configuredSites.values()) {
-			if (this.runtimeOnlySiteKeys.has(site.siteKey)) {
-				continue;
-			}
-
-			const registeredSite = this.getRegisteredSite(site.siteKey);
-			if (!registeredSite) {
-				continue;
-			}
-
-			await db
-				.insert(runtimeSettings)
-				.values(buildRuntimeSettingsDefaults(registeredSite.id, site))
-				.onConflictDoNothing({
-					target: runtimeSettings.siteId,
-				});
-		}
-
-		for (const site of configuredSites) {
-			if (!this.runtimeOnlySiteKeys.has(site.siteKey)) {
-				continue;
-			}
-
-			this.registeredSites.set(site.siteKey, {
-				id: 0,
-				siteKey: site.siteKey,
-				name: site.name,
-				allowedOrigins: [...site.allowedOrigins],
-				runtimeOnly: true,
-			});
 		}
 
 		return [...this.registeredSites.values()];
 	}
+
+	public async seedSiteFromTemplate(
+		db: AppDatabase,
+		site: Pick<SiteConfig, "siteKey" | "name" | "allowedOrigins">,
+	): Promise<RegisteredSiteRecord> {
+		await db
+			.insert(sites)
+			.values({
+				siteKey: site.siteKey,
+				name: site.name,
+				allowedOriginsJson: serializeAllowedOrigins(site.allowedOrigins),
+			})
+			.onConflictDoNothing({
+				target: sites.siteKey,
+			});
+
+		const [registeredSite] = await db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, site.siteKey))
+			.limit(1);
+		if (!registeredSite) {
+			throw new Error("Expected seeded site row to exist.");
+		}
+
+		await db
+			.insert(siteSettings)
+			.values(buildDefaultSiteSettings(registeredSite.id))
+			.onConflictDoNothing({
+				target: siteSettings.siteId,
+			});
+
+		return {
+			id: registeredSite.id,
+			siteKey: registeredSite.siteKey,
+			name: registeredSite.name,
+			allowedOrigins: parseAllowedOrigins(registeredSite.allowedOriginsJson),
+		};
+	}
 }
 
-export function createSiteRegistry(
-	sitesConfig: SiteConfig[],
-	options?: {
-		runtimeOnlySiteKeys?: Iterable<string>;
-	},
-): SiteRegistry {
-	return new SiteRegistry(sitesConfig, options?.runtimeOnlySiteKeys);
+export function createSiteRegistry(): SiteRegistry {
+	return new SiteRegistry();
 }

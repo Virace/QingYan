@@ -21,7 +21,7 @@ tags:
   - name: Admin Visitors
   - name: Admin Blacklist
   - name: Admin Sites
-  - name: Admin Settings
+  - name: Admin Site Settings
 paths:
   /healthz:
     get:
@@ -591,28 +591,6 @@ paths:
           $ref: '#/components/responses/Error401'
         '404':
           $ref: '#/components/responses/Error404'
-  /api/admin/settings:
-    get:
-      tags: [Admin Settings]
-      summary: 获取站点运行时设置
-      operationId: getAdminSettings
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - $ref: '#/components/parameters/SiteKey'
-      responses:
-        '200':
-          description: 运行时设置
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSettingsResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-        '404':
-          $ref: '#/components/responses/Error404'
   /api/admin/system-settings:
     get:
       tags: [Admin System Settings]
@@ -655,7 +633,7 @@ paths:
   /api/admin/sites:
     get:
       tags: [Admin Sites]
-      summary: 列出站点总览与运行时摘要
+      summary: 列出站点总览与设置摘要
       operationId: listAdminSites
       security:
         - AdminSessionCookie: []
@@ -668,14 +646,85 @@ paths:
                 $ref: '#/components/schemas/AdminSitesListResponse'
         '401':
           $ref: '#/components/responses/Error401'
-    put:
-      tags: [Admin Settings]
-      summary: 更新站点运行时设置
-      operationId: updateAdminSettings
+    post:
+      tags: [Admin Sites]
+      summary: 创建站点
+      operationId: createAdminSite
+      security:
+        - AdminSessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSiteCreateRequest'
+      responses:
+        '200':
+          description: 站点创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSiteMutationResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+  /api/admin/sites/{siteKey}:
+    patch:
+      tags: [Admin Sites]
+      summary: 更新站点基础信息
+      operationId: updateAdminSite
       security:
         - AdminSessionCookie: []
       parameters:
-        - $ref: '#/components/parameters/SiteKey'
+        - $ref: '#/components/parameters/SiteKeyPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSitePatchRequest'
+      responses:
+        '200':
+          description: 站点更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSiteMutationResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /api/admin/sites/{siteKey}/settings:
+    get:
+      tags: [Admin Site Settings]
+      summary: 获取站点设置
+      operationId: getAdminSiteSettings
+      security:
+        - AdminSessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/SiteKeyPath'
+      responses:
+        '200':
+          description: 站点设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSettingsResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '404':
+          $ref: '#/components/responses/Error404'
+    put:
+      tags: [Admin Site Settings]
+      summary: 更新站点设置
+      operationId: updateAdminSiteSettings
+      security:
+        - AdminSessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/SiteKeyPath'
       requestBody:
         required: true
         content:
@@ -684,7 +733,7 @@ paths:
               $ref: '#/components/schemas/AdminSettingsUpdateRequest'
       responses:
         '200':
-          description: 运行时设置更新成功
+          description: 站点设置更新成功
           content:
             application/json:
               schema:
@@ -705,6 +754,13 @@ components:
     SiteKey:
       name: siteKey
       in: query
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    SiteKeyPath:
+      name: siteKey
+      in: path
       required: true
       schema:
         type: string
@@ -2203,6 +2259,51 @@ components:
               type: integer
               minimum: 1
               maximum: 3650
+    AdminSiteCreateRequest:
+      type: object
+      required: [siteKey, name, allowedOrigins]
+      properties:
+        siteKey:
+          type: string
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
+        name:
+          type: string
+          minLength: 1
+        allowedOrigins:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uri
+    AdminSitePatchRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+        allowedOrigins:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uri
+    AdminSiteMutationResponse:
+      type: object
+      required: [site]
+      properties:
+        site:
+          type: object
+          required: [siteKey, name, allowedOrigins]
+          properties:
+            siteKey:
+              type: string
+            name:
+              type: string
+            allowedOrigins:
+              type: array
+              items:
+                type: string
     AdminSiteSummaryItem:
       type: object
       required:

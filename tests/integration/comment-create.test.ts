@@ -5,7 +5,7 @@ import {
 	captchaSessions,
 	comments,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 } from "../../src/db/schema";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -21,7 +21,7 @@ describe("POST /api/comments", () => {
 	it("requires captcha before allowing comment creation", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
@@ -58,7 +58,7 @@ describe("POST /api/comments", () => {
 	it("creates a pending comment when captcha is submitted with the write action", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
@@ -170,7 +170,7 @@ describe("POST /api/comments", () => {
 	it("accepts path-only pageUrl input and stores the normalized path", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
 
@@ -212,7 +212,7 @@ describe("POST /api/comments", () => {
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
 
@@ -260,17 +260,15 @@ describe("POST /api/comments", () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {
 				config.server.trustProxy = true;
-				const metadata = config.sites[0]?.defaults.comments.metadata;
-				if (!metadata) {
-					throw new Error("Expected metadata config to exist");
-				}
-				metadata.collectIp = false;
-				metadata.collectUserAgent = false;
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
+			commentMetadataJson: JSON.stringify({
+				collectIp: false,
+				collectUserAgent: false,
+			}),
 		});
 
 		const response = await fixture.app.inject({
@@ -310,14 +308,14 @@ describe("POST /api/comments", () => {
 		expect(comment?.authorDeviceSource).toBeNull();
 	});
 
-	it("honors runtime request metadata collection switches", async () => {
+	it("honors DB site settings request metadata switches", async () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {
 				config.server.trustProxy = true;
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 			commentMetadataJson: JSON.stringify({
 				collectIp: false,
@@ -366,17 +364,19 @@ describe("POST /api/comments", () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {
 				config.server.trustProxy = true;
-				const metadata = config.sites[0]?.defaults.comments.metadata;
-				if (!metadata) {
-					throw new Error("Expected metadata config to exist");
-				}
-				metadata.ipRegion.enabled = true;
-				metadata.ipRegion.ipv4.dbPath = "./data/missing-ip2region-v4.xdb";
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
+			commentMetadataJson: JSON.stringify({
+				ipRegion: {
+					enabled: true,
+					ipv4: {
+						dbPath: "./data/missing-ip2region-v4.xdb",
+					},
+				},
+			}),
 		});
 
 		const response = await fixture.app.inject({
@@ -418,7 +418,7 @@ describe("POST /api/comments", () => {
 	it("requires captcha on the third write attempt in threshold mode", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "threshold",
 			captchaThresholdWindowSec: 60,
 			captchaThresholdMaxActions: 3,
@@ -490,7 +490,7 @@ describe("POST /api/comments", () => {
 	it("auto-blacklists by exact ip after the long-window write threshold is exceeded", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 			abuseGuardEnabled: true,
 			abuseGuardWindowSec: 600,

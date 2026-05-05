@@ -11,7 +11,7 @@ import {
 	pageFeedbackRecords,
 	pageThreads,
 	pageViewSessions,
-	runtimeSettings,
+	siteSettings,
 	visitors,
 	voteRecords,
 } from "../../db/schema";
@@ -19,7 +19,7 @@ import type { CaptchaService } from "../comments/captcha-service";
 import type { CommentsRepository } from "../comments/repository";
 import type { AdminSessionService } from "../admin/session-service";
 import { AppError } from "../shared/errors";
-import { buildRuntimeSettingsDefaults } from "../shared/runtime-settings-defaults";
+import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
 
 export class DevModeService {
 	public constructor(
@@ -35,18 +35,16 @@ export class DevModeService {
 
 	private async ensureSite(siteKey: "default") {
 		const site = this.commentsRepository.getRegisteredSite(siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(siteKey);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new AppError(404, "SITE_NOT_FOUND", "站点不存在。");
 		}
 
-		return { site, configuredSite };
+		return { site };
 	}
 
 	public async resetPageState(siteKey: "default", pageKey: string) {
 		const site = this.commentsRepository.getRegisteredSite(siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(siteKey);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new AppError(404, "SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -87,9 +85,9 @@ export class DevModeService {
 		}
 
 		await this.db
-			.update(runtimeSettings)
-			.set(buildRuntimeSettingsDefaults(site.id, configuredSite))
-			.where(eq(runtimeSettings.siteId, site.id));
+			.update(siteSettings)
+			.set(buildDefaultSiteSettings(site.id))
+			.where(eq(siteSettings.siteId, site.id));
 
 		return { ok: true };
 	}
@@ -157,7 +155,7 @@ export class DevModeService {
 		pageTitle?: string;
 		pageUrl?: string;
 	}) {
-		const { site, configuredSite } = await this.ensureSite(input.siteKey);
+		const { site } = await this.ensureSite(input.siteKey);
 		const thread = await this.commentsRepository.getOrCreatePageThread({
 			siteId: site.id,
 			pageKey: input.pageKey,
@@ -167,12 +165,12 @@ export class DevModeService {
 
 		if (input.scenario === "comments-captcha-always") {
 			await this.db
-				.update(runtimeSettings)
+				.update(siteSettings)
 				.set({
-					...buildRuntimeSettingsDefaults(site.id, configuredSite),
+					...buildDefaultSiteSettings(site.id),
 					captchaMode: "always",
 				})
-				.where(eq(runtimeSettings.siteId, site.id));
+				.where(eq(siteSettings.siteId, site.id));
 			await this.db
 				.delete(captchaSessions)
 				.where(eq(captchaSessions.pageThreadId, thread.id));
@@ -185,14 +183,14 @@ export class DevModeService {
 
 		if (input.scenario === "comments-threshold-next-write") {
 			await this.db
-				.update(runtimeSettings)
+				.update(siteSettings)
 				.set({
-					...buildRuntimeSettingsDefaults(site.id, configuredSite),
+					...buildDefaultSiteSettings(site.id),
 					captchaMode: "threshold",
 					captchaThresholdWindowSec: 60,
 					captchaThresholdMaxActions: 1,
 				})
-				.where(eq(runtimeSettings.siteId, site.id));
+				.where(eq(siteSettings.siteId, site.id));
 			await this.db
 				.delete(captchaSessions)
 				.where(eq(captchaSessions.pageThreadId, thread.id));

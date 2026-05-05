@@ -1,16 +1,9 @@
 import Database from "better-sqlite3";
-import {
-	mkdtempSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	rmSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { applyDatabaseMigrations } from "../../src/db/migrations";
 import { applyInitialMigration } from "../support/test-fixtures";
 
 function createMigratedDatabase() {
@@ -52,7 +45,7 @@ describe("initial migration", () => {
 					"blacklist_rules",
 					"admin_sessions",
 					"admin_bootstrap_state",
-					"runtime_settings",
+					"site_settings",
 					"system_settings",
 					"audit_logs",
 					"import_batches",
@@ -64,7 +57,7 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("keeps runtime settings unique per site and avoids provider-specific runtime settings", () => {
+	it("keeps site settings unique per site and avoids provider-specific settings", () => {
 		const fixture = createMigratedDatabase();
 		const combinedMigrationSql = readdirSync(
 			path.resolve(process.cwd(), "drizzle"),
@@ -83,15 +76,16 @@ describe("initial migration", () => {
 				)
 				.run("fangyuan", "FangYuan", "[]");
 			fixture.sqlite
-				.prepare("INSERT INTO runtime_settings (site_id) VALUES (?)")
+				.prepare("INSERT INTO site_settings (site_id) VALUES (?)")
 				.run(1);
 
 			expect(() =>
 				fixture.sqlite
-					.prepare("INSERT INTO runtime_settings (site_id) VALUES (?)")
+					.prepare("INSERT INTO site_settings (site_id) VALUES (?)")
 					.run(1),
 			).toThrow();
 			expect(combinedMigrationSql).not.toContain("runtime_provider");
+			expect(combinedMigrationSql).not.toContain("runtime_settings");
 			expect(combinedMigrationSql).not.toContain("artalk_");
 			expect(combinedMigrationSql).not.toContain("wp_");
 			expect(combinedMigrationSql).toContain("`captcha_mode` text");
@@ -138,8 +132,8 @@ describe("initial migration", () => {
 			const commentsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(comments)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
-			const runtimeSettingsColumns = fixture.sqlite
-				.prepare("PRAGMA table_info(runtime_settings)")
+			const siteSettingsColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(site_settings)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const systemSettingsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(system_settings)")
@@ -177,7 +171,7 @@ describe("initial migration", () => {
 					"author_device_error",
 				]),
 			);
-			expect(runtimeSettingsColumns.map((column) => column.name)).toEqual(
+			expect(siteSettingsColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
 					"comment_require_json",
 					"captcha_mode",
@@ -193,12 +187,12 @@ describe("initial migration", () => {
 				]),
 			);
 			expect(
-				runtimeSettingsColumns.find(
+				siteSettingsColumns.find(
 					(column) => column.name === "comment_require_json",
 				)?.dflt_value,
 			).toBe('\'["nickname","email"]\'');
 			expect(
-				runtimeSettingsColumns.find((column) => column.name === "captcha_mode")
+				siteSettingsColumns.find((column) => column.name === "captcha_mode")
 					?.dflt_value,
 			).toBe("'threshold'");
 			expect(systemSettingsColumns.map((column) => column.name)).toEqual(
@@ -290,207 +284,11 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("applies missing migrations when an existing dev database starts", () => {
-		const directory = mkdtempSync(path.join(tmpdir(), "qingyan-migration-"));
-		const databaseFile = path.join(directory, "qingyan.db");
-		mkdirSync(path.dirname(databaseFile), { recursive: true });
-		const sqlite = new Database(databaseFile);
+	it("uses a single unreleased baseline migration", () => {
+		const migrationFiles = readdirSync(path.resolve(process.cwd(), "drizzle"))
+			.filter((fileName) => fileName.endsWith(".sql"))
+			.sort();
 
-		try {
-			sqlite.exec(`
-				CREATE TABLE __qingyan_migrations (
-					name text PRIMARY KEY NOT NULL,
-					applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-				);
-				CREATE TABLE sites (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					site_key text NOT NULL,
-					name text NOT NULL,
-					allowed_origins_json text NOT NULL,
-					config_json text,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-				);
-				CREATE UNIQUE INDEX sites_site_key_idx ON sites (site_key);
-				CREATE TABLE runtime_settings (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					site_id integer NOT NULL,
-					comments_enabled integer DEFAULT true NOT NULL,
-					default_status text DEFAULT 'pending' NOT NULL,
-					max_depth integer DEFAULT 3 NOT NULL,
-					root_limit integer DEFAULT 20 NOT NULL,
-					comment_require_json text DEFAULT '["nickname","email"]' NOT NULL,
-					allow_website integer DEFAULT true NOT NULL,
-					captcha_mode text DEFAULT 'threshold' NOT NULL,
-					captcha_threshold_window_sec integer DEFAULT 60 NOT NULL,
-					captcha_threshold_max_actions integer DEFAULT 3 NOT NULL,
-					abuse_guard_enabled integer DEFAULT true NOT NULL,
-					abuse_guard_window_sec integer DEFAULT 600 NOT NULL,
-					abuse_guard_max_write_actions integer DEFAULT 100 NOT NULL,
-					auto_blacklist_enabled integer DEFAULT true NOT NULL,
-					auto_blacklist_scope text DEFAULT 'post' NOT NULL,
-					auto_blacklist_ttl_sec integer DEFAULT 1800 NOT NULL,
-					email_notifications_enabled integer DEFAULT false NOT NULL,
-					allow_page_like integer DEFAULT true NOT NULL,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					FOREIGN KEY (site_id) REFERENCES sites(id)
-				);
-				CREATE UNIQUE INDEX runtime_settings_site_id_idx ON runtime_settings (site_id);
-				INSERT INTO __qingyan_migrations (name) VALUES
-					('0000_initial.sql'),
-					('0001_classy_ben_grimm.sql'),
-					('0002_public_captcha_providers.sql'),
-					('0003_comment_request_metadata.sql'),
-					('0004_admin_bootstrap_state.sql');
-			`);
-
-			applyDatabaseMigrations(sqlite);
-
-			const runtimeColumns = sqlite
-				.prepare("PRAGMA table_info(runtime_settings)")
-				.all() as Array<{ name: string }>;
-			expect(runtimeColumns.map((column) => column.name)).toContain(
-				"comment_metadata_json",
-			);
-			expect(
-				sqlite
-					.prepare(
-						"SELECT name FROM __qingyan_migrations WHERE name = '0005_runtime_settings_comment_metadata.sql'",
-					)
-					.get(),
-			).toBeTruthy();
-		} finally {
-			sqlite.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	it("infers applied migrations for legacy dev databases without a migration ledger", () => {
-		const directory = mkdtempSync(path.join(tmpdir(), "qingyan-migration-"));
-		const databaseFile = path.join(directory, "qingyan.db");
-		mkdirSync(path.dirname(databaseFile), { recursive: true });
-		const sqlite = new Database(databaseFile);
-
-		try {
-			sqlite.exec(`
-				CREATE TABLE sites (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					site_key text NOT NULL,
-					name text NOT NULL,
-					allowed_origins_json text NOT NULL,
-					config_json text,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-				);
-				CREATE UNIQUE INDEX sites_site_key_idx ON sites (site_key);
-				CREATE TABLE runtime_settings (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					site_id integer NOT NULL,
-					comments_enabled integer DEFAULT true NOT NULL,
-					default_status text DEFAULT 'pending' NOT NULL,
-					max_depth integer DEFAULT 3 NOT NULL,
-					root_limit integer DEFAULT 20 NOT NULL,
-					comment_require_json text DEFAULT '["nickname","email"]' NOT NULL,
-					allow_website integer DEFAULT true NOT NULL,
-					captcha_mode text DEFAULT 'threshold' NOT NULL,
-					captcha_threshold_window_sec integer DEFAULT 60 NOT NULL,
-					captcha_threshold_max_actions integer DEFAULT 3 NOT NULL,
-					abuse_guard_enabled integer DEFAULT true NOT NULL,
-					abuse_guard_window_sec integer DEFAULT 600 NOT NULL,
-					abuse_guard_max_write_actions integer DEFAULT 100 NOT NULL,
-					auto_blacklist_enabled integer DEFAULT true NOT NULL,
-					auto_blacklist_scope text DEFAULT 'post' NOT NULL,
-					auto_blacklist_ttl_sec integer DEFAULT 1800 NOT NULL,
-					email_notifications_enabled integer DEFAULT false NOT NULL,
-					allow_page_like integer DEFAULT true NOT NULL,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					FOREIGN KEY (site_id) REFERENCES sites(id)
-				);
-				CREATE UNIQUE INDEX runtime_settings_site_id_idx ON runtime_settings (site_id);
-				CREATE TABLE system_settings (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					category text NOT NULL,
-					key text NOT NULL,
-					value_json text NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-				);
-				CREATE TABLE admin_bootstrap_state (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					console_path text NOT NULL,
-					username text NOT NULL,
-					password_hash text NOT NULL,
-					generated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					password_rotated_at text
-				);
-				CREATE TABLE captcha_sessions (
-					id text PRIMARY KEY NOT NULL,
-					site_id integer NOT NULL,
-					visitor_id integer NOT NULL,
-					page_thread_id integer,
-					triggered_by text NOT NULL,
-					mode text NOT NULL,
-					challenge_payload_json text,
-					verified integer DEFAULT false NOT NULL,
-					expires_at text NOT NULL,
-					verified_at text,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					provider_kind text,
-					provider_state_json text
-				);
-				CREATE TABLE comments (
-					id text PRIMARY KEY NOT NULL,
-					site_id integer NOT NULL,
-					page_thread_id integer NOT NULL,
-					parent_id text,
-					visitor_id integer,
-					status text DEFAULT 'pending' NOT NULL,
-					author_name text NOT NULL,
-					author_email text,
-					author_email_hash text,
-					author_website text,
-					content_raw text NOT NULL,
-					content_html text,
-					is_pinned integer DEFAULT false NOT NULL,
-					is_folded integer DEFAULT false NOT NULL,
-					reply_count integer DEFAULT 0 NOT NULL,
-					vote_up_count integer DEFAULT 0 NOT NULL,
-					vote_down_count integer DEFAULT 0 NOT NULL,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					deleted_at text,
-					author_ip text
-				);
-				CREATE TABLE ip_region_database_state (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					ip_version text NOT NULL,
-					file_path text NOT NULL,
-					file_hash text NOT NULL,
-					source_url text,
-					cache_policy text NOT NULL,
-					activated_at text NOT NULL,
-					updated_at text NOT NULL
-				);
-			`);
-
-			applyDatabaseMigrations(sqlite);
-
-			const runtimeColumns = sqlite
-				.prepare("PRAGMA table_info(runtime_settings)")
-				.all() as Array<{ name: string }>;
-			expect(runtimeColumns.map((column) => column.name)).toContain(
-				"comment_metadata_json",
-			);
-			const applied = sqlite
-				.prepare("SELECT name FROM __qingyan_migrations ORDER BY name")
-				.all() as Array<{ name: string }>;
-			expect(applied.map((record) => record.name)).toContain(
-				"0005_runtime_settings_comment_metadata.sql",
-			);
-		} finally {
-			sqlite.close();
-			rmSync(directory, { recursive: true, force: true });
-		}
+		expect(migrationFiles).toEqual(["0000_initial.sql"]);
 	});
 });

@@ -1,39 +1,31 @@
-import type { SiteConfig } from "../../config/types";
 import { ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
+import { defaultCommentMetadata } from "../shared/site-settings-defaults";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import type { CommentsRepository } from "./repository";
 
-function buildCapability(
-	site: SiteConfig,
-	settings?: {
-		commentsEnabled: boolean;
-		defaultStatus: string;
-		maxDepth: number;
-		allowWebsite: boolean;
-		allowPageLike: boolean;
-		captchaMode: string;
-	},
-) {
-	const commentsDefaults = site.defaults.comments;
-	const supportsCaptcha =
-		(settings?.captchaMode ?? commentsDefaults.captcha.mode) !== "never";
+function buildCapability(settings?: {
+	commentsEnabled: boolean;
+	defaultStatus: string;
+	maxDepth: number;
+	allowWebsite: boolean;
+	allowPageLike: boolean;
+	captchaMode: string;
+}) {
+	const supportsCaptcha = (settings?.captchaMode ?? "threshold") !== "never";
 
 	return {
-		enabled: settings?.commentsEnabled ?? commentsDefaults.enabled,
-		supportsReply: (settings?.maxDepth ?? commentsDefaults.maxDepth) > 1,
+		enabled: settings?.commentsEnabled ?? true,
+		supportsReply: (settings?.maxDepth ?? 3) > 1,
 		supportsVote: true,
 		supportsCaptcha,
-		defaultStatus: settings?.defaultStatus ?? commentsDefaults.defaultStatus,
+		defaultStatus: settings?.defaultStatus ?? "pending",
 		message: null,
 	};
 }
 
-function buildCommentDisplayOptions(
-	site: SiteConfig,
-	metadata = site.defaults.comments.metadata,
-) {
+function buildCommentDisplayOptions(metadata = defaultCommentMetadata) {
 	return {
 		location: {
 			enabled: metadata.ipRegion.enabled,
@@ -70,8 +62,7 @@ export class CommentsService {
 
 	public async getBootstrap(input: BootstrapInput) {
 		const site = this.repository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.repository.getConfiguredSite(input.siteKey);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -100,7 +91,7 @@ export class CommentsService {
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 		});
-		const settings = await this.repository.getRuntimeSettings(site.id);
+		const settings = await this.repository.getSiteSettings(site.id);
 		const commentBundle = await this.repository.listPublicComments({
 			pageThreadId: thread.id,
 			sortBy: pagination.sortBy,
@@ -130,11 +121,9 @@ export class CommentsService {
 				};
 
 		return {
-			capability: buildCapability(configuredSite, settings ?? undefined),
-			commentForm: buildCommentForm(configuredSite, {
-				allowWebsite:
-					settings?.allowWebsite ??
-					configuredSite.defaults.comments.allowWebsite,
+			capability: buildCapability(settings ?? undefined),
+			commentForm: buildCommentForm({
+				allowWebsite: settings?.allowWebsite,
 				commentRequireJson: settings?.commentRequireJson,
 			}),
 			thread: refreshedThread,
@@ -147,19 +136,13 @@ export class CommentsService {
 			},
 			commentBundle,
 			commentDisplay: buildCommentDisplayOptions(
-				configuredSite,
-				this.repository.resolveCommentMetadata(
-					configuredSite,
-					settings ?? undefined,
-				),
+				this.repository.resolveCommentMetadata(settings ?? undefined),
 			),
 			pageMetrics: {
 				pageViewCount: refreshedThread.pageViewCount,
 			},
 			pageFeedback: {
-				supportsLike:
-					settings?.allowPageLike ??
-					configuredSite.defaults.pageFeedback.allowLike,
+				supportsLike: settings?.allowPageLike ?? true,
 				likeCount: refreshedThread.pageLikeCount,
 				liked: pageFeedback.liked,
 			},
@@ -175,8 +158,7 @@ export class CommentsService {
 
 	public async getThread(input: BootstrapInput) {
 		const site = this.repository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.repository.getConfiguredSite(input.siteKey);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -200,7 +182,7 @@ export class CommentsService {
 			offset: pagination.offset,
 			visitorId: visitor.id,
 		});
-		const settings = await this.repository.getRuntimeSettings(site.id);
+		const settings = await this.repository.getSiteSettings(site.id);
 
 		return {
 			thread,
@@ -213,11 +195,7 @@ export class CommentsService {
 			},
 			commentBundle,
 			commentDisplay: buildCommentDisplayOptions(
-				configuredSite,
-				this.repository.resolveCommentMetadata(
-					configuredSite,
-					settings ?? undefined,
-				),
+				this.repository.resolveCommentMetadata(settings ?? undefined),
 			),
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 		};

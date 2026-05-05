@@ -5,7 +5,7 @@ import path from "node:path";
 
 import Ip2Region from "ts-ip2region2";
 
-import type { SiteConfig } from "../../../config/types";
+import type { CommentMetadataSettings } from "../../shared/site-settings-defaults";
 import { parseDeviceSnapshot } from "./device";
 import { parseIpRegionText } from "./ip-region";
 
@@ -33,13 +33,12 @@ export interface CommentMetadataResolver {
 	resolve(input: {
 		ip?: string;
 		userAgent?: string;
-		metadata: SiteConfig["defaults"]["comments"]["metadata"];
+		metadata: CommentMetadataSettings;
 	}): Promise<CommentMetadataSnapshot> | CommentMetadataSnapshot;
 	close?(): void;
 }
 
-type IpRegionConfig =
-	SiteConfig["defaults"]["comments"]["metadata"]["ipRegion"];
+type IpRegionConfig = CommentMetadataSettings["ipRegion"];
 type IpVersion = "v4" | "v6";
 
 interface SearcherEntry {
@@ -146,7 +145,7 @@ export class DefaultCommentMetadataResolver implements CommentMetadataResolver {
 	public resolve(input: {
 		ip?: string;
 		userAgent?: string;
-		metadata: SiteConfig["defaults"]["comments"]["metadata"];
+		metadata: CommentMetadataSettings;
 	}): CommentMetadataSnapshot {
 		const snapshot: CommentMetadataSnapshot = {};
 		if (input.ip && input.metadata.ipRegion.enabled) {

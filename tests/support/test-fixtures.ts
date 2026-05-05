@@ -6,8 +6,10 @@ import Database from "better-sqlite3";
 
 import { buildApp } from "../../src/app";
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
-import type { AppConfig } from "../../src/config/types";
+import type { AppConfig, SiteConfig } from "../../src/config/types";
+import { createDatabaseClients } from "../../src/db/client";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 
 function createTempWorkspace() {
 	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-"));
@@ -37,6 +39,18 @@ export function applyInitialMigration(databaseFile: string): void {
 	}
 
 	sqlite.close();
+}
+
+async function seedTestSite(
+	databaseFile: string,
+	site: Pick<SiteConfig, "siteKey" | "name" | "allowedOrigins">,
+): Promise<void> {
+	const { db, sqlite } = createDatabaseClients(databaseFile);
+	try {
+		await createSiteRegistry().seedSiteFromTemplate(db, site);
+	} finally {
+		sqlite.close();
+	}
 }
 
 export function createTestConfig(
@@ -210,6 +224,7 @@ export function createTestConfig(
 export async function createTestApp(options?: {
 	devMode?: boolean;
 	devAdminToken?: string;
+	seedSite?: Pick<SiteConfig, "siteKey" | "name" | "allowedOrigins"> | false;
 	mutateConfig?: (config: AppConfig) => void;
 }) {
 	const workspace = createTempWorkspace();
@@ -220,6 +235,17 @@ export async function createTestApp(options?: {
 		workspace.logsDirectory,
 	);
 	options?.mutateConfig?.(baseConfig);
+	if (!options?.devMode) {
+		const [defaultSite] = baseConfig.sites;
+		const site =
+			options?.seedSite === false
+				? undefined
+				: (options?.seedSite ?? defaultSite);
+		if (!site) {
+			throw new Error("Test fixture requires a default site seed.");
+		}
+		await seedTestSite(workspace.databaseFile, site);
+	}
 	const resolved = resolveRuntimeOptions(baseConfig, {
 		QINGYAN_DEV_MODE: options?.devMode ? "true" : "false",
 		QINGYAN_DEV_ADMIN_TOKEN: options?.devAdminToken,

@@ -20,45 +20,12 @@ function tableExists(sqlite: SqliteClient, tableName: string): boolean {
 	);
 }
 
-function tableHasColumn(
-	sqlite: SqliteClient,
-	tableName: string,
-	columnName: string,
-): boolean {
-	const columns = sqlite
-		.prepare(`PRAGMA table_info(${tableName})`)
-		.all() as Array<{
-		name: string;
-	}>;
-	return columns.some((column) => column.name === columnName);
-}
-
 function inferAppliedMigrations(sqlite: SqliteClient): string[] {
 	if (!tableExists(sqlite, "sites")) {
 		return [];
 	}
 
-	const applied = ["0000_initial.sql"];
-	if (tableExists(sqlite, "system_settings")) {
-		applied.push("0001_classy_ben_grimm.sql");
-	}
-	if (tableHasColumn(sqlite, "captcha_sessions", "provider_kind")) {
-		applied.push("0002_public_captcha_providers.sql");
-	}
-	if (tableExists(sqlite, "ip_region_database_state")) {
-		applied.push("0003_comment_request_metadata.sql");
-	}
-	if (tableExists(sqlite, "admin_bootstrap_state")) {
-		applied.push("0004_admin_bootstrap_state.sql");
-	}
-	if (tableHasColumn(sqlite, "runtime_settings", "comment_metadata_json")) {
-		applied.push("0005_runtime_settings_comment_metadata.sql");
-	}
-	if (tableExists(sqlite, "import_batches")) {
-		applied.push("0006_import_jobs.sql");
-	}
-
-	return applied;
+	return ["0000_initial.sql"];
 }
 
 export function applyDatabaseMigrations(

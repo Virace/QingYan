@@ -25,7 +25,7 @@ import {
 	DataPage,
 	OverviewPage,
 	PagesPage,
-	RuntimeSettingsPage,
+	SiteSettingsPage,
 	SitesPage,
 	SystemSettingsPage,
 	UsersPage,
@@ -58,7 +58,7 @@ const navItems: Array<{
 	{ id: "blacklist", label: "黑名单", icon: ShieldIcon },
 	{ id: "sites", label: "站点", icon: GlobeIcon },
 	{ id: "data", label: "数据", icon: DatabaseIcon },
-	{ id: "settings", label: "运行时设置", icon: FlagIcon },
+	{ id: "settings", label: "站点设置", icon: FlagIcon },
 	{ id: "system", label: "系统设置", icon: SettingsIcon },
 ];
 
@@ -133,7 +133,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			case "data":
 				return <DataPage siteKey={activeSiteKey} />;
 			case "settings":
-				return <RuntimeSettingsPage siteKey={activeSiteKey} />;
+				return <SiteSettingsPage siteKey={activeSiteKey} />;
 			case "system":
 				return <SystemSettingsPage />;
 		}

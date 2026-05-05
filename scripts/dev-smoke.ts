@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { buildApp } from "../src/app";
-import { captchaSessions, comments, runtimeSettings } from "../src/db/schema";
+import { captchaSessions, comments, siteSettings } from "../src/db/schema";
 import {
 	applyInitialMigration,
 	createTestConfig,
@@ -19,7 +19,7 @@ async function main() {
 	await app.ready();
 
 	try {
-		await app.db.update(runtimeSettings).set({
+		await app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 

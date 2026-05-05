@@ -8,8 +8,8 @@ import {
 
 import { sites } from "./sites";
 
-export const runtimeSettings = sqliteTable(
-	"runtime_settings",
+export const siteSettings = sqliteTable(
+	"site_settings",
 	{
 		id: integer("id").primaryKey({ autoIncrement: true }),
 		siteId: integer("site_id")
@@ -64,5 +64,5 @@ export const runtimeSettings = sqliteTable(
 		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 	},
-	(table) => [uniqueIndex("runtime_settings_site_id_idx").on(table.siteId)],
+	(table) => [uniqueIndex("site_settings_site_id_idx").on(table.siteId)],
 );

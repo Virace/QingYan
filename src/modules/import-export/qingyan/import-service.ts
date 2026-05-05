@@ -18,10 +18,13 @@ import {
 	type QingYanExport,
 	type QingYanExportComment,
 	type QingYanExportPageThread,
+	type QingYanExportSiteSettings,
 	type QingYanExportVisitor,
 } from "./export-model";
 
 export type QingYanExistingStrategy = "fail_on_existing" | "skip_existing";
+export type QingYanImportMode = "data_only" | "settings_only" | "full_site";
+export type QingYanSettingsStrategy = "fail_on_existing" | "replace_settings";
 
 interface ImportBatchRow {
 	id: string;
@@ -40,6 +43,15 @@ export interface QingYanDryRunResult {
 		willSkipExistingComments: number;
 		conflicts: number;
 		warnings: number;
+	};
+	settings: {
+		status: "skipped" | "unchanged" | "replace" | "conflict";
+		changes: Array<{
+			path: string;
+			current: unknown;
+			incoming: unknown;
+			action: "skip" | "replace" | "conflict";
+		}>;
 	};
 	items: Array<{
 		type: "page_thread" | "visitor" | "comment";
@@ -61,9 +73,31 @@ export interface QingYanApplyResult {
 		createdPageFeedbackRecords: number;
 		createdBlacklistRules: number;
 		importRecordsCreated: number;
+		settingsUpdated: boolean;
 	};
 	dryRun: QingYanDryRunResult;
 }
+
+const siteSettingsWritableColumns = [
+	"comments_enabled",
+	"default_status",
+	"max_depth",
+	"root_limit",
+	"comment_require_json",
+	"allow_website",
+	"allow_page_like",
+	"captcha_mode",
+	"captcha_threshold_window_sec",
+	"captcha_threshold_max_actions",
+	"abuse_guard_enabled",
+	"abuse_guard_window_sec",
+	"abuse_guard_max_write_actions",
+	"auto_blacklist_enabled",
+	"auto_blacklist_scope",
+	"auto_blacklist_ttl_sec",
+	"comment_metadata_json",
+	"email_notifications_enabled",
+] as const;
 
 function hashPayload(payload: unknown) {
 	return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -81,6 +115,13 @@ function parsePayload(summaryJson: string) {
 	};
 }
 
+function normalizeSqlValue(value: unknown): unknown {
+	if (typeof value === "boolean") {
+		return value ? 1 : 0;
+	}
+	return value;
+}
+
 export class QingYanImportService {
 	public constructor(private readonly sqlite: SqliteClient) {}
 
@@ -89,7 +130,10 @@ export class QingYanImportService {
 		fileName: string;
 		payload: unknown;
 		existingStrategy: QingYanExistingStrategy;
+		importMode?: QingYanImportMode;
+		settingsStrategy?: QingYanSettingsStrategy;
 	}) {
+		const options = this.normalizeOptions(input);
 		const exportPayload = this.parseExport(input.payload);
 		if (exportPayload.scope.siteKey !== input.siteKey) {
 			throw new InvalidRequestError({
@@ -97,11 +141,7 @@ export class QingYanImportService {
 			});
 		}
 		const siteId = this.getSiteId(input.siteKey);
-		const dryRun = this.buildDryRun(
-			siteId,
-			exportPayload,
-			input.existingStrategy,
-		);
+		const dryRun = this.buildDryRun(siteId, exportPayload, options);
 		const jobId = `qy_${randomUUID().replaceAll("-", "")}`;
 		const status =
 			dryRun.summary.conflicts > 0 ? "dry_run_failed" : "dry_run_passed";
@@ -122,7 +162,7 @@ export class QingYanImportService {
 				QINGYAN_EXPORT_FORMAT_VERSION,
 				status,
 				JSON.stringify({ exportPayload, dryRun }),
-				JSON.stringify({ existingStrategy: input.existingStrategy }),
+				JSON.stringify(options),
 			);
 
 		return {
@@ -136,7 +176,11 @@ export class QingYanImportService {
 
 	public apply(
 		jobId: string,
-		input: { existingStrategy: QingYanExistingStrategy },
+		input: {
+			existingStrategy: QingYanExistingStrategy;
+			importMode?: QingYanImportMode;
+			settingsStrategy?: QingYanSettingsStrategy;
+		},
 	) {
 		return this.sqlite.transaction(() =>
 			this.applyInTransaction(jobId, input),
@@ -156,16 +200,33 @@ export class QingYanImportService {
 		}
 	}
 
+	private normalizeOptions(input: {
+		existingStrategy: QingYanExistingStrategy;
+		importMode?: QingYanImportMode;
+		settingsStrategy?: QingYanSettingsStrategy;
+	}) {
+		return {
+			existingStrategy: input.existingStrategy,
+			importMode: input.importMode ?? "full_site",
+			settingsStrategy: input.settingsStrategy ?? "fail_on_existing",
+		};
+	}
+
 	private applyInTransaction(
 		jobId: string,
-		input: { existingStrategy: QingYanExistingStrategy },
+		input: {
+			existingStrategy: QingYanExistingStrategy;
+			importMode?: QingYanImportMode;
+			settingsStrategy?: QingYanSettingsStrategy;
+		},
 	) {
+		const options = this.normalizeOptions(input);
 		const batch = this.getBatch(jobId);
 		const payload = parsePayload(batch.summary_json);
 		const dryRun = this.buildDryRun(
 			batch.site_id,
 			payload.exportPayload,
-			input.existingStrategy,
+			options,
 		);
 		if (dryRun.summary.conflicts > 0) {
 			throw new InvalidRequestError({
@@ -173,7 +234,12 @@ export class QingYanImportService {
 			});
 		}
 
-		const apply = this.writeExport(batch, payload.exportPayload, dryRun);
+		const apply = this.writeExport(
+			batch,
+			payload.exportPayload,
+			dryRun,
+			options,
+		);
 		this.markApplied(
 			jobId,
 			{
@@ -181,7 +247,7 @@ export class QingYanImportService {
 				dryRun,
 				apply,
 			},
-			input,
+			options,
 		);
 		return {
 			job: {
@@ -195,7 +261,11 @@ export class QingYanImportService {
 	private buildDryRun(
 		siteId: number,
 		payload: QingYanExport,
-		existingStrategy: QingYanExistingStrategy,
+		options: {
+			existingStrategy: QingYanExistingStrategy;
+			importMode: QingYanImportMode;
+			settingsStrategy: QingYanSettingsStrategy;
+		},
 	): QingYanDryRunResult {
 		const existingSourceKeys = this.existingSourceKeys(siteId, [
 			...payload.data.pageThreads.map((item) =>
@@ -227,87 +297,98 @@ export class QingYanImportService {
 			warnings: 0,
 		};
 		const items: QingYanDryRunResult["items"] = [];
-		for (const thread of payload.data.pageThreads) {
-			if (existingPageKeys.has(thread.pageKey)) {
-				summary.willReusePageThreads += 1;
-				items.push({
-					type: "page_thread",
-					status: "reuse",
-					sourceKey: qingyanSourceKey("pageThread", thread.source.id),
-					pageKey: thread.pageKey,
-					message: "page thread already exists",
-				});
-			} else {
-				summary.willCreatePageThreads += 1;
-				items.push({
-					type: "page_thread",
-					status: "create",
-					sourceKey: qingyanSourceKey("pageThread", thread.source.id),
-					pageKey: thread.pageKey,
-					message: "page thread will be created",
-				});
-			}
+		const settings = this.buildSettingsDryRun(siteId, payload, options);
+		if (settings.status === "conflict") {
+			summary.conflicts += 1;
 		}
-		for (const visitor of payload.data.visitors) {
-			if (existingVisitorKeys.has(visitor.visitorKey)) {
-				summary.willReuseVisitors += 1;
-				items.push({
-					type: "visitor",
-					status: "reuse",
-					sourceKey: qingyanSourceKey("visitor", visitor.source.id),
-					message: "visitor already exists",
-				});
-			} else {
-				summary.willCreateVisitors += 1;
-				items.push({
-					type: "visitor",
-					status: "create",
-					sourceKey: qingyanSourceKey("visitor", visitor.source.id),
-					message: "visitor will be created",
-				});
-			}
-		}
-		for (const comment of payload.data.comments) {
-			const sourceKey = qingyanSourceKey("comment", comment.source.id);
-			if (existingSourceKeys.has(sourceKey)) {
-				if (existingStrategy === "skip_existing") {
-					summary.willSkipExistingComments += 1;
+		if (options.importMode !== "settings_only") {
+			for (const thread of payload.data.pageThreads) {
+				if (existingPageKeys.has(thread.pageKey)) {
+					summary.willReusePageThreads += 1;
 					items.push({
-						type: "comment",
-						status: "skip",
-						sourceKey,
-						pageKey: comment.pageKey,
-						message: "source key was already imported",
+						type: "page_thread",
+						status: "reuse",
+						sourceKey: qingyanSourceKey("pageThread", thread.source.id),
+						pageKey: thread.pageKey,
+						message: "page thread already exists",
 					});
 				} else {
-					summary.conflicts += 1;
+					summary.willCreatePageThreads += 1;
 					items.push({
-						type: "comment",
-						status: "conflict",
-						sourceKey,
-						pageKey: comment.pageKey,
-						message: "source key was already imported",
+						type: "page_thread",
+						status: "create",
+						sourceKey: qingyanSourceKey("pageThread", thread.source.id),
+						pageKey: thread.pageKey,
+						message: "page thread will be created",
 					});
 				}
-				continue;
 			}
-			summary.willCreateComments += 1;
-			items.push({
-				type: "comment",
-				status: "create",
-				sourceKey,
-				pageKey: comment.pageKey,
-				message: "comment will be created",
-			});
+			for (const visitor of payload.data.visitors) {
+				if (existingVisitorKeys.has(visitor.visitorKey)) {
+					summary.willReuseVisitors += 1;
+					items.push({
+						type: "visitor",
+						status: "reuse",
+						sourceKey: qingyanSourceKey("visitor", visitor.source.id),
+						message: "visitor already exists",
+					});
+				} else {
+					summary.willCreateVisitors += 1;
+					items.push({
+						type: "visitor",
+						status: "create",
+						sourceKey: qingyanSourceKey("visitor", visitor.source.id),
+						message: "visitor will be created",
+					});
+				}
+			}
+			for (const comment of payload.data.comments) {
+				const sourceKey = qingyanSourceKey("comment", comment.source.id);
+				if (existingSourceKeys.has(sourceKey)) {
+					if (options.existingStrategy === "skip_existing") {
+						summary.willSkipExistingComments += 1;
+						items.push({
+							type: "comment",
+							status: "skip",
+							sourceKey,
+							pageKey: comment.pageKey,
+							message: "source key was already imported",
+						});
+					} else {
+						summary.conflicts += 1;
+						items.push({
+							type: "comment",
+							status: "conflict",
+							sourceKey,
+							pageKey: comment.pageKey,
+							message: "source key was already imported",
+						});
+					}
+					continue;
+				}
+				summary.willCreateComments += 1;
+				items.push({
+					type: "comment",
+					status: "create",
+					sourceKey,
+					pageKey: comment.pageKey,
+					message: "comment will be created",
+				});
+			}
 		}
 
-		return { summary, items };
+		return { summary, settings, items };
 	}
 
 	private writeExport(
 		batch: ImportBatchRow,
 		payload: QingYanExport,
 		dryRun: QingYanDryRunResult,
+		options: {
+			existingStrategy: QingYanExistingStrategy;
+			importMode: QingYanImportMode;
+			settingsStrategy: QingYanSettingsStrategy;
+		},
 	): QingYanApplyResult {
 		const summary: QingYanApplyResult["summary"] = {
 			createdPageThreads: 0,
@@ -319,7 +400,18 @@ export class QingYanImportService {
 			createdPageFeedbackRecords: 0,
 			createdBlacklistRules: 0,
 			importRecordsCreated: 0,
+			settingsUpdated: false,
 		};
+		if (options.importMode !== "data_only") {
+			summary.settingsUpdated = this.applySettings(
+				batch.site_id,
+				payload,
+				options,
+			);
+		}
+		if (options.importMode === "settings_only") {
+			return { summary, dryRun };
+		}
 		const threadIds = this.ensurePageThreads(
 			batch,
 			payload.data.pageThreads,
@@ -634,6 +726,162 @@ export class QingYanImportService {
 			summary.createdBlacklistRules += 1;
 			summary.importRecordsCreated += 1;
 		}
+	}
+
+	private buildSettingsDryRun(
+		siteId: number,
+		payload: QingYanExport,
+		options: {
+			importMode: QingYanImportMode;
+			settingsStrategy: QingYanSettingsStrategy;
+		},
+	): QingYanDryRunResult["settings"] {
+		if (options.importMode === "data_only") {
+			return { status: "skipped", changes: [] };
+		}
+
+		const changes: QingYanDryRunResult["settings"]["changes"] = [];
+		const currentSite = this.sqlite
+			.prepare("SELECT name, allowed_origins_json FROM sites WHERE id = ?")
+			.get(siteId) as
+			| { name: string; allowed_origins_json: string }
+			| undefined;
+		if (currentSite) {
+			const currentAllowedOrigins = JSON.parse(
+				currentSite.allowed_origins_json,
+			) as string[];
+			if (currentSite.name !== payload.data.site.name) {
+				changes.push({
+					path: "site.name",
+					current: currentSite.name,
+					incoming: payload.data.site.name,
+					action:
+						options.settingsStrategy === "replace_settings"
+							? "replace"
+							: "conflict",
+				});
+			}
+			if (
+				JSON.stringify(currentAllowedOrigins) !==
+				JSON.stringify(payload.data.site.allowedOrigins)
+			) {
+				changes.push({
+					path: "site.allowedOrigins",
+					current: currentAllowedOrigins,
+					incoming: payload.data.site.allowedOrigins,
+					action:
+						options.settingsStrategy === "replace_settings"
+							? "replace"
+							: "conflict",
+				});
+			}
+		}
+
+		const incomingSettings = payload.data.siteSettings;
+		if (incomingSettings) {
+			const currentSettings = this.getCurrentSiteSettings(siteId);
+			for (const column of siteSettingsWritableColumns) {
+				if (!(column in incomingSettings)) {
+					continue;
+				}
+				const current = currentSettings?.[column];
+				const incoming = normalizeSqlValue(incomingSettings[column]);
+				if (current !== incoming) {
+					changes.push({
+						path: `siteSettings.${column}`,
+						current,
+						incoming,
+						action:
+							options.settingsStrategy === "replace_settings"
+								? "replace"
+								: "conflict",
+					});
+				}
+			}
+		}
+
+		if (changes.length === 0) {
+			return { status: "unchanged", changes };
+		}
+
+		return {
+			status:
+				options.settingsStrategy === "replace_settings"
+					? "replace"
+					: "conflict",
+			changes,
+		};
+	}
+
+	private applySettings(
+		siteId: number,
+		payload: QingYanExport,
+		options: {
+			settingsStrategy: QingYanSettingsStrategy;
+		},
+	): boolean {
+		const dryRun = this.buildSettingsDryRun(siteId, payload, {
+			importMode: "full_site",
+			settingsStrategy: options.settingsStrategy,
+		});
+		if (dryRun.status === "conflict") {
+			throw new InvalidRequestError({
+				message: "Settings dry-run 存在冲突，不能执行导入。",
+			});
+		}
+		if (dryRun.status !== "replace") {
+			return false;
+		}
+
+		this.sqlite
+			.prepare(
+				`UPDATE sites
+				SET name = ?, allowed_origins_json = ?, updated_at = ?
+				WHERE id = ?`,
+			)
+			.run(
+				payload.data.site.name,
+				JSON.stringify(payload.data.site.allowedOrigins),
+				new Date().toISOString(),
+				siteId,
+			);
+		if (payload.data.siteSettings) {
+			this.replaceSiteSettings(siteId, payload.data.siteSettings);
+		}
+		return true;
+	}
+
+	private replaceSiteSettings(
+		siteId: number,
+		settings: QingYanExportSiteSettings,
+	) {
+		const updates = Object.fromEntries(
+			siteSettingsWritableColumns
+				.filter((column) => column in settings)
+				.map((column) => [column, normalizeSqlValue(settings[column])]),
+		);
+		const columns = Object.keys(updates);
+		if (columns.length === 0) {
+			return;
+		}
+		const assignments = columns.map((column) => `${column} = ?`).join(", ");
+		this.sqlite
+			.prepare(
+				`UPDATE site_settings
+				SET ${assignments}, updated_at = ?
+				WHERE site_id = ?`,
+			)
+			.run(
+				...columns.map((column) => updates[column]),
+				new Date().toISOString(),
+				siteId,
+			);
+	}
+
+	private getCurrentSiteSettings(siteId: number) {
+		return this.sqlite
+			.prepare("SELECT * FROM site_settings WHERE site_id = ?")
+			.get(siteId) as Record<string, unknown> | undefined;
 	}
 
 	private readSource(value: Record<string, unknown>) {

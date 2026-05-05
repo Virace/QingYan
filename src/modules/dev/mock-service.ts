@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 
-import type { SiteConfig } from "../../config/types";
+import type { DevSiteSeed } from "../../config/runtime-options";
 import { buildCommentForm } from "../comments/comment-form";
 import { presentComments } from "../comments/presenter";
 import { createCaptchaChallenge } from "../shared/captcha-challenge";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import {
+	buildDefaultSiteSettings,
+	defaultCommentRequire,
+} from "../shared/site-settings-defaults";
 
 type ScenarioName =
 	| "comments-captcha-always"
@@ -99,12 +103,16 @@ function buildStableCommentId(
 	return `dev_${segment || "page"}_${kind}_${index}`;
 }
 
-function cloneSiteForDefault(baseSite: SiteConfig): SiteConfig {
+function cloneSiteForDefault(baseSite: DevSiteSeed): DevSiteSeed {
 	return {
 		...baseSite,
 		siteKey: "default",
 		name: "Default",
 	};
+}
+
+function defaultCommentStatus(): "pending" | "approved" {
+	return "pending";
 }
 
 function sortComments(
@@ -121,11 +129,13 @@ function sortComments(
 }
 
 export class DevMockService {
-	private readonly configuredSite: SiteConfig;
+	private readonly configuredSite: DevSiteSeed;
 
 	private readonly pages = new Map<string, RuntimePageState>();
 
-	public constructor(baseSite: SiteConfig) {
+	private readonly defaultSettings = buildDefaultSiteSettings(0);
+
+	public constructor(baseSite: DevSiteSeed) {
 		this.configuredSite = cloneSiteForDefault(baseSite);
 	}
 
@@ -133,7 +143,7 @@ export class DevMockService {
 		return siteKey === "default";
 	}
 
-	public getConfiguredSite(siteKey: string): SiteConfig | undefined {
+	public getConfiguredSite(siteKey: string): DevSiteSeed | undefined {
 		return this.ownsSite(siteKey) ? this.configuredSite : undefined;
 	}
 
@@ -364,12 +374,11 @@ export class DevMockService {
 
 	private buildCapability() {
 		return {
-			enabled: this.configuredSite.defaults.comments.enabled,
-			supportsReply: this.configuredSite.defaults.comments.maxDepth > 1,
+			enabled: this.defaultSettings.commentsEnabled,
+			supportsReply: this.defaultSettings.maxDepth > 1,
 			supportsVote: true,
-			supportsCaptcha:
-				this.configuredSite.defaults.comments.captcha.mode !== "never",
-			defaultStatus: this.configuredSite.defaults.comments.defaultStatus,
+			supportsCaptcha: this.defaultSettings.captchaMode !== "never",
+			defaultStatus: defaultCommentStatus(),
 			message: null,
 		};
 	}
@@ -650,15 +659,16 @@ export class DevMockService {
 		return this.setVisitorCookieResult(
 			{
 				capability: this.buildCapability(),
-				commentForm: buildCommentForm(this.configuredSite, {
-					allowWebsite: this.configuredSite.defaults.comments.allowWebsite,
+				commentForm: buildCommentForm({
+					allowWebsite: this.defaultSettings.allowWebsite,
+					commentRequireJson: JSON.stringify(defaultCommentRequire),
 				}),
 				...threadBody,
 				pageMetrics: {
 					pageViewCount: pageState.pageViewCount,
 				},
 				pageFeedback: {
-					supportsLike: this.configuredSite.defaults.pageFeedback.allowLike,
+					supportsLike: this.defaultSettings.allowPageLike,
 					likeCount:
 						pageState.baseLikeCount +
 						[...pageState.visitorStates.values()].filter(
@@ -866,7 +876,7 @@ export class DevMockService {
 			authorWebsite: input.authorWebsite ?? null,
 			contentRaw: input.contentRaw,
 			contentHtml: null,
-			status: this.configuredSite.defaults.comments.defaultStatus,
+			status: defaultCommentStatus(),
 			isPinned: false,
 			isFolded: false,
 			replyCount: 0,
@@ -889,7 +899,7 @@ export class DevMockService {
 
 		return {
 			commentId,
-			status: this.configuredSite.defaults.comments.defaultStatus,
+			status: defaultCommentStatus(),
 		};
 	}
 
@@ -1047,7 +1057,7 @@ export class DevMockService {
 		return this.setVisitorCookieResult(
 			{
 				pageFeedback: {
-					supportsLike: this.configuredSite.defaults.pageFeedback.allowLike,
+					supportsLike: this.defaultSettings.allowPageLike,
 					likeCount:
 						pageState.baseLikeCount +
 						[...pageState.visitorStates.values()].filter(

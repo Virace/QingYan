@@ -19,15 +19,14 @@ import {
 	comments,
 	pageViewSessions,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	sites,
 	visitors,
 } from "../../db/schema";
 import { resolvePublicPageUrl } from "../shared/page-url";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
-import { buildRuntimeSettingsDefaults } from "../shared/runtime-settings-defaults";
-import type { SiteConfig } from "../../config/types";
+import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
 
 function parseStringArray(payload?: string | null): string[] {
 	if (!payload) {
@@ -174,7 +173,6 @@ export class AdminRepository {
 		siteKey: string;
 		name: string;
 		allowedOrigins: string[];
-		defaults: SiteConfig["defaults"];
 	}) {
 		const allowedOriginsJson = JSON.stringify(input.allowedOrigins);
 		await this.db.insert(sites).values({
@@ -189,20 +187,34 @@ export class AdminRepository {
 		}
 
 		await this.db
-			.insert(runtimeSettings)
-			.values(
-				buildRuntimeSettingsDefaults(site.id, {
-					siteKey: input.siteKey,
-					name: input.name,
-					allowedOrigins: input.allowedOrigins,
-					defaults: input.defaults,
-				}),
-			)
+			.insert(siteSettings)
+			.values(buildDefaultSiteSettings(site.id))
 			.onConflictDoNothing({
-				target: runtimeSettings.siteId,
+				target: siteSettings.siteId,
 			});
 
 		return site;
+	}
+
+	public async updateSite(
+		siteKey: string,
+		input: {
+			name?: string;
+			allowedOrigins?: string[];
+		},
+	) {
+		await this.db
+			.update(sites)
+			.set({
+				name: input.name,
+				allowedOriginsJson: input.allowedOrigins
+					? JSON.stringify(input.allowedOrigins)
+					: undefined,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(sites.siteKey, siteKey));
+
+		return this.getSiteByKey(siteKey);
 	}
 
 	public async createAdminSession(input: {
@@ -673,16 +685,16 @@ export class AdminRepository {
 				siteKey: sites.siteKey,
 				name: sites.name,
 				allowedOriginsJson: sites.allowedOriginsJson,
-				commentsEnabled: runtimeSettings.commentsEnabled,
-				defaultStatus: runtimeSettings.defaultStatus,
-				commentRequireJson: runtimeSettings.commentRequireJson,
-				allowWebsite: runtimeSettings.allowWebsite,
-				captchaMode: runtimeSettings.captchaMode,
-				allowPageLike: runtimeSettings.allowPageLike,
-				emailNotificationsEnabled: runtimeSettings.emailNotificationsEnabled,
+				commentsEnabled: siteSettings.commentsEnabled,
+				defaultStatus: siteSettings.defaultStatus,
+				commentRequireJson: siteSettings.commentRequireJson,
+				allowWebsite: siteSettings.allowWebsite,
+				captchaMode: siteSettings.captchaMode,
+				allowPageLike: siteSettings.allowPageLike,
+				emailNotificationsEnabled: siteSettings.emailNotificationsEnabled,
 			})
 			.from(sites)
-			.innerJoin(runtimeSettings, eq(runtimeSettings.siteId, sites.id))
+			.innerJoin(siteSettings, eq(siteSettings.siteId, sites.id))
 			.orderBy(sites.siteKey);
 
 		const siteIds = rows.map((row) => row.siteId);
@@ -934,17 +946,17 @@ export class AdminRepository {
 		return rules;
 	}
 
-	public async getRuntimeSettings(siteId: number) {
+	public async getSiteSettings(siteId: number) {
 		const [settings] = await this.db
 			.select()
-			.from(runtimeSettings)
-			.where(eq(runtimeSettings.siteId, siteId))
+			.from(siteSettings)
+			.where(eq(siteSettings.siteId, siteId))
 			.limit(1);
 
 		return settings;
 	}
 
-	public async updateRuntimeSettings(
+	public async updateSiteSettings(
 		siteId: number,
 		input: {
 			commentsEnabled?: boolean;
@@ -968,7 +980,7 @@ export class AdminRepository {
 		},
 	) {
 		await this.db
-			.update(runtimeSettings)
+			.update(siteSettings)
 			.set({
 				commentsEnabled: input.commentsEnabled,
 				defaultStatus: input.defaultStatus,
@@ -990,8 +1002,8 @@ export class AdminRepository {
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})
-			.where(eq(runtimeSettings.siteId, siteId));
+			.where(eq(siteSettings.siteId, siteId));
 
-		return this.getRuntimeSettings(siteId);
+		return this.getSiteSettings(siteId);
 	}
 }

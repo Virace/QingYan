@@ -330,15 +330,31 @@ export function createSite(input: {
 	});
 }
 
+export function updateSite(
+	siteKey: string,
+	input: {
+		name?: string;
+		allowedOrigins?: string[];
+	},
+) {
+	return requestJson<{ items: AdminSite[] }>(
+		`/api/admin/sites/${encodeURIComponent(siteKey)}`,
+		{
+			method: "PATCH",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
 export function getSettings(siteKey: string) {
 	return requestJson<AdminSettings>(
-		`/api/admin/settings?${queryString({ siteKey })}`,
+		`/api/admin/sites/${encodeURIComponent(siteKey)}/settings`,
 	);
 }
 
 export function updateSettings(siteKey: string, input: Partial<AdminSettings>) {
 	return requestJson<AdminSettings>(
-		`/api/admin/settings?${queryString({ siteKey })}`,
+		`/api/admin/sites/${encodeURIComponent(siteKey)}/settings`,
 		{
 			method: "PUT",
 			body: JSON.stringify(input),

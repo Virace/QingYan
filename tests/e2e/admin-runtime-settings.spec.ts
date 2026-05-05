@@ -31,19 +31,19 @@ test.use({
 	storageState: existsSync(authStatePath) ? authStatePath : undefined,
 });
 
-test("runtime settings page renders editable controls", async ({ page }) => {
+test("site settings page renders editable controls", async ({ page }) => {
 	if (!(await isLoggedIn(page))) {
 		await login(page);
 	}
 
-	await page.getByRole("button", { name: "运行时设置" }).click();
-	await expect(page.getByRole("heading", { name: "运行时设置" })).toBeVisible();
+	await page.getByRole("button", { name: "站点设置" }).click();
+	await expect(page.getByRole("heading", { name: "站点设置" })).toBeVisible();
 	await expect(page.getByText("请选择站点")).toHaveCount(0);
 	await expect(page.getByText("评论开关")).toBeVisible();
 	await expect(page.getByText("验证码模式")).toBeVisible();
 	await expect(page.getByText("请求元数据")).toBeVisible();
 	await expect(page.getByText("IPv4 下载源")).toBeVisible();
 	await expect(
-		page.getByRole("button", { name: "保存运行时设置" }),
+		page.getByRole("button", { name: "保存站点设置" }),
 	).toBeVisible();
 });

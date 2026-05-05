@@ -1,10 +1,16 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
-import type { AppRuntimeOptions } from "../../config/runtime-options";
-import type { SiteConfig } from "../../config/types";
+import type {
+	AppRuntimeOptions,
+	DevSiteSeed,
+} from "../../config/runtime-options";
 import { createSessionToken } from "../admin/session-utils";
 import { buildCommentForm } from "../comments/comment-form";
 import { AppError, InvalidRequestError } from "../shared/errors";
+import {
+	buildDefaultSiteSettings,
+	defaultCommentRequire,
+} from "../shared/site-settings-defaults";
 
 export class DevMemorySessionStore {
 	private readonly sessions = new Map<string, { expiresAt: string }>();
@@ -78,22 +84,32 @@ export function setVisitorCookie<T>(
 	return result.body;
 }
 
-export function buildSiteSummary(site: SiteConfig) {
+export function buildSiteSummary(site: DevSiteSeed) {
+	const settings = buildDefaultSiteSettings(0);
 	return {
 		siteKey: site.siteKey,
 		name: site.name,
 		allowedOrigins: site.allowedOrigins,
 		comments: {
-			enabled: site.defaults.comments.enabled,
-			defaultStatus: site.defaults.comments.defaultStatus,
-			identity: buildCommentForm(site, {
-				allowWebsite: site.defaults.comments.allowWebsite,
+			enabled: settings.commentsEnabled,
+			defaultStatus: settings.defaultStatus,
+			identity: buildCommentForm({
+				allowWebsite: settings.allowWebsite,
+				commentRequireJson: JSON.stringify(defaultCommentRequire),
 			}),
-			allowWebsite: site.defaults.comments.allowWebsite,
-			captcha: site.defaults.comments.captcha,
+			allowWebsite: settings.allowWebsite,
+			captcha: {
+				mode: settings.captchaMode,
+				thresholdWindowSec: settings.captchaThresholdWindowSec,
+				thresholdMaxActions: settings.captchaThresholdMaxActions,
+			},
 		},
-		pageFeedback: site.defaults.pageFeedback,
-		notifications: site.defaults.notifications,
+		pageFeedback: {
+			allowLike: settings.allowPageLike,
+		},
+		notifications: {
+			emailEnabled: settings.emailNotificationsEnabled,
+		},
 		pageCount: 0,
 		commentCount: 0,
 		userCount: 0,

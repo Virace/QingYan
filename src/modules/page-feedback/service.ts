@@ -36,10 +36,7 @@ export class PageFeedbackService {
 		userAgent?: string;
 	}) {
 		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -55,9 +52,8 @@ export class PageFeedbackService {
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 		});
-		const settings = await this.commentsRepository.getRuntimeSettings(site.id);
-		const supportsLike =
-			settings?.allowPageLike ?? configuredSite.defaults.pageFeedback.allowLike;
+		const settings = await this.commentsRepository.getSiteSettings(site.id);
+		const supportsLike = settings?.allowPageLike ?? true;
 		if (!supportsLike) {
 			throw new AppError(403, "PAGE_FEEDBACK_DISABLED", "页面点赞功能未开启。");
 		}

@@ -1,4 +1,4 @@
-import type { AppConfig, SiteConfig } from "../../config/types";
+import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { CommentsRepository } from "./repository";
@@ -144,26 +144,17 @@ export class CaptchaService {
 		return JSON.parse(session.challengePayloadJson) as CaptchaSessionPayload;
 	}
 
-	private async resolvePolicy(input: {
-		siteId: number;
-		configuredSite: SiteConfig;
-	}) {
-		const settings = await this.commentsRepository.getRuntimeSettings(
-			input.siteId,
-		);
+	private async resolvePolicy(siteId: number) {
+		const settings = await this.commentsRepository.getSiteSettings(siteId);
 		return resolveCaptchaPolicy({
 			captchaMode:
 				(settings?.captchaMode as
 					| "never"
 					| "always"
 					| "threshold"
-					| undefined) ?? input.configuredSite.defaults.comments.captcha.mode,
-			captchaThresholdWindowSec:
-				settings?.captchaThresholdWindowSec ??
-				input.configuredSite.defaults.comments.captcha.thresholdWindowSec,
-			captchaThresholdMaxActions:
-				settings?.captchaThresholdMaxActions ??
-				input.configuredSite.defaults.comments.captcha.thresholdMaxActions,
+					| undefined) ?? "threshold",
+			captchaThresholdWindowSec: settings?.captchaThresholdWindowSec ?? 60,
+			captchaThresholdMaxActions: settings?.captchaThresholdMaxActions ?? 3,
 		});
 	}
 
@@ -277,10 +268,7 @@ export class CaptchaService {
 		userAgent?: string;
 	}) {
 		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
@@ -299,7 +287,6 @@ export class CaptchaService {
 
 		return {
 			site,
-			configuredSite,
 			visitor,
 			thread,
 		};
@@ -348,12 +335,8 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, configuredSite, visitor, thread } =
-			await this.resolveContext(input);
-		const policy = await this.resolvePolicy({
-			siteId: site.id,
-			configuredSite,
-		});
+		const { site, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy(site.id);
 
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
@@ -436,12 +419,8 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, configuredSite, visitor, thread } =
-			await this.resolveContext(input);
-		const policy = await this.resolvePolicy({
-			siteId: site.id,
-			configuredSite,
-		});
+		const { site, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode !== "threshold") {
 			return;
 		}
@@ -525,12 +504,8 @@ export class CaptchaService {
 		consumeRateLimit: (key: string) => Promise<void>;
 		checkRateLimit: (key: string) => void;
 	}) {
-		const { site, configuredSite, visitor, thread } =
-			await this.resolveContext(input);
-		const policy = await this.resolvePolicy({
-			siteId: site.id,
-			configuredSite,
-		});
+		const { site, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode === "never") {
 			return {
 				required: false,
@@ -965,12 +940,8 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, configuredSite, visitor, thread } =
-			await this.resolveContext(input);
-		const policy = await this.resolvePolicy({
-			siteId: site.id,
-			configuredSite,
-		});
+		const { site, visitor, thread } = await this.resolveContext(input);
+		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode === "never") {
 			return;
 		}

@@ -24,7 +24,7 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 - bootstrap 返回 `commentForm.allow / require`，前端可按 `nickname | email | website` 动态渲染必填项
 - 页面点赞
 - 后台登录（管理员登录验证码 + 5 次失败永久封禁 IP）
-- 后台评论审核、黑名单、页面管理、用户管理、访客管理、站点总览、运行时设置、系统设置
+- 后台评论审核、黑名单、页面管理、用户管理、访客管理、站点总览、站点设置、系统设置
 - 本地 `logs/access` 与 `logs/app` 双通道日志
 - 文本 `.log` + 结构化 `.jsonl` 双格式落盘
 - 后台可动态调整日志等级和保留天数
@@ -40,19 +40,27 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 pnpm install
 ```
 
-### 2. 准备配置
+### 2. 首次安装
+
+首次部署推荐让 QingYan 进入 install mode，而不是手写完整业务配置。
 
 ```bash
-cp config/qingyan.example.yml config/qingyan.yml
+pnpm dev:api
 ```
 
-然后根据实际环境修改：
+当 `config/qingyan.yml` 不存在时，后端会启动 minimal install app，并在终端输出一次性安装地址：
 
-- `server.publicBaseUrl`
-- `admin.tokenHash`
-- `sites[].allowedOrigins`
-- `security.publicOriginGuard.allowMissingOrigin`
-- `database.sqlite.file`
+```text
+install.url=http://127.0.0.1:4401/install?token=...
+```
+
+安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置和基础系统设置。安装完成后重启服务进入正常模式；已安装状态下 `/install` 不再开放。
+
+需要指定配置路径或安装 token 时可使用：
+
+```bash
+QINGYAN_CONFIG_PATH=./config/qingyan.yml QINGYAN_INSTALL_TOKEN=change-me pnpm dev:api
+```
 
 ### 3. 校验配置
 
@@ -106,13 +114,15 @@ admin.username=...
 admin.password=...
 ```
 
-在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。非 dev 启动时，如果管理员密码由首次启动自动生成，`admin.password` 会显示一次性初始密码；如果配置文件提供了 `admin.auth.passwordHash`，明文密码无法从 hash 反推，启动输出会提示使用该 hash 对应的原始密码。
+在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态；安装完成页会显示一次性初始密码。
 
 ## 配置文档
 
 - 完整配置说明见 [docs/configuration.md](docs/configuration.md)
-- 入库示例见 `config/qingyan.example.yml`
+- startup config 示例见 `config/qingyan.example.yml`
 - 本地实参默认使用 `config/qingyan.yml`
+- 站点、站点设置、系统设置由数据库持久化，后台管理端维护
+- release 后破坏性升级的预留规则见 [docs/upgrade-lifecycle.md](docs/upgrade-lifecycle.md)
 
 ## OpenAPI
 
@@ -207,7 +217,7 @@ QINGYAN_DEV_MODE=true pnpm dev:api
 QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 ```
 
-无数据库模式会自动启用 dev mode，并使用运行时内存状态提供完整 dev mock 控制面和前台业务 API；进程重启后 mock 状态会丢失。
+无数据库模式会自动启用 dev mode，并使用进程内存状态提供完整 dev mock 控制面和前台业务 API；进程重启后 mock 状态会丢失。
 
 dev mode 只新增 `/api/dev/*` 控制面；正常业务接口仍然是 `/api/*` 与 `/admin`。前端在 dev mode 下依然需要显式传 `siteKey: "default"`。
 

@@ -1,13 +1,36 @@
 import { buildApp } from "./app";
 import { loadConfig } from "./config/load-config";
 import { resolveRuntimeOptions } from "./config/runtime-options";
+import { buildInstallApp } from "./modules/install/install-app";
+import {
+	resolveInstallUrl,
+	resolveMinimalInstallConfig,
+} from "./modules/install/minimal-config";
+import { resolveInstallState } from "./modules/install/state";
 
 function resolveAdminUrl(publicBaseUrl: string, consolePath: string): string {
 	return new URL(consolePath, publicBaseUrl).toString();
 }
 
 async function main(): Promise<void> {
-	const loadedConfig = await loadConfig();
+	const minimalInstallConfig = resolveMinimalInstallConfig();
+	const installState = await resolveInstallState(minimalInstallConfig);
+	if (!installState.installed) {
+		if (minimalInstallConfig.disabled) {
+			throw new Error(
+				`QingYan is not installed and install mode is disabled: ${installState.reason ?? "unknown"}`,
+			);
+		}
+		const installApp = buildInstallApp({ minimalConfig: minimalInstallConfig });
+		await installApp.listen({
+			host: minimalInstallConfig.host,
+			port: minimalInstallConfig.port,
+		});
+		console.log(`install.url=${resolveInstallUrl(minimalInstallConfig)}`);
+		return;
+	}
+
+	const loadedConfig = await loadConfig(minimalInstallConfig.configPath);
 	const { config, runtimeOptions } = resolveRuntimeOptions(loadedConfig);
 	const app = await buildApp(config, runtimeOptions);
 

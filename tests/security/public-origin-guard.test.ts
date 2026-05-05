@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../../src/config/types";
-import { runtimeSettings } from "../../src/db/schema";
+import { siteSettings } from "../../src/db/schema";
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -73,7 +74,7 @@ describe("public origin guard", () => {
 			mutateConfig: requireOrigin,
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
 
@@ -87,6 +88,49 @@ describe("public origin guard", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
+	});
+
+	it("uses updated DB-owned allowedOrigins for public writes", async () => {
+		const fixture = await createTestApp({
+			mutateConfig: requireOrigin,
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+		});
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const update = await fixture.app.inject({
+			method: "PATCH",
+			url: "/api/admin/sites/fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				allowedOrigins: ["https://new.example.com"],
+			},
+		});
+		expect(update.statusCode).toBe(200);
+
+		const oldOrigin = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			headers: {
+				origin: "http://localhost:4321",
+			},
+			payload: commentPayload("post:old-origin"),
+		});
+		expect(oldOrigin.statusCode).toBe(403);
+
+		const newOrigin = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			headers: {
+				origin: "https://new.example.com",
+			},
+			payload: commentPayload("post:new-origin"),
+		});
+		expect(newOrigin.statusCode).toBe(200);
 	});
 
 	it("rejects public writes from an origin outside the site's allowedOrigins", async () => {

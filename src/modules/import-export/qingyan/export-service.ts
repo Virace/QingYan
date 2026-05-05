@@ -5,7 +5,8 @@ import {
 } from "./export-model";
 
 interface ExportInclude {
-	runtimeSettings?: boolean;
+	siteSettings?: boolean;
+	systemSettings?: boolean;
 	pageThreads?: boolean;
 	comments?: boolean;
 	visitors?: boolean;
@@ -50,8 +51,11 @@ export class QingYanExportService {
 					name: site.name,
 					allowedOrigins: JSON.parse(site.allowed_origins_json) as string[],
 				},
-				runtimeSettings: include.runtimeSettings
-					? this.exportRuntimeSettings(site.id)
+				siteSettings: include.siteSettings
+					? this.exportSiteSettings(site.id)
+					: null,
+				systemSettings: include.systemSettings
+					? this.exportSystemSettings()
 					: null,
 				pageThreads: include.pageThreads ? this.exportPageThreads(site.id) : [],
 				visitors: include.visitors ? this.exportVisitors(site.id) : [],
@@ -79,12 +83,22 @@ export class QingYanExportService {
 		return site;
 	}
 
-	private exportRuntimeSettings(siteId: number) {
+	private exportSiteSettings(siteId: number) {
 		return (
 			this.sqlite
-				.prepare("SELECT * FROM runtime_settings WHERE site_id = ?")
+				.prepare("SELECT * FROM site_settings WHERE site_id = ?")
 				.get(siteId) ?? null
 		);
+	}
+
+	private exportSystemSettings() {
+		return this.sqlite
+			.prepare(
+				`SELECT category, key, value_json, updated_at
+				FROM system_settings
+				ORDER BY category, key`,
+			)
+			.all();
 	}
 
 	private exportPageThreads(siteId: number) {

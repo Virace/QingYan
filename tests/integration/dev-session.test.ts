@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runtimeSettings, sites } from "../../src/db/schema";
+import { siteSettings, sites } from "../../src/db/schema";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -101,10 +101,18 @@ describe("dev session bootstrap", () => {
 		expect(me.json().sites).toEqual([{ siteKey: "default", name: "Default" }]);
 	});
 
-	it("persists the dev default site and runtime settings into sqlite", async () => {
+	it("persists the dev default site and site settings into sqlite", async () => {
 		const fixture = await createTestApp({
 			devMode: true,
 			devAdminToken: "dev-token",
+			mutateConfig(config) {
+				config.sites[0] = {
+					...config.sites[0],
+					siteKey: "external",
+					name: "External",
+					allowedOrigins: ["https://external.example"],
+				};
+			},
 		});
 		cleanups.push(fixture.cleanup);
 
@@ -114,7 +122,7 @@ describe("dev session bootstrap", () => {
 				name: "Default",
 			}),
 		]);
-		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([
+		expect(await fixture.app.db.select().from(siteSettings)).toEqual([
 			expect.objectContaining({
 				siteId: 1,
 			}),

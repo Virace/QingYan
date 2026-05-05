@@ -167,7 +167,7 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	);
 }
 
-export function RuntimeSettingsPage({ siteKey }: { siteKey?: string }) {
+export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
 	const resolvedSiteKey = siteKey ?? "";
 	const query = useQuery({
@@ -199,7 +199,7 @@ export function RuntimeSettingsPage({ siteKey }: { siteKey?: string }) {
 			const message =
 				error instanceof ApiError
 					? `${error.message}${error.code ? ` (${error.code})` : ""}`
-					: "运行时设置加载失败。";
+					: "站点设置加载失败。";
 			return <EmptyState text={message} />;
 		}
 		return <EmptyState text="加载中" />;
@@ -228,7 +228,7 @@ export function RuntimeSettingsPage({ siteKey }: { siteKey?: string }) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="text-lg">运行时设置</CardTitle>
+				<CardTitle className="text-lg">站点设置</CardTitle>
 				<CardDescription>{draft.siteKey}</CardDescription>
 			</CardHeader>
 			<CardContent>
@@ -893,7 +893,7 @@ export function RuntimeSettingsPage({ siteKey }: { siteKey?: string }) {
 					</Field>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
-							保存运行时设置
+							保存站点设置
 						</Button>
 					</div>
 				</form>

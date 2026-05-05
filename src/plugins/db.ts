@@ -25,7 +25,13 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		await resolveAdminBootstrap(fastify.config, db, fastify.runtimeOptions),
 	);
 
-	await fastify.siteRegistry.sync(db);
+	if (fastify.runtimeOptions.devMode.seed) {
+		await fastify.siteRegistry.seedSiteFromTemplate(
+			db,
+			fastify.runtimeOptions.devMode.seed.site,
+		);
+	}
+	await fastify.siteRegistry.loadFromDatabase(db);
 	const ipRegionScheduler = new IpRegionAutoUpdateScheduler(db, fastify.config);
 	ipRegionScheduler.start();
 

@@ -4,7 +4,7 @@ import {
 	comments,
 	pageFeedbackRecords,
 	pageThreads,
-	runtimeSettings,
+	siteSettings,
 	sites,
 } from "../../src/db/schema";
 
@@ -144,7 +144,7 @@ describe("dev control routes", () => {
 				name: "Default",
 			}),
 		]);
-		expect(await fixture.app.db.select().from(runtimeSettings)).toEqual([
+		expect(await fixture.app.db.select().from(siteSettings)).toEqual([
 			expect.objectContaining({
 				siteId: 1,
 			}),

@@ -12,6 +12,7 @@ import {
 	listUsers,
 	listVisitors,
 	updateComment,
+	updateSite,
 } from "@/api/admin";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -672,6 +673,18 @@ export function SitesPage({
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 	});
+	const updateMutation = useMutation({
+		mutationFn: (input: {
+			siteKey: string;
+			name: string;
+			allowedOrigins: string[];
+		}) =>
+			updateSite(input.siteKey, {
+				name: input.name,
+				allowedOrigins: input.allowedOrigins,
+			}),
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
 	const allowedOrigins = allowedOriginsText
 		.split(/\r?\n|,/)
 		.map((value) => value.trim())
@@ -682,7 +695,7 @@ export function SitesPage({
 			<Card>
 				<CardHeader>
 					<CardTitle className="text-lg">新增站点</CardTitle>
-					<CardDescription>创建站点后可继续配置运行时参数。</CardDescription>
+					<CardDescription>创建站点后可继续配置站点设置。</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<form
@@ -728,58 +741,96 @@ export function SitesPage({
 			<Card>
 				<CardHeader>
 					<CardTitle className="text-lg">站点</CardTitle>
-					<CardDescription>配置站点和运行时摘要。</CardDescription>
+					<CardDescription>配置站点和站点设置摘要。</CardDescription>
 				</CardHeader>
 				<CardContent className="grid gap-3 md:grid-cols-2">
-					{query.data?.items.map((site) => (
-						<div key={site.siteKey} className="rounded-md border p-4">
-							<p className="font-medium">{site.name}</p>
-							<p className="text-xs text-muted-foreground">{site.siteKey}</p>
-							<div className="mt-3 flex flex-wrap gap-2">
-								<Badge variant="secondary">页面 {site.pageCount}</Badge>
-								<Badge variant="outline">评论 {site.commentCount}</Badge>
-								<Badge variant="outline">用户 {site.userCount}</Badge>
-								<Badge variant="outline">访客 {site.visitorCount}</Badge>
+					{query.data?.items.map((site) => {
+						const draftOrigins = site.allowedOrigins.join("\n");
+						return (
+							<div key={site.siteKey} className="rounded-md border p-4">
+								<p className="font-medium">{site.name}</p>
+								<p className="text-xs text-muted-foreground">{site.siteKey}</p>
+								<form
+									className="mt-3 grid gap-2"
+									onSubmit={(event) => {
+										event.preventDefault();
+										const form = new FormData(event.currentTarget);
+										const nextName = String(form.get("name") ?? "").trim();
+										const nextOrigins = String(form.get("allowedOrigins") ?? "")
+											.split(/\r?\n|,/)
+											.map((value) => value.trim())
+											.filter(Boolean);
+										if (!nextName || nextOrigins.length === 0) {
+											return;
+										}
+										updateMutation.mutate({
+											siteKey: site.siteKey,
+											name: nextName,
+											allowedOrigins: nextOrigins,
+										});
+									}}
+								>
+									<Input name="name" defaultValue={site.name} />
+									<textarea
+										name="allowedOrigins"
+										className={`${inputClass} min-h-20`}
+										defaultValue={draftOrigins}
+									/>
+									<Button
+										type="submit"
+										size="sm"
+										variant="outline"
+										disabled={updateMutation.isPending}
+									>
+										保存站点
+									</Button>
+								</form>
+								<div className="mt-3 flex flex-wrap gap-2">
+									<Badge variant="secondary">页面 {site.pageCount}</Badge>
+									<Badge variant="outline">评论 {site.commentCount}</Badge>
+									<Badge variant="outline">用户 {site.userCount}</Badge>
+									<Badge variant="outline">访客 {site.visitorCount}</Badge>
+								</div>
+								<p className="mt-3 text-xs text-muted-foreground">
+									{site.allowedOrigins.join(", ")}
+								</p>
+								<div className="mt-4 flex flex-wrap gap-2">
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => openSite(site.siteKey, "settings")}
+									>
+										站点设置
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => openSite(site.siteKey, "pages")}
+									>
+										页面
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => openSite(site.siteKey, "users")}
+									>
+										用户
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => openSite(site.siteKey, "visitors")}
+									>
+										访客
+									</Button>
+								</div>
 							</div>
-							<p className="mt-3 text-xs text-muted-foreground">
-								{site.allowedOrigins.join(", ")}
-							</p>
-							<div className="mt-4 flex flex-wrap gap-2">
-								<Button
-									type="button"
-									size="sm"
-									variant="outline"
-									onClick={() => openSite(site.siteKey, "settings")}
-								>
-									运行时设置
-								</Button>
-								<Button
-									type="button"
-									size="sm"
-									variant="outline"
-									onClick={() => openSite(site.siteKey, "pages")}
-								>
-									页面
-								</Button>
-								<Button
-									type="button"
-									size="sm"
-									variant="outline"
-									onClick={() => openSite(site.siteKey, "users")}
-								>
-									用户
-								</Button>
-								<Button
-									type="button"
-									size="sm"
-									variant="outline"
-									onClick={() => openSite(site.siteKey, "visitors")}
-								>
-									访客
-								</Button>
-							</div>
-						</div>
-					))}
+						);
+					})}
 				</CardContent>
 			</Card>
 		</div>

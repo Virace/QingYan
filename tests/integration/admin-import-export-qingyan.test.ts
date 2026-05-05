@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { comments, siteSettings } from "../../src/db/schema";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 function qingyanExportPayload() {
 	return {
 		format: "qingyan.export.v1",
-		formatVersion: 1,
+		formatVersion: 2,
 		createdAt: "2026-05-05T00:00:00.000Z",
 		generator: {
 			name: "QingYan",
@@ -27,7 +28,27 @@ function qingyanExportPayload() {
 				name: "FangYuan",
 				allowedOrigins: ["http://localhost:4321"],
 			},
-			runtimeSettings: null,
+			siteSettings: {
+				comments_enabled: 0,
+				default_status: "approved",
+				max_depth: 2,
+				root_limit: 10,
+				comment_require_json: '["nickname"]',
+				allow_website: 0,
+				allow_page_like: 0,
+				captcha_mode: "never",
+				captcha_threshold_window_sec: 60,
+				captcha_threshold_max_actions: 3,
+				abuse_guard_enabled: 1,
+				abuse_guard_window_sec: 600,
+				abuse_guard_max_write_actions: 100,
+				auto_blacklist_enabled: 1,
+				auto_blacklist_scope: "post",
+				auto_blacklist_ttl_sec: 1800,
+				comment_metadata_json: null,
+				email_notifications_enabled: 1,
+			},
+			systemSettings: [],
 			pageThreads: [
 				{
 					id: "thread_1",
@@ -150,7 +171,7 @@ function qingyanExportPayload() {
 }
 
 describe("admin import/export QingYan routes", () => {
-	it("exports a site-scoped qingyan.export.v1 logical JSON without runtime session data", async () => {
+	it("exports a site-scoped qingyan.export.v2 logical JSON without runtime session data", async () => {
 		const fixture = await createTestApp();
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 
@@ -190,7 +211,8 @@ describe("admin import/export QingYan routes", () => {
 				siteKey: "fangyuan",
 				format: "qingyan.export.v1",
 				include: {
-					runtimeSettings: true,
+					siteSettings: true,
+					systemSettings: true,
 					pageThreads: true,
 					comments: true,
 					visitors: true,
@@ -208,7 +230,7 @@ describe("admin import/export QingYan routes", () => {
 		);
 		expect(response.json()).toMatchObject({
 			format: "qingyan.export.v1",
-			formatVersion: 1,
+			formatVersion: 2,
 			scope: {
 				type: "site",
 				siteKey: "fangyuan",
@@ -218,6 +240,11 @@ describe("admin import/export QingYan routes", () => {
 					siteKey: "fangyuan",
 					name: "FangYuan",
 				},
+				siteSettings: {
+					comments_enabled: 1,
+					default_status: "pending",
+				},
+				systemSettings: [],
 				pageThreads: [
 					{
 						pageKey: "post/exported",
@@ -244,7 +271,7 @@ describe("admin import/export QingYan routes", () => {
 		expect(response.json().data.adminBootstrapState).toBeUndefined();
 	});
 
-	it("dry-runs and applies a qingyan.export.v1 JSON import", async () => {
+	it("dry-runs and applies a qingyan.export.v2 JSON data-only import", async () => {
 		const fixture = await createTestApp();
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const payload = qingyanExportPayload();
@@ -260,6 +287,7 @@ describe("admin import/export QingYan routes", () => {
 				fileName: "qingyan-export.json",
 				payload,
 				existingStrategy: "fail_on_existing",
+				importMode: "data_only",
 			},
 		});
 
@@ -275,6 +303,9 @@ describe("admin import/export QingYan routes", () => {
 					willCreateComments: 1,
 					conflicts: 0,
 				},
+				settings: {
+					status: "skipped",
+				},
 			},
 		});
 
@@ -287,6 +318,7 @@ describe("admin import/export QingYan routes", () => {
 			},
 			payload: {
 				existingStrategy: "fail_on_existing",
+				importMode: "data_only",
 			},
 		});
 
@@ -304,6 +336,7 @@ describe("admin import/export QingYan routes", () => {
 					createdPageFeedbackRecords: 1,
 					createdBlacklistRules: 1,
 					importRecordsCreated: 5,
+					settingsUpdated: false,
 				},
 			},
 		});
@@ -336,6 +369,112 @@ describe("admin import/export QingYan routes", () => {
 			.get() as { value: number };
 		expect(feedbackCount.value).toBe(1);
 		expect(blacklistCount.value).toBe(1);
+		const [settings] = await fixture.app.db.select().from(siteSettings);
+		expect(settings).toMatchObject({
+			defaultStatus: "pending",
+			commentsEnabled: true,
+		});
+	});
+
+	it("dry-runs and applies settings-only imports without comments", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const payload = qingyanExportPayload();
+
+		const conflictResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/import-export/qingyan/dry-run",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "settings.json",
+				payload,
+				existingStrategy: "fail_on_existing",
+				importMode: "settings_only",
+				settingsStrategy: "fail_on_existing",
+			},
+		});
+		expect(conflictResponse.statusCode).toBe(200);
+		expect(conflictResponse.json()).toMatchObject({
+			job: {
+				status: "dry_run_failed",
+			},
+			dryRun: {
+				summary: {
+					conflicts: 1,
+					willCreateComments: 0,
+				},
+				settings: {
+					status: "conflict",
+					changes: expect.arrayContaining([
+						expect.objectContaining({
+							path: "siteSettings.default_status",
+							action: "conflict",
+						}),
+					]),
+				},
+			},
+		});
+
+		const replaceResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/import-export/qingyan/dry-run",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "settings.json",
+				payload,
+				existingStrategy: "fail_on_existing",
+				importMode: "settings_only",
+				settingsStrategy: "replace_settings",
+			},
+		});
+		expect(replaceResponse.statusCode).toBe(200);
+		expect(replaceResponse.json()).toMatchObject({
+			job: {
+				status: "dry_run_passed",
+			},
+			dryRun: {
+				settings: {
+					status: "replace",
+				},
+			},
+		});
+
+		const applyResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/api/admin/import-export/qingyan/jobs/${replaceResponse.json().job.id}/apply`,
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				existingStrategy: "fail_on_existing",
+				importMode: "settings_only",
+				settingsStrategy: "replace_settings",
+			},
+		});
+		expect(applyResponse.statusCode).toBe(200);
+		expect(applyResponse.json()).toMatchObject({
+			apply: {
+				summary: {
+					createdComments: 0,
+					settingsUpdated: true,
+				},
+			},
+		});
+		expect(await fixture.app.db.select().from(comments)).toEqual([]);
+		const [settings] = await fixture.app.db.select().from(siteSettings);
+		expect(settings).toMatchObject({
+			commentsEnabled: false,
+			defaultStatus: "approved",
+			maxDepth: 2,
+			allowPageLike: false,
+			emailNotificationsEnabled: true,
+		});
 	});
 
 	it("uses import records to block or skip repeated QingYan comments", async () => {
@@ -389,6 +528,7 @@ describe("admin import/export QingYan routes", () => {
 				fileName: "qingyan-export.json",
 				payload,
 				existingStrategy: "fail_on_existing",
+				importMode: "data_only",
 			},
 		});
 
@@ -416,6 +556,7 @@ describe("admin import/export QingYan routes", () => {
 				fileName: "qingyan-export.json",
 				payload,
 				existingStrategy: "skip_existing",
+				importMode: "data_only",
 			},
 		});
 

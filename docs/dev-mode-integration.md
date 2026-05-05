@@ -75,6 +75,8 @@ QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 开启后，系统自动进入以下语义：
 
 - 只提供一个开发站点：`default`
+- `default` 来自 dev seed，不从 startup config 的 `sites[]` 派生
+- DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite
 - 前端仍然必须显式传 `siteKey: "default"`
 - 页面维度继续使用真实 `pageKey`
 - 真实业务 API 路径保持不变
@@ -201,7 +203,7 @@ GET /api/dev/state?siteKey=default&pageKey=post:threshold-demo&visitorKey=visito
 - 验证码会话
 - 页面线程数据
 
-并把站点的 runtime settings 恢复到当前 dev 站点默认值。
+并把站点的 `site_settings` 恢复到当前 dev seed 默认值。
 
 ### 4. `POST /api/dev/scenario`
 

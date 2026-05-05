@@ -8,7 +8,6 @@ import { createPasswordHash } from "./modules/admin/password-hash";
 import { adminOverviewRoutes } from "./modules/admin/overview-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
-import { adminSettingsRoutes } from "./modules/admin/settings-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
@@ -74,14 +73,11 @@ export async function buildApp(
 		trustProxy: config.server.trustProxy,
 	});
 	const openApi = await loadOpenApiDocument();
-	const devDefaultSite = runtimeOptions.devMode.defaultSite;
+	const devSeedSite = runtimeOptions.devMode.seed?.site;
 
 	app.decorate("config", config);
 	app.decorate("runtimeOptions", runtimeOptions);
-	app.decorate(
-		"siteRegistry",
-		createSiteRegistry(devDefaultSite ? [devDefaultSite] : config.sites),
-	);
+	app.decorate("siteRegistry", createSiteRegistry());
 
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.context?.requestId ?? request.id;
@@ -140,11 +136,11 @@ export async function buildApp(
 	await app.register(cookiePlugin);
 
 	if (isDevMemoryMode(runtimeOptions)) {
-		if (!devDefaultSite) {
-			throw new Error("Dev memory mode requires a default site.");
+		if (!devSeedSite) {
+			throw new Error("Dev memory mode requires a seed site.");
 		}
 
-		const devMockService = new DevMockService(devDefaultSite);
+		const devMockService = new DevMockService(devSeedSite);
 		app.decorate("devMockService", devMockService);
 		app.decorate("loggerManager", createMemoryLoggerManager(config));
 		app.decorate("adminBootstrap", {
@@ -191,7 +187,6 @@ export async function buildApp(
 	await app.register(adminVisitorsRoutes, { prefix: "/api/admin/visitors" });
 	await app.register(adminBlacklistRoutes, { prefix: "/api/admin/blacklist" });
 	await app.register(adminSitesRoutes, { prefix: "/api/admin/sites" });
-	await app.register(adminSettingsRoutes, { prefix: "/api/admin/settings" });
 	await app.register(adminSystemSettingsRoutes, {
 		prefix: "/api/admin/system-settings",
 	});

@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import type { AppConfig, SiteConfig } from "./types";
+import type { AppConfig } from "./types";
+
+export interface DevSiteSeed {
+	siteKey: "default";
+	name: string;
+	allowedOrigins: string[];
+}
 
 export interface AppRuntimeOptions {
 	devMode: {
@@ -9,7 +15,9 @@ export interface AppRuntimeOptions {
 		adminPassword?: string;
 		adminToken?: string;
 		tokenSource?: "env" | "generated";
-		defaultSite?: SiteConfig;
+		seed?: {
+			site: DevSiteSeed;
+		};
 		storage?: "memory";
 	};
 }
@@ -17,12 +25,8 @@ export interface AppRuntimeOptions {
 const DEFAULT_DEV_ADMIN_USERNAME = "admin";
 const DEFAULT_DEV_ADMIN_PASSWORD = "admin";
 
-function buildDefaultDevSite(
-	baseSite: SiteConfig,
-	allowedOrigin: string,
-): SiteConfig {
+function buildDefaultDevSite(allowedOrigin: string): DevSiteSeed {
 	return {
-		...baseSite,
 		siteKey: "default",
 		name: "Default",
 		allowedOrigins: [allowedOrigin],
@@ -46,11 +50,6 @@ export function resolveRuntimeOptions(
 		};
 	}
 
-	const firstSite = config.sites[0];
-	if (!firstSite) {
-		throw new Error("Dev mode requires at least one configured site.");
-	}
-
 	const allowedOrigin =
 		environment.QINGYAN_DEV_ALLOWED_ORIGIN ?? "http://localhost:4321";
 	const adminToken =
@@ -64,7 +63,9 @@ export function resolveRuntimeOptions(
 			environment.QINGYAN_DEV_ADMIN_PASSWORD ?? DEFAULT_DEV_ADMIN_PASSWORD,
 		adminToken,
 		tokenSource,
-		defaultSite: buildDefaultDevSite(firstSite, allowedOrigin),
+		seed: {
+			site: buildDefaultDevSite(allowedOrigin),
+		},
 	};
 	if (useMemoryStorage) {
 		devMode.storage = "memory";

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { captchaSessions, runtimeSettings } from "../../src/db/schema";
+import { captchaSessions, siteSettings } from "../../src/db/schema";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -39,7 +39,7 @@ describe("comment captcha providers", () => {
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
@@ -143,7 +143,7 @@ describe("comment captcha providers", () => {
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
@@ -219,7 +219,7 @@ describe("comment captcha providers", () => {
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
@@ -341,7 +341,7 @@ describe("comment captcha providers", () => {
 			},
 		});
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
