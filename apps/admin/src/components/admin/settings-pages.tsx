@@ -741,6 +741,33 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	);
 }
 
+function withoutEmptySecrets(
+	settings: AdminSystemSettings,
+): AdminSystemSettings {
+	const next = structuredClone(settings);
+	if (next.mail.smtp.password === "") {
+		delete next.mail.smtp.password;
+	}
+	if (next.captcha.turnstile.secretKey === "") {
+		delete next.captcha.turnstile.secretKey;
+	}
+	if (next.captcha.hcaptcha.secretKey === "") {
+		delete next.captcha.hcaptcha.secretKey;
+	}
+	if (next.captcha.recaptcha.apiKey === "") {
+		delete next.captcha.recaptcha.apiKey;
+	}
+	if (next.captcha.geetest.captchaKey === "") {
+		delete next.captcha.geetest.captchaKey;
+	}
+
+	return next;
+}
+
+function secretPlaceholder(configured: boolean) {
+	return configured ? "已配置，留空则保留" : "";
+}
+
 export function SystemSettingsPage() {
 	const queryClient = useQueryClient();
 	const query = useQuery({
@@ -777,7 +804,7 @@ export function SystemSettingsPage() {
 					className="grid gap-4 md:grid-cols-2"
 					onSubmit={(event) => {
 						event.preventDefault();
-						mutation.mutate(draft);
+						mutation.mutate(withoutEmptySecrets(draft));
 					}}
 				>
 					<Field label="日志等级">
@@ -821,6 +848,573 @@ export function SystemSettingsPage() {
 					<Field label="日志目录">
 						<Input value={draft.logging.directory} readOnly />
 					</Field>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">邮件通知</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="启用邮件通知">
+								<select
+									className={inputClass}
+									value={String(draft.mail.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												enabled: event.target.value === "true",
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="SMTP Host">
+								<Input
+									value={draft.mail.smtp.host}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												smtp: {
+													...draft.mail.smtp,
+													host: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="SMTP Port">
+								<Input
+									type="number"
+									min={1}
+									value={draft.mail.smtp.port}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												smtp: {
+													...draft.mail.smtp,
+													port: Number(event.target.value),
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="SMTP 加密连接 Secure">
+								<select
+									className={inputClass}
+									value={String(draft.mail.smtp.secure)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												smtp: {
+													...draft.mail.smtp,
+													secure: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="SMTP 用户名">
+								<Input
+									value={draft.mail.smtp.username}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												smtp: {
+													...draft.mail.smtp,
+													username: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="发件人">
+								<Input
+									value={draft.mail.smtp.from}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												smtp: {
+													...draft.mail.smtp,
+													from: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="SMTP 密码">
+								<Input
+									type="password"
+									autoComplete="new-password"
+									placeholder={secretPlaceholder(
+										draft.mail.smtp.passwordConfigured,
+									)}
+									value={draft.mail.smtp.password ?? ""}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											mail: {
+												...draft.mail,
+												smtp: {
+													...draft.mail.smtp,
+													password: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
+					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">验证码服务</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="验证码类型 Provider">
+								<select
+									className={inputClass}
+									value={draft.captcha.provider}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											captcha: {
+												...draft.captcha,
+												provider: event.target
+													.value as AdminSystemSettings["captcha"]["provider"],
+											},
+										})
+									}
+								>
+									<option value="image">内置图片 image</option>
+									<option value="turnstile">Cloudflare Turnstile</option>
+									<option value="hcaptcha">hCaptcha</option>
+									<option value="recaptcha">Google reCAPTCHA</option>
+									<option value="geetest">极验 GeeTest</option>
+								</select>
+							</Field>
+						</div>
+						{draft.captcha.provider === "image" ? (
+							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
+								<p className="text-sm font-medium md:col-span-2">
+									内置图片验证码
+								</p>
+								<Field label="图片宽度">
+									<Input
+										type="number"
+										min={1}
+										value={draft.captcha.image.width}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													image: {
+														...draft.captcha.image,
+														width: Number(event.target.value),
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="图片高度">
+									<Input
+										type="number"
+										min={1}
+										value={draft.captcha.image.height}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													image: {
+														...draft.captcha.image,
+														height: Number(event.target.value),
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="图片 TTL 秒">
+									<Input
+										type="number"
+										min={1}
+										value={draft.captcha.image.ttlSec}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													image: {
+														...draft.captcha.image,
+														ttlSec: Number(event.target.value),
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+							</div>
+						) : null}
+						{draft.captcha.provider === "turnstile" ? (
+							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
+								<p className="text-sm font-medium md:col-span-2">
+									Cloudflare Turnstile
+								</p>
+								<Field label="Turnstile Site Key">
+									<Input
+										value={draft.captcha.turnstile.siteKey}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													turnstile: {
+														...draft.captcha.turnstile,
+														siteKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="Turnstile Secret Key">
+									<Input
+										type="password"
+										placeholder={secretPlaceholder(
+											draft.captcha.turnstile.secretKeyConfigured,
+										)}
+										value={draft.captcha.turnstile.secretKey ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													turnstile: {
+														...draft.captcha.turnstile,
+														secretKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="Turnstile Action">
+									<Input
+										value={draft.captcha.turnstile.expectedAction}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													turnstile: {
+														...draft.captcha.turnstile,
+														expectedAction: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="Turnstile Hostname">
+									<Input
+										value={draft.captcha.turnstile.expectedHostname ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													turnstile: {
+														...draft.captcha.turnstile,
+														expectedHostname: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+							</div>
+						) : null}
+						{draft.captcha.provider === "hcaptcha" ? (
+							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
+								<p className="text-sm font-medium md:col-span-2">hCaptcha</p>
+								<Field label="hCaptcha Site Key">
+									<Input
+										value={draft.captcha.hcaptcha.siteKey}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													hcaptcha: {
+														...draft.captcha.hcaptcha,
+														siteKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="hCaptcha Secret Key">
+									<Input
+										type="password"
+										placeholder={secretPlaceholder(
+											draft.captcha.hcaptcha.secretKeyConfigured,
+										)}
+										value={draft.captcha.hcaptcha.secretKey ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													hcaptcha: {
+														...draft.captcha.hcaptcha,
+														secretKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="hCaptcha Hostname">
+									<Input
+										value={draft.captcha.hcaptcha.expectedHostname ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													hcaptcha: {
+														...draft.captcha.hcaptcha,
+														expectedHostname: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+							</div>
+						) : null}
+						{draft.captcha.provider === "recaptcha" ? (
+							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
+								<p className="text-sm font-medium md:col-span-2">
+									Google reCAPTCHA
+								</p>
+								<Field label="reCAPTCHA Variant">
+									<select
+										className={inputClass}
+										value={draft.captcha.recaptcha.variant}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														variant: event.target
+															.value as AdminSystemSettings["captcha"]["recaptcha"]["variant"],
+													},
+												},
+											})
+										}
+									>
+										<option value="score_based">score_based</option>
+										<option value="policy_based_challenge">
+											policy_based_challenge
+										</option>
+									</select>
+								</Field>
+								<Field label="reCAPTCHA Project ID">
+									<Input
+										value={draft.captcha.recaptcha.projectId}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														projectId: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="reCAPTCHA Site Key">
+									<Input
+										value={draft.captcha.recaptcha.siteKey}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														siteKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="reCAPTCHA API Key">
+									<Input
+										type="password"
+										placeholder={secretPlaceholder(
+											draft.captcha.recaptcha.apiKeyConfigured,
+										)}
+										value={draft.captcha.recaptcha.apiKey ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														apiKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="reCAPTCHA Action">
+									<Input
+										value={draft.captcha.recaptcha.expectedAction}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														expectedAction: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="reCAPTCHA Hostname">
+									<Input
+										value={draft.captcha.recaptcha.expectedHostname ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														expectedHostname: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="reCAPTCHA 最低分数 Min Score">
+									<Input
+										type="number"
+										min={0}
+										max={1}
+										step={0.01}
+										value={draft.captcha.recaptcha.minScore}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													recaptcha: {
+														...draft.captcha.recaptcha,
+														minScore: Number(event.target.value),
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+							</div>
+						) : null}
+						{draft.captcha.provider === "geetest" ? (
+							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
+								<p className="text-sm font-medium md:col-span-2">GeeTest</p>
+								<Field label="GeeTest Captcha ID">
+									<Input
+										value={draft.captcha.geetest.captchaId}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													geetest: {
+														...draft.captcha.geetest,
+														captchaId: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="GeeTest Captcha Key">
+									<Input
+										type="password"
+										placeholder={secretPlaceholder(
+											draft.captcha.geetest.captchaKeyConfigured,
+										)}
+										value={draft.captcha.geetest.captchaKey ?? ""}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													geetest: {
+														...draft.captcha.geetest,
+														captchaKey: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+								<Field label="GeeTest API Server">
+									<Input
+										value={draft.captcha.geetest.apiServer}
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												captcha: {
+													...draft.captcha,
+													geetest: {
+														...draft.captcha.geetest,
+														apiServer: event.target.value,
+													},
+												},
+											})
+										}
+									/>
+								</Field>
+							</div>
+						) : null}
+					</div>
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
 						<p className="text-sm font-medium">IP 数据库</p>
 						<div className="grid gap-4 md:grid-cols-2">

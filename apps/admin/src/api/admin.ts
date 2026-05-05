@@ -177,6 +177,55 @@ export interface AdminSystemSettings {
 		retentionDays: number;
 		directory: string;
 	};
+	mail: {
+		enabled: boolean;
+		smtp: {
+			host: string;
+			port: number;
+			secure: boolean;
+			username: string;
+			password?: string;
+			passwordConfigured: boolean;
+			from: string;
+		};
+	};
+	captcha: {
+		provider: "image" | "turnstile" | "hcaptcha" | "recaptcha" | "geetest";
+		image: {
+			width: number;
+			height: number;
+			ttlSec: number;
+		};
+		turnstile: {
+			siteKey: string;
+			secretKey?: string;
+			secretKeyConfigured: boolean;
+			expectedAction: string;
+			expectedHostname?: string;
+		};
+		hcaptcha: {
+			siteKey: string;
+			secretKey?: string;
+			secretKeyConfigured: boolean;
+			expectedHostname?: string;
+		};
+		recaptcha: {
+			variant: "score_based" | "policy_based_challenge";
+			projectId: string;
+			siteKey: string;
+			apiKey?: string;
+			apiKeyConfigured: boolean;
+			expectedAction: string;
+			expectedHostname?: string;
+			minScore: number;
+		};
+		geetest: {
+			captchaId: string;
+			captchaKey?: string;
+			captchaKeyConfigured: boolean;
+			apiServer: string;
+		};
+	};
 	ipRegion: {
 		enabled: boolean;
 		cachePolicy: "file" | "vectorIndex" | "content";
