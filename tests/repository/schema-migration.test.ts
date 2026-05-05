@@ -47,6 +47,7 @@ describe("initial migration", () => {
 					"admin_bootstrap_state",
 					"site_settings",
 					"system_settings",
+					"__qingyan_upgrades",
 					"audit_logs",
 					"import_batches",
 					"import_records",
@@ -147,6 +148,14 @@ describe("initial migration", () => {
 			const adminBootstrapColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(admin_bootstrap_state)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const upgradeLedgerColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(__qingyan_upgrades)")
+				.all() as Array<{
+				name: string;
+				notnull: number;
+				pk: number;
+				type: string;
+			}>;
 
 			expect(commentsColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
@@ -224,6 +233,27 @@ describe("initial migration", () => {
 				blacklistRuleColumns.find((column) => column.name === "scope")
 					?.dflt_value,
 			).toBe("'post'");
+			expect(upgradeLedgerColumns).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "name",
+						pk: 1,
+						type: "TEXT",
+					}),
+					expect.objectContaining({ name: "from_version", type: "TEXT" }),
+					expect.objectContaining({ name: "to_version", type: "TEXT" }),
+					expect.objectContaining({
+						name: "applied_at",
+						notnull: 1,
+						type: "TEXT",
+					}),
+					expect.objectContaining({
+						name: "summary_json",
+						notnull: 1,
+						type: "TEXT",
+					}),
+				]),
+			);
 		} finally {
 			fixture.cleanup();
 		}

@@ -9,4 +9,5 @@ export * from "./security";
 export * from "./settings";
 export * from "./sites";
 export * from "./system-settings";
+export * from "./upgrades";
 export * from "./visitors";

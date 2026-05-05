@@ -237,6 +237,15 @@ Admin API 会返回 logging、mail、captcha 和 ipRegion 的 typed 设置。sec
 
 当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；预留规则见 [upgrade-lifecycle.md](upgrade-lifecycle.md)。
 
+当前已预留 CLI 骨架：
+
+```bash
+pnpm qingyan:upgrade -- --dry-run --config config/qingyan.yml
+pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backup/upgrade
+```
+
+`--dry-run` 输出公开脱敏的 UpgradePlan，不写配置、SQLite 或 `__qingyan_upgrades`。`--apply` 仅用于 `upgrade_required` 状态，且必须提供 `--backup-dir`；写入 upgrade ledger 前会备份 startup config、SQLite DB、WAL/SHM 和 UpgradePlan。缺 startup config 仍进入 install mode，不进入 upgrade；坏 config 进入 `broken_config`，partial marker 进入 `recovery_required`。
+
 ## Dev Mode
 
 `pnpm dev` 默认启用 dev mode，并提供固定开发管理员账号：

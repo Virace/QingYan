@@ -183,6 +183,13 @@ CREATE TABLE `system_settings` (
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `system_settings_category_key_idx` ON `system_settings` (`category`,`key`);--> statement-breakpoint
+CREATE TABLE `__qingyan_upgrades` (
+	`name` text PRIMARY KEY NOT NULL,
+	`from_version` text,
+	`to_version` text,
+	`applied_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`summary_json` text NOT NULL
+);--> statement-breakpoint
 CREATE TABLE `ip_region_database_state` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`ip_version` text NOT NULL,

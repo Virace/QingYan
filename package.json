@@ -33,6 +33,7 @@
 		"test": "vitest run --config vitest.config.ts",
 		"config:check": "tsx src/config/check-config.ts config/qingyan.example.yml",
 		"config:check:local": "tsx src/config/check-config.ts",
+		"qingyan:upgrade": "tsx scripts/upgrade.ts",
 		"ip-region:update": "tsx scripts/ip-region.ts update",
 		"wp-comments": "tsx scripts/wp-comments.ts",
 		"wp-comments:analyze": "tsx scripts/wp-comments.ts analyze",
