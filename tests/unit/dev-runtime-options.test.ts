@@ -1,9 +1,55 @@
-import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
+import { applyInstall } from "../../src/modules/install/install-service";
+import type { MinimalInstallConfig } from "../../src/modules/install/minimal-config";
 import { createTestConfig } from "../support/test-fixtures";
+
+async function createInstalledDevWorkspace() {
+	const directory = mkdtempSync(join(tmpdir(), "qingyan-dev-installed-"));
+	const databaseFile = join(directory, "data", "qingyan.db");
+	const configPath = join(directory, "config", "qingyan.yml");
+	const minimalConfig: MinimalInstallConfig = {
+		configPath,
+		host: "127.0.0.1",
+		port: 4401,
+		token: "install-token",
+		disabled: false,
+		restartMode: "manual",
+	};
+	await applyInstall({
+		minimalConfig,
+		payload: {
+			token: "install-token",
+			server: {
+				host: "127.0.0.1",
+				port: 4401,
+				publicBaseUrl: "http://localhost:4401",
+				trustProxy: false,
+			},
+			database: {
+				sqliteFile: databaseFile,
+			},
+			admin: {
+				consolePath: "/admin",
+				username: "admin",
+				password: "adminadmin",
+			},
+			site: {
+				siteKey: "default",
+				name: "Default",
+				allowedOrigins: ["http://localhost:4321"],
+			},
+		},
+		environment: {},
+	});
+
+	return { directory, configPath };
+}
 
 describe("resolveRuntimeOptions", () => {
 	it("keeps config untouched and exposes an explicit dev seed in dev mode", () => {
@@ -75,28 +121,68 @@ describe("resolveRuntimeOptions", () => {
 		expect(resolved.config).toBe(config);
 	});
 
-	it("prints fixed dev credentials and captcha from the dev script", () => {
-		const tsxCli = join(
-			process.cwd(),
-			"node_modules",
-			"tsx",
-			"dist",
-			"cli.mjs",
-		);
-		const result = spawnSync(process.execPath, [tsxCli, "scripts/dev.ts"], {
-			cwd: process.cwd(),
-			env: {
-				...process.env,
-				QINGYAN_DEV_CAPTCHA_ANSWER: "1357",
-				QINGYAN_DEV_API_ORIGIN: "http://127.0.0.1:9",
-				QINGYAN_DEV_PRINT_CONFIG_ONLY: "true",
-				PATH: process.env.PATH ?? "",
-			},
-			encoding: "utf-8",
-		});
+	it("prints fixed dev credentials and captcha from the dev script", async () => {
+		const workspace = await createInstalledDevWorkspace();
+		try {
+			const tsxCli = join(
+				process.cwd(),
+				"node_modules",
+				"tsx",
+				"dist",
+				"cli.mjs",
+			);
+			const result = spawnSync(process.execPath, [tsxCli, "scripts/dev.ts"], {
+				cwd: process.cwd(),
+				env: {
+					...process.env,
+					QINGYAN_CONFIG_PATH: workspace.configPath,
+					QINGYAN_DEV_CAPTCHA_ANSWER: "1357",
+					QINGYAN_DEV_API_ORIGIN: "http://127.0.0.1:9",
+					QINGYAN_DEV_PRINT_CONFIG_ONLY: "true",
+					PATH: process.env.PATH ?? "",
+				},
+				encoding: "utf-8",
+			});
 
-		const output = `${result.stdout}\n${result.stderr}`;
-		expect(output).toContain("QingYan Dev Admin: admin / admin");
-		expect(output).toContain("QingYan Dev Captcha: 1357");
+			const output = `${result.stdout}\n${result.stderr}`;
+			expect(output).toContain("QingYan Dev Admin: admin / admin");
+			expect(output).toContain("QingYan Dev Captcha: 1357");
+		} finally {
+			rmSync(workspace.directory, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps the admin dev server disabled when the dev script is in install mode", () => {
+		const workspace = mkdtempSync(join(tmpdir(), "qingyan-dev-install-"));
+		try {
+			const tsxCli = join(
+				process.cwd(),
+				"node_modules",
+				"tsx",
+				"dist",
+				"cli.mjs",
+			);
+			const result = spawnSync(process.execPath, [tsxCli, "scripts/dev.ts"], {
+				cwd: process.cwd(),
+				env: {
+					...process.env,
+					QINGYAN_CONFIG_PATH: join(workspace, "config", "qingyan.yml"),
+					QINGYAN_DEV_API_ORIGIN: "http://127.0.0.1:9",
+					QINGYAN_DEV_PRINT_CONFIG_ONLY: "true",
+					PATH: process.env.PATH ?? "",
+				},
+				encoding: "utf-8",
+			});
+
+			const output = `${result.stdout}\n${result.stderr}`;
+			expect(output).toContain("QingYan install mode:");
+			expect(output).toContain(
+				"install.url=http://127.0.0.1:4401/admin/install",
+			);
+			expect(output).not.toContain("QingYan Admin dev server:");
+			expect(output).not.toContain("QingYan Dev Admin:");
+		} finally {
+			rmSync(workspace, { recursive: true, force: true });
+		}
 	});
 });

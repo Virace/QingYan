@@ -55,6 +55,7 @@ function createMinimalConfig(configPath: string): MinimalInstallConfig {
 		port: 4401,
 		token: "install-token",
 		disabled: false,
+		restartMode: "manual",
 	};
 }
 
@@ -281,6 +282,99 @@ function installGeneratedAdminPayload(databaseFile: string) {
 	};
 }
 
+function installCompleteConfigPayload(databaseFile: string) {
+	return {
+		...installFormPayload(databaseFile),
+		admin: {
+			consolePath: "/admin",
+			username: "admin",
+			password: "adminadmin",
+			session: {
+				cookieName: "custom_admin",
+				ttlMinutes: 30,
+				sameSite: "strict",
+				secure: true,
+			},
+		},
+		security: {
+			requestIdHeader: "x-qy-request-id",
+			globalFloodGuard: {
+				enabled: true,
+				windowSec: 20,
+				maxRequests: 240,
+			},
+			publicOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: true,
+			},
+			rateLimit: {
+				adminLogin: {
+					windowSec: 500,
+					maxFailures: 4,
+				},
+				commentCreate: {
+					windowSec: 200,
+					maxRequests: 7,
+				},
+				commentVote: {
+					windowSec: 201,
+					maxRequests: 17,
+				},
+				captchaVerify: {
+					windowSec: 202,
+					maxFailures: 9,
+				},
+				pageLike: {
+					windowSec: 203,
+					maxRequests: 12,
+				},
+			},
+		},
+		systemSettings: {
+			logging: {
+				level: "debug",
+				retentionDays: 30,
+			},
+			mail: {
+				enabled: true,
+				smtp: {
+					host: "smtp.example.test",
+					port: 587,
+					secure: false,
+					username: "noreply",
+					password: "smtp-password",
+					from: "noreply@example.test",
+				},
+			},
+			captcha: {
+				provider: "turnstile",
+				turnstile: {
+					siteKey: "turnstile-site-key",
+					secretKey: "turnstile-secret",
+					expectedAction: "comment",
+					expectedHostname: "comments.example.test",
+				},
+				recaptcha: {
+					minScore: 0.7,
+				},
+			},
+			ipRegion: {
+				enabled: true,
+				precision: "city",
+				autoUpdate: {
+					enabled: true,
+				},
+				ipv4: {
+					dbPath: "./data/custom-v4.xdb",
+				},
+				ipv6: {
+					dbPath: "./data/custom-v6.xdb",
+				},
+			},
+		},
+	};
+}
+
 describe("install bootstrap", () => {
 	it("serves install page when config is missing", async () => {
 		const workspace = createWorkspace();
@@ -298,13 +392,65 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("QingYan Install");
 		expect(response.body).toContain("生成安装计划");
 		expect(response.body).toContain("确认安装");
+		expect(response.body).toContain("正在重启服务并进入管理后台");
+		expect(response.body).toContain("waitForAdmin");
+		expect(response.body).toContain('mode: "no-cors"');
+		expect(response.body).toContain("transition.adminUrl");
+		expect(response.body).toContain("服务与数据库");
+		expect(response.body).toContain("管理员与会话");
+		expect(response.body).toContain("站点与安全");
+		expect(response.body).toContain("恢复与确认");
 		expect(response.body).toContain("后台入口");
 		expect(response.body).toContain("系统设置");
 		expect(response.body).toContain("从导出包恢复");
-		expect(response.body).toContain('name="adminConsolePath"');
-		expect(response.body).toContain('name="restorePayload"');
+		expect(response.body).toContain("来自环境变量");
+		expect(response.body).toContain("data-step");
+		expect(response.body).toContain("target > maxUnlockedStep");
+		expect(response.body).toContain("validateStep(currentStep)");
+		expect(response.body).toContain('data-path="admin.session.cookieName"');
+		expect(response.body).toContain("浏览器跨站请求是否携带后台登录 Cookie");
+		expect(response.body).toContain("请求洪泛防护");
+		expect(response.body).toContain("启用公开 Origin guard");
+		expect(response.body).toContain(
+			'data-path="security.rateLimit.commentCreate.maxRequests"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.captcha.turnstile.siteKey"',
+		);
+		expect(response.body).toContain('data-captcha-panel="image"');
+		expect(response.body).toContain('data-captcha-panel="turnstile" hidden');
+		expect(response.body).toContain("updateCaptchaPanel()");
+		expect(response.body).toContain('type="number" min="1" step="1"');
+		expect(response.body).toContain('min="0" max="1" step="0.01"');
+		expect(response.body).toContain('data-path="restore.payload"');
 		expect(response.body).not.toContain("Use <code>POST");
 		expect(response.body).not.toContain("install-token");
+	});
+
+	it("renders env-managed install fields as locked wizard metadata", async () => {
+		const workspace = createWorkspace();
+		const app = buildInstallApp({
+			minimalConfig: createMinimalConfig(workspace.configPath),
+			environment: {
+				QINGYAN_SERVER_HOST: "0.0.0.0",
+				QINGYAN_SMTP_PASSWORD: "super-secret-password",
+			},
+		});
+		cleanups.push(() => app.close());
+
+		const response = await app.inject({
+			method: "GET",
+			url: "/admin/install",
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.body).toContain("QINGYAN_SERVER_HOST");
+		expect(response.body).toContain("QINGYAN_SMTP_PASSWORD");
+		expect(response.body).toContain('"path":"server.host"');
+		expect(response.body).toContain(
+			'"path":"systemSettings.mail.smtp.password"',
+		);
+		expect(response.body).not.toContain("super-secret-password");
 	});
 
 	it("redirects the default admin UI entry to install before bootstrap", async () => {
@@ -419,7 +565,14 @@ describe("install bootstrap", () => {
 				expect.objectContaining({ category: "mail", key: "enabled" }),
 				expect.objectContaining({ category: "ipRegion", key: "enabled" }),
 			]),
+			systemSettingsReview: {
+				defaultSeedCount: expect.any(Number),
+				environmentSeeds: [],
+			},
 		});
+		expect(response.json().systemSettingsReview.defaultSeedCount).toBe(
+			response.json().systemSettings.length,
+		);
 		expect(existsSync(workspace.configPath)).toBe(false);
 		expect(existsSync(workspace.databaseFile)).toBe(false);
 	});
@@ -473,6 +626,149 @@ describe("install bootstrap", () => {
 		});
 		expect(existsSync(workspace.configPath)).toBe(false);
 		expect(existsSync(workspace.databaseFile)).toBe(false);
+	});
+
+	it("plans and applies complete startup and system settings config", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const app = buildInstallApp({ minimalConfig });
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const payload = installCompleteConfigPayload(workspace.databaseFile);
+		const planResponse = await app.inject({
+			method: "POST",
+			url: "/admin/install/plan",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload,
+		});
+
+		expect(planResponse.statusCode).toBe(200);
+		expect(planResponse.json()).toMatchObject({
+			systemSettings: expect.arrayContaining([
+				expect.objectContaining({
+					category: "logging",
+					key: "level",
+					valuePreview: "debug",
+				}),
+				expect.objectContaining({
+					category: "mail",
+					key: "smtp.host",
+					valuePreview: "smtp.example.test",
+				}),
+				expect.objectContaining({
+					category: "captcha",
+					key: "provider",
+					valuePreview: "turnstile",
+				}),
+				expect.objectContaining({
+					category: "captcha",
+					key: "turnstile.secretKey",
+					secret: true,
+					valuePreview: "configured",
+				}),
+				expect.objectContaining({
+					category: "ipRegion",
+					key: "precision",
+					valuePreview: "city",
+				}),
+			]),
+		});
+		expect(planResponse.json().applyPayload.admin.session).toMatchObject({
+			cookieName: "custom_admin",
+			ttlMinutes: 30,
+			sameSite: "strict",
+			secure: true,
+		});
+		expect(planResponse.json().applyPayload.security).toMatchObject({
+			requestIdHeader: "x-qy-request-id",
+			rateLimit: {
+				commentCreate: {
+					maxRequests: 7,
+				},
+			},
+		});
+
+		const apply = await app.inject({
+			method: "POST",
+			url: "/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: planResponse.json().applyPayload,
+		});
+
+		expect(apply.statusCode).toBe(201);
+		expect(apply.body).not.toContain("smtp-password");
+		expect(apply.body).not.toContain("turnstile-secret");
+
+		const config = await loadConfig(workspace.configPath, {});
+		expect(config.admin.session).toMatchObject({
+			cookieName: "custom_admin",
+			ttlMinutes: 30,
+			sameSite: "strict",
+			secure: true,
+		});
+		expect(config.security).toMatchObject({
+			requestIdHeader: "x-qy-request-id",
+			publicOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: true,
+			},
+			rateLimit: {
+				commentCreate: {
+					windowSec: 200,
+					maxRequests: 7,
+				},
+				pageLike: {
+					windowSec: 203,
+					maxRequests: 12,
+				},
+			},
+		});
+
+		const { db, sqlite } = createDatabaseClients(workspace.databaseFile);
+		try {
+			const rows = await db.select().from(systemSettings);
+			expect(rows).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						category: "logging",
+						key: "level",
+						valueJson: '"debug"',
+					}),
+					expect.objectContaining({
+						category: "mail",
+						key: "smtp.host",
+						valueJson: '"smtp.example.test"',
+					}),
+					expect.objectContaining({
+						category: "mail",
+						key: "smtp.password",
+						valueJson: '"smtp-password"',
+					}),
+					expect.objectContaining({
+						category: "captcha",
+						key: "provider",
+						valueJson: '"turnstile"',
+					}),
+					expect.objectContaining({
+						category: "captcha",
+						key: "turnstile.secretKey",
+						valueJson: '"turnstile-secret"',
+					}),
+					expect.objectContaining({
+						category: "ipRegion",
+						key: "precision",
+						valueJson: '"city"',
+					}),
+				]),
+			);
+		} finally {
+			sqlite.close();
+		}
 	});
 
 	it("reports env-managed fields in the install plan without leaking secret values", async () => {
@@ -533,7 +829,20 @@ describe("install bootstrap", () => {
 					valuePreview: "configured",
 				}),
 			]),
+			systemSettingsReview: {
+				environmentSeeds: [
+					expect.objectContaining({
+						path: "mail.smtp.password",
+						envName: "QINGYAN_SMTP_PASSWORD",
+						secret: true,
+						valuePreview: "configured",
+					}),
+				],
+			},
 		});
+		expect(response.json().systemSettingsReview.defaultSeedCount).toBe(
+			response.json().systemSettings.length - 1,
+		);
 		expect(response.body).not.toContain("super-secret-password");
 	});
 
@@ -677,6 +986,12 @@ describe("install bootstrap", () => {
 			initialPassword: "adminadmin",
 			configPath: workspace.configPath,
 			databasePath: path.resolve(process.cwd(), workspace.databaseFile),
+			transition: {
+				mode: "manual",
+				adminUrl: "http://localhost:4401/admin",
+				pollUrl: "http://localhost:4401/admin",
+				restartRequired: true,
+			},
 			systemSettings: expect.arrayContaining([
 				expect.objectContaining({ category: "logging", key: "level" }),
 				expect.objectContaining({ category: "captcha", key: "provider" }),
@@ -1102,6 +1417,93 @@ describe("install bootstrap", () => {
 
 		expect(minimalConfig.disabled).toBe(true);
 		expect(minimalConfig.configPath).toBe(workspace.configPath);
+	});
+
+	it("does not schedule restart when install apply uses manual restart mode", async () => {
+		const workspace = createWorkspace();
+		const scheduled: unknown[] = [];
+		const app = buildInstallApp({
+			minimalConfig: createMinimalConfig(workspace.configPath),
+			scheduleRestart: (transition) => scheduled.push(transition),
+		});
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installFormPayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json()).toMatchObject({
+			transition: {
+				mode: "manual",
+				adminUrl: "http://localhost:4401/admin",
+				restartRequired: true,
+			},
+		});
+		expect(scheduled).toEqual([]);
+	});
+
+	it("schedules restart after successful install apply when restart mode is exit", async () => {
+		const workspace = createWorkspace();
+		const scheduled: unknown[] = [];
+		const minimalConfig: MinimalInstallConfig = {
+			...createMinimalConfig(workspace.configPath),
+			restartMode: "exit",
+		};
+		const app = buildInstallApp({
+			minimalConfig,
+			scheduleRestart: (transition) => scheduled.push(transition),
+		});
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installFormPayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json()).toMatchObject({
+			transition: {
+				mode: "exit",
+				adminUrl: "http://localhost:4401/admin",
+				restartRequired: true,
+			},
+		});
+		expect(scheduled).toEqual([response.json().transition]);
+	});
+
+	it("does not schedule restart when install apply fails", async () => {
+		const workspace = createWorkspace();
+		const scheduled: unknown[] = [];
+		const minimalConfig: MinimalInstallConfig = {
+			...createMinimalConfig(workspace.configPath),
+			restartMode: "exit",
+		};
+		const app = buildInstallApp({
+			minimalConfig,
+			scheduleRestart: (transition) => scheduled.push(transition),
+		});
+		cleanups.push(() => app.close());
+
+		const response = await app.inject({
+			method: "POST",
+			url: "/admin/install",
+			payload: installPayload(workspace.databaseFile, "bad-token"),
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(scheduled).toEqual([]);
 	});
 
 	it("keeps install mode out of root UI and normal admin session routes", async () => {

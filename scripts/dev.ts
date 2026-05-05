@@ -3,6 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { parse } from "yaml";
 
+import {
+	resolveInstallUrl,
+	resolveMinimalInstallConfig,
+} from "../src/modules/install/minimal-config";
+import { resolveInstallState } from "../src/modules/install/state";
+
 interface DevConfig {
 	adminPath: string;
 	apiOrigin: string;
@@ -68,11 +74,6 @@ function startProcess(
 	return child;
 }
 
-const { adminPath, apiOrigin } = readDevConfig();
-const adminBase = `${adminPath}/`;
-const children: ChildProcess[] = [];
-let stopping = false;
-
 const devAdminUsername = process.env.QINGYAN_DEV_ADMIN_USERNAME ?? "admin";
 const devAdminPassword = process.env.QINGYAN_DEV_ADMIN_PASSWORD ?? "admin";
 const devCaptchaAnswer = process.env.QINGYAN_DEV_CAPTCHA_ANSWER ?? "2468";
@@ -83,28 +84,8 @@ const devEnv = createProcessEnv({
 	QINGYAN_TEST_CAPTCHA_ANSWER: devCaptchaAnswer,
 });
 
-console.log(`QingYan API dev server: ${apiOrigin}`);
-console.log(`QingYan Admin dev server: http://localhost:5173${adminPath}`);
-console.log(`QingYan Dev Admin: ${devAdminUsername} / ${devAdminPassword}`);
-console.log(`QingYan Dev Captcha: ${devCaptchaAnswer}`);
-
-if (process.env.QINGYAN_DEV_PRINT_CONFIG_ONLY === "true") {
-	process.exit(0);
-}
-
-children.push(
-	startProcess("api", ["exec", "tsx", "watch", "src/server.ts"], devEnv),
-);
-children.push(
-	startProcess(
-		"admin",
-		["exec", "vite", "--config", "apps/admin/vite.config.ts"],
-		createProcessEnv({
-			QINGYAN_ADMIN_BASE: adminBase,
-			QINGYAN_DEV_API_ORIGIN: apiOrigin,
-		}),
-	),
-);
+const children: ChildProcess[] = [];
+let stopping = false;
 
 function stopAll(exitCode: number): void {
 	if (stopping) {
@@ -130,3 +111,53 @@ for (const child of children) {
 
 process.on("SIGINT", () => stopAll(0));
 process.on("SIGTERM", () => stopAll(0));
+
+async function main(): Promise<void> {
+	const minimalInstallConfig = resolveMinimalInstallConfig(devEnv);
+	const installState = await resolveInstallState(minimalInstallConfig, devEnv);
+
+	if (!installState.installed) {
+		console.log("QingYan install mode:");
+		console.log(`install.url=${resolveInstallUrl(minimalInstallConfig)}`);
+
+		if (process.env.QINGYAN_DEV_PRINT_CONFIG_ONLY === "true") {
+			process.exit(0);
+		}
+
+		children.push(
+			startProcess("api", ["exec", "tsx", "watch", "src/server.ts"], devEnv),
+		);
+		return;
+	}
+
+	const { adminPath, apiOrigin } = readDevConfig();
+	const adminBase = `${adminPath}/`;
+
+	console.log(`QingYan API dev server: ${apiOrigin}`);
+	console.log(`QingYan Admin dev server: http://localhost:5173${adminPath}`);
+	console.log(`QingYan Dev Admin: ${devAdminUsername} / ${devAdminPassword}`);
+	console.log(`QingYan Dev Captcha: ${devCaptchaAnswer}`);
+
+	if (process.env.QINGYAN_DEV_PRINT_CONFIG_ONLY === "true") {
+		process.exit(0);
+	}
+
+	children.push(
+		startProcess("api", ["exec", "tsx", "watch", "src/server.ts"], devEnv),
+	);
+	children.push(
+		startProcess(
+			"admin",
+			["exec", "vite", "--config", "apps/admin/vite.config.ts"],
+			createProcessEnv({
+				QINGYAN_ADMIN_BASE: adminBase,
+				QINGYAN_DEV_API_ORIGIN: apiOrigin,
+			}),
+		),
+	);
+}
+
+void main().catch((error: unknown) => {
+	console.error("dev.crashed", error);
+	stopAll(1);
+});

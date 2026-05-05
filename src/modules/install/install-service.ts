@@ -34,7 +34,11 @@ import { InvalidRequestError } from "../shared/errors";
 import { createSiteRegistry } from "../shared/site-registry";
 import { AdminSystemSettingsRepository } from "../admin/system-settings-repository";
 import { flattenSystemSettings } from "../system-settings/codec";
-import { defaultSystemSettings } from "../system-settings/definitions";
+import {
+	defaultSystemSettings,
+	systemSettingsSchema,
+	type SystemSettings,
+} from "../system-settings/definitions";
 import type { MinimalInstallConfig } from "./minimal-config";
 
 const installRestoreOptionsSchema = z
@@ -69,12 +73,22 @@ export const installApplySchema = z.object({
 		consolePath: z.string().min(1).optional(),
 		username: z.string().min(1).optional(),
 		password: z.string().min(8).optional(),
+		session: z
+			.object({
+				cookieName: z.string().min(1).default("qingyan_admin"),
+				ttlMinutes: z.number().int().positive().default(1440),
+				sameSite: z.enum(["strict", "lax", "none"]).default("lax"),
+				secure: z.boolean().optional(),
+			})
+			.optional(),
 	}),
+	security: configSchema.shape.security.optional(),
 	site: z.object({
 		siteKey: z.string().min(1).default("default"),
 		name: z.string().min(1).default("Default"),
 		allowedOrigins: z.array(z.string().url()).min(1),
 	}),
+	systemSettings: z.unknown().optional(),
 	restore: installRestoreOptionsSchema,
 });
 
@@ -103,6 +117,7 @@ type NormalizedInstallInput = Omit<
 		usernameDefaulted: boolean;
 		password: string;
 		passwordGenerated: boolean;
+		session?: InstallApplyInput["admin"]["session"];
 	};
 };
 
@@ -127,8 +142,43 @@ type InstallSystemSettingSeed = {
 
 type ResolvedInstallInput = NormalizedInstallInput & {
 	startupConfig: StartupConfig;
-	systemSettings: InstallSystemSettingSeed[];
+	systemSettingSeeds: InstallSystemSettingSeed[];
 	values: InstallValueMeta[];
+};
+
+const defaultSecurityConfig: StartupConfig["security"] = {
+	requestIdHeader: "x-request-id",
+	globalFloodGuard: {
+		enabled: true,
+		windowSec: 10,
+		maxRequests: 120,
+	},
+	publicOriginGuard: {
+		enabled: true,
+		allowMissingOrigin: false,
+	},
+	rateLimit: {
+		adminLogin: {
+			windowSec: 600,
+			maxFailures: 5,
+		},
+		commentCreate: {
+			windowSec: 300,
+			maxRequests: 5,
+		},
+		commentVote: {
+			windowSec: 300,
+			maxRequests: 15,
+		},
+		captchaVerify: {
+			windowSec: 300,
+			maxFailures: 8,
+		},
+		pageLike: {
+			windowSec: 300,
+			maxRequests: 10,
+		},
+	},
 };
 
 export interface InstallPlan {
@@ -167,6 +217,15 @@ export interface InstallPlan {
 		secret?: boolean;
 		valuePreview?: string | number | boolean | null;
 	}>;
+	systemSettingsReview: {
+		defaultSeedCount: number;
+		environmentSeeds: Array<{
+			path: string;
+			envName: string;
+			secret: boolean;
+			valuePreview?: string | number | boolean | null;
+		}>;
+	};
 	env: Array<{
 		path: string;
 		envName: string;
@@ -235,11 +294,15 @@ function normalizeInstallInput(
 			usernameDefaulted: defaultedUsername,
 			password: input.admin.password ?? createInitialAdminPassword(),
 			passwordGenerated: generatedPassword,
+			session: input.admin.session,
 		},
 	};
 }
 
 function buildStartupConfig(input: NormalizedInstallInput): StartupConfig {
+	const session = input.admin.session;
+	const sessionSecure =
+		session?.secure ?? input.server.publicBaseUrl.startsWith("https://");
 	return {
 		server: {
 			host: input.server.host,
@@ -255,46 +318,13 @@ function buildStartupConfig(input: NormalizedInstallInput): StartupConfig {
 		},
 		admin: {
 			session: {
-				cookieName: "qingyan_admin",
-				ttlMinutes: 1440,
-				sameSite: "lax",
-				secure: input.server.publicBaseUrl.startsWith("https://"),
+				cookieName: session?.cookieName ?? "qingyan_admin",
+				ttlMinutes: session?.ttlMinutes ?? 1440,
+				sameSite: session?.sameSite ?? "lax",
+				secure: sessionSecure,
 			},
 		},
-		security: {
-			requestIdHeader: "x-request-id",
-			globalFloodGuard: {
-				enabled: true,
-				windowSec: 10,
-				maxRequests: 120,
-			},
-			publicOriginGuard: {
-				enabled: true,
-				allowMissingOrigin: false,
-			},
-			rateLimit: {
-				adminLogin: {
-					windowSec: 600,
-					maxFailures: 5,
-				},
-				commentCreate: {
-					windowSec: 300,
-					maxRequests: 5,
-				},
-				commentVote: {
-					windowSec: 300,
-					maxRequests: 15,
-				},
-				captchaVerify: {
-					windowSec: 300,
-					maxFailures: 8,
-				},
-				pageLike: {
-					windowSec: 300,
-					maxRequests: 10,
-				},
-			},
-		},
+		security: input.security ?? defaultSecurityConfig,
 	};
 }
 
@@ -320,6 +350,36 @@ function previewValue(value: unknown): string | number | boolean | null {
 	return value === null || value === undefined ? null : String(value);
 }
 
+function mergePlainObject(base: unknown, override: unknown): unknown {
+	if (override === undefined) {
+		return base;
+	}
+	if (
+		!base ||
+		typeof base !== "object" ||
+		Array.isArray(base) ||
+		!override ||
+		typeof override !== "object" ||
+		Array.isArray(override)
+	) {
+		return override;
+	}
+
+	const next = structuredClone(base) as Record<string, unknown>;
+	for (const [key, value] of Object.entries(override)) {
+		if (value !== undefined) {
+			next[key] = mergePlainObject(next[key], value);
+		}
+	}
+	return next;
+}
+
+function buildSystemSettingsInput(input: unknown): SystemSettings {
+	return systemSettingsSchema.parse(
+		mergePlainObject(defaultSystemSettings, input),
+	);
+}
+
 function splitSystemSettingPath(settingPath: string): {
 	category: string;
 	key: string;
@@ -336,9 +396,10 @@ function splitSystemSettingPath(settingPath: string): {
 
 function buildSystemSettingSeeds(
 	environment: NodeJS.ProcessEnv,
+	systemSettingsInput: unknown,
 ): InstallSystemSettingSeed[] {
 	const seeds: InstallSystemSettingSeed[] = flattenSystemSettings(
-		defaultSystemSettings,
+		buildSystemSettingsInput(systemSettingsInput),
 	).map((row) => ({
 		category: row.category,
 		key: row.key,
@@ -373,6 +434,22 @@ function buildSystemSettingSeeds(
 		}
 	}
 	return seeds;
+}
+
+function buildSystemSettingsReview(seeds: InstallSystemSettingSeed[]) {
+	const environmentSeeds = seeds
+		.filter((seed) => seed.source === "environment" && seed.envName)
+		.map((seed) => ({
+			path: `${seed.category}.${seed.key}`,
+			envName: seed.envName ?? "",
+			secret: Boolean(seed.secret),
+			valuePreview: seed.secret ? "configured" : previewValue(seed.value),
+		}));
+
+	return {
+		defaultSeedCount: seeds.length - environmentSeeds.length,
+		environmentSeeds,
+	};
 }
 
 function buildValueMeta(input: {
@@ -419,7 +496,10 @@ function buildValueMeta(input: {
 		});
 	}
 
-	for (const seed of buildSystemSettingSeeds(input.environment)) {
+	for (const seed of buildSystemSettingSeeds(
+		input.environment,
+		input.normalized.systemSettings,
+	)) {
 		if (seed.source !== "environment") {
 			continue;
 		}
@@ -444,7 +524,10 @@ function resolveInstallConfigInput(input: {
 	const startupConfig = configSchema.parse(
 		applyStartupEnvOverrides(buildStartupConfig(normalized), environment),
 	);
-	const systemSettings = buildSystemSettingSeeds(environment);
+	const systemSettings = buildSystemSettingSeeds(
+		environment,
+		normalized.systemSettings,
+	);
 	return {
 		...normalized,
 		server: startupConfig.server,
@@ -452,7 +535,7 @@ function resolveInstallConfigInput(input: {
 			sqliteFile: startupConfig.database.sqlite.file,
 		},
 		startupConfig,
-		systemSettings,
+		systemSettingSeeds: systemSettings,
 		values: buildValueMeta({
 			normalized,
 			startupConfig,
@@ -469,6 +552,7 @@ function buildApplyPayload(
 	} = {
 		consolePath: input.admin.consolePath,
 		username: input.admin.username,
+		session: input.startupConfig.admin.session,
 	};
 	if (!input.admin.passwordGenerated) {
 		adminPayload.password = input.admin.password;
@@ -484,7 +568,9 @@ function buildApplyPayload(
 			sqliteFile: input.startupConfig.database.sqlite.file,
 		},
 		admin: adminPayload,
+		security: input.startupConfig.security,
 		site: input.site,
+		systemSettings: input.systemSettings,
 	};
 	if (input.restore) {
 		payload.restore = {
@@ -669,7 +755,7 @@ export async function buildInstallPlan(input: {
 						dryRun: restoreDryRun,
 					}
 				: undefined,
-		systemSettings: resolved.systemSettings.map((seed) => ({
+		systemSettings: resolved.systemSettingSeeds.map((seed) => ({
 			category: seed.category,
 			key: seed.key,
 			action: "seed",
@@ -678,6 +764,9 @@ export async function buildInstallPlan(input: {
 			secret: seed.secret,
 			valuePreview: seed.secret ? "configured" : previewValue(seed.value),
 		})),
+		systemSettingsReview: buildSystemSettingsReview(
+			resolved.systemSettingSeeds,
+		),
 		env,
 		values: resolved.values,
 		applyPayload: buildApplyPayload(resolved),
@@ -715,7 +804,7 @@ export async function applyInstall(input: {
 		databaseFile,
 		admin: resolved.admin,
 		site: resolved.site,
-		systemSettings: resolved.systemSettings,
+		systemSettings: resolved.systemSettingSeeds,
 		restore: resolved.restore,
 	});
 
@@ -729,7 +818,7 @@ export async function applyInstall(input: {
 		configPath: input.minimalConfig.configPath,
 		databasePath: databaseFile,
 		backupPath,
-		systemSettings: resolved.systemSettings.map((seed) => ({
+		systemSettings: resolved.systemSettingSeeds.map((seed) => ({
 			category: seed.category,
 			key: seed.key,
 			source: seed.source,

@@ -21,7 +21,14 @@ async function main(): Promise<void> {
 				`QingYan is not installed and install mode is disabled: ${installState.reason ?? "unknown"}`,
 			);
 		}
-		const installApp = buildInstallApp({ minimalConfig: minimalInstallConfig });
+		const installApp = buildInstallApp({
+			minimalConfig: minimalInstallConfig,
+			scheduleRestart: (transition) => {
+				setTimeout(() => {
+					process.exit(0);
+				}, transition.restartAfterMs);
+			},
+		});
 		await installApp.listen({
 			host: minimalInstallConfig.host,
 			port: minimalInstallConfig.port,

@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 
 import { resolveConfigPath } from "../../config/load-config";
 
+export type InstallRestartMode = "manual" | "exit";
+
 export interface MinimalInstallConfig {
 	configPath: string;
 	host: string;
 	port: number;
 	token: string;
 	disabled: boolean;
+	restartMode: InstallRestartMode;
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -22,6 +25,16 @@ function parsePort(value: string | undefined, fallback: number): number {
 	return port;
 }
 
+function parseRestartMode(value: string | undefined): InstallRestartMode {
+	if (!value) {
+		return "manual";
+	}
+	if (value === "manual" || value === "exit") {
+		return value;
+	}
+	throw new Error("QINGYAN_INSTALL_RESTART_MODE must be manual or exit.");
+}
+
 export function resolveMinimalInstallConfig(
 	environment: NodeJS.ProcessEnv = process.env,
 ): MinimalInstallConfig {
@@ -31,6 +44,7 @@ export function resolveMinimalInstallConfig(
 		port: parsePort(environment.QINGYAN_SERVER_PORT, 4401),
 		token: environment.QINGYAN_INSTALL_TOKEN ?? `qy_install_${randomUUID()}`,
 		disabled: environment.QINGYAN_INSTALL_DISABLED === "true",
+		restartMode: parseRestartMode(environment.QINGYAN_INSTALL_RESTART_MODE),
 	};
 }
 
