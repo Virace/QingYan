@@ -54,6 +54,15 @@ export interface QingYanDryRunResult {
 			action: "skip" | "replace" | "conflict";
 		}>;
 	};
+	systemSettings: {
+		status: "skipped" | "unchanged" | "replace" | "conflict";
+		changes: Array<{
+			path: string;
+			current: unknown;
+			incoming: unknown;
+			action: "skip" | "replace" | "conflict";
+		}>;
+	};
 	items: Array<{
 		type: "page_thread" | "visitor" | "comment";
 		status: "create" | "reuse" | "skip" | "conflict" | "warning";
@@ -75,6 +84,7 @@ export interface QingYanApplyResult {
 		createdBlacklistRules: number;
 		importRecordsCreated: number;
 		settingsUpdated: boolean;
+		systemSettingsUpdated: boolean;
 	};
 	dryRun: QingYanDryRunResult;
 }
@@ -320,6 +330,10 @@ export class QingYanImportService {
 		if (settings.status === "conflict") {
 			summary.conflicts += 1;
 		}
+		const systemSettings = this.buildSystemSettingsDryRun(payload, options);
+		if (systemSettings.status === "conflict") {
+			summary.conflicts += 1;
+		}
 		if (options.importMode !== "settings_only") {
 			for (const thread of payload.data.pageThreads) {
 				if (existingPageKeys.has(thread.pageKey)) {
@@ -396,7 +410,7 @@ export class QingYanImportService {
 			}
 		}
 
-		return { summary, settings, items };
+		return { summary, settings, systemSettings, items };
 	}
 
 	private writeExport(
@@ -420,13 +434,12 @@ export class QingYanImportService {
 			createdBlacklistRules: 0,
 			importRecordsCreated: 0,
 			settingsUpdated: false,
+			systemSettingsUpdated: false,
 		};
 		if (options.importMode !== "data_only") {
-			summary.settingsUpdated = this.applySettings(
-				batch.site_id,
-				payload,
-				options,
-			);
+			const settingsApply = this.applySettings(batch.site_id, payload, options);
+			summary.settingsUpdated = settingsApply.settingsUpdated;
+			summary.systemSettingsUpdated = settingsApply.systemSettingsUpdated;
 		}
 		if (options.importMode === "settings_only") {
 			return { summary, dryRun };
@@ -832,14 +845,59 @@ export class QingYanImportService {
 		};
 	}
 
+	private buildSystemSettingsDryRun(
+		payload: QingYanExport,
+		options: {
+			importMode: QingYanImportMode;
+			settingsStrategy: QingYanSettingsStrategy;
+		},
+	): QingYanDryRunResult["systemSettings"] {
+		if (options.importMode === "data_only") {
+			return { status: "skipped", changes: [] };
+		}
+
+		const changes: QingYanDryRunResult["systemSettings"]["changes"] = [];
+		for (const row of this.readSystemSettingRows(payload)) {
+			const current = this.getCurrentSystemSettingValue(row.category, row.key);
+			if (JSON.stringify(current) === JSON.stringify(row.value)) {
+				continue;
+			}
+			changes.push({
+				path: `${row.category}.${row.key}`,
+				current,
+				incoming: row.value,
+				action:
+					options.settingsStrategy === "replace_settings"
+						? "replace"
+						: "conflict",
+			});
+		}
+
+		if (changes.length === 0) {
+			return { status: "unchanged", changes };
+		}
+
+		return {
+			status:
+				options.settingsStrategy === "replace_settings"
+					? "replace"
+					: "conflict",
+			changes,
+		};
+	}
+
 	private applySettings(
 		siteId: number,
 		payload: QingYanExport,
 		options: {
 			settingsStrategy: QingYanSettingsStrategy;
 		},
-	): boolean {
+	): { settingsUpdated: boolean; systemSettingsUpdated: boolean } {
 		const dryRun = this.buildSettingsDryRun(siteId, payload, {
+			importMode: "full_site",
+			settingsStrategy: options.settingsStrategy,
+		});
+		const systemSettingsDryRun = this.buildSystemSettingsDryRun(payload, {
 			importMode: "full_site",
 			settingsStrategy: options.settingsStrategy,
 		});
@@ -848,26 +906,36 @@ export class QingYanImportService {
 				message: "Settings dry-run 存在冲突，不能执行导入。",
 			});
 		}
-		if (dryRun.status !== "replace") {
-			return false;
+		if (systemSettingsDryRun.status === "conflict") {
+			throw new InvalidRequestError({
+				message: "System settings dry-run 存在冲突，不能执行导入。",
+			});
 		}
 
-		this.sqlite
-			.prepare(
-				`UPDATE sites
-				SET name = ?, allowed_origins_json = ?, updated_at = ?
-				WHERE id = ?`,
-			)
-			.run(
-				payload.data.site.name,
-				JSON.stringify(payload.data.site.allowedOrigins),
-				new Date().toISOString(),
-				siteId,
-			);
-		if (payload.data.siteSettings) {
-			this.replaceSiteSettings(siteId, payload.data.siteSettings);
+		const settingsUpdated = dryRun.status === "replace";
+		if (settingsUpdated) {
+			this.sqlite
+				.prepare(
+					`UPDATE sites
+					SET name = ?, allowed_origins_json = ?, updated_at = ?
+					WHERE id = ?`,
+				)
+				.run(
+					payload.data.site.name,
+					JSON.stringify(payload.data.site.allowedOrigins),
+					new Date().toISOString(),
+					siteId,
+				);
+			if (payload.data.siteSettings) {
+				this.replaceSiteSettings(siteId, payload.data.siteSettings);
+			}
 		}
-		return true;
+
+		const systemSettingsUpdated = systemSettingsDryRun.status === "replace";
+		if (systemSettingsUpdated) {
+			this.replaceSystemSettings(payload);
+		}
+		return { settingsUpdated, systemSettingsUpdated };
 	}
 
 	private replaceSiteSettings(
@@ -901,6 +969,72 @@ export class QingYanImportService {
 		return this.sqlite
 			.prepare("SELECT * FROM site_settings WHERE site_id = ?")
 			.get(siteId) as Record<string, unknown> | undefined;
+	}
+
+	private readSystemSettingRows(payload: QingYanExport) {
+		return (payload.data.systemSettings ?? []).map((row) => {
+			if (typeof row.category !== "string" || typeof row.key !== "string") {
+				throw new InvalidRequestError({
+					message: "System setting row 缺少 category 或 key。",
+				});
+			}
+			if (isSecretSystemSetting({ category: row.category, key: row.key })) {
+				throw new InvalidRequestError({
+					message: "普通 QingYan 导入不接受 system settings secret 字段。",
+				});
+			}
+			const valueJson =
+				typeof row.valueJson === "string"
+					? row.valueJson
+					: typeof row.value_json === "string"
+						? row.value_json
+						: undefined;
+			if (valueJson === undefined) {
+				throw new InvalidRequestError({
+					message: "System setting row 缺少 value_json。",
+				});
+			}
+			try {
+				return {
+					category: row.category,
+					key: row.key,
+					value: JSON.parse(valueJson) as unknown,
+				};
+			} catch {
+				throw new InvalidRequestError({
+					message: "System setting row value_json 不是有效 JSON。",
+				});
+			}
+		});
+	}
+
+	private getCurrentSystemSettingValue(category: string, key: string) {
+		const row = this.sqlite
+			.prepare(
+				"SELECT value_json FROM system_settings WHERE category = ? AND key = ?",
+			)
+			.get(category, key) as { value_json: string } | undefined;
+		if (!row) {
+			return undefined;
+		}
+		try {
+			return JSON.parse(row.value_json) as unknown;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private replaceSystemSettings(payload: QingYanExport) {
+		const now = new Date().toISOString();
+		const statement = this.sqlite.prepare(
+			`INSERT INTO system_settings (category, key, value_json, updated_at)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(category, key)
+			DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+		);
+		for (const row of this.readSystemSettingRows(payload)) {
+			statement.run(row.category, row.key, JSON.stringify(row.value), now);
+		}
 	}
 
 	private readSource(value: Record<string, unknown>) {

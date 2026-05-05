@@ -36,9 +36,6 @@ describe("request context", () => {
 			requestId: expect.stringMatching(/^req_/),
 			siteKey: "fangyuan",
 			pageKey: "post:request-context",
-			site: {
-				siteKey: "fangyuan",
-			},
 			visitor: {
 				key: "visitor_cookie_1",
 				source: "cookie",
@@ -69,9 +66,6 @@ describe("request context", () => {
 		expect(response.json()).toMatchObject({
 			siteKey: "fangyuan",
 			pageKey: "post:body-context",
-			site: {
-				siteKey: "fangyuan",
-			},
 		});
 	});
 });

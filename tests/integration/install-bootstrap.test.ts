@@ -83,6 +83,176 @@ function installPayload(databaseFile: string, token = "install-token") {
 	};
 }
 
+function qingyanRestorePayload() {
+	return {
+		format: "qingyan.export.v1",
+		formatVersion: 2,
+		createdAt: "2026-05-05T00:00:00.000Z",
+		generator: {
+			name: "QingYan",
+			version: "0.1.0",
+		},
+		scope: {
+			type: "site",
+			siteKey: "fangyuan",
+		},
+		schema: {
+			entitiesVersion: 1,
+			sourceDatabase: "sqlite",
+			sourceMigrations: [],
+		},
+		data: {
+			site: {
+				siteKey: "fangyuan",
+				name: "FangYuan",
+				allowedOrigins: ["http://localhost:4321"],
+			},
+			siteSettings: {
+				comments_enabled: 0,
+				default_status: "approved",
+				max_depth: 2,
+				root_limit: 10,
+				comment_require_json: '["nickname"]',
+				allow_website: 0,
+				allow_page_like: 0,
+				captcha_mode: "never",
+				captcha_threshold_window_sec: 60,
+				captcha_threshold_max_actions: 3,
+				abuse_guard_enabled: 1,
+				abuse_guard_window_sec: 600,
+				abuse_guard_max_write_actions: 100,
+				auto_blacklist_enabled: 1,
+				auto_blacklist_scope: "post",
+				auto_blacklist_ttl_sec: 1800,
+				comment_metadata_json: null,
+				email_notifications_enabled: 1,
+			},
+			systemSettings: [],
+			pageThreads: [
+				{
+					id: "thread_1",
+					source: { type: "qingyan", id: "1" },
+					siteKey: "fangyuan",
+					pageKey: "post/imported",
+					pageTitle: "Imported",
+					pageUrl: "/post/imported",
+					stats: {
+						commentCount: 1,
+						rootCommentCount: 1,
+						pageViewCount: 0,
+						pageLikeCount: 0,
+					},
+					timestamps: {
+						createdAt: "2026-05-05T00:00:00.000Z",
+						updatedAt: "2026-05-05T00:00:00.000Z",
+					},
+				},
+			],
+			visitors: [
+				{
+					id: "visitor_1",
+					source: { type: "qingyan", id: "1" },
+					siteKey: "fangyuan",
+					visitorKey: "visitor_exported",
+					ipHash: "ip_hash",
+					userAgentHash: "ua_hash",
+					timestamps: {
+						createdAt: "2026-05-05T00:00:00.000Z",
+						lastSeenAt: "2026-05-05T00:00:00.000Z",
+					},
+				},
+			],
+			comments: [
+				{
+					id: "comment_1",
+					source: { type: "qingyan", id: "c_source" },
+					siteKey: "fangyuan",
+					pageKey: "post/imported",
+					parentId: null,
+					visitorKey: "visitor_exported",
+					status: "approved",
+					author: {
+						name: "Alice",
+						email: "alice@example.com",
+						website: "https://example.com",
+					},
+					request: {
+						ip: "127.0.0.1",
+						userAgent: "Vitest",
+					},
+					metadata: {},
+					content: {
+						raw: "hello from export",
+						html: "<p>hello from export</p>",
+					},
+					stats: {
+						replyCount: 0,
+						voteUpCount: 0,
+						voteDownCount: 0,
+					},
+					flags: {
+						isPinned: false,
+						isFolded: false,
+					},
+					timestamps: {
+						createdAt: "2026-05-05T00:00:00.000Z",
+						updatedAt: "2026-05-05T00:00:00.000Z",
+						deletedAt: null,
+					},
+					extensions: {},
+				},
+			],
+			voteRecords: [],
+			pageFeedbackRecords: [
+				{
+					id: "feedback_1",
+					source: { type: "qingyan", id: "1" },
+					siteKey: "fangyuan",
+					pageKey: "post/imported",
+					visitorKey: "visitor_exported",
+					timestamps: {
+						createdAt: "2026-05-05T00:00:00.000Z",
+					},
+				},
+			],
+			blacklistRules: [
+				{
+					id: "blacklist_1",
+					source: { type: "qingyan", id: "1" },
+					siteKey: "fangyuan",
+					scope: "site",
+					targetType: "email",
+					targetValue: "blocked@example.com",
+					matchMode: "exact",
+					reason: "imported",
+					sourceName: "manual",
+					expiresAt: null,
+					createdAt: "2026-05-05T00:00:00.000Z",
+				},
+			],
+		},
+	};
+}
+
+function installRestorePayload(databaseFile: string) {
+	return {
+		...installFormPayload(databaseFile),
+		admin: {
+			consolePath: "/admin",
+			username: "installer",
+			password: "installer-password",
+		},
+		restore: {
+			enabled: true,
+			fileName: "fangyuan-export.json",
+			payload: qingyanRestorePayload(),
+			existingStrategy: "fail_on_existing",
+			importMode: "full_site",
+			settingsStrategy: "replace_settings",
+		},
+	};
+}
+
 function installFormPayload(databaseFile: string) {
 	const payload = installPayload(databaseFile);
 	return {
@@ -130,7 +300,9 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("确认安装");
 		expect(response.body).toContain("后台入口");
 		expect(response.body).toContain("系统设置");
+		expect(response.body).toContain("从导出包恢复");
 		expect(response.body).toContain('name="adminConsolePath"');
+		expect(response.body).toContain('name="restorePayload"');
 		expect(response.body).not.toContain("Use <code>POST");
 		expect(response.body).not.toContain("install-token");
 	});
@@ -247,6 +419,57 @@ describe("install bootstrap", () => {
 				expect.objectContaining({ category: "mail", key: "enabled" }),
 				expect.objectContaining({ category: "ipRegion", key: "enabled" }),
 			]),
+		});
+		expect(existsSync(workspace.configPath)).toBe(false);
+		expect(existsSync(workspace.databaseFile)).toBe(false);
+	});
+
+	it("plans install restore without writing config or database", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const app = buildInstallApp({ minimalConfig });
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/admin/install/plan",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installRestorePayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			site: {
+				siteKey: "fangyuan",
+				name: "FangYuan",
+			},
+			restore: {
+				enabled: true,
+				fileName: "fangyuan-export.json",
+				siteKey: "fangyuan",
+				importMode: "full_site",
+				settingsStrategy: "replace_settings",
+				dryRun: {
+					summary: {
+						willCreatePageThreads: 1,
+						willCreateVisitors: 1,
+						willCreateComments: 1,
+						conflicts: 0,
+					},
+					settings: {
+						status: "replace",
+					},
+				},
+			},
+		});
+		expect(response.json().applyPayload.restore.payload).toMatchObject({
+			format: "qingyan.export.v1",
+			scope: {
+				siteKey: "fangyuan",
+			},
 		});
 		expect(existsSync(workspace.configPath)).toBe(false);
 		expect(existsSync(workspace.databaseFile)).toBe(false);
@@ -514,6 +737,125 @@ describe("install bootstrap", () => {
 					expect.objectContaining({ category: "ipRegion", key: "enabled" }),
 				]),
 			);
+		} finally {
+			sqlite.close();
+		}
+	});
+
+	it("applies install restore while keeping admin bootstrap local to this install", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const app = buildInstallApp({ minimalConfig });
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const plan = await app.inject({
+			method: "POST",
+			url: "/admin/install/plan",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installRestorePayload(workspace.databaseFile),
+		});
+		expect(plan.statusCode).toBe(200);
+
+		const response = await app.inject({
+			method: "POST",
+			url: "/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: plan.json().applyPayload,
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json()).toMatchObject({
+			username: "installer",
+			initialPassword: "installer-password",
+			restore: {
+				enabled: true,
+				siteKey: "fangyuan",
+				apply: {
+					summary: {
+						createdPageThreads: 1,
+						createdVisitors: 1,
+						createdComments: 1,
+						createdPageFeedbackRecords: 1,
+						createdBlacklistRules: 1,
+						settingsUpdated: true,
+					},
+				},
+			},
+		});
+
+		const { sqlite } = createDatabaseClients(workspace.databaseFile);
+		try {
+			const admin = sqlite
+				.prepare("SELECT console_path, username FROM admin_bootstrap_state")
+				.get() as { console_path: string; username: string };
+			expect(admin).toMatchObject({
+				console_path: "/admin",
+				username: "installer",
+			});
+			const site = sqlite
+				.prepare("SELECT id, site_key, name, allowed_origins_json FROM sites")
+				.get() as {
+				id: number;
+				site_key: string;
+				name: string;
+				allowed_origins_json: string;
+			};
+			expect(site).toMatchObject({
+				site_key: "fangyuan",
+				name: "FangYuan",
+			});
+			expect(JSON.parse(site.allowed_origins_json)).toEqual([
+				"http://localhost:4321",
+			]);
+			const settings = sqlite
+				.prepare(
+					"SELECT comments_enabled, default_status, root_limit FROM site_settings WHERE site_id = ?",
+				)
+				.get(site.id) as {
+				comments_enabled: number;
+				default_status: string;
+				root_limit: number;
+			};
+			expect(settings).toMatchObject({
+				comments_enabled: 0,
+				default_status: "approved",
+				root_limit: 10,
+			});
+			const comment = sqlite
+				.prepare(
+					`SELECT comments.author_name, comments.content_raw, page_threads.page_key
+					FROM comments
+					INNER JOIN page_threads ON page_threads.id = comments.page_thread_id`,
+				)
+				.get() as {
+				author_name: string;
+				content_raw: string;
+				page_key: string;
+			};
+			expect(comment).toMatchObject({
+				author_name: "Alice",
+				content_raw: "hello from export",
+				page_key: "post/imported",
+			});
+			expect(
+				(
+					sqlite
+						.prepare("SELECT COUNT(*) AS count FROM page_feedback_records")
+						.get() as { count: number }
+				).count,
+			).toBe(1);
+			expect(
+				(
+					sqlite
+						.prepare("SELECT COUNT(*) AS count FROM blacklist_rules")
+						.get() as { count: number }
+				).count,
+			).toBe(1);
 		} finally {
 			sqlite.close();
 		}

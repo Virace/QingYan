@@ -4,7 +4,7 @@ import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-se
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
-function qingyanExportPayload(): Record<string, any> {
+function qingyanExportPayload() {
 	return {
 		format: "qingyan.export.v1",
 		formatVersion: 2,
@@ -29,7 +29,7 @@ function qingyanExportPayload(): Record<string, any> {
 				allowedOrigins: ["http://localhost:4321"],
 			},
 			siteSettings: null,
-			systemSettings: [],
+			systemSettings: [] as Array<Record<string, unknown>>,
 			pageThreads: [],
 			visitors: [],
 			comments: [],
@@ -128,5 +128,90 @@ describe("QingYan export system settings policy", () => {
 				},
 			},
 		});
+	});
+
+	it("dry-runs and applies non-secret system setting rows during ordinary import", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const repository = new AdminSystemSettingsRepository(fixture.app.db);
+		await repository.upsert("logging", "level", "info");
+		const payload = qingyanExportPayload();
+		payload.data.systemSettings = [
+			{
+				category: "logging",
+				key: "level",
+				value_json: JSON.stringify("debug"),
+				updated_at: "2026-05-05T00:00:00.000Z",
+			},
+		];
+
+		const dryRunResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/import-export/qingyan/dry-run",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "qingyan-export.json",
+				payload,
+				existingStrategy: "fail_on_existing",
+				importMode: "settings_only",
+				settingsStrategy: "replace_settings",
+			},
+		});
+
+		expect(dryRunResponse.statusCode).toBe(200);
+		expect(dryRunResponse.json()).toMatchObject({
+			job: {
+				status: "dry_run_passed",
+			},
+			dryRun: {
+				systemSettings: {
+					status: "replace",
+					changes: [
+						{
+							path: "logging.level",
+							current: "info",
+							incoming: "debug",
+							action: "replace",
+						},
+					],
+				},
+			},
+		});
+
+		const applyResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/api/admin/import-export/qingyan/jobs/${dryRunResponse.json().job.id}/apply`,
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				existingStrategy: "fail_on_existing",
+				importMode: "settings_only",
+				settingsStrategy: "replace_settings",
+			},
+		});
+
+		expect(applyResponse.statusCode).toBe(200);
+		expect(applyResponse.json()).toMatchObject({
+			apply: {
+				summary: {
+					settingsUpdated: false,
+					systemSettingsUpdated: true,
+				},
+			},
+		});
+		const rows = await repository.listAll();
+		expect(rows).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					category: "logging",
+					key: "level",
+					valueJson: JSON.stringify("debug"),
+				}),
+			]),
+		);
 	});
 });

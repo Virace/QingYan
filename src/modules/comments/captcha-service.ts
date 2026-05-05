@@ -535,7 +535,6 @@ export class CaptchaService {
 		consumeRateLimit: (key: string) => Promise<void>;
 		checkRateLimit: (key: string) => void;
 	}) {
-		const captchaSettings = await this.getCaptchaSettings();
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode === "never") {

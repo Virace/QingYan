@@ -75,8 +75,10 @@ fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; }
 legend { font-weight: 650; margin-bottom: 2px; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 label { display: grid; gap: 7px; font-size: 14px; color: #3f3f46; }
-input { height: 38px; border: 1px solid #d4d4d8; border-radius: 6px; padding: 0 11px; font: inherit; color: #18181b; background: #fff; }
-input:focus { outline: 2px solid #0f766e; outline-offset: 1px; border-color: #0f766e; }
+input, textarea { border: 1px solid #d4d4d8; border-radius: 6px; font: inherit; color: #18181b; background: #fff; }
+input { height: 38px; padding: 0 11px; }
+textarea { min-height: 132px; resize: vertical; padding: 10px 11px; line-height: 1.5; }
+input:focus, textarea:focus { outline: 2px solid #0f766e; outline-offset: 1px; border-color: #0f766e; }
 button { height: 40px; border: 0; border-radius: 6px; padding: 0 16px; font: inherit; font-weight: 650; color: #fff; background: #0f766e; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.6; }
 .message { display: none; border-radius: 6px; padding: 12px 14px; font-size: 14px; line-height: 1.6; }
@@ -121,6 +123,11 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </div>
 <label>允许的前端 Origin<input name="allowedOrigins" autocomplete="off" required></label>
 </fieldset>
+<fieldset>
+<legend>从导出包恢复</legend>
+<label>导出文件名<input name="restoreFileName" autocomplete="off" placeholder="qingyan-export.json"></label>
+<label>QingYan 导出 JSON<textarea name="restorePayload" spellcheck="false" placeholder="留空则只执行全新安装"></textarea></label>
+</fieldset>
 <section id="install-review" class="message"></section>
 <div id="install-message" class="message"></div>
 <div class="grid">
@@ -150,6 +157,24 @@ function optionalString(value) {
 	const text = String(value ?? "").trim();
 	return text || undefined;
 }
+function collectRestore(data) {
+	const text = String(data.get("restorePayload") ?? "").trim();
+	if (!text) return undefined;
+	let payload;
+	try {
+		payload = JSON.parse(text);
+	} catch (_) {
+		throw new Error("QingYan 导出 JSON 格式无效。");
+	}
+	return {
+		enabled: true,
+		fileName: optionalString(data.get("restoreFileName")) ?? "qingyan-export.json",
+		payload,
+		existingStrategy: "fail_on_existing",
+		importMode: "full_site",
+		settingsStrategy: "replace_settings",
+	};
+}
 function collectPayload() {
 	const data = new FormData(form);
 	const allowedOrigins = String(data.get("allowedOrigins") ?? "")
@@ -176,6 +201,7 @@ function collectPayload() {
 			name: String(data.get("siteName") ?? ""),
 			allowedOrigins,
 		},
+		restore: collectRestore(data),
 	};
 }
 function renderPlan(plan) {
@@ -185,6 +211,14 @@ function renderPlan(plan) {
 	const envFields = plan.env.length
 		? plan.env.map((item) => item.envName + " -> " + item.path + (item.secret ? "（已隐藏）" : "")).join(", ")
 		: "无";
+	const restoreText = plan.restore
+		? "<br>恢复: " + plan.restore.fileName +
+			" / " + plan.restore.siteKey +
+			"（页面 " + plan.restore.dryRun.summary.willCreatePageThreads +
+			"，访客 " + plan.restore.dryRun.summary.willCreateVisitors +
+			"，评论 " + plan.restore.dryRun.summary.willCreateComments +
+			"，冲突 " + plan.restore.dryRun.summary.conflicts + "）"
+		: "";
 	review.dataset.kind = "success";
 	review.innerHTML =
 		"<strong>安装计划</strong><br>" +
@@ -194,7 +228,8 @@ function renderPlan(plan) {
 		"管理员: " + plan.admin.username + (plan.admin.passwordGenerated ? "（将随机生成初始密码）" : "") + "<br>" +
 		"默认站点: " + plan.site.siteKey + " / " + plan.site.name + "<br>" +
 		"系统设置: " + systemSettings + "<br>" +
-		"环境变量锁定: " + envFields;
+		"环境变量锁定: " + envFields +
+		restoreText;
 	return plan.applyPayload;
 }
 async function requestJson(url, payload) {
@@ -236,7 +271,8 @@ applyButton.addEventListener("click", async () => {
 	try {
 		const result = await requestJson("${INSTALL_PATH}", plannedPayload);
 		const backupText = result.backupPath ? " 原配置备份: " + result.backupPath + "。" : "";
-		setMessage("success", "安装完成。请重启服务后访问 " + result.adminUrl + "。管理员 " + result.username + "，初始密码 " + result.initialPassword + "。配置文件: " + result.configPath + "。数据库: " + result.databasePath + "。系统设置写入 " + result.systemSettings.length + " 项。" + backupText);
+		const restoreText = result.restore ? "恢复站点 " + result.restore.siteKey + "，写入评论 " + result.restore.apply.summary.createdComments + " 条。" : "";
+		setMessage("success", "安装完成。请重启服务后访问 " + result.adminUrl + "。管理员 " + result.username + "，初始密码 " + result.initialPassword + "。配置文件: " + result.configPath + "。数据库: " + result.databasePath + "。系统设置写入 " + result.systemSettings.length + " 项。" + restoreText + backupText);
 		form.reset();
 		plannedPayload = null;
 	} catch (error) {
@@ -323,7 +359,7 @@ export function buildInstallApp(input: {
 		return reply.redirect(INSTALL_PATH);
 	});
 
-	app.get(INSTALL_PATH, async (request, reply) => {
+	app.get(INSTALL_PATH, async (_request, reply) => {
 		const blocked = await assertInstallOpen({
 			minimalConfig: input.minimalConfig,
 			environment: input.environment,
