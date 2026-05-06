@@ -16,6 +16,7 @@ data/
 logs/
 config/qingyan.yml
 config/qingyan.local.yml
+config/*.installed.lock
 *.db
 *.db-shm
 *.db-wal

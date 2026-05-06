@@ -32,6 +32,10 @@ import securityPlugin from "./plugins/security";
 
 type OpenApiDocument = Awaited<ReturnType<typeof loadOpenApiDocument>>;
 
+interface BuildAppOptions {
+	adminDistDirectory?: string;
+}
+
 function registerBaseRoutes(
 	app: FastifyInstance,
 	openApi: OpenApiDocument,
@@ -63,6 +67,7 @@ export async function buildApp(
 			enabled: false,
 		},
 	},
+	options: BuildAppOptions = {},
 ): Promise<FastifyInstance> {
 	const app = Fastify({
 		logger: true,
@@ -153,7 +158,9 @@ export async function buildApp(
 		});
 		await app.register(requestContextPlugin);
 		registerBaseRoutes(app, openApi);
-		await app.register(adminUiRoutes);
+		await app.register(adminUiRoutes, {
+			distDirectory: options.adminDistDirectory,
+		});
 		await app.register(
 			createDevMemoryRoutes({
 				devMockService,
@@ -170,7 +177,9 @@ export async function buildApp(
 
 	registerBaseRoutes(app, openApi);
 
-	await app.register(adminUiRoutes);
+	await app.register(adminUiRoutes, {
+		distDirectory: options.adminDistDirectory,
+	});
 	await app.register(adminSessionRoutes, { prefix: "/api/admin/session" });
 	await app.register(captchaWidgetRoutes, { prefix: "/api" });
 

@@ -137,6 +137,7 @@ export function createTestConfig(
 export async function createTestApp(options?: {
 	devMode?: boolean;
 	devAdminToken?: string;
+	adminDistDirectory?: string;
 	seedSite?: SiteSeed | false;
 	mutateConfig?: (config: AppConfig) => void;
 }) {
@@ -163,7 +164,9 @@ export async function createTestApp(options?: {
 		QINGYAN_DEV_ADMIN_TOKEN: options?.devAdminToken,
 		QINGYAN_DEV_ALLOWED_ORIGIN: "http://localhost:4321",
 	});
-	const app = await buildApp(resolved.config, resolved.runtimeOptions);
+	const app = await buildApp(resolved.config, resolved.runtimeOptions, {
+		adminDistDirectory: options?.adminDistDirectory,
+	});
 
 	return {
 		app,

@@ -4,43 +4,54 @@ import path from "node:path";
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
-import { renderAdminPage } from "./ui/render-admin-page";
+interface AdminUiRouteOptions {
+	distDirectory?: string;
+}
 
-const ADMIN_DIST_DIRECTORY = path.resolve(process.cwd(), "dist/admin");
-const ADMIN_INDEX_HTML = path.join(ADMIN_DIST_DIRECTORY, "index.html");
-const ADMIN_ASSETS_DIRECTORY = path.join(ADMIN_DIST_DIRECTORY, "assets");
+interface AdminDistPaths {
+	indexHtml: string;
+	assetsDirectory: string;
+}
 
 function setAdminNoIndexHeaders(reply: FastifyReply): void {
 	reply.header("X-Robots-Tag", "noindex, nofollow, noarchive");
 	reply.header("Cache-Control", "no-store");
 }
 
-export const adminUiRoutes: FastifyPluginAsync = async (fastify) => {
+export const adminUiRoutes: FastifyPluginAsync<AdminUiRouteOptions> = async (
+	fastify,
+	options,
+) => {
 	const adminPath = fastify.adminBootstrap.consolePath;
+	const distPaths = resolveAdminDistPaths(options.distDirectory);
 	const adminPaths = new Set([adminPath]);
 	if (fastify.runtimeOptions.devMode.enabled) {
 		adminPaths.add("/admin");
 	}
 
 	for (const basePath of adminPaths) {
-		registerAdminUiPath(fastify, basePath);
+		registerAdminUiPath(fastify, basePath, distPaths);
 	}
 };
 
 function registerAdminUiPath(
 	fastify: Parameters<FastifyPluginAsync>[0],
 	basePath: string,
+	distPaths: AdminDistPaths,
 ): void {
 	const renderShell = async () =>
-		existsSync(ADMIN_INDEX_HTML)
-			? injectAdminRuntime(await readFile(ADMIN_INDEX_HTML, "utf-8"), basePath)
-			: renderAdminPage({ basePath });
+		existsSync(distPaths.indexHtml)
+			? injectAdminRuntime(
+					await readFile(distPaths.indexHtml, "utf-8"),
+					basePath,
+				)
+			: undefined;
 
 	fastify.get(`${basePath}/assets/*`, async (request, reply) => {
 		const assetName = (request.params as { "*": string })["*"];
-		const assetPath = path.resolve(ADMIN_ASSETS_DIRECTORY, assetName);
+		const assetPath = path.resolve(distPaths.assetsDirectory, assetName);
 		if (
-			!isPathInsideDirectory(ADMIN_ASSETS_DIRECTORY, assetPath) ||
+			!isPathInsideDirectory(distPaths.assetsDirectory, assetPath) ||
 			!existsSync(assetPath)
 		) {
 			return reply.code(404).send({
@@ -77,8 +88,27 @@ function registerAdminUiPath(
 		}
 
 		setAdminNoIndexHeaders(reply);
-		return reply.type("text/html; charset=utf-8").send(await renderShell());
+		const shell = await renderShell();
+		if (!shell) {
+			return reply.code(503).send({
+				error: {
+					code: "ADMIN_UI_NOT_BUILT",
+					message:
+						"Admin UI build output is missing. Run pnpm run admin:build before serving the backend.",
+				},
+			});
+		}
+
+		return reply.type("text/html; charset=utf-8").send(shell);
 	});
+}
+
+function resolveAdminDistPaths(distDirectory?: string): AdminDistPaths {
+	const directory = path.resolve(process.cwd(), distDirectory ?? "dist/admin");
+	return {
+		indexHtml: path.join(directory, "index.html"),
+		assetsDirectory: path.join(directory, "assets"),
+	};
 }
 
 function resolveMissingSlashRedirect(
