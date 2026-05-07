@@ -11,6 +11,10 @@ import {
 	type WordPressDryRunResult,
 } from "./wordpress/dry-run";
 import type { SqliteClient } from "../../db/client";
+import type {
+	DatabaseBackupResult,
+	DatabaseBackupService,
+} from "../database-backup/database-backup-service";
 import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import type { ImportJobRepository } from "./job-repository";
@@ -51,6 +55,15 @@ export interface WordPressApplyResult {
 	dryRun: WordPressDryRunResult;
 }
 
+export interface WordPressApplyResponse {
+	job: {
+		id: string;
+		status: "applied";
+	};
+	apply: WordPressApplyResult;
+	backup: DatabaseBackupResult | null;
+}
+
 function hashText(value: string) {
 	return createHash("sha256").update(value).digest("hex");
 }
@@ -71,6 +84,7 @@ export class ImportJobService {
 	public constructor(
 		private readonly repository: ImportJobRepository,
 		private readonly sqlite: SqliteClient,
+		private readonly backupService?: DatabaseBackupService,
 	) {}
 
 	public async createWordPressAnalyzeJob(input: {
@@ -191,16 +205,66 @@ export class ImportJobService {
 	public async apply(
 		jobId: string,
 		input: { existingStrategy: ExistingImportStrategy },
-	) {
+	): Promise<WordPressApplyResponse> {
+		const batch = this.getBatchRow(jobId);
+		const payload = parsePayload(batch.summary_json);
+		this.assertPlanCanApply(batch, payload, input);
+		const backup = this.backupService
+			? await this.backupService.createImportBackup({
+					jobId,
+					siteId: batch.site_id,
+					sourceType: batch.source_type,
+				})
+			: null;
+		if (backup) {
+			this.updateBackup(jobId, backup);
+		}
 		try {
-			return this.sqlite.transaction(() =>
+			const result = this.sqlite.transaction(() =>
 				this.applyInTransaction(jobId, input),
 			)();
+			return {
+				...result,
+				backup,
+			};
 		} catch (error) {
 			if (error instanceof InvalidRequestError) {
 				throw error;
 			}
 			throw error;
+		}
+	}
+
+	private assertPlanCanApply(
+		batch: ImportBatchRow,
+		payload: ImportJobPayload,
+		input: { existingStrategy: ExistingImportStrategy },
+	) {
+		if (!payload.plan) {
+			throw new InvalidRequestError({
+				message: "导入任务还没有生成 import plan。",
+			});
+		}
+		const sourceKeys = this.listPlanSourceKeys(payload.plan);
+		const existingSourceRecords = this.selectSourceRecords(
+			batch.site_id,
+			batch.source_type,
+			sourceKeys,
+		);
+		const existingPageKeys = this.selectPageThreadKeys(
+			batch.site_id,
+			payload.plan.items.map((item) => item.pageKey),
+		);
+		const dryRun = dryRunWordPressImport({
+			plan: payload.plan,
+			existingPageKeys,
+			existingSourceKeys: new Set(existingSourceRecords.keys()),
+			existingStrategy: input.existingStrategy,
+		});
+		if (dryRun.summary.conflicts > 0) {
+			throw new InvalidRequestError({
+				message: "Dry-run 仍存在冲突，不能执行导入。",
+			});
 		}
 	}
 
@@ -551,5 +615,15 @@ export class ImportJobService {
 				nowIso,
 				jobId,
 			);
+	}
+
+	private updateBackup(jobId: string, backup: DatabaseBackupResult) {
+		this.sqlite
+			.prepare(
+				`UPDATE import_batches
+				SET backup_json = ?, updated_at = ?
+				WHERE id = ?`,
+			)
+			.run(JSON.stringify(backup), new Date().toISOString(), jobId);
 	}
 }

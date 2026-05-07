@@ -25,6 +25,7 @@ export const importBatches = sqliteTable(
 		summaryJson: text("summary_json").notNull(),
 		optionsJson: text("options_json").notNull(),
 		errorJson: text("error_json"),
+		backupJson: text("backup_json"),
 		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		appliedAt: text("applied_at"),

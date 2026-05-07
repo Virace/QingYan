@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
+import { DatabaseBackupService } from "../database-backup/database-backup-service";
 import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { ImportJobRepository } from "./job-repository";
 import { ImportJobService } from "./job-service";
@@ -59,6 +60,12 @@ const wordpressAnalyzeQuerySchema = wordpressAnalyzeBodySchema
 	});
 const importJobParamsSchema = z.object({
 	jobId: z.string().min(1),
+});
+const importJobsQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	status: z.string().min(1).optional(),
+	sourceType: z.string().min(1).optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 const dryRunBodySchema = z.object({
 	existingStrategy: z.enum(["fail_on_existing", "skip_existing"]),
@@ -124,6 +131,68 @@ function parseMappingJson(mappingJson?: string) {
 	return mapping.data;
 }
 
+function parseJsonField(value: string | null | undefined) {
+	if (!value) {
+		return null;
+	}
+	return JSON.parse(value) as unknown;
+}
+
+function summarizeJobPayload(value: string) {
+	const payload = parseJsonField(value);
+	if (!payload || typeof payload !== "object") {
+		return {};
+	}
+	const record = payload as Record<string, unknown>;
+	return {
+		report:
+			record.report &&
+			typeof record.report === "object" &&
+			"summary" in record.report
+				? (record.report as { summary?: unknown }).summary
+				: undefined,
+		plan:
+			record.plan && typeof record.plan === "object" && "summary" in record.plan
+				? (record.plan as { summary?: unknown }).summary
+				: undefined,
+		dryRun:
+			record.dryRun &&
+			typeof record.dryRun === "object" &&
+			"summary" in record.dryRun
+				? (record.dryRun as { summary?: unknown }).summary
+				: undefined,
+		apply:
+			record.apply &&
+			typeof record.apply === "object" &&
+			"summary" in record.apply
+				? (record.apply as { summary?: unknown }).summary
+				: undefined,
+	};
+}
+
+function serializeImportJob(
+	batch: Awaited<ReturnType<ImportJobRepository["getBatch"]>>,
+) {
+	if (!batch) {
+		return null;
+	}
+	return {
+		id: batch.id,
+		siteId: batch.siteId,
+		sourceType: batch.sourceType,
+		sourceFileName: batch.sourceFileName,
+		format: batch.format,
+		formatVersion: batch.formatVersion,
+		status: batch.status,
+		createdAt: batch.createdAt,
+		updatedAt: batch.updatedAt,
+		appliedAt: batch.appliedAt,
+		summary: summarizeJobPayload(batch.summaryJson),
+		backup: parseJsonField(batch.backupJson),
+		error: parseJsonField(batch.errorJson),
+	};
+}
+
 export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.addContentTypeParser(
 		["application/xml", "text/xml"],
@@ -145,12 +214,67 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.siteRegistry,
 	);
 	const wordpressService = new WordPressAdminImportService();
+	const importJobRepository = new ImportJobRepository(fastify.db);
+	const backupService = new DatabaseBackupService({
+		engine: fastify.config.database.client,
+		databaseFile: fastify.config.database.sqlite.file,
+		sqlite: fastify.sqlite,
+	});
 	const jobService = new ImportJobService(
-		new ImportJobRepository(fastify.db),
+		importJobRepository,
 		fastify.sqlite,
+		backupService,
 	);
 	const qingyanExportService = new QingYanExportService(fastify.sqlite);
-	const qingyanImportService = new QingYanImportService(fastify.sqlite);
+	const qingyanImportService = new QingYanImportService(
+		fastify.sqlite,
+		backupService,
+	);
+
+	fastify.get("/jobs", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = importJobsQuerySchema.safeParse(request.query);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const siteId = parsed.data.siteKey
+			? fastify.siteRegistry.getRegisteredSite(parsed.data.siteKey)?.id
+			: undefined;
+		if (parsed.data.siteKey && !siteId) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+		const rows = await importJobRepository.listBatches({
+			siteId,
+			status: parsed.data.status,
+			sourceType: parsed.data.sourceType,
+			limit: parsed.data.limit,
+		});
+		return {
+			items: rows.map((row) => serializeImportJob(row)),
+			nextCursor: null,
+		};
+	});
+
+	fastify.get("/jobs/:jobId", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = importJobParamsSchema.safeParse(request.params);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const batch = await importJobRepository.getBatch(parsed.data.jobId);
+		const job = serializeImportJob(batch);
+		if (!job) {
+			throw new ResourceNotFoundError(
+				"IMPORT_JOB_NOT_FOUND",
+				"导入任务不存在。",
+			);
+		}
+		return { job };
+	});
 
 	fastify.post("/export", async (request, reply) => {
 		await sessionService.requireSession(request);
@@ -300,6 +424,9 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
-		return qingyanImportService.apply(parsedParams.data.jobId, parsedBody.data);
+		return qingyanImportService.applyWithBackup(
+			parsedParams.data.jobId,
+			parsedBody.data,
+		);
 	});
 };

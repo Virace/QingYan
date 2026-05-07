@@ -246,6 +246,13 @@ Admin API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 typed 设
 
 普通 QingYan import 不接受 hand-crafted system settings secret rows；dry-run 阶段会直接拒绝。当前 install restore mode 仍未实现，不能把普通 export 当作完整实例备份。
 
+Admin 数据管理中的 WordPress WXR 导入和 QingYan JSON 导入在真实 apply 前会创建导入任务记录，并先生成一次数据库级备份。该备份用于保存合并前状态，和普通 QingYan export/import 的用途不同：
+
+- 普通 export/import 面向跨实例业务迁移，格式会排除 session、install token、运行时路径和 secret 明文。
+- 导入前数据库备份面向本实例回退，当前内置实现使用 SQLite backup API 生成主库备份，并在存在时记录 WAL/SHM 现场文件。
+- 任务记录会保存备份的 `engine`、`strategy`、备份目录和文件 metadata，便于之后按运维流程停服务覆盖恢复。
+- 当前内置数据库备份 provider 仅覆盖 SQLite。后续支持 PostgreSQL、MySQL 或 MariaDB 时，会通过独立 provider 或外部备份确认接入，不把普通业务 export 当作完整数据库备份。
+
 ## Future Upgrade Lifecycle
 
 当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`。

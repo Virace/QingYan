@@ -159,6 +159,7 @@ export interface ImportApplyResult {
 			importRecordsCreated: number;
 		};
 	};
+	backup: ImportJobBackup | null;
 }
 
 export interface QingYanExportPayload {
@@ -215,6 +216,52 @@ export interface QingYanApplyResult {
 			importRecordsCreated: number;
 		};
 	};
+	backup: ImportJobBackup | null;
+}
+
+export interface ImportJobBackupFile {
+	role: "database" | "wal" | "shm" | "metadata";
+	path: string;
+	backupPath: string | null;
+	present: boolean;
+	size: number | null;
+	sha256: string | null;
+}
+
+export interface ImportJobBackup {
+	kind: "import_database_backup";
+	engine: string;
+	strategy: string;
+	createdAt: string;
+	backupDirectory: string;
+	databaseBackupPath?: string;
+	files: ImportJobBackupFile[];
+	notes: string[];
+}
+
+export interface ImportJobListItem {
+	id: string;
+	siteId: number;
+	sourceType: string;
+	sourceFileName: string;
+	format: string;
+	formatVersion: number;
+	status: string;
+	createdAt: string;
+	updatedAt: string;
+	appliedAt: string | null;
+	summary: unknown;
+	backup: ImportJobBackup | null;
+	error: unknown;
+}
+
+export interface ImportJobsResult {
+	items: ImportJobListItem[];
+	nextCursor: string | null;
+}
+
+export interface ImportJobDetailResult {
+	job: ImportJobListItem;
 }
 
 function queryString(input: Record<string, string | undefined>) {
@@ -334,5 +381,28 @@ export function applyQingYanImportJob(
 			method: "POST",
 			body: JSON.stringify(input),
 		},
+	);
+}
+
+export function listImportJobs(input: {
+	siteKey?: string;
+	status?: string;
+	sourceType?: string;
+	limit?: number;
+}) {
+	const query = queryString({
+		siteKey: input.siteKey,
+		status: input.status,
+		sourceType: input.sourceType,
+		limit: input.limit ? String(input.limit) : undefined,
+	});
+	return requestJson<ImportJobsResult>(
+		`/api/admin/import-export/jobs?${query}`,
+	);
+}
+
+export function getImportJob(jobId: string) {
+	return requestJson<ImportJobDetailResult>(
+		`/api/admin/import-export/jobs/${encodeURIComponent(jobId)}`,
 	);
 }

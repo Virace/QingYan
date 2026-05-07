@@ -235,6 +235,7 @@ CREATE TABLE `import_batches` (
 	`summary_json` text NOT NULL,
 	`options_json` text NOT NULL,
 	`error_json` text,
+	`backup_json` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`applied_at` text,

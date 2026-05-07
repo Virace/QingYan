@@ -339,6 +339,17 @@ describe("admin import/export QingYan routes", () => {
 					settingsUpdated: false,
 				},
 			},
+			backup: {
+				engine: "sqlite",
+				strategy: "sqlite_backup_api",
+			},
+		});
+		const backupJson = fixture.app.sqlite
+			.prepare("SELECT backup_json FROM import_batches WHERE id = ?")
+			.get(jobId) as { backup_json: string | null };
+		expect(JSON.parse(backupJson.backup_json ?? "{}")).toMatchObject({
+			engine: "sqlite",
+			strategy: "sqlite_backup_api",
 		});
 
 		const comment = fixture.app.sqlite

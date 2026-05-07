@@ -379,6 +379,17 @@ describe("admin import/export WordPress routes", () => {
 					importRecordsCreated: 1,
 				},
 			},
+			backup: {
+				engine: "sqlite",
+				strategy: "sqlite_backup_api",
+			},
+		});
+		const backupJson = fixture.app.sqlite
+			.prepare("SELECT backup_json FROM import_batches WHERE id = ?")
+			.get(jobId) as { backup_json: string | null };
+		expect(JSON.parse(backupJson.backup_json ?? "{}")).toMatchObject({
+			engine: "sqlite",
+			strategy: "sqlite_backup_api",
 		});
 
 		const thread = fixture.app.sqlite
@@ -432,6 +443,46 @@ describe("admin import/export WordPress routes", () => {
 			source_key: "wordpress:post:1:comment:100",
 			target_type: "comment",
 			target_id: comment.id,
+		});
+
+		const jobsResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/import-export/jobs?siteKey=fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(jobsResponse.statusCode).toBe(200);
+		expect(jobsResponse.json()).toMatchObject({
+			items: [
+				{
+					id: jobId,
+					status: "applied",
+					sourceType: "wordpress-wxr",
+					backup: {
+						engine: "sqlite",
+						strategy: "sqlite_backup_api",
+					},
+				},
+			],
+		});
+
+		const detailResponse = await fixture.app.inject({
+			method: "GET",
+			url: `/api/admin/import-export/jobs/${jobId}`,
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(detailResponse.statusCode).toBe(200);
+		expect(detailResponse.json()).toMatchObject({
+			job: {
+				id: jobId,
+				backup: {
+					engine: "sqlite",
+					strategy: "sqlite_backup_api",
+				},
+			},
 		});
 	});
 

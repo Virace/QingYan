@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import { importBatches, importRecords, pageThreads } from "../../db/schema";
@@ -50,6 +50,37 @@ export class ImportJobRepository {
 			})
 			.where(eq(importBatches.id, id));
 		return this.getBatch(id);
+	}
+
+	public async updateBackup(id: string, backup: unknown) {
+		await this.database
+			.update(importBatches)
+			.set({
+				backupJson: JSON.stringify(backup),
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(importBatches.id, id));
+		return this.getBatch(id);
+	}
+
+	public async listBatches(input: {
+		siteId?: number;
+		status?: string;
+		sourceType?: string;
+		limit: number;
+	}) {
+		const filters = [
+			input.siteId ? eq(importBatches.siteId, input.siteId) : undefined,
+			input.status ? eq(importBatches.status, input.status) : undefined,
+			input.sourceType
+				? eq(importBatches.sourceType, input.sourceType)
+				: undefined,
+		].filter((filter) => filter !== undefined);
+		const query = this.database.select().from(importBatches).$dynamic();
+		if (filters.length > 0) {
+			query.where(and(...filters));
+		}
+		return query.orderBy(desc(importBatches.createdAt)).limit(input.limit);
 	}
 
 	public async listExistingPageKeys(siteId: number, pageKeys: string[]) {

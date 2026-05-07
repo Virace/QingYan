@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { SqliteClient } from "../../../db/client";
+import type {
+	DatabaseBackupResult,
+	DatabaseBackupService,
+} from "../../database-backup/database-backup-service";
 import { secretSystemSettingPaths } from "../../system-settings/definitions";
 import {
 	InvalidRequestError,
@@ -89,6 +93,15 @@ export interface QingYanApplyResult {
 	dryRun: QingYanDryRunResult;
 }
 
+export interface QingYanApplyResponse {
+	job: {
+		id: string;
+		status: "applied";
+	};
+	apply: QingYanApplyResult;
+	backup: DatabaseBackupResult | null;
+}
+
 const siteSettingsWritableColumns = [
 	"comments_enabled",
 	"default_status",
@@ -138,7 +151,10 @@ function normalizeSqlValue(value: unknown): unknown {
 }
 
 export class QingYanImportService {
-	public constructor(private readonly sqlite: SqliteClient) {}
+	public constructor(
+		private readonly sqlite: SqliteClient,
+		private readonly backupService?: DatabaseBackupService,
+	) {}
 
 	public createDryRun(input: {
 		siteKey: string;
@@ -201,6 +217,32 @@ export class QingYanImportService {
 		return this.sqlite.transaction(() =>
 			this.applyInTransaction(jobId, input),
 		)();
+	}
+
+	public async applyWithBackup(
+		jobId: string,
+		input: {
+			existingStrategy: QingYanExistingStrategy;
+			importMode?: QingYanImportMode;
+			settingsStrategy?: QingYanSettingsStrategy;
+		},
+	): Promise<QingYanApplyResponse> {
+		const batch = this.getBatch(jobId);
+		this.assertCanApply(batch, input);
+		const backup = this.backupService
+			? await this.backupService.createImportBackup({
+					jobId,
+					siteId: batch.site_id,
+					sourceType: batch.source_type,
+				})
+			: null;
+		if (backup) {
+			this.updateBackup(jobId, backup);
+		}
+		return {
+			...this.sqlite.transaction(() => this.applyInTransaction(jobId, input))(),
+			backup,
+		};
 	}
 
 	private parseExport(payload: unknown) {
@@ -285,6 +327,28 @@ export class QingYanImportService {
 			},
 			apply,
 		};
+	}
+
+	private assertCanApply(
+		batch: ImportBatchRow,
+		input: {
+			existingStrategy: QingYanExistingStrategy;
+			importMode?: QingYanImportMode;
+			settingsStrategy?: QingYanSettingsStrategy;
+		},
+	) {
+		const options = this.normalizeOptions(input);
+		const payload = parsePayload(batch.summary_json);
+		const dryRun = this.buildDryRun(
+			batch.site_id,
+			payload.exportPayload,
+			options,
+		);
+		if (dryRun.summary.conflicts > 0) {
+			throw new InvalidRequestError({
+				message: "Dry-run 仍存在冲突，不能执行导入。",
+			});
+		}
 	}
 
 	private buildDryRun(
@@ -1197,5 +1261,15 @@ export class QingYanImportService {
 				nowIso,
 				jobId,
 			);
+	}
+
+	private updateBackup(jobId: string, backup: DatabaseBackupResult) {
+		this.sqlite
+			.prepare(
+				`UPDATE import_batches
+				SET backup_json = ?, updated_at = ?
+				WHERE id = ?`,
+			)
+			.run(JSON.stringify(backup), new Date().toISOString(), jobId);
 	}
 }
