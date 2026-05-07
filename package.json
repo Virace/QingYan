@@ -3,6 +3,10 @@
 	"version": "0.1.0",
 	"private": true,
 	"description": "面向内容站点的第一方评论后端。",
+	"bin": {
+		"qingyanctl": "dist/cli/main.js",
+		"qyctl": "dist/cli/main.js"
+	},
 	"packageManager": "pnpm@10.33.0",
 	"engines": {
 		"node": ">=24.0.0"

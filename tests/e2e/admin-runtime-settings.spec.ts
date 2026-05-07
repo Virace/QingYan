@@ -106,3 +106,60 @@ test("system settings captcha provider shows only matching fields", async ({
 	await expect(page.getByText("GeeTest API Server")).toBeVisible();
 	await expect(page.getByText("reCAPTCHA API Key")).toHaveCount(0);
 });
+
+test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
+	await page.route("**/api/admin/ops/update/check", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				state: "no_release",
+				currentVersion: "0.1.0",
+				autoUpdatable: false,
+				source: {
+					provider: "github-releases",
+					owner: "Virace",
+					repo: "QingYan",
+					url: "https://github.com/Virace/QingYan",
+				},
+				message:
+					"更新规则已配置，但当前仓库尚未发布首个 Release，暂时没有可安装更新。",
+				checkedAt: "2026-05-07T00:00:00.000Z",
+			}),
+		});
+	});
+
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	const mobileModuleSelect = page.getByLabel("管理模块");
+	if (await mobileModuleSelect.isVisible()) {
+		await mobileModuleSelect.selectOption("ops");
+	} else {
+		await page.getByRole("button", { name: "运维" }).click();
+	}
+	await expect(page.getByRole("heading", { name: "运维" })).toBeVisible();
+	await expect(page.getByText("qingyan.full-backup / sqlite")).toBeVisible();
+	await expect(page.getByText("service-action")).toBeVisible();
+	await expect(page.getByText("更新检测")).toBeVisible();
+	await expect(page.getByText("GitHub Release / Virace/QingYan")).toBeVisible();
+
+	await page.getByRole("button", { name: "检查更新" }).click();
+	await expect(page.getByText("尚未发布 Release")).toBeVisible();
+	await expect(page.getByText("当前仓库尚未发布首个 Release")).toBeVisible();
+	await page.getByRole("button", { name: "查看更新计划" }).click();
+	await expect(
+		page.getByRole("heading", { name: "更新执行计划" }),
+	).toBeVisible();
+	await expect(page.getByText("创建整站备份")).toBeVisible();
+	await expect(page.getByText("执行 qyctl upgrade")).toBeVisible();
+
+	await page.getByRole("button", { name: "数据升级预检" }).click();
+	await expect(
+		page.getByRole("heading", { name: "数据库升级检查" }),
+	).toBeVisible();
+	await expect(page.getByText('"state": "normal_current"')).toBeVisible();
+	await expect(
+		page.getByText("systemctl status qingyan.service"),
+	).toBeVisible();
+});

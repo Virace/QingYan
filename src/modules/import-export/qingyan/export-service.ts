@@ -5,7 +5,7 @@ import {
 	QINGYAN_EXPORT_FORMAT_VERSION,
 } from "./export-model";
 
-interface ExportInclude {
+export interface ExportInclude {
 	siteSettings?: boolean;
 	systemSettings?: boolean;
 	pageThreads?: boolean;

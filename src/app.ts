@@ -6,6 +6,7 @@ import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
 import { createPasswordHash } from "./modules/admin/password-hash";
 import { adminOverviewRoutes } from "./modules/admin/overview-routes";
+import { adminOpsRoutes } from "./modules/admin/ops-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
@@ -188,6 +189,7 @@ export async function buildApp(
 	}
 
 	await app.register(adminOverviewRoutes, { prefix: "/api/admin/overview" });
+	await app.register(adminOpsRoutes, { prefix: "/api/admin/ops" });
 	await app.register(commentsPublicRoutes, { prefix: "/api" });
 	await app.register(pageFeedbackPublicRoutes, { prefix: "/api" });
 	await app.register(commentsAdminRoutes, { prefix: "/api/admin/comments" });

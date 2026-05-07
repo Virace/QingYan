@@ -11,6 +11,7 @@ import {
 	RefreshCwIcon,
 	SettingsIcon,
 	ShieldIcon,
+	TerminalSquareIcon,
 	UsersIcon,
 	type LucideIcon,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import {
 	CommentsPage,
 	DataPage,
 	OverviewPage,
+	OpsPage,
 	PagesPage,
 	SiteSettingsPage,
 	SitesPage,
@@ -42,6 +44,7 @@ export type AdminView =
 	| "blacklist"
 	| "sites"
 	| "data"
+	| "ops"
 	| "settings"
 	| "system";
 
@@ -58,6 +61,7 @@ const navItems: Array<{
 	{ id: "blacklist", label: "黑名单", icon: ShieldIcon },
 	{ id: "sites", label: "站点", icon: GlobeIcon },
 	{ id: "data", label: "数据", icon: DatabaseIcon },
+	{ id: "ops", label: "运维", icon: TerminalSquareIcon },
 	{ id: "settings", label: "站点设置", icon: FlagIcon },
 	{ id: "system", label: "系统设置", icon: SettingsIcon },
 ];
@@ -132,6 +136,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return <SitesPage openSite={openSite} />;
 			case "data":
 				return <DataPage siteKey={activeSiteKey} />;
+			case "ops":
+				return <OpsPage />;
 			case "settings":
 				return <SiteSettingsPage siteKey={activeSiteKey} />;
 			case "system":

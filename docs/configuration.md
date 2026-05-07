@@ -276,6 +276,37 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 
 `--dry-run` 输出公开脱敏的 UpgradePlan，不写配置、SQLite 或 `__qingyan_upgrades`。`--apply` 仅用于 `upgrade_required` 状态，且必须提供 `--backup-dir`；CLI 和 Web Upgrade Mode 复用同一个升级执行服务。缺 startup config 仍进入 install mode，不进入 upgrade；坏 config 进入 `broken_config`，partial marker 进入 `recovery_required`。
 
+### QingYanctl 运维入口
+
+`qingyanctl` 与 `qyctl` 是等价入口。它们面向本机 Linux/Unix 运维，默认读取 QingYan 配置路径，也可通过 `--config` 或 `QINGYAN_CONFIG_PATH` 指定配置。
+
+常用命令：
+
+```bash
+qyctl info
+qyctl admin repass
+qyctl admin entrance
+qyctl export default ./site.json
+qyctl import default ./site.json --dry-run
+qyctl backup ./qingyan-full-backup
+qyctl restore ./qingyan-full-backup.qingyan-backup --dry-run
+qyctl upgrade --dry-run
+qyctl update check
+qyctl update plan
+qyctl status
+qyctl start
+qyctl stop
+qyctl restart
+```
+
+`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；当前仓库尚未发布首个 Release 时会显示“尚未发布 Release”。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+
+### Release 更新规则
+
+- Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
+- 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
+- Admin 运维页只做检测和提示，不直接执行程序覆盖。
+
 ## Dev Mode
 
 `pnpm dev` 默认启用 dev mode，并提供固定开发管理员账号：

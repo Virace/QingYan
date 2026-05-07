@@ -118,6 +118,47 @@ admin.username=...
 admin.password=...
 ```
 
+## 运维 CLI
+
+构建后会提供两个等价入口：
+
+```bash
+qingyanctl
+qyctl
+```
+
+`qyctl info` 用于快速查看服务状态、控制台入口、管理员用户名、配置文件和数据库位置，不显示管理员密码。数据库只保存密码 hash；如需重置密码，使用：
+
+```bash
+qyctl admin repass
+qyctl admin repass <password>
+```
+
+后台入口可通过以下命令重置；不传路径时自动生成随机入口：
+
+```bash
+qyctl admin entrance
+qyctl admin entrance /hidden-admin
+```
+
+站点级 JSON 导入导出只用于评论、页面线程、访客、站点设置等业务数据迁移，不是整站备份：
+
+```bash
+qyctl export default ./site.json
+qyctl import default ./site.json --dry-run
+```
+
+整站备份使用 `qyctl backup`，包含数据库完整备份、配置文件、安装锁和 manifest。恢复计划可用 `qyctl restore <backup> --dry-run` 检查。`qyctl upgrade` 只表示数据升级：当程序文件已通过外部 shell / systemd action 更新后，它使用当前程序内置 migrations 和 application upgrade steps 升级数据库状态。程序下载、解压和替换不放在 `qyctl upgrade` 中。
+
+程序更新检测基于当前仓库的 GitHub Release：
+
+```bash
+qyctl update check
+qyctl update plan
+```
+
+`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。当前仓库尚未发布首个 Release 时，会显示“尚未发布 Release”。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
+
 在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。即使安装时随机生成过管理员用户名和密码，dev mode 也会临时注入开发账号；非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态，安装完成页会显示一次性初始密码。
 
 ## 配置文档
