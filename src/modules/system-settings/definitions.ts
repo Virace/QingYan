@@ -5,6 +5,7 @@ export const systemSettingCategories = [
 	"mail",
 	"captcha",
 	"ipRegion",
+	"avatar",
 ] as const;
 
 export type SystemSettingCategory = (typeof systemSettingCategories)[number];
@@ -88,6 +89,12 @@ export const systemSettingsSchema = z.object({
 			sources: z.array(z.string().url()),
 		}),
 	}),
+	avatar: z.object({
+		gravatar: z.object({
+			enabled: z.boolean(),
+			baseUrl: z.string().url(),
+		}),
+	}),
 });
 
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
@@ -164,6 +171,12 @@ export const defaultSystemSettings: SystemSettings = {
 				"https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb",
 				"https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v6.xdb",
 			],
+		},
+	},
+	avatar: {
+		gravatar: {
+			enabled: false,
+			baseUrl: "https://gravatar.com/avatar",
 		},
 	},
 };

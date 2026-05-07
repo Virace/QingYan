@@ -52,6 +52,12 @@ describe("admin system settings", () => {
 				cachePolicy: "vectorIndex",
 				precision: "province",
 			},
+			avatar: {
+				gravatar: {
+					enabled: false,
+					baseUrl: "https://gravatar.com/avatar",
+				},
+			},
 		});
 
 		const updateResponse = await fixture.app.inject({
@@ -211,6 +217,65 @@ describe("admin system settings", () => {
 		expect(afterUpdate.body).not.toContain("turnstile-secret");
 		expect(afterUpdate.json().mail.smtp.passwordConfigured).toBe(true);
 		expect(afterUpdate.json().captcha.turnstile.secretKeyConfigured).toBe(true);
+	});
+
+	it("updates global Gravatar settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				avatar: {
+					gravatar: {
+						enabled: true,
+						baseUrl: "https://cravatar.cn/avatar/",
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json()).toMatchObject({
+			avatar: {
+				gravatar: {
+					enabled: true,
+					baseUrl: "https://cravatar.cn/avatar",
+				},
+			},
+		});
+
+		const getResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(getResponse.statusCode).toBe(200);
+		expect(getResponse.json()).toMatchObject({
+			logging: {
+				level: "info",
+				retentionDays: 7,
+			},
+			avatar: {
+				gravatar: {
+					enabled: true,
+					baseUrl: "https://cravatar.cn/avatar",
+				},
+			},
+		});
 	});
 
 	it("rejects invalid logging values", async () => {

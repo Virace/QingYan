@@ -19,4 +19,8 @@ export class RuntimeSystemSettingsService {
 	public async getIpRegionSettings() {
 		return (await this.getSettings()).ipRegion;
 	}
+
+	public async getAvatarSettings() {
+		return (await this.getSettings()).avatar;
+	}
 }

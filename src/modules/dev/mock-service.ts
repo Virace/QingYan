@@ -26,6 +26,7 @@ type RuntimeCommentRecord = {
 	id: string;
 	parentId: string | null;
 	authorName: string;
+	authorEmailHash: string | null;
 	authorWebsite: string | null;
 	contentRaw: string;
 	contentHtml: string | null;
@@ -365,6 +366,7 @@ export class DevMockService {
 			comments: presentComments(
 				selectedComments.map((comment) => ({
 					...comment,
+					authorEmailHash: comment.authorEmailHash ?? null,
 					updatedAt: comment.updatedAt ?? comment.createdAt,
 				})),
 				this.buildViewerVoteMap(input.visitor),
@@ -396,6 +398,7 @@ export class DevMockService {
 			id: rootId,
 			parentId: null,
 			authorName: "Seed Root",
+			authorEmailHash: null,
 			authorWebsite: null,
 			contentRaw: "seeded root comment",
 			contentHtml: null,
@@ -413,6 +416,7 @@ export class DevMockService {
 			id: replyId,
 			parentId: rootId,
 			authorName: "Seed Reply",
+			authorEmailHash: null,
 			authorWebsite: null,
 			contentRaw: "seeded reply comment",
 			contentHtml: null,
@@ -450,6 +454,7 @@ export class DevMockService {
 				id: input.id,
 				parentId: input.parentId,
 				authorName: input.authorName,
+				authorEmailHash: null,
 				authorWebsite: input.authorWebsite ?? null,
 				contentRaw: input.contentRaw,
 				contentHtml: null,
@@ -873,6 +878,7 @@ export class DevMockService {
 			id: commentId,
 			parentId: input.parentCommentId,
 			authorName: input.authorName,
+			authorEmailHash: null,
 			authorWebsite: input.authorWebsite ?? null,
 			contentRaw: input.contentRaw,
 			contentHtml: null,

@@ -254,4 +254,12 @@ export const adminSystemSettingsBodySchema = z.object({
 			}),
 		})
 		.optional(),
+	avatar: z
+		.object({
+			gravatar: z.object({
+				enabled: z.boolean(),
+				baseUrl: z.string().url(),
+			}),
+		})
+		.optional(),
 });

@@ -6,6 +6,7 @@ import {
 	type SystemSettingRow,
 } from "../system-settings/codec";
 import type { SystemSettings } from "../system-settings/definitions";
+import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
 
 type AdminSystemSettingsInput = {
@@ -42,6 +43,7 @@ type AdminSystemSettingsInput = {
 		>;
 	};
 	ipRegion?: SystemSettings["ipRegion"];
+	avatar?: SystemSettings["avatar"];
 	requestId?: string;
 };
 
@@ -135,6 +137,14 @@ export class AdminSystemSettingsService {
 					}
 				: current.captcha,
 			ipRegion: input.ipRegion ?? current.ipRegion,
+			avatar: input.avatar
+				? {
+						gravatar: {
+							enabled: input.avatar.gravatar.enabled,
+							baseUrl: normalizeGravatarBaseUrl(input.avatar.gravatar.baseUrl),
+						},
+					}
+				: current.avatar,
 		};
 
 		for (const row of flattenSystemSettings(next)) {

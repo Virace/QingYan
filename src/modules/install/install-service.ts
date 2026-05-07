@@ -33,6 +33,7 @@ import { QingYanImportService } from "../import-export/qingyan/import-service";
 import { InvalidRequestError } from "../shared/errors";
 import { createSiteRegistry } from "../shared/site-registry";
 import { flattenSystemSettings } from "../system-settings/codec";
+import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import {
 	defaultSystemSettings,
 	type SystemSettings,
@@ -375,9 +376,18 @@ function mergePlainObject(base: unknown, override: unknown): unknown {
 }
 
 function buildSystemSettingsInput(input: unknown): SystemSettings {
-	return systemSettingsSchema.parse(
+	const settings = systemSettingsSchema.parse(
 		mergePlainObject(defaultSystemSettings, input),
 	);
+	return {
+		...settings,
+		avatar: {
+			gravatar: {
+				...settings.avatar.gravatar,
+				baseUrl: normalizeGravatarBaseUrl(settings.avatar.gravatar.baseUrl),
+			},
+		},
+	};
 }
 
 function splitSystemSettingPath(settingPath: string): {

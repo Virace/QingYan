@@ -968,6 +968,10 @@ components:
             - string
             - 'null'
           format: uri
+        gravatarUrl:
+          type: string
+          format: uri
+          description: Optional Gravatar image URL generated from the comment author email hash. QingYan does not host, proxy, cache, or upload avatar files.
     CommentContent:
       type: object
       required: [raw, html]
@@ -2216,14 +2220,30 @@ components:
           $ref: '#/components/schemas/AdminSystemIpRegionDatabase'
         ipv6:
           $ref: '#/components/schemas/AdminSystemIpRegionDatabase'
+    AdminSystemAvatarSettings:
+      type: object
+      required: [gravatar]
+      properties:
+        gravatar:
+          type: object
+          required: [enabled, baseUrl]
+          properties:
+            enabled:
+              type: boolean
+            baseUrl:
+              type: string
+              format: uri
+              description: Gravatar avatar endpoint base URL, for example https://gravatar.com/avatar or a mirror endpoint.
     AdminSystemSettingsResponse:
       type: object
-      required: [logging, ipRegion]
+      required: [logging, ipRegion, avatar]
       properties:
         logging:
           $ref: '#/components/schemas/AdminSystemLoggingSettings'
         ipRegion:
           $ref: '#/components/schemas/AdminSystemIpRegionSettings'
+        avatar:
+          $ref: '#/components/schemas/AdminSystemAvatarSettings'
     AdminSystemSettingsUpdateRequest:
       type: object
       required: [logging]
@@ -2241,6 +2261,8 @@ components:
               maximum: 3650
         ipRegion:
           $ref: '#/components/schemas/AdminSystemIpRegionSettings'
+        avatar:
+          $ref: '#/components/schemas/AdminSystemAvatarSettings'
     AdminSiteCreateRequest:
       type: object
       required: [siteKey, name, allowedOrigins]

@@ -41,7 +41,9 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.addHook("onClose", async () => {
 		metadataResolver.close();
 	});
-	const readService = new CommentsService(readRepository, captchaService);
+	const readService = new CommentsService(readRepository, captchaService, () =>
+		systemSettingsService.getAvatarSettings(),
+	);
 	const writeService = new CommentsWriteService(
 		fastify.config,
 		fastify.security,

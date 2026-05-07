@@ -374,6 +374,12 @@ function installCompleteConfigPayload(databaseFile: string) {
 					dbPath: "./data/custom-v6.xdb",
 				},
 			},
+			avatar: {
+				gravatar: {
+					enabled: true,
+					baseUrl: "https://cravatar.cn/avatar/",
+				},
+			},
 		},
 	};
 }
@@ -420,6 +426,13 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain(
 			'data-path="systemSettings.captcha.turnstile.siteKey"',
 		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.gravatar.enabled"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.gravatar.baseUrl"',
+		);
+		expect(response.body).toContain("Gravatar Base URL");
 		expect(response.body).toContain('data-captcha-panel="image"');
 		expect(response.body).toContain('data-captcha-panel="turnstile" hidden');
 		expect(response.body).toContain("updateCaptchaPanel()");
@@ -766,6 +779,16 @@ describe("install bootstrap", () => {
 						category: "ipRegion",
 						key: "precision",
 						valueJson: '"city"',
+					}),
+					expect.objectContaining({
+						category: "avatar",
+						key: "gravatar.enabled",
+						valueJson: "true",
+					}),
+					expect.objectContaining({
+						category: "avatar",
+						key: "gravatar.baseUrl",
+						valueJson: JSON.stringify("https://cravatar.cn/avatar"),
 					}),
 				]),
 			);

@@ -194,12 +194,23 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 - `ipRegion.ipv4.sources`
 - `ipRegion.ipv6.dbPath`
 - `ipRegion.ipv6.sources`
+- `avatar.gravatar.enabled`
+- `avatar.gravatar.baseUrl`
 
 首装会写入完整默认系统设置。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
-Admin API 会返回 logging、mail、captcha 和 ipRegion 的 typed 设置。secret 字段不会在 Admin API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+Admin API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 typed 设置。secret 字段不会在 Admin API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
 
 日志目录仍属于部署环境，不在后台修改。logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
+
+### Gravatar 作者头像 URL
+
+`system_settings` 中的 `avatar.gravatar` 控制公开评论是否返回 Gravatar URL：
+
+- `avatar.gravatar.enabled`：是否启用后端 Gravatar URL 生成，默认关闭。
+- `avatar.gravatar.baseUrl`：Gravatar 头像 endpoint base URL，默认 `https://gravatar.com/avatar`，可替换为镜像地址。
+
+启用后，公开评论作者结构可能包含 `author.gravatarUrl`。该字段只表示第三方 Gravatar 图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件。字段名故意不使用 `avatarUrl`，避免误解为后端提供通用头像系统。没有该字段、Gravatar 图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。
 
 ## 评论验证码与元数据
 

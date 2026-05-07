@@ -358,6 +358,11 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>SMTP 密码<input data-path="systemSettings.mail.smtp.password" type="password" autocomplete="new-password"><span class="hint" data-hint-for="systemSettings.mail.smtp.password"></span></label>
 </fieldset>
 <fieldset>
+<legend>头像 / Gravatar</legend>
+<label class="check"><input data-path="systemSettings.avatar.gravatar.enabled" data-type="boolean" type="checkbox">启用 Gravatar<span class="hint" data-hint-for="systemSettings.avatar.gravatar.enabled">开启后公开评论作者会返回 author.gravatarUrl。</span></label>
+<label>Gravatar Base URL<input data-path="systemSettings.avatar.gravatar.baseUrl"><span class="hint" data-hint-for="systemSettings.avatar.gravatar.baseUrl">默认 https://gravatar.com/avatar；国内部署可配置镜像地址。</span></label>
+</fieldset>
+<fieldset>
 <legend>验证码</legend>
 <label>验证码类型 Provider<select data-path="systemSettings.captcha.provider"><option value="image">内置图片 image</option><option value="turnstile">Cloudflare Turnstile</option><option value="hcaptcha">hCaptcha</option><option value="recaptcha">Google reCAPTCHA</option><option value="geetest">极验 GeeTest</option></select><span class="hint" data-hint-for="systemSettings.captcha.provider">选择后只显示该验证码服务需要填写的配置项。</span></label>
 <div class="captcha-panel" data-captcha-panel="image">

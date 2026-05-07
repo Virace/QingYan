@@ -1,7 +1,10 @@
+import { buildGravatarUrl } from "./gravatar";
+
 interface PresenterCommentInput {
 	id: string;
 	parentId: string | null;
 	authorName: string;
+	authorEmailHash: string | null;
 	authorWebsite: string | null;
 	authorIp?: string | null;
 	authorUserAgent?: string | null;
@@ -32,6 +35,12 @@ interface PresenterOptions {
 	};
 	device?: {
 		enabled: boolean;
+	};
+	avatar?: {
+		gravatar: {
+			enabled: boolean;
+			baseUrl: string;
+		};
 	};
 }
 
@@ -130,12 +139,19 @@ export function presentComments(
 	const rootNodes: Array<Record<string, unknown>> = [];
 
 	for (const comment of comments) {
+		const gravatarUrl = buildGravatarUrl({
+			enabled: options?.avatar?.gravatar.enabled ?? false,
+			emailHash: comment.authorEmailHash,
+			baseUrl:
+				options?.avatar?.gravatar.baseUrl ?? "https://gravatar.com/avatar",
+		});
 		const node: Record<string, unknown> = {
 			id: comment.id,
 			parentId: comment.parentId,
 			author: {
 				name: comment.authorName,
 				website: comment.authorWebsite ?? undefined,
+				gravatarUrl,
 			},
 			content: {
 				raw: comment.contentRaw,

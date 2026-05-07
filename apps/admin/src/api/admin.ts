@@ -243,6 +243,12 @@ export interface AdminSystemSettings {
 			sources: string[];
 		};
 	};
+	avatar: {
+		gravatar: {
+			enabled: boolean;
+			baseUrl: string;
+		};
+	};
 }
 
 function queryString(input: Record<string, string | number | undefined>) {

@@ -1,6 +1,10 @@
 import { ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
-import { defaultCommentMetadata } from "../shared/site-settings-defaults";
+import {
+	defaultCommentMetadata,
+	type CommentMetadataSettings,
+} from "../shared/site-settings-defaults";
+import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import type { CommentsRepository } from "./repository";
@@ -25,7 +29,11 @@ function buildCapability(settings?: {
 	};
 }
 
-function buildCommentDisplayOptions(metadata = defaultCommentMetadata) {
+function buildCommentDisplayOptions(input: {
+	metadata?: CommentMetadataSettings;
+	avatar: SystemSettings["avatar"];
+}) {
+	const metadata = input.metadata ?? defaultCommentMetadata;
 	return {
 		location: {
 			enabled: metadata.ipRegion.enabled,
@@ -34,6 +42,7 @@ function buildCommentDisplayOptions(metadata = defaultCommentMetadata) {
 		device: {
 			enabled: metadata.device.enabled && metadata.device.display.enabled,
 		},
+		avatar: input.avatar,
 	};
 }
 
@@ -54,6 +63,9 @@ export class CommentsService {
 	public constructor(
 		private readonly repository: CommentsRepository,
 		private readonly captchaService?: CaptchaService,
+		private readonly loadAvatarSettings?: () => Promise<
+			SystemSettings["avatar"]
+		>,
 	) {}
 
 	public getRepository(): CommentsRepository {
@@ -92,6 +104,14 @@ export class CommentsService {
 			pageUrl: input.pageUrl,
 		});
 		const settings = await this.repository.getSiteSettings(site.id);
+		const avatarSettings = this.loadAvatarSettings
+			? await this.loadAvatarSettings()
+			: {
+					gravatar: {
+						enabled: false,
+						baseUrl: "https://gravatar.com/avatar",
+					},
+				};
 		const commentBundle = await this.repository.listPublicComments({
 			pageThreadId: thread.id,
 			sortBy: pagination.sortBy,
@@ -135,9 +155,10 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay: buildCommentDisplayOptions(
-				this.repository.resolveCommentMetadata(settings ?? undefined),
-			),
+			commentDisplay: buildCommentDisplayOptions({
+				metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
+				avatar: avatarSettings,
+			}),
 			pageMetrics: {
 				pageViewCount: refreshedThread.pageViewCount,
 			},
@@ -183,6 +204,14 @@ export class CommentsService {
 			visitorId: visitor.id,
 		});
 		const settings = await this.repository.getSiteSettings(site.id);
+		const avatarSettings = this.loadAvatarSettings
+			? await this.loadAvatarSettings()
+			: {
+					gravatar: {
+						enabled: false,
+						baseUrl: "https://gravatar.com/avatar",
+					},
+				};
 
 		return {
 			thread,
@@ -194,9 +223,10 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay: buildCommentDisplayOptions(
-				this.repository.resolveCommentMetadata(settings ?? undefined),
-			),
+			commentDisplay: buildCommentDisplayOptions({
+				metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
+				avatar: avatarSettings,
+			}),
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 		};
 	}

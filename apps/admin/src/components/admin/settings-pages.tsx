@@ -849,6 +849,54 @@ export function SystemSettingsPage() {
 						<Input value={draft.logging.directory} readOnly />
 					</Field>
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">头像 / Gravatar</p>
+						<p className="text-sm text-muted-foreground">
+							后端只返回 author.gravatarUrl，不托管、不代理、不缓存头像图片。
+							图片缺失或加载失败时由前端继续显示名称首字母或文字 fallback。
+						</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="启用 Gravatar">
+								<select
+									className={inputClass}
+									value={String(draft.avatar.gravatar.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											avatar: {
+												gravatar: {
+													...draft.avatar.gravatar,
+													enabled: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="false">关闭</option>
+									<option value="true">开启</option>
+								</select>
+							</Field>
+							<Field label="Gravatar Base URL">
+								<Input
+									value={draft.avatar.gravatar.baseUrl}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											avatar: {
+												gravatar: {
+													...draft.avatar.gravatar,
+													baseUrl: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+								<span className="text-xs text-muted-foreground">
+									国内部署可填写镜像地址，例如 https://cravatar.cn/avatar。
+								</span>
+							</Field>
+						</div>
+					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
 						<p className="text-sm font-medium">邮件通知</p>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="启用邮件通知">

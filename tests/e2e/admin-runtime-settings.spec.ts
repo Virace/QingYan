@@ -59,6 +59,8 @@ test("system settings page renders database-owned install settings", async ({
 	await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
 	await expect(page.getByText("SMTP Host")).toBeVisible();
 	await expect(page.getByText("SMTP 密码")).toBeVisible();
+	await expect(page.getByText("启用 Gravatar")).toBeVisible();
+	await expect(page.getByText("Gravatar Base URL")).toBeVisible();
 	await expect(page.getByText("验证码类型 Provider")).toBeVisible();
 	await expect(page.getByText("图片宽度")).toBeVisible();
 	await expect(page.getByText("Turnstile Site Key")).toHaveCount(0);
