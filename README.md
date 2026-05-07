@@ -129,16 +129,24 @@ admin.password=...
 - 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
 - release 后破坏性升级规则由项目规范维护；开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`
 
-## 升级预留入口
+## 升级入口
 
-当前尚无正式 release，不为旧未发布状态提供兼容升级。首次正式 release 后，如果检测到需要 confirmed upgrade，优先使用 CLI 入口生成计划并备份：
+当前尚无正式 release，不为旧未发布状态提供兼容升级。首次正式 release 后，如果启动时检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是启动正常评论 API 或 Admin Console。终端会输出：
+
+```text
+upgrade.url=http://127.0.0.1:4401/upgrade
+```
+
+浏览器访问 `/upgrade` 可查看脱敏后的 `UpgradePlan`，确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
+
+CLI 仍是底层运维入口，适合服务器、Docker、CI 或 Web 无法启动的场景：
 
 ```bash
 pnpm qingyan:upgrade -- --dry-run --config config/qingyan.yml
 pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backup/upgrade
 ```
 
-`--dry-run` 只输出脱敏后的 `UpgradePlan`，不写配置、SQLite 或 upgrade ledger。`--apply` 必须显式提供 `--backup-dir`，执行前会备份 startup config、SQLite DB、WAL/SHM 和公开脱敏的 UpgradePlan。
+`--dry-run` 只输出脱敏后的 `UpgradePlan`，不写配置、SQLite 或 upgrade ledger。`--apply` 必须显式提供 `--backup-dir`，并与 Web Upgrade Mode 复用同一个升级执行服务。
 
 ## OpenAPI
 

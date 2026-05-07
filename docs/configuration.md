@@ -257,14 +257,24 @@ Admin 数据管理中的 WordPress WXR 导入和 QingYan JSON 导入在真实 ap
 
 当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`。
 
-当前已预留 CLI 骨架：
+启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `/upgrade` 地址；浏览器访问该页面后，会通过 HttpOnly `qingyan_upgrade` cookie 完成一次性升级令牌校验。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `/admin/install` 语义。
+
+Web Upgrade Mode 暴露最小接口：
+
+- `GET /upgrade`: 最小升级页面。
+- `GET /api/upgrade/state`: 返回公开脱敏的 UpgradePlan，或 recovery / broken config 状态。
+- `POST /api/upgrade/apply`: 需要升级 token 和精确确认文本 `UPGRADE QINGYAN`。
+
+confirmed upgrade 的写入顺序固定为：重新检测状态、创建 partial marker、创建 SQLite 数据库备份和 startup config / UpgradePlan 备份、执行 schema migrations、执行 application upgrades、写入 `__qingyan_upgrades` ledger、成功后清理 partial marker。若备份失败，不写 upgrade ledger；若任一步失败，partial marker 会保留，下次启动进入 `recovery_required`，不会继续启动 normal app。
+
+CLI 仍是底层运维入口：
 
 ```bash
 pnpm qingyan:upgrade -- --dry-run --config config/qingyan.yml
 pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backup/upgrade
 ```
 
-`--dry-run` 输出公开脱敏的 UpgradePlan，不写配置、SQLite 或 `__qingyan_upgrades`。`--apply` 仅用于 `upgrade_required` 状态，且必须提供 `--backup-dir`；写入 upgrade ledger 前会备份 startup config、SQLite DB、WAL/SHM 和 UpgradePlan。缺 startup config 仍进入 install mode，不进入 upgrade；坏 config 进入 `broken_config`，partial marker 进入 `recovery_required`。
+`--dry-run` 输出公开脱敏的 UpgradePlan，不写配置、SQLite 或 `__qingyan_upgrades`。`--apply` 仅用于 `upgrade_required` 状态，且必须提供 `--backup-dir`；CLI 和 Web Upgrade Mode 复用同一个升级执行服务。缺 startup config 仍进入 install mode，不进入 upgrade；坏 config 进入 `broken_config`，partial marker 进入 `recovery_required`。
 
 ## Dev Mode
 

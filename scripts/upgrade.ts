@@ -4,12 +4,7 @@ import path from "node:path";
 
 import { loadConfig, resolveConfigPath } from "../src/config/load-config";
 import type { AppConfig } from "../src/config/types";
-import { createUpgradeBackups } from "../src/modules/upgrade/backup";
-import { detectUpgradeRuntimeState } from "../src/modules/upgrade/state";
-import {
-	toPublicUpgradePlan,
-	type UpgradePlan,
-} from "../src/modules/upgrade/upgrade-plan";
+import { UpgradeService } from "../src/modules/upgrade/upgrade-service";
 
 interface UpgradeCliOptions {
 	configPath?: string;
@@ -61,30 +56,6 @@ function readPackageVersion(): string {
 	return packageJson.version ?? "0.0.0";
 }
 
-function writeAppliedUpgrades(databaseFile: string, plan: UpgradePlan): void {
-	const sqlite = new Database(databaseFile);
-	try {
-		const insert = sqlite.prepare(`
-			INSERT OR REPLACE INTO __qingyan_upgrades
-				(name, from_version, to_version, summary_json)
-			VALUES (?, ?, ?, ?)
-		`);
-		const apply = sqlite.transaction(() => {
-			for (const step of plan.applicationUpgrades) {
-				insert.run(
-					step.name,
-					step.fromVersion ?? null,
-					step.toVersion ?? plan.targetVersion,
-					JSON.stringify(step.summary ?? {}),
-				);
-			}
-		});
-		apply();
-	} finally {
-		sqlite.close();
-	}
-}
-
 export async function runUpgradeCli(
 	args = process.argv.slice(2),
 ): Promise<number> {
@@ -100,15 +71,18 @@ export async function runUpgradeCli(
 	const databaseFile = loadedConfig
 		? path.resolve(process.cwd(), loadedConfig.database.sqlite.file)
 		: path.resolve(process.cwd(), "config", "qingyan.db");
-	const state = detectUpgradeRuntimeState({
+	const service = new UpgradeService({
 		configPath,
 		loadedConfig,
 		configError,
 		databaseFile,
 		createSqliteClient: (file) => new Database(file),
 		currentApplicationVersion: readPackageVersion(),
-		partialUpgradeMarkerPath: options.partialMarkerPath,
+		partialUpgradeMarkerPath:
+			options.partialMarkerPath ??
+			path.join(path.dirname(databaseFile), "upgrade", "partial-upgrade.json"),
 	});
+	const state = service.publicState();
 
 	if (state.state !== "upgrade_required") {
 		console.log(JSON.stringify({ state: state.state }, null, 2));
@@ -118,7 +92,7 @@ export async function runUpgradeCli(
 			: 0;
 	}
 	if (options.dryRun) {
-		console.log(JSON.stringify(toPublicUpgradePlan(state.plan), null, 2));
+		console.log(JSON.stringify(state.plan, null, 2));
 		return 0;
 	}
 	if (!options.backupDirectory) {
@@ -126,14 +100,11 @@ export async function runUpgradeCli(
 			"--apply requires --backup-dir before writing upgrade ledger.",
 		);
 	}
-	const backups = createUpgradeBackups({
-		configPath,
-		databaseFile,
-		plan: state.plan,
+	const result = await service.apply({
+		confirm: "UPGRADE QINGYAN",
 		backupDirectory: options.backupDirectory,
 	});
-	writeAppliedUpgrades(databaseFile, state.plan);
-	console.log(JSON.stringify({ state: "applied", backups }, null, 2));
+	console.log(JSON.stringify(result, null, 2));
 	return 0;
 }
 

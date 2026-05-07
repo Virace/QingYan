@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { detectUpgradeRuntimeState } from "../../src/modules/upgrade/state";
+import { writePartialUpgradeMarker } from "../../src/modules/upgrade/partial-marker";
 import {
 	createTestConfig,
 	applyInitialMigration,
@@ -164,7 +165,15 @@ describe("upgrade runtime state", () => {
 		try {
 			const markerPath = path.join(workspace.directory, "partial-upgrade.json");
 			writeFileSync(workspace.configPath, "server:\n", "utf-8");
-			writeFileSync(markerPath, "{}", "utf-8");
+			writePartialUpgradeMarker({
+				markerPath,
+				fromVersion: "0.0.1",
+				toVersion: "0.1.0",
+				planPath: "backup/upgrade-plan.json",
+				backupDirectory: "backup",
+				currentStep: "schema-migrations",
+				now: () => new Date("2026-05-07T00:00:00.000Z"),
+			});
 
 			const state = detectUpgradeRuntimeState({
 				configPath: workspace.configPath,
@@ -178,6 +187,15 @@ describe("upgrade runtime state", () => {
 			expect(state).toEqual({
 				state: "recovery_required",
 				reason: "partial_upgrade_marker",
+				recovery: {
+					kind: "qingyan_partial_upgrade",
+					startedAt: "2026-05-07T00:00:00.000Z",
+					fromVersion: "0.0.1",
+					toVersion: "0.1.0",
+					planPath: "backup/upgrade-plan.json",
+					backupDirectory: "backup",
+					currentStep: "schema-migrations",
+				},
 			});
 		} finally {
 			workspace.cleanup();

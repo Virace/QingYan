@@ -1,5 +1,8 @@
+import Database from "better-sqlite3";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { buildApp } from "./app";
-import { loadConfig } from "./config/load-config";
 import { resolveRuntimeOptions } from "./config/runtime-options";
 import { buildInstallApp } from "./modules/install/install-app";
 import {
@@ -7,15 +10,39 @@ import {
 	resolveMinimalInstallConfig,
 } from "./modules/install/minimal-config";
 import { resolveInstallState } from "./modules/install/state";
+import { createUpgradeApp } from "./modules/upgrade/upgrade-app";
+import { resolveStartupMode } from "./startup-mode";
 
 function resolveAdminUrl(publicBaseUrl: string, consolePath: string): string {
 	return new URL(consolePath, publicBaseUrl).toString();
 }
 
+function readPackageVersion(): string {
+	const packagePath = path.resolve(process.cwd(), "package.json");
+	const packageJson = JSON.parse(readFileSync(packagePath, "utf-8")) as {
+		version?: string;
+	};
+	return packageJson.version ?? "0.0.0";
+}
+
 async function main(): Promise<void> {
 	const minimalInstallConfig = resolveMinimalInstallConfig();
 	const installState = await resolveInstallState(minimalInstallConfig);
-	if (!installState.installed) {
+	const startupMode = await resolveStartupMode({
+		installed: installState.installed,
+		installReason: installState.reason,
+		configPath: minimalInstallConfig.configPath,
+		currentApplicationVersion: readPackageVersion(),
+		partialUpgradeMarkerPath: path.join(
+			path.dirname(minimalInstallConfig.configPath),
+			"..",
+			"data",
+			"upgrade",
+			"partial-upgrade.json",
+		),
+		createSqliteClient: (file) => new Database(file),
+	});
+	if (startupMode.mode === "install") {
 		if (minimalInstallConfig.disabled) {
 			throw new Error(
 				`QingYan is not installed and install mode is disabled: ${installState.reason ?? "unknown"}`,
@@ -36,9 +63,37 @@ async function main(): Promise<void> {
 		console.log(`install.url=${resolveInstallUrl(minimalInstallConfig)}`);
 		return;
 	}
+	if (startupMode.mode === "upgrade") {
+		const upgradeApp = createUpgradeApp({
+			configPath: minimalInstallConfig.configPath,
+			loadedConfig: startupMode.config,
+			configError: startupMode.configError,
+			databaseFile: startupMode.databaseFile,
+			currentApplicationVersion: readPackageVersion(),
+			partialUpgradeMarkerPath: path.join(
+				path.dirname(minimalInstallConfig.configPath),
+				"..",
+				"data",
+				"upgrade",
+				"partial-upgrade.json",
+			),
+			createSqliteClient: (file) => new Database(file),
+		});
+		const listenConfig = startupMode.config?.server ?? minimalInstallConfig;
+		await upgradeApp.listen({
+			host: listenConfig.host,
+			port: listenConfig.port,
+		});
+		const host =
+			listenConfig.host === "0.0.0.0" || listenConfig.host === "::"
+				? "localhost"
+				: listenConfig.host;
+		console.log(`upgrade.url=http://${host}:${listenConfig.port}/upgrade`);
+		console.log(`upgrade.state=${startupMode.state.state}`);
+		return;
+	}
 
-	const loadedConfig = await loadConfig(minimalInstallConfig.configPath);
-	const { config, runtimeOptions } = resolveRuntimeOptions(loadedConfig);
+	const { config, runtimeOptions } = resolveRuntimeOptions(startupMode.config);
 	const app = await buildApp(config, runtimeOptions);
 
 	await app.listen({

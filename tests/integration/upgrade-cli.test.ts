@@ -154,11 +154,16 @@ describe("upgrade cli", () => {
 				{ name: "application-version:0.1.0", to_version: "0.1.0" },
 			]);
 			const result = JSON.parse(output.mock.calls.at(-1)?.[0] ?? "{}") as {
-				backups?: { config?: string; database?: string; plan?: string };
+				backup?: {
+					files?: Array<{ role: string; backupPath: string | null }>;
+				};
 			};
-			expect(existsSync(result.backups?.config ?? "")).toBe(true);
-			expect(existsSync(result.backups?.database ?? "")).toBe(true);
-			expect(existsSync(result.backups?.plan ?? "")).toBe(true);
+			const backupPath = (role: string) =>
+				result.backup?.files?.find((file) => file.role === role)?.backupPath ??
+				"";
+			expect(existsSync(backupPath("config"))).toBe(true);
+			expect(existsSync(backupPath("database"))).toBe(true);
+			expect(existsSync(backupPath("plan"))).toBe(true);
 		} finally {
 			output.mockRestore();
 			workspace.cleanup();

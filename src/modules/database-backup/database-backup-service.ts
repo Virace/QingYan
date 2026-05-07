@@ -16,7 +16,7 @@ export type DatabaseBackupKind =
 	| "upgrade_database_backup";
 
 export interface DatabaseBackupFile {
-	role: "database" | "wal" | "shm" | "metadata";
+	role: "database" | "wal" | "shm" | "config" | "plan" | "metadata";
 	path: string;
 	backupPath: string | null;
 	present: boolean;
@@ -102,8 +102,89 @@ export class DatabaseBackupService {
 		return result;
 	}
 
+	public async createUpgradeBackup(input: {
+		upgradeId: string;
+		fromVersion: string;
+		toVersion: string;
+		configPath: string;
+		plan: unknown;
+		partialMarkerPath: string;
+		backupDirectory?: string;
+	}): Promise<DatabaseBackupResult> {
+		if (this.input.engine !== "sqlite") {
+			throw new Error("DATABASE_BACKUP_ENGINE_UNSUPPORTED");
+		}
+
+		const createdAt = (this.input.now?.() ?? new Date()).toISOString();
+		const backupDirectory =
+			input.backupDirectory ??
+			path.join(
+				path.dirname(this.input.databaseFile),
+				"backups",
+				"upgrades",
+				input.upgradeId,
+			);
+		mkdirSync(backupDirectory, { recursive: true });
+
+		const stamp = createdAt.replace(/\D/g, "").slice(0, 14);
+		const databaseBackupPath = path.join(
+			backupDirectory,
+			`${path.basename(this.input.databaseFile)}.bak-${stamp}`,
+		);
+		await this.input.sqlite.backup(databaseBackupPath);
+
+		const planPath = path.join(backupDirectory, "upgrade-plan.json");
+		writeFileSync(
+			planPath,
+			`${JSON.stringify(input.plan, null, 2)}\n`,
+			"utf-8",
+		);
+
+		const files = [
+			this.fileMetadata(
+				"database",
+				this.input.databaseFile,
+				databaseBackupPath,
+			),
+			this.copyOptional(
+				"wal",
+				`${this.input.databaseFile}-wal`,
+				backupDirectory,
+				stamp,
+			),
+			this.copyOptional(
+				"shm",
+				`${this.input.databaseFile}-shm`,
+				backupDirectory,
+				stamp,
+			),
+			this.copyOptional("config", input.configPath, backupDirectory, stamp),
+			this.fileMetadata("plan", planPath, planPath),
+		];
+		const result: DatabaseBackupResult = {
+			kind: "upgrade_database_backup",
+			engine: "sqlite",
+			strategy: "sqlite_backup_api",
+			createdAt,
+			backupDirectory: this.displayPath(backupDirectory),
+			databaseBackupPath: this.displayPath(databaseBackupPath),
+			files,
+			notes: [
+				"SQLite backup API output is the primary restore file.",
+				"Startup config and public UpgradePlan are included for recovery.",
+				"WAL/SHM files are copied when present for diagnostics.",
+			],
+		};
+		const metadataPath = path.join(backupDirectory, "metadata.json");
+		writeFileSync(metadataPath, JSON.stringify({ ...result, input }, null, 2));
+		result.files.push(
+			this.fileMetadata("metadata", metadataPath, metadataPath),
+		);
+		return result;
+	}
+
 	private copyOptional(
-		role: "wal" | "shm",
+		role: Exclude<DatabaseBackupFile["role"], "database" | "plan" | "metadata">,
 		filePath: string,
 		backupDirectory: string,
 		stamp: string,

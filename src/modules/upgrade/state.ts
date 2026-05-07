@@ -2,6 +2,10 @@ import { existsSync } from "node:fs";
 
 import type { AppConfig } from "../../config/types";
 import type { SqliteClient } from "../../db/client";
+import {
+	readPartialUpgradeMarker,
+	type PartialUpgradeMarker,
+} from "./partial-marker";
 import type {
 	UpgradeApplicationStep,
 	UpgradeMigrationStep,
@@ -12,7 +16,11 @@ export type UpgradeRuntimeState =
 	| { state: "not_installed" }
 	| { state: "normal_current" }
 	| { state: "upgrade_required"; plan: UpgradePlan }
-	| { state: "recovery_required"; reason: string }
+	| {
+			state: "recovery_required";
+			reason: string;
+			recovery: PartialUpgradeMarker | null;
+	  }
 	| { state: "broken_config"; reason: string };
 
 export interface UpgradeDetectorInput {
@@ -190,7 +198,11 @@ export function detectUpgradeRuntimeState(
 		input.partialUpgradeMarkerPath &&
 		existsSync(input.partialUpgradeMarkerPath)
 	) {
-		return { state: "recovery_required", reason: "partial_upgrade_marker" };
+		return {
+			state: "recovery_required",
+			reason: "partial_upgrade_marker",
+			recovery: readPartialUpgradeMarker(input.partialUpgradeMarkerPath),
+		};
 	}
 	if (!input.loadedConfig || !existsSync(input.databaseFile)) {
 		return { state: "not_installed" };

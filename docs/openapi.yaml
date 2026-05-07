@@ -22,6 +22,7 @@ tags:
   - name: Admin Blacklist
   - name: Admin Sites
   - name: Admin Site Settings
+  - name: Upgrade
 paths:
   /healthz:
     get:
@@ -744,6 +745,42 @@ paths:
           $ref: '#/components/responses/Error401'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/upgrade/state:
+    get:
+      tags: [Upgrade]
+      summary: 获取 Web Upgrade Mode 状态
+      operationId: getUpgradeState
+      responses:
+        '200':
+          description: 当前升级状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpgradeStateResponse'
+  /api/upgrade/apply:
+    post:
+      tags: [Upgrade]
+      summary: 执行确认后的 Web upgrade
+      operationId: applyUpgrade
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpgradeApplyRequest'
+      responses:
+        '200':
+          description: 升级执行完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpgradeApplyResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
 components:
   securitySchemes:
     AdminSessionCookie:
@@ -891,6 +928,169 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorObject'
+    UpgradePlan:
+      type: object
+      required:
+        - currentVersion
+        - targetVersion
+        - schemaMigrations
+        - applicationUpgrades
+        - configChanges
+        - dbSettingChanges
+        - secretHandling
+        - backupPaths
+        - risks
+      properties:
+        currentVersion:
+          type: string
+        targetVersion:
+          type: string
+        schemaMigrations:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+        applicationUpgrades:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              fromVersion:
+                type: string
+              toVersion:
+                type: string
+              summary:
+                type: object
+                additionalProperties: true
+        configChanges:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        dbSettingChanges:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        secretHandling:
+          type: array
+          items:
+            type: string
+        backupPaths:
+          type: object
+          additionalProperties: true
+        risks:
+          type: array
+          items:
+            type: string
+    PartialUpgradeMarker:
+      type: object
+      required:
+        - kind
+        - startedAt
+        - fromVersion
+        - toVersion
+        - planPath
+        - backupDirectory
+        - currentStep
+      properties:
+        kind:
+          type: string
+          const: qingyan_partial_upgrade
+        startedAt:
+          type: string
+        fromVersion:
+          type: string
+        toVersion:
+          type: string
+        planPath:
+          type: string
+        backupDirectory:
+          type: string
+        currentStep:
+          type: string
+        error:
+          type: string
+    UpgradeStateResponse:
+      oneOf:
+        - type: object
+          required: [state, plan]
+          properties:
+            state:
+              type: string
+              const: upgrade_required
+            plan:
+              $ref: '#/components/schemas/UpgradePlan'
+        - type: object
+          required: [state, reason, recovery]
+          properties:
+            state:
+              type: string
+              const: recovery_required
+            reason:
+              type: string
+            recovery:
+              oneOf:
+                - $ref: '#/components/schemas/PartialUpgradeMarker'
+                - type: 'null'
+        - type: object
+          required: [state, reason]
+          properties:
+            state:
+              type: string
+              const: broken_config
+            reason:
+              type: string
+        - type: object
+          required: [state]
+          properties:
+            state:
+              type: string
+              enum: [normal_current, not_installed]
+    UpgradeApplyRequest:
+      type: object
+      required: [confirm]
+      properties:
+        token:
+          type: string
+          description: 可选；浏览器流程通常通过 HttpOnly cookie 提供
+        confirm:
+          type: string
+          const: UPGRADE QINGYAN
+        backupDirectory:
+          type: string
+    UpgradeApplyResponse:
+      type: object
+      required: [state, backup, applied, restartRequired]
+      properties:
+        state:
+          type: string
+          const: applied
+        backup:
+          type: object
+          additionalProperties: true
+        applied:
+          type: object
+          required: [schemaMigrations, applicationUpgrades]
+          properties:
+            schemaMigrations:
+              type: array
+              items:
+                type: string
+            applicationUpgrades:
+              type: array
+              items:
+                type: string
+        restartRequired:
+          type: boolean
     CommentCapability:
       type: object
       required:
