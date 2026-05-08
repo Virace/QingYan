@@ -196,6 +196,8 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 - 运行时 JSON：`GET /openapi.json`
 - 文档页：`GET /docs`
 
+公开 OpenAPI 只覆盖内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口。Admin Console Web 使用的 `/api/admin/*` 管理接口不进入公开 OpenAPI；开发者调试或扩展内置后台时可参考 [`docs/admin-console-api.md`](docs/admin-console-api.md)。
+
 ## Docker / Compose
 
 ### Docker 构建

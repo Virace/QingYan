@@ -145,13 +145,7 @@ security:
 - `name`
 - `allowedOrigins`
 
-每个站点的行为由 `site_settings` 持久化，后台 API 路径为：
-
-```text
-GET /api/admin/sites/{siteKey}/settings
-PUT /api/admin/sites/{siteKey}/settings
-PATCH /api/admin/sites/{siteKey}
-```
+每个站点的行为由 `site_settings` 持久化，并通过 QingYan 自带 Admin Console 维护。对应的 `/api/admin/*` 路径不纳入公开 OpenAPI；开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`。
 
 站点设置包含：
 
@@ -199,7 +193,9 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 
 首装会写入完整默认系统设置。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
-Admin API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 typed 设置。secret 字段不会在 Admin API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+
+`/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
 
 日志目录仍属于部署环境，不在后台修改。logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
 
