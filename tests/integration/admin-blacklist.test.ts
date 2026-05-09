@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -16,14 +16,12 @@ describe("admin blacklist", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const createResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/blacklist",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				targetType: "email",
@@ -66,9 +64,7 @@ describe("admin blacklist", () => {
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
 			url: `/api/admin/blacklist/${ruleId}`,
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(deleteResponse.statusCode).toBe(200);
 		expect(deleteResponse.json()).toMatchObject({

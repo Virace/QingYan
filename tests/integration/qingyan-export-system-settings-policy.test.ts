@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 function qingyanExportPayload() {
@@ -43,7 +43,7 @@ function qingyanExportPayload() {
 describe("QingYan export system settings policy", () => {
 	it("excludes system setting secrets from ordinary exports", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const repository = new AdminSystemSettingsRepository(fixture.app.db);
 		await repository.upsert("mail", "smtp.password", "smtp-secret");
 		await repository.upsert(
@@ -56,9 +56,7 @@ describe("QingYan export system settings policy", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/export",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				format: "qingyan.export.v1",
@@ -92,7 +90,7 @@ describe("QingYan export system settings policy", () => {
 
 	it("rejects secret system setting rows during ordinary import dry-run", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const payload = qingyanExportPayload();
 		payload.data.systemSettings = [
 			{
@@ -106,9 +104,7 @@ describe("QingYan export system settings policy", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "qingyan-export.json",
@@ -132,7 +128,7 @@ describe("QingYan export system settings policy", () => {
 
 	it("dry-runs and applies non-secret system setting rows during ordinary import", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const repository = new AdminSystemSettingsRepository(fixture.app.db);
 		await repository.upsert("logging", "level", "info");
 		const payload = qingyanExportPayload();
@@ -148,9 +144,7 @@ describe("QingYan export system settings policy", () => {
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "qingyan-export.json",
@@ -184,9 +178,7 @@ describe("QingYan export system settings policy", () => {
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/qingyan/jobs/${dryRunResponse.json().job.id}/apply`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
 				importMode: "settings_only",

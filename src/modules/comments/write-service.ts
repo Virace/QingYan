@@ -5,6 +5,7 @@ import {
 	defaultSystemSettings,
 	type SystemSettings,
 } from "../system-settings/definitions";
+import { normalizeSafeHttpUrl } from "../shared/url-policy";
 import type { CommentsRepository } from "./repository";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
@@ -92,7 +93,10 @@ export class CommentsWriteService {
 			Boolean(input.verifiedAuthorSession) && verifiedAuthor.enabled;
 		const authorName = input.author.name?.trim() ?? "";
 		const authorEmail = input.author.email?.trim() || undefined;
-		const authorWebsite = input.author.website?.trim() || undefined;
+		const authorWebsiteInput = input.author.website?.trim() || undefined;
+		const authorWebsite = authorWebsiteInput
+			? normalizeSafeHttpUrl(authorWebsiteInput)
+			: undefined;
 		if (
 			!shouldUseVerifiedAuthor &&
 			commentForm.require.includes("nickname") &&

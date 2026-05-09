@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { captchaSessions, siteSettings } from "../../src/db/schema";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import {
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
@@ -180,16 +180,15 @@ describe("logging business events", () => {
 		});
 		expect(createComment.statusCode).toBe(200);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const updateSettings = await fixture.app.inject({
 			method: "PUT",
 			url: "/api/admin/sites/fangyuan/settings",
 			headers: {
 				"x-request-id": "req_settings_updated",
+				...withAdminWriteAuth({ adminCookie, csrfToken }).headers,
 			},
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			cookies: withAdminWriteAuth({ adminCookie, csrfToken }).cookies,
 			payload: {
 				comments: {
 					defaultStatus: "approved",

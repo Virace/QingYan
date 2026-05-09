@@ -96,6 +96,8 @@ CREATE INDEX `page_threads_site_id_idx` ON `page_threads` (`site_id`);--> statem
 CREATE TABLE `admin_sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`token_hash` text NOT NULL,
+	`csrf_token_hash` text,
+	`csrf_issued_at` text,
 	`ip` text,
 	`user_agent` text,
 	`expires_at` text NOT NULL,

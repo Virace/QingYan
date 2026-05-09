@@ -6,6 +6,7 @@ import {
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
 } from "../support/captcha";
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -17,6 +18,60 @@ afterEach(async () => {
 });
 
 describe("admin session", () => {
+	it("returns csrf token on login and me", async () => {
+		await withForcedTestCaptchaAnswer(async () => {
+			const fixture = await createTestApp();
+			cleanups.push(fixture.cleanup);
+
+			const captchaResponse = await fixture.app.inject({
+				method: "GET",
+				url: "/api/admin/session/captcha",
+			});
+			const { challenge } = captchaResponse.json() as {
+				challenge: {
+					challengeId: string;
+				};
+			};
+
+			const loginResponse = await fixture.app.inject({
+				method: "POST",
+				url: "/api/admin/session/login",
+				payload: {
+					username: "admin",
+					password: "replace-me",
+					challengeId: challenge.challengeId,
+					captchaValue: getForcedTestCaptchaAnswer(),
+				},
+			});
+
+			expect(loginResponse.statusCode).toBe(200);
+			expect(loginResponse.json()).toMatchObject({
+				authenticated: true,
+				csrf: {
+					header: "x-qingyan-csrf-token",
+				},
+			});
+
+			const adminCookie = loginResponse.cookies.find(
+				(cookie) => cookie.name === "qingyan_admin",
+			);
+			const meResponse = await fixture.app.inject({
+				method: "GET",
+				url: "/api/admin/session/me",
+				cookies: {
+					qingyan_admin: adminCookie?.value ?? "",
+				},
+			});
+			expect(meResponse.statusCode).toBe(200);
+			expect(meResponse.json()).toMatchObject({
+				authenticated: true,
+				csrf: {
+					header: "x-qingyan-csrf-token",
+				},
+			});
+		});
+	});
+
 	it("requires captcha before allowing admin login", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -38,7 +93,7 @@ describe("admin session", () => {
 		});
 	});
 
-	it("permanently blacklists an ip after five invalid password submissions", async () => {
+	it("temporarily blacklists an ip after configured invalid password submissions", async () => {
 		await withForcedTestCaptchaAnswer(async () => {
 			const fixture = await createTestApp();
 			cleanups.push(fixture.cleanup);
@@ -81,8 +136,8 @@ describe("admin session", () => {
 				targetValue: "127.0.0.1",
 				source: "auto",
 				scope: "all",
-				expiresAt: null,
 			});
+			expect(rules[0]?.expiresAt).toBeTruthy();
 
 			const captchaResponse = await fixture.app.inject({
 				method: "GET",
@@ -188,7 +243,15 @@ describe("admin session", () => {
 			const adminCookie = loginResponse.cookies.find(
 				(cookie) => cookie.name === "qingyan_admin",
 			);
+			const csrfToken = (
+				loginResponse.json() as {
+					csrf?: {
+						token?: string;
+					};
+				}
+			).csrf?.token;
 			expect(adminCookie?.maxAge).toBe(86_400);
+			expect(csrfToken).toBeTruthy();
 
 			const meResponse = await fixture.app.inject({
 				method: "GET",
@@ -202,12 +265,24 @@ describe("admin session", () => {
 				authenticated: true,
 				sites: [{ siteKey: "fangyuan", name: "FangYuan" }],
 			});
+			const meCsrfToken = (
+				meResponse.json() as {
+					csrf?: {
+						token?: string;
+					};
+				}
+			).csrf?.token;
+			expect(meCsrfToken).toBeTruthy();
 
 			const logoutResponse = await fixture.app.inject({
 				method: "POST",
 				url: "/api/admin/session/logout",
 				cookies: {
 					qingyan_admin: adminCookie?.value ?? "",
+				},
+				headers: {
+					origin: "http://localhost:4401",
+					"x-qingyan-csrf-token": meCsrfToken ?? "",
 				},
 			});
 			expect(logoutResponse.statusCode).toBe(200);
@@ -228,6 +303,33 @@ describe("admin session", () => {
 					code: "ADMIN_AUTH_REQUIRED",
 				},
 			});
+		});
+	});
+
+	it("rejects admin write requests without csrf token", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/api/admin/sites/fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			headers: {
+				origin: "http://localhost:4401",
+			},
+			payload: {
+				name: "Blocked",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "ADMIN_CSRF_REQUIRED",
+			},
 		});
 	});
 

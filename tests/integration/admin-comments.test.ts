@@ -9,7 +9,7 @@ import {
 	sites,
 } from "../../src/db/schema";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -25,7 +25,7 @@ describe("admin comments", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const [site] = await fixture.app.db
 			.select()
@@ -119,9 +119,10 @@ describe("admin comments", () => {
 		const patchResponse = await fixture.app.inject({
 			method: "PATCH",
 			url: "/api/admin/comments/c_admin_1",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				status: "approved",
 				isPinned: true,
@@ -139,9 +140,10 @@ describe("admin comments", () => {
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
 			url: "/api/admin/comments/c_admin_1",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 		});
 		expect(deleteResponse.statusCode).toBe(200);
 		expect(deleteResponse.json()).toMatchObject({
@@ -161,7 +163,7 @@ describe("admin comments", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const [site] = await fixture.app.db
 			.select()
 			.from(sites)
@@ -218,9 +220,10 @@ describe("admin comments", () => {
 		const reply = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/comments/c_admin_reply_root/reply",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				content: {
 					raw: "管理员回复",
@@ -256,7 +259,7 @@ describe("admin comments", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const [site] = await fixture.app.db
 			.select()
 			.from(sites)
@@ -312,9 +315,10 @@ describe("admin comments", () => {
 		const reply = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/comments/c_admin_reply_disabled_root/reply",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				content: {
 					raw: "管理员回复",

@@ -33,7 +33,7 @@ export const createCommentBodySchema = z.object({
 	author: z.object({
 		name: z.string().trim().optional().default(""),
 		email: z.string().trim().email().optional(),
-		website: z.string().url().optional(),
+		website: z.string().trim().optional(),
 	}),
 	content: z.object({
 		raw: z.string().min(1),

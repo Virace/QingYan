@@ -94,10 +94,16 @@ const defaultSecurityConfig = {
 		enabled: true,
 		allowMissingOrigin: false,
 	},
+	adminOriginGuard: {
+		enabled: true,
+		allowMissingOrigin: false,
+		allowedOrigins: [],
+	},
 	rateLimit: {
 		adminLogin: {
 			windowSec: 600,
 			maxFailures: 5,
+			autoBlacklistSec: 1800,
 		},
 		commentCreate: {
 			windowSec: 300,

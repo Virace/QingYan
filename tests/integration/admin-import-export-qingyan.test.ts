@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { comments, siteSettings } from "../../src/db/schema";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 function qingyanExportPayload() {
@@ -171,9 +171,36 @@ function qingyanExportPayload() {
 }
 
 describe("admin import/export QingYan routes", () => {
+	it("rejects qingyan import when site allowedOrigins contains a path", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const payload = qingyanExportPayload();
+		payload.data.site.allowedOrigins = ["https://admin.example.com/path"];
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/import-export/qingyan/dry-run",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "bad-export.json",
+				payload,
+				existingStrategy: "fail_on_existing",
+				importMode: "full_site",
+				settingsStrategy: "replace_settings",
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+	});
+
 	it("exports a site-scoped qingyan.export.v2 logical JSON without runtime session data", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		fixture.app.sqlite
 			.prepare(
@@ -204,9 +231,10 @@ describe("admin import/export QingYan routes", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/export",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				format: "qingyan.export.v1",
@@ -273,15 +301,16 @@ describe("admin import/export QingYan routes", () => {
 
 	it("dry-runs and applies a qingyan.export.v2 JSON data-only import", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const payload = qingyanExportPayload();
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "qingyan-export.json",
@@ -313,9 +342,10 @@ describe("admin import/export QingYan routes", () => {
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/qingyan/jobs/${jobId}/apply`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				existingStrategy: "fail_on_existing",
 				importMode: "data_only",
@@ -389,15 +419,16 @@ describe("admin import/export QingYan routes", () => {
 
 	it("dry-runs and applies settings-only imports without comments", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const payload = qingyanExportPayload();
 
 		const conflictResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "settings.json",
@@ -432,9 +463,10 @@ describe("admin import/export QingYan routes", () => {
 		const replaceResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "settings.json",
@@ -459,9 +491,10 @@ describe("admin import/export QingYan routes", () => {
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/qingyan/jobs/${replaceResponse.json().job.id}/apply`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				existingStrategy: "fail_on_existing",
 				importMode: "settings_only",
@@ -490,7 +523,7 @@ describe("admin import/export QingYan routes", () => {
 
 	it("uses import records to block or skip repeated QingYan comments", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const payload = qingyanExportPayload();
 
 		fixture.app.sqlite
@@ -531,9 +564,10 @@ describe("admin import/export QingYan routes", () => {
 		const conflictResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "qingyan-export.json",
@@ -559,9 +593,10 @@ describe("admin import/export QingYan routes", () => {
 		const skipResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "qingyan-export.json",
@@ -588,14 +623,15 @@ describe("admin import/export QingYan routes", () => {
 
 	it("rejects unsupported future QingYan export versions", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/qingyan/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "future.json",

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -16,7 +16,7 @@ describe("admin settings", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
@@ -70,9 +70,7 @@ describe("admin settings", () => {
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
 			url: "/api/admin/sites/fangyuan/settings",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				comments: {
 					defaultStatus: "approved",
@@ -192,16 +190,14 @@ describe("admin settings", () => {
 	it("persists site settings for the dev default site", async () => {
 		const fixture = await createTestApp({ devMode: true });
 		cleanups.push(fixture.cleanup);
-		const { adminCookie } = await loginAsAdmin(fixture.app, {
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app, {
 			password: "admin",
 		});
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
 			url: "/api/admin/sites/default/settings",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				comments: {
 					enabled: false,

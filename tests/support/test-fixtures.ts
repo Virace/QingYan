@@ -105,10 +105,16 @@ export function createTestConfig(
 				enabled: true,
 				allowMissingOrigin: true,
 			},
+			adminOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: false,
+				allowedOrigins: [],
+			},
 			rateLimit: {
 				adminLogin: {
 					windowSec: 600,
 					maxFailures: 5,
+					autoBlacklistSec: 1800,
 				},
 				commentCreate: {
 					windowSec: 300,

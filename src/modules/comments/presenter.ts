@@ -1,4 +1,5 @@
 import { buildGravatarUrl } from "./gravatar";
+import { sanitizeOptionalSafeHttpUrl } from "../shared/url-policy";
 import type { CommentAuthorIdentity } from "./verified-author";
 
 interface PresenterCommentInput {
@@ -62,11 +63,7 @@ function toPublicTimestamp(value: string | null): string | null {
 	return Number.isNaN(timestamp.getTime()) ? value : timestamp.toISOString();
 }
 
-function renderHtml(raw: string, existingHtml: string | null): string {
-	if (existingHtml) {
-		return existingHtml;
-	}
-
+function renderHtml(raw: string): string {
 	return `<p>${raw
 		.replaceAll("&", "&amp;")
 		.replaceAll("<", "&lt;")
@@ -153,7 +150,7 @@ export function presentComments(
 		});
 		const author: Record<string, unknown> = {
 			name: comment.authorName,
-			website: comment.authorWebsite ?? undefined,
+			website: sanitizeOptionalSafeHttpUrl(comment.authorWebsite),
 			gravatarUrl,
 		};
 		if (
@@ -171,7 +168,7 @@ export function presentComments(
 			author,
 			content: {
 				raw: comment.contentRaw,
-				html: renderHtml(comment.contentRaw, comment.contentHtml),
+				html: renderHtml(comment.contentRaw),
 			},
 			status: comment.status,
 			isPinned: comment.isPinned,

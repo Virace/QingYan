@@ -51,10 +51,36 @@ export async function loginAsAdmin(
 		if (!adminCookie?.value) {
 			throw new Error("Expected qingyan_admin cookie");
 		}
+		const payload = loginResponse.json() as {
+			csrf?: {
+				header?: string;
+				token?: string;
+			};
+		};
+		if (!payload.csrf?.token) {
+			throw new Error("Expected csrf token in login response");
+		}
 
 		return {
 			adminCookie,
+			csrfToken: payload.csrf.token,
 			loginResponse,
 		};
 	});
+}
+
+export function withAdminWriteAuth(input: {
+	adminCookie: { value: string };
+	csrfToken: string;
+	origin?: string;
+}) {
+	return {
+		cookies: {
+			qingyan_admin: input.adminCookie.value,
+		},
+		headers: {
+			origin: input.origin ?? "http://localhost:4401",
+			"x-qingyan-csrf-token": input.csrfToken,
+		},
+	};
 }

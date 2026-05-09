@@ -2,6 +2,7 @@ import type { AppDatabase } from "../../db/client";
 import { eq } from "drizzle-orm";
 import { siteSettings } from "../../db/schema/settings";
 import { sites } from "../../db/schema/sites";
+import { normalizeOriginList } from "./url-policy";
 import { buildDefaultSiteSettings } from "./site-settings-defaults";
 
 export interface RegisteredSiteRecord {
@@ -18,7 +19,7 @@ export interface SiteSeed {
 }
 
 function serializeAllowedOrigins(allowedOrigins: string[]): string {
-	return JSON.stringify(allowedOrigins);
+	return JSON.stringify(normalizeOriginList(allowedOrigins));
 }
 
 function parseAllowedOrigins(payload: string): string[] {

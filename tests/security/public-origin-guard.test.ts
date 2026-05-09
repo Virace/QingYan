@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../../src/config/types";
 import { siteSettings } from "../../src/db/schema";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -98,14 +98,12 @@ describe("public origin guard", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const update = await fixture.app.inject({
 			method: "PATCH",
 			url: "/api/admin/sites/fangyuan",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				allowedOrigins: ["https://new.example.com"],
 			},

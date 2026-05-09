@@ -16,6 +16,10 @@ import {
 } from "../comments/verified-author";
 import { presentComments } from "../comments/presenter";
 import { CommentsWriteRepository } from "../comments/write-repository";
+import {
+	normalizeOriginList,
+	sanitizeOptionalSafeHttpUrl,
+} from "../shared/url-policy";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminRepository } from "./repository";
 
@@ -251,7 +255,7 @@ export class AdminManagementService {
 		const site = await this.repository.createSite({
 			siteKey: input.siteKey,
 			name: input.name,
-			allowedOrigins: input.allowedOrigins,
+			allowedOrigins: normalizeOriginList(input.allowedOrigins),
 		});
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
@@ -288,7 +292,9 @@ export class AdminManagementService {
 
 		const site = await this.repository.updateSite(input.siteKey, {
 			name: input.name,
-			allowedOrigins: input.allowedOrigins,
+			allowedOrigins: input.allowedOrigins
+				? normalizeOriginList(input.allowedOrigins)
+				: undefined,
 		});
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
@@ -676,7 +682,13 @@ export class AdminManagementService {
 				? JSON.stringify(input.comments.metadata)
 				: undefined,
 			verifiedAuthorJson: input.comments?.verifiedAuthor
-				? serializeVerifiedAuthorSettings(input.comments.verifiedAuthor)
+				? serializeVerifiedAuthorSettings({
+						...input.comments.verifiedAuthor,
+						website:
+							sanitizeOptionalSafeHttpUrl(
+								input.comments.verifiedAuthor.website,
+							) ?? "",
+					})
 				: undefined,
 			emailNotificationsEnabled: input.notifications?.emailEnabled,
 		});

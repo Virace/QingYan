@@ -8,7 +8,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -20,17 +20,38 @@ afterEach(async () => {
 });
 
 describe("admin sites", () => {
+	it("rejects allowed origins that include a path", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/api/admin/sites/fangyuan",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				allowedOrigins: ["https://new.example.com/path"],
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+	});
+
 	it("creates a site with default site settings", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const createResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/sites",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				siteKey: "docs",
 				name: "Docs",
@@ -101,13 +122,14 @@ describe("admin sites", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "PUT",
 			url: "/api/admin/sites/fangyuan/settings",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				comments: {
 					verifiedAuthor: {
@@ -135,13 +157,14 @@ describe("admin sites", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "PATCH",
 			url: "/api/admin/sites/fangyuan",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
 			payload: {
 				name: "FangYuan Updated",
 				allowedOrigins: ["https://new.example.com"],

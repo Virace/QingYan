@@ -220,6 +220,8 @@ export class AdminRepository {
 	public async createAdminSession(input: {
 		id: string;
 		tokenHash: string;
+		csrfTokenHash?: string;
+		csrfIssuedAt?: string;
 		ip?: string;
 		userAgent?: string;
 		expiresAt: string;
@@ -239,6 +241,21 @@ export class AdminRepository {
 
 	public async deleteAdminSession(id: string) {
 		await this.db.delete(adminSessions).where(eq(adminSessions.id, id));
+	}
+
+	public async updateAdminSessionCsrf(input: {
+		id: string;
+		csrfTokenHash: string;
+		csrfIssuedAt: string;
+	}) {
+		await this.db
+			.update(adminSessions)
+			.set({
+				csrfTokenHash: input.csrfTokenHash,
+				csrfIssuedAt: input.csrfIssuedAt,
+				lastSeenAt: input.csrfIssuedAt,
+			})
+			.where(eq(adminSessions.id, input.id));
 	}
 
 	public async listComments(input: {

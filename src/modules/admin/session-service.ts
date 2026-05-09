@@ -9,9 +9,12 @@ import type { AdminBootstrap } from "./bootstrap-service";
 import { verifyPasswordHash } from "./password-hash";
 import type { AdminRepository } from "./repository";
 import { AdminLoginChallengeStore } from "./login-challenge-store";
-import { createSessionToken, hashSessionToken } from "./session-utils";
-
-const ADMIN_LOGIN_BLACKLIST_THRESHOLD = 5;
+import {
+	createCsrfToken,
+	createSessionToken,
+	hashCsrfToken,
+	hashSessionToken,
+} from "./session-utils";
 
 export class AdminSessionService {
 	private readonly failedLoginCounts = new Map<string, number>();
@@ -33,6 +36,21 @@ export class AdminSessionService {
 		return this.config.admin.session.cookieName;
 	}
 
+	private async issueCsrfToken(sessionId: string) {
+		const csrfToken = createCsrfToken();
+		const csrfIssuedAt = new Date().toISOString();
+		await this.repository.updateAdminSessionCsrf({
+			id: sessionId,
+			csrfTokenHash: hashCsrfToken(csrfToken),
+			csrfIssuedAt,
+		});
+		return {
+			header: "x-qingyan-csrf-token" as const,
+			token: csrfToken,
+			issuedAt: csrfIssuedAt,
+		};
+	}
+
 	public async createDevSession(input: {
 		expectedToken: string;
 		devToken: string;
@@ -45,16 +63,18 @@ export class AdminSessionService {
 		}
 
 		const sessionToken = createSessionToken();
+		const sessionId = createSessionToken();
 		const expiresAt = new Date(
 			Date.now() + this.config.admin.session.ttlMinutes * 60 * 1000,
 		).toISOString();
 		await this.repository.createAdminSession({
-			id: createSessionToken(),
+			id: sessionId,
 			tokenHash: hashSessionToken(sessionToken),
 			ip: input.ip,
 			userAgent: input.userAgent,
 			expiresAt,
 		});
+		const csrf = await this.issueCsrfToken(sessionId);
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
@@ -72,6 +92,7 @@ export class AdminSessionService {
 		return {
 			sessionToken,
 			expiresAt,
+			csrf,
 		};
 	}
 
@@ -88,7 +109,7 @@ export class AdminSessionService {
 				requestId: input.requestId,
 				ip: input.ip,
 				errorCode: "ADMIN_BLACKLISTED",
-				errorMessage: "当前来源已被永久禁止登录。",
+				errorMessage: "当前来源已被临时禁止登录。",
 			});
 		} catch (error) {
 			await this.security.writeAudit({
@@ -131,8 +152,14 @@ export class AdminSessionService {
 
 		const nextFailures = (this.failedLoginCounts.get(input.ip) ?? 0) + 1;
 		this.failedLoginCounts.set(input.ip, nextFailures);
+		const adminLoginRule = this.config.security.rateLimit.adminLogin;
+		const maxFailures = adminLoginRule.maxFailures ?? 5;
+		const autoBlacklistSec = adminLoginRule.autoBlacklistSec ?? 1800;
 
-		if (nextFailures >= ADMIN_LOGIN_BLACKLIST_THRESHOLD) {
+		if (nextFailures >= maxFailures) {
+			const expiresAt = new Date(
+				Date.now() + autoBlacklistSec * 1000,
+			).toISOString();
 			await this.repository.createBlacklistRule({
 				scope: "all",
 				targetType: "ip",
@@ -140,18 +167,19 @@ export class AdminSessionService {
 				targetValue: input.ip,
 				reason: "admin login failures",
 				source: "auto",
+				expiresAt,
 			});
 			await this.security.writeAudit({
 				requestId: input.requestId,
 				actorType: "system",
 				event: "security.blacklist.added",
 				level: "error",
-				message: "已加入永久黑名单",
+				message: "已加入临时黑名单",
 				targetType: "ip",
 				targetId: input.ip,
 				payload: {
 					reason: "admin_login_failed_limit",
-					ttl: "permanent",
+					ttlSec: autoBlacklistSec,
 				},
 			});
 			this.failedLoginCounts.delete(input.ip);
@@ -159,13 +187,13 @@ export class AdminSessionService {
 			throw new AppError(
 				403,
 				"ADMIN_BLACKLISTED",
-				"当前来源已被永久禁止登录。",
+				"当前来源已被临时禁止登录。",
 			);
 		}
 
 		throw new AppError(input.statusCode, input.code, input.message, {
 			failureCount: nextFailures,
-			maxFailures: ADMIN_LOGIN_BLACKLIST_THRESHOLD,
+			maxFailures,
 		});
 	}
 
@@ -234,16 +262,18 @@ export class AdminSessionService {
 		}
 
 		const sessionToken = createSessionToken();
+		const sessionId = createSessionToken();
 		const expiresAt = new Date(
 			Date.now() + this.config.admin.session.ttlMinutes * 60 * 1000,
 		).toISOString();
 		await this.repository.createAdminSession({
-			id: createSessionToken(),
+			id: sessionId,
 			tokenHash: hashSessionToken(sessionToken),
 			ip: input.ip,
 			userAgent: input.userAgent,
 			expiresAt,
 		});
+		const csrf = await this.issueCsrfToken(sessionId);
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
@@ -260,6 +290,7 @@ export class AdminSessionService {
 		return {
 			sessionToken,
 			expiresAt,
+			csrf,
 		};
 	}
 
@@ -323,6 +354,7 @@ export class AdminSessionService {
 
 	public async getMe(request: FastifyRequest) {
 		const session = await this.requireSession(request);
+		const csrf = await this.issueCsrfToken(session.id);
 		const sites =
 			this.siteRegistry?.listRegisteredSites() ??
 			(await this.repository.listSites());
@@ -331,6 +363,10 @@ export class AdminSessionService {
 			authenticated: true,
 			session: {
 				expiresAt: session.expiresAt,
+			},
+			csrf: {
+				header: csrf.header,
+				token: csrf.token,
 			},
 			sites: sites.map((site) => ({
 				siteKey: site.siteKey,

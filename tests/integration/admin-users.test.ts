@@ -7,7 +7,7 @@ import {
 	pageThreads,
 	sites,
 } from "../../src/db/schema";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -133,13 +133,11 @@ describe("admin users", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const createResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/blacklist",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				targetType: "email",
@@ -160,9 +158,7 @@ describe("admin users", () => {
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
 			url: "/api/admin/blacklist/target",
-			cookies: {
-				qingyan_admin: adminCookie?.value ?? "",
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				targetType: "email",

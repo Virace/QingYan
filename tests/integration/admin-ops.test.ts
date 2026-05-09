@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { adminBootstrapState } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -97,14 +97,12 @@ describe("admin ops routes", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedInstalledBootstrap(fixture);
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/ops/update/plan",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -135,14 +133,12 @@ describe("admin ops routes", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedInstalledBootstrap(fixture);
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/ops/upgrade/dry-run",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 
 		expect(response.statusCode).toBe(200);

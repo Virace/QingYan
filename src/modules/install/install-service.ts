@@ -34,6 +34,7 @@ import { InvalidRequestError } from "../shared/errors";
 import { createSiteRegistry } from "../shared/site-registry";
 import { flattenSystemSettings } from "../system-settings/codec";
 import { normalizeGravatarBaseUrl } from "../comments/gravatar";
+import { normalizeOriginList } from "../shared/url-policy";
 import {
 	defaultSystemSettings,
 	type SystemSettings,
@@ -87,7 +88,10 @@ export const installApplySchema = z.object({
 	site: z.object({
 		siteKey: z.string().min(1).default("default"),
 		name: z.string().min(1).default("Default"),
-		allowedOrigins: z.array(z.string().url()).min(1),
+		allowedOrigins: z
+			.array(z.string().min(1))
+			.min(1)
+			.transform((value) => normalizeOriginList(value)),
 	}),
 	systemSettings: z.unknown().optional(),
 	restore: installRestoreOptionsSchema,
@@ -158,10 +162,16 @@ const defaultSecurityConfig: StartupConfig["security"] = {
 		enabled: true,
 		allowMissingOrigin: false,
 	},
+	adminOriginGuard: {
+		enabled: true,
+		allowMissingOrigin: false,
+		allowedOrigins: [],
+	},
 	rateLimit: {
 		adminLogin: {
 			windowSec: 600,
 			maxFailures: 5,
+			autoBlacklistSec: 1800,
 		},
 		commentCreate: {
 			windowSec: 300,

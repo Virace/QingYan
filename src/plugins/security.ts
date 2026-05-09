@@ -8,13 +8,17 @@ import {
 	matchBlacklistRule,
 	type BlacklistSubject,
 } from "../modules/shared/blacklist-match";
+import {
+	hashCsrfToken,
+	hashSessionToken,
+} from "../modules/admin/session-utils";
 import type {
 	RateLimitRule,
 	RateLimitSnapshot,
 } from "../modules/shared/rate-limit";
 import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
 import { AppError } from "../modules/shared/errors";
-import { auditLogs, blacklistRules } from "../db/schema";
+import { adminSessions, auditLogs, blacklistRules } from "../db/schema";
 
 const PUBLIC_WRITE_ROUTES = [
 	{ method: "POST", pattern: /^\/api\/comments$/ },
@@ -96,6 +100,20 @@ function isPublicWriteRequest(method: string, rawUrl: string): boolean {
 	return PUBLIC_WRITE_ROUTES.some(
 		(route) => route.method === method && route.pattern.test(pathname),
 	);
+}
+
+function isAdminWriteRequest(method: string, rawUrl: string): boolean {
+	const pathname = resolvePathname(rawUrl);
+	if (!pathname.startsWith("/api/admin/")) {
+		return false;
+	}
+	if (pathname === "/api/admin/session/login") {
+		return false;
+	}
+	if (pathname === "/api/admin/session/captcha") {
+		return false;
+	}
+	return ["POST", "PUT", "PATCH", "DELETE"].includes(method);
 }
 
 function readOrigin(
@@ -417,32 +435,82 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		}
 
 		if (
-			!fastify.config.security.publicOriginGuard.enabled ||
-			!isPublicWriteRequest(request.method, url)
+			fastify.config.security.publicOriginGuard.enabled &&
+			isPublicWriteRequest(request.method, url)
+		) {
+			if (!origin) {
+				if (
+					fastify.config.security.publicOriginGuard.allowMissingOrigin ||
+					fastify.runtimeOptions.devMode.enabled
+				) {
+					return;
+				}
+
+				throw new AppError(
+					403,
+					"PUBLIC_ORIGIN_REQUIRED",
+					"公开写接口需要浏览器来源信息。",
+				);
+			}
+
+			if (!site?.allowedOrigins.includes(origin)) {
+				throw new AppError(
+					403,
+					"PUBLIC_ORIGIN_FORBIDDEN",
+					"请求来源不在站点允许列表中。",
+				);
+			}
+		}
+
+		if (
+			!fastify.config.security.adminOriginGuard.enabled ||
+			!isAdminWriteRequest(request.method, url)
 		) {
 			return;
 		}
 
-		if (!origin) {
-			if (
-				fastify.config.security.publicOriginGuard.allowMissingOrigin ||
-				fastify.runtimeOptions.devMode.enabled
-			) {
-				return;
-			}
+		const sessionCookie =
+			request.cookies[fastify.config.admin.session.cookieName];
+		if (!sessionCookie) {
+			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
+		}
 
+		const allowedAdminOrigins =
+			fastify.config.security.adminOriginGuard.allowedOrigins.length > 0
+				? fastify.config.security.adminOriginGuard.allowedOrigins
+				: [new URL(fastify.config.server.publicBaseUrl).origin];
+		if (origin && !allowedAdminOrigins.includes(origin)) {
+			throw new AppError(403, "ADMIN_ORIGIN_FORBIDDEN", "后台请求来源不合法。");
+		}
+		if (
+			!origin &&
+			!fastify.config.security.adminOriginGuard.allowMissingOrigin
+		) {
+			throw new AppError(403, "ADMIN_ORIGIN_FORBIDDEN", "后台请求来源不合法。");
+		}
+
+		const csrfToken = request.headers["x-qingyan-csrf-token"];
+		if (typeof csrfToken !== "string" || csrfToken.length === 0) {
 			throw new AppError(
 				403,
-				"PUBLIC_ORIGIN_REQUIRED",
-				"公开写接口需要浏览器来源信息。",
+				"ADMIN_CSRF_REQUIRED",
+				"后台写请求缺少 CSRF token。",
 			);
 		}
 
-		if (!site?.allowedOrigins.includes(origin)) {
+		const [session] = await fastify.db
+			.select()
+			.from(adminSessions)
+			.where(eq(adminSessions.tokenHash, hashSessionToken(sessionCookie)))
+			.limit(1);
+		if (
+			!session?.csrfTokenHash ||
+			session.csrfTokenHash !== hashCsrfToken(csrfToken)
+		) {
 			throw new AppError(
 				403,
-				"PUBLIC_ORIGIN_FORBIDDEN",
-				"请求来源不在站点允许列表中。",
+				"ADMIN_CSRF_INVALID",
+				"后台写请求 CSRF token 无效。",
 			);
 		}
 	});

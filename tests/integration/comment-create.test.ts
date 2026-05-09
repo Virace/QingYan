@@ -19,6 +19,44 @@ afterEach(async () => {
 });
 
 describe("POST /api/comments", () => {
+	it("rejects a dangerous author website scheme", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:dangerous-website",
+				pageTitle: "Dangerous Website",
+				pageUrl: "https://fangyuan.example.com/posts/dangerous-website/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+					website: "javascript:alert(1)",
+				},
+				content: {
+					raw: "hello qingyan",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "COMMENT_WEBSITE_URL_INVALID",
+			},
+		});
+	});
+
 	it("requires captcha before allowing comment creation", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

@@ -27,6 +27,8 @@ export const adminSessions = sqliteTable(
 	{
 		id: text("id").primaryKey(),
 		tokenHash: text("token_hash").notNull(),
+		csrfTokenHash: text("csrf_token_hash"),
+		csrfIssuedAt: text("csrf_issued_at"),
 		ip: text("ip"),
 		userAgent: text("user_agent"),
 		expiresAt: text("expires_at").notNull(),

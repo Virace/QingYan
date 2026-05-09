@@ -8,7 +8,15 @@ export function createSessionToken(): string {
 	return `as_${randomUUID().replaceAll("-", "")}`;
 }
 
+export function createCsrfToken(): string {
+	return `csrf_${randomUUID().replaceAll("-", "")}`;
+}
+
 export function hashSessionToken(token: string): string {
+	return hashValue(token);
+}
+
+export function hashCsrfToken(token: string): string {
 	return hashValue(token);
 }
 

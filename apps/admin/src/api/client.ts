@@ -7,6 +7,9 @@ export interface ApiErrorPayload {
 	};
 }
 
+let adminCsrfHeader = "x-qingyan-csrf-token";
+let adminCsrfToken: string | null = null;
+
 export class ApiError extends Error {
 	public constructor(
 		message: string,
@@ -18,6 +21,20 @@ export class ApiError extends Error {
 	}
 }
 
+export function updateAdminCsrf(input: {
+	header?: string;
+	token?: string | null;
+}): void {
+	if (input.header) {
+		adminCsrfHeader = input.header;
+	}
+	adminCsrfToken = input.token ?? null;
+}
+
+export function clearAdminCsrf(): void {
+	adminCsrfToken = null;
+}
+
 export async function requestJson<T>(
 	pathname: string,
 	init: RequestInit = {},
@@ -25,6 +42,14 @@ export async function requestJson<T>(
 	const headers = new Headers(init.headers);
 	if (!headers.has("content-type") && init.body) {
 		headers.set("content-type", "application/json");
+	}
+	if (
+		adminCsrfToken &&
+		["POST", "PUT", "PATCH", "DELETE"].includes(
+			(init.method ?? "GET").toUpperCase(),
+		)
+	) {
+		headers.set(adminCsrfHeader, adminCsrfToken);
 	}
 
 	const response = await fetch(pathname, {

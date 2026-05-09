@@ -14,6 +14,12 @@ const publicOriginGuardSchema = z.object({
 	allowMissingOrigin: z.boolean().default(false),
 });
 
+const adminOriginGuardSchema = z.object({
+	enabled: z.boolean().default(true),
+	allowMissingOrigin: z.boolean().default(false),
+	allowedOrigins: z.array(z.string().url()).default([]),
+});
+
 const adminConsoleSchema = z
 	.object({
 		path: z
@@ -80,6 +86,11 @@ export const configSchema = z
 				publicOriginGuard: publicOriginGuardSchema.default({
 					enabled: true,
 					allowMissingOrigin: false,
+				}),
+				adminOriginGuard: adminOriginGuardSchema.default({
+					enabled: true,
+					allowMissingOrigin: false,
+					allowedOrigins: [],
 				}),
 				rateLimit: z
 					.object({

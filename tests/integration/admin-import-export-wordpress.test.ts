@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 function wxrFixture() {
@@ -41,13 +41,12 @@ function largeWxrFixture() {
 async function analyzeResolvedWordPressJob(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 	adminCookie: { value: string },
+	csrfToken: string,
 ) {
 	const response = await fixture.app.inject({
 		method: "POST",
 		url: "/api/admin/import-export/wordpress/analyze",
-		cookies: {
-			qingyan_admin: adminCookie.value,
-		},
+		...withAdminWriteAuth({ adminCookie, csrfToken }),
 		payload: {
 			siteKey: "fangyuan",
 			fileName: "wordpress.xml",
@@ -90,14 +89,12 @@ describe("admin import/export WordPress routes", () => {
 
 	it("analyzes uploaded WordPress WXR XML for an authenticated admin", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/wordpress/analyze",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "wordpress.xml",
@@ -132,17 +129,16 @@ describe("admin import/export WordPress routes", () => {
 
 	it("accepts large WXR XML as the request body without the JSON body limit", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/wordpress/analyze?siteKey=fangyuan&fileName=large.xml&sourceBasePath=/",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
 			headers: {
 				"content-type": "application/xml",
+				...withAdminWriteAuth({ adminCookie, csrfToken }).headers,
 			},
+			cookies: withAdminWriteAuth({ adminCookie, csrfToken }).cookies,
 			payload: largeWxrFixture(),
 		});
 
@@ -162,14 +158,12 @@ describe("admin import/export WordPress routes", () => {
 
 	it("returns a clear invalid request error for invalid WXR XML", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/api/admin/import-export/wordpress/analyze",
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "broken.xml",
@@ -188,15 +182,17 @@ describe("admin import/export WordPress routes", () => {
 
 	it("converts an analyzed resolved report to a persisted import plan and dry-runs it", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
-		const jobId = await analyzeResolvedWordPressJob(fixture, adminCookie);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const jobId = await analyzeResolvedWordPressJob(
+			fixture,
+			adminCookie,
+			csrfToken,
+		);
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 
 		expect(planResponse.statusCode).toBe(200);
@@ -216,9 +212,7 @@ describe("admin import/export WordPress routes", () => {
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/jobs/${jobId}/dry-run`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
 			},
@@ -243,15 +237,17 @@ describe("admin import/export WordPress routes", () => {
 
 	it("uses import records to mark repeated WordPress comments as skipped during dry-run", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
-		const jobId = await analyzeResolvedWordPressJob(fixture, adminCookie);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const jobId = await analyzeResolvedWordPressJob(
+			fixture,
+			adminCookie,
+			csrfToken,
+		);
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(planResponse.statusCode).toBe(200);
 
@@ -307,9 +303,7 @@ describe("admin import/export WordPress routes", () => {
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/jobs/${jobId}/dry-run`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "skip_existing",
 			},
@@ -329,24 +323,24 @@ describe("admin import/export WordPress routes", () => {
 
 	it("applies a dry-run-passed WordPress import plan in one transaction", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
-		const jobId = await analyzeResolvedWordPressJob(fixture, adminCookie);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const jobId = await analyzeResolvedWordPressJob(
+			fixture,
+			adminCookie,
+			csrfToken,
+		);
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(planResponse.statusCode).toBe(200);
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/jobs/${jobId}/dry-run`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
 			},
@@ -356,9 +350,7 @@ describe("admin import/export WordPress routes", () => {
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/jobs/${jobId}/apply`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
 			},
@@ -488,15 +480,17 @@ describe("admin import/export WordPress routes", () => {
 
 	it("does not write comments when applying a plan with unresolved dry-run conflicts", async () => {
 		const fixture = await createTestApp();
-		const { adminCookie } = await loginAsAdmin(fixture.app);
-		const jobId = await analyzeResolvedWordPressJob(fixture, adminCookie);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const jobId = await analyzeResolvedWordPressJob(
+			fixture,
+			adminCookie,
+			csrfToken,
+		);
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(planResponse.statusCode).toBe(200);
 
@@ -552,9 +546,7 @@ describe("admin import/export WordPress routes", () => {
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
 			url: `/api/admin/import-export/jobs/${jobId}/apply`,
-			cookies: {
-				qingyan_admin: adminCookie.value,
-			},
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
 			},

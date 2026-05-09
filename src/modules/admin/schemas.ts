@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isSafeHttpUrl, normalizeOrigin } from "../shared/url-policy";
+
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
 const commentMetadataSchema = z.object({
 	collectIp: z.boolean().optional(),
@@ -25,7 +27,12 @@ const verifiedAuthorSchema = z.object({
 	enabled: z.boolean(),
 	displayName: z.string().trim().min(1),
 	email: z.string().trim().email().or(z.literal("")),
-	website: z.string().trim().url().or(z.literal("")),
+	website: z
+		.string()
+		.trim()
+		.refine((value) => value === "" || isSafeHttpUrl(value), {
+			message: "website 仅允许 http 或 https。",
+		}),
 	badgeLabel: z.string().trim().min(1),
 });
 
@@ -62,7 +69,18 @@ export const adminSiteCreateBodySchema = z.object({
 		.min(1)
 		.regex(/^[a-z0-9][a-z0-9_-]*$/i),
 	name: z.string().min(1),
-	allowedOrigins: z.array(z.string().url()).min(1),
+	allowedOrigins: z
+		.array(
+			z.string().refine((value) => {
+				try {
+					normalizeOrigin(value);
+					return true;
+				} catch {
+					return false;
+				}
+			}, "allowedOrigins 必须是纯 origin"),
+		)
+		.min(1),
 });
 
 export const adminSiteParamsSchema = z.object({
@@ -72,7 +90,19 @@ export const adminSiteParamsSchema = z.object({
 export const adminSitePatchBodySchema = z
 	.object({
 		name: z.string().min(1).optional(),
-		allowedOrigins: z.array(z.string().url()).min(1).optional(),
+		allowedOrigins: z
+			.array(
+				z.string().refine((value) => {
+					try {
+						normalizeOrigin(value);
+						return true;
+					} catch {
+						return false;
+					}
+				}, "allowedOrigins 必须是纯 origin"),
+			)
+			.min(1)
+			.optional(),
 	})
 	.refine((value) => Object.keys(value).length > 0, {
 		message: "至少需要一个更新字段",

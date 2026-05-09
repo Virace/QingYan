@@ -11,6 +11,10 @@ import {
 	ResourceNotFoundError,
 } from "../../shared/errors";
 import {
+	normalizeOriginList,
+	sanitizeOptionalSafeHttpUrl,
+} from "../../shared/url-policy";
+import {
 	hashCommentEmail,
 	renderCommentHtml,
 } from "../../shared/comment-content";
@@ -247,7 +251,9 @@ export class QingYanImportService {
 
 	private parseExport(payload: unknown) {
 		try {
-			return parseQingYanExport(payload);
+			const parsed = parseQingYanExport(payload);
+			normalizeOriginList(parsed.data.site.allowedOrigins);
+			return parsed;
 		} catch (error) {
 			throw new InvalidRequestError({
 				message:
@@ -695,11 +701,11 @@ export class QingYanImportService {
 				comment.author.name,
 				comment.author.email,
 				hashCommentEmail(comment.author.email ?? undefined),
-				comment.author.website,
+				sanitizeOptionalSafeHttpUrl(comment.author.website),
 				comment.request?.ip,
 				comment.request?.userAgent,
 				comment.content.raw,
-				comment.content.html ?? renderCommentHtml(comment.content.raw),
+				renderCommentHtml(comment.content.raw),
 				comment.timestamps?.createdAt ?? nowIso,
 				comment.timestamps?.updatedAt ?? nowIso,
 				comment.timestamps?.deletedAt ?? null,
@@ -986,7 +992,7 @@ export class QingYanImportService {
 				)
 				.run(
 					payload.data.site.name,
-					JSON.stringify(payload.data.site.allowedOrigins),
+					JSON.stringify(normalizeOriginList(payload.data.site.allowedOrigins)),
 					new Date().toISOString(),
 					siteId,
 				);

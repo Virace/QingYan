@@ -51,6 +51,10 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 			session: {
 				expiresAt: result.expiresAt,
 			},
+			csrf: {
+				header: result.csrf.header,
+				token: result.csrf.token,
+			},
 		};
 	});
 

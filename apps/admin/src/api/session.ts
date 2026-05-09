@@ -1,4 +1,4 @@
-import { requestJson } from "./client";
+import { clearAdminCsrf, requestJson, updateAdminCsrf } from "./client";
 
 export interface CaptchaChallenge {
 	challengeId: string;
@@ -16,6 +16,10 @@ export interface AdminSessionPayload {
 	authenticated: true;
 	session: {
 		expiresAt: string;
+	};
+	csrf: {
+		header: string;
+		token: string;
 	};
 }
 
@@ -38,6 +42,9 @@ export function loginAdmin(input: {
 	return requestJson<AdminSessionPayload>("/api/admin/session/login", {
 		method: "POST",
 		body: JSON.stringify(input),
+	}).then((payload) => {
+		updateAdminCsrf(payload.csrf);
+		return payload;
 	});
 }
 
@@ -45,9 +52,16 @@ export function logoutAdmin() {
 	return requestJson<{ authenticated: false }>("/api/admin/session/logout", {
 		method: "POST",
 		body: "{}",
+	}).finally(() => {
+		clearAdminCsrf();
 	});
 }
 
 export function fetchAdminMe() {
-	return requestJson<AdminMePayload>("/api/admin/session/me");
+	return requestJson<AdminMePayload>("/api/admin/session/me").then(
+		(payload) => {
+			updateAdminCsrf(payload.csrf);
+			return payload;
+		},
+	);
 }
