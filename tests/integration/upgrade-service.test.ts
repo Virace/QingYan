@@ -97,6 +97,38 @@ function seedOldDatabase(databaseFile: string) {
 	}
 }
 
+function seedLegacyDatabaseWithoutLedgers(databaseFile: string) {
+	const sqlite = new Database(databaseFile);
+	try {
+		sqlite.exec(`
+			CREATE TABLE sites (
+				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+				site_key text NOT NULL,
+				name text NOT NULL,
+				allowed_origins_json text NOT NULL
+			);
+			CREATE TABLE admin_bootstrap_state (
+				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+				console_path text NOT NULL,
+				username text NOT NULL,
+				password_hash text NOT NULL
+			);
+		`);
+		sqlite
+			.prepare(
+				"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
+			)
+			.run("default", "Default", "[]");
+		sqlite
+			.prepare(
+				"INSERT INTO admin_bootstrap_state (id, console_path, username, password_hash) VALUES (?, ?, ?, ?)",
+			)
+			.run(1, "/admin", "admin", "hash");
+	} finally {
+		sqlite.close();
+	}
+}
+
 function readUpgradeRows(databaseFile: string) {
 	const sqlite = new Database(databaseFile);
 	try {
@@ -268,6 +300,40 @@ describe("UpgradeService", () => {
 				"application-version:0.1.0",
 				"service-probe",
 			]);
+		} finally {
+			workspace.cleanup();
+		}
+	});
+
+	it("upgrades legacy databases that predate migration and upgrade ledgers", async () => {
+		const workspace = createWorkspace();
+		try {
+			const loadedConfig = writeConfig(
+				workspace.configPath,
+				workspace.databaseFile,
+			);
+			seedLegacyDatabaseWithoutLedgers(workspace.databaseFile);
+			const service = new UpgradeService({
+				configPath: workspace.configPath,
+				loadedConfig,
+				databaseFile: workspace.databaseFile,
+				currentApplicationVersion: "0.1.0",
+				partialUpgradeMarkerPath: workspace.partialMarkerPath,
+				createSqliteClient: (file) => new Database(file),
+				now: () => new Date("2026-05-07T00:00:00.000Z"),
+			});
+
+			const result = await service.apply({ confirm: "UPGRADE QINGYAN" });
+
+			expect(result).toMatchObject({
+				state: "applied",
+				applied: {
+					schemaMigrations: ["schema-migration-ledger"],
+					applicationUpgrades: [],
+				},
+			});
+			expect(existsSync(workspace.partialMarkerPath)).toBe(false);
+			expect(service.detect()).toEqual({ state: "normal_current" });
 		} finally {
 			workspace.cleanup();
 		}

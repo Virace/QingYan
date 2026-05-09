@@ -71,6 +71,15 @@ function writeAppliedUpgrades(
 	steps: UpgradeApplicationStep[],
 	targetVersion: string,
 ) {
+	sqlite.exec(`
+		CREATE TABLE IF NOT EXISTS __qingyan_upgrades (
+			name text PRIMARY KEY NOT NULL,
+			from_version text,
+			to_version text,
+			applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+			summary_json text NOT NULL
+		)
+	`);
 	const insert = sqlite.prepare(`
 		INSERT OR REPLACE INTO __qingyan_upgrades
 			(name, from_version, to_version, summary_json)
