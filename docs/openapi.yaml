@@ -964,6 +964,7 @@ components:
             - 'null'
         author:
           type: object
+          description: Author fields submitted by an ordinary commenter or by a verified-author frontend flow. Public frontends may store successful ordinary author fields in their own origin storage for later form prefill; this is a frontend convenience, not authentication.
           properties:
             name:
               type: string

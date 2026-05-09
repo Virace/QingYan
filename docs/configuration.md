@@ -212,6 +212,22 @@ Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 t
 
 启用后，公开评论作者结构可能包含 `author.gravatarUrl`。该字段只表示第三方 Gravatar 图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件。字段名故意不使用 `avatarUrl`，避免误解为后端提供通用头像系统。没有该字段、Gravatar 图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。
 
+### 普通评论者资料记忆推荐集成
+
+QingYan 不要求为普通访客建立用户模型。若内容站点希望避免访客重复输入昵称、邮箱和网站，推荐由站点前端在普通评论成功提交后，把评论者资料保存在当前站点浏览器存储中，并在下一次渲染评论表单时预填。
+
+推荐实现：
+
+- 存储位置：主站前端的 `localStorage`，而不是 QingYan 后端设置的可读 cookie。
+- 作用范围：按 QingYan `siteKey` 隔离，例如 `qingyan:commenter-profile:v1:<siteKey>`。
+- 保存字段：`nickname | email | website` 中当前 `commentForm.allow` 允许的字段。
+- 过期时间：默认 90 天；每次普通评论成功后刷新过期时间。
+- 表单行为：可以默认勾选“记住我”，允许访客取消；取消后应清除当前 `siteKey` 的本地资料。
+
+选择前端本地存储是为了兼容 QingYan 的两种常见部署方式：当 QingYan 与主站同域时，cookie 和本地存储都能工作；当 QingYan 使用独立域名时，QingYan 域下的 cookie 不能被主站页面直接读取，跨站 credential cookie 还会受到 `SameSite=None; Secure`、CORS credentials 和浏览器隐私策略影响。普通评论者资料只用于表单预填，由主站前端保存更稳定。
+
+该资料不是认证状态：它不会生成可信作者标识，不会绕过验证码、限流、黑名单、审核策略，也不会绕过可信评论作者邮箱保留规则。当前请求是否为可信评论作者仍只由有效后台 session cookie 与站点的 `comments.verifiedAuthor` 设置决定。
+
 ## 评论验证码与元数据
 
 公开评论验证码仍按同一站点、同一页面、同一访客维度复用。配置来源从站点的 DB settings 读取：
