@@ -11,6 +11,7 @@ import {
 } from "../../db/schema";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import type { CommentMetadataSnapshot } from "./metadata/resolver";
+import type { CommentAuthorIdentity } from "./verified-author";
 
 export type CaptchaAction = "comment_create" | "comment_vote" | "page_like";
 
@@ -115,7 +116,8 @@ export class CommentsWriteRepository {
 		siteId: number;
 		pageThreadId: number;
 		parentCommentId: string | null;
-		visitorId: number;
+		visitorId: number | null;
+		authorIdentity?: CommentAuthorIdentity;
 		authorName: string;
 		authorEmail?: string;
 		authorWebsite?: string;
@@ -133,6 +135,7 @@ export class CommentsWriteRepository {
 			pageThreadId: input.pageThreadId,
 			parentId: input.parentCommentId,
 			visitorId: input.visitorId,
+			authorIdentity: input.authorIdentity ?? "visitor",
 			status: input.status,
 			authorName: input.authorName,
 			authorEmail: input.authorEmail,

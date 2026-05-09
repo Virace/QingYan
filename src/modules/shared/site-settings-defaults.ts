@@ -1,3 +1,8 @@
+import {
+	defaultVerifiedAuthor,
+	serializeVerifiedAuthorSettings,
+} from "../comments/verified-author";
+
 export type CommentMetadataSettings = {
 	collectIp: boolean;
 	collectUserAgent: boolean;
@@ -53,6 +58,7 @@ export function buildDefaultSiteSettings(siteId: number) {
 		autoBlacklistScope: "post",
 		autoBlacklistTtlSec: 1800,
 		commentMetadataJson: JSON.stringify(defaultCommentMetadata),
+		verifiedAuthorJson: serializeVerifiedAuthorSettings(defaultVerifiedAuthor),
 		emailNotificationsEnabled: false,
 	};
 }

@@ -33,7 +33,7 @@ describe("admin bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: rows[0]?.consolePath ?? "/missing",
+			url: `${rows[0]?.consolePath ?? "/missing"}/`,
 		});
 		expect(response.statusCode).toBe(200);
 		expect(response.body).toContain("QingYan Admin");
@@ -125,11 +125,11 @@ describe("admin bootstrap", () => {
 
 		const configuredRoute = await fixture.app.inject({
 			method: "GET",
-			url: "/hidden-admin",
+			url: "/hidden-admin/",
 		});
 		const devAlias = await fixture.app.inject({
 			method: "GET",
-			url: "/admin",
+			url: "/admin/",
 		});
 
 		expect(configuredRoute.statusCode).toBe(200);
@@ -148,7 +148,7 @@ describe("admin bootstrap", () => {
 
 		const configuredRoute = await fixture.app.inject({
 			method: "GET",
-			url: "/hidden-admin",
+			url: "/hidden-admin/",
 		});
 		const defaultRoute = await fixture.app.inject({
 			method: "GET",

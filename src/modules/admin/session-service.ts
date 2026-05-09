@@ -290,6 +290,17 @@ export class AdminSessionService {
 		return session;
 	}
 
+	public async getOptionalSession(request: FastifyRequest) {
+		try {
+			return await this.requireSession(request);
+		} catch (error) {
+			if (error instanceof AppError) {
+				return null;
+			}
+			throw error;
+		}
+	}
+
 	public async logout(request: FastifyRequest) {
 		const sessionCookie = request.cookies[this.getSessionCookieName()];
 		if (!sessionCookie) {

@@ -86,7 +86,48 @@ describe("admin sites", () => {
 			comments: {
 				enabled: true,
 				rootLimit: 20,
+				verifiedAuthor: {
+					enabled: true,
+					displayName: "管理员",
+					email: "",
+					website: "",
+					badgeLabel: "管理员",
+				},
 			},
+		});
+	});
+
+	it("updates verified author settings per site", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				comments: {
+					verifiedAuthor: {
+						enabled: true,
+						displayName: "Virace",
+						email: "Owner@Example.COM",
+						website: "https://fangyuan.example.com/about",
+						badgeLabel: "楼主",
+					},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comments.verifiedAuthor).toEqual({
+			enabled: true,
+			displayName: "Virace",
+			email: "owner@example.com",
+			website: "https://fangyuan.example.com/about",
+			badgeLabel: "楼主",
 		});
 	});
 

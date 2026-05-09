@@ -1,8 +1,10 @@
 import { buildGravatarUrl } from "./gravatar";
+import type { CommentAuthorIdentity } from "./verified-author";
 
 interface PresenterCommentInput {
 	id: string;
 	parentId: string | null;
+	authorIdentity?: CommentAuthorIdentity | string;
 	authorName: string;
 	authorEmailHash: string | null;
 	authorWebsite: string | null;
@@ -41,6 +43,10 @@ interface PresenterOptions {
 			enabled: boolean;
 			baseUrl: string;
 		};
+	};
+	verifiedAuthor?: {
+		enabled: boolean;
+		badgeLabel: string;
 	};
 }
 
@@ -145,14 +151,24 @@ export function presentComments(
 			baseUrl:
 				options?.avatar?.gravatar.baseUrl ?? "https://gravatar.com/avatar",
 		});
+		const author: Record<string, unknown> = {
+			name: comment.authorName,
+			website: comment.authorWebsite ?? undefined,
+			gravatarUrl,
+		};
+		if (
+			comment.authorIdentity === "verified" &&
+			options?.verifiedAuthor?.enabled &&
+			options.verifiedAuthor.badgeLabel
+		) {
+			author.badge = {
+				label: options.verifiedAuthor.badgeLabel,
+			};
+		}
 		const node: Record<string, unknown> = {
 			id: comment.id,
 			parentId: comment.parentId,
-			author: {
-				name: comment.authorName,
-				website: comment.authorWebsite ?? undefined,
-				gravatarUrl,
-			},
+			author,
 			content: {
 				raw: comment.contentRaw,
 				html: renderHtml(comment.contentRaw, comment.contentHtml),

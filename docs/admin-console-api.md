@@ -237,6 +237,30 @@ Query：
 }
 ```
 
+### `POST /api/admin/comments/{commentId}/reply`
+
+使用当前站点的可信评论作者配置快速回复评论。该接口只能由已登录后台会话调用，创建的回复会直接标记为 `approved`，并在公开评论树中展示当前站点配置的 badge label。
+
+请求：
+
+```ts
+{
+  content: {
+    raw: string;
+  };
+}
+```
+
+响应：
+
+```ts
+{
+  comment: PublicComment;
+}
+```
+
+若目标评论不存在，返回 `COMMENT_NOT_FOUND`；若该站点未启用可信评论作者，返回 `VERIFIED_AUTHOR_DISABLED`。
+
 ## Pages, Users, Visitors
 
 以下三个列表接口共享分页 query：
@@ -456,6 +480,13 @@ Query：
       require: Array<"nickname" | "email" | "website">;
     };
     allowWebsite: boolean;
+    verifiedAuthor: {
+      enabled: boolean;
+      displayName: string;
+      email: string;
+      website: string;
+      badgeLabel: string;
+    };
     captcha: {
       mode: "never" | "always" | "threshold";
     };
@@ -559,6 +590,13 @@ AdminSettings
       require: Array<"nickname" | "email" | "website">;
     };
     allowWebsite: boolean;
+    verifiedAuthor: {
+      enabled: boolean;
+      displayName: string;
+      email: string;
+      website: string;
+      badgeLabel: string;
+    };
     captcha: {
       mode: "never" | "always" | "threshold";
       thresholdWindowSec: number;
@@ -998,4 +1036,3 @@ Query：
   errorCode?: string;
 }
 ```
-

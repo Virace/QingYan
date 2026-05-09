@@ -19,10 +19,20 @@ import { DefaultCommentMetadataResolver } from "./metadata/resolver";
 import { CommentsWriteRepository } from "./write-repository";
 import { CommentsWriteService } from "./write-service";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { AdminRepository } from "../admin/repository";
+import { AdminSessionService } from "../admin/session-service";
 
 export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	const readRepository = new CommentsRepository(
 		fastify.db,
+		fastify.siteRegistry,
+	);
+	const adminRepository = new AdminRepository(fastify.db);
+	const adminSessionService = new AdminSessionService(
+		fastify.config,
+		fastify.security,
+		adminRepository,
+		fastify.adminBootstrap,
 		fastify.siteRegistry,
 	);
 	const writeRepository = new CommentsWriteRepository(fastify.db);
@@ -78,11 +88,13 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const adminSession = await adminSessionService.getOptionalSession(request);
 		const result = await readService.getBootstrap({
 			...parsed.data,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
+			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
@@ -106,6 +118,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				result.commentBundle.viewerVoteMap,
 				result.commentDisplay,
 			),
+			viewer: result.viewer,
 			pageMetrics: result.pageMetrics,
 			pageFeedback: result.pageFeedback,
 			captcha: result.captcha,
@@ -198,6 +211,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const adminSession = await adminSessionService.getOptionalSession(request);
 		const result = await writeService.createComment({
 			siteKey: parsed.data.siteKey,
 			pageKey: parsed.data.pageKey,
@@ -211,6 +225,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
+			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {

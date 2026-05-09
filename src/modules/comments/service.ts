@@ -8,6 +8,11 @@ import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import type { CommentsRepository } from "./repository";
+import {
+	mergeVerifiedAuthorSettings,
+	toPublicVerifiedAuthorViewer,
+	type VerifiedAuthorSettings,
+} from "./verified-author";
 
 function buildCapability(settings?: {
 	commentsEnabled: boolean;
@@ -32,6 +37,7 @@ function buildCapability(settings?: {
 function buildCommentDisplayOptions(input: {
 	metadata?: CommentMetadataSettings;
 	avatar: SystemSettings["avatar"];
+	verifiedAuthor: VerifiedAuthorSettings;
 }) {
 	const metadata = input.metadata ?? defaultCommentMetadata;
 	return {
@@ -43,6 +49,10 @@ function buildCommentDisplayOptions(input: {
 			enabled: metadata.device.enabled && metadata.device.display.enabled,
 		},
 		avatar: input.avatar,
+		verifiedAuthor: {
+			enabled: input.verifiedAuthor.enabled,
+			badgeLabel: input.verifiedAuthor.badgeLabel,
+		},
 	};
 }
 
@@ -57,6 +67,7 @@ export interface BootstrapInput {
 	visitorKey?: string;
 	ip?: string;
 	userAgent?: string;
+	verifiedAuthorSession?: { type: "admin" };
 }
 
 export class CommentsService {
@@ -104,6 +115,12 @@ export class CommentsService {
 			pageUrl: input.pageUrl,
 		});
 		const settings = await this.repository.getSiteSettings(site.id);
+		const verifiedAuthor = mergeVerifiedAuthorSettings(
+			settings?.verifiedAuthorJson,
+		);
+		const publicVerifiedAuthor = input.verifiedAuthorSession
+			? toPublicVerifiedAuthorViewer(verifiedAuthor)
+			: undefined;
 		const avatarSettings = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
@@ -158,7 +175,13 @@ export class CommentsService {
 			commentDisplay: buildCommentDisplayOptions({
 				metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
 				avatar: avatarSettings,
+				verifiedAuthor,
 			}),
+			viewer: {
+				...(publicVerifiedAuthor
+					? { verifiedAuthor: publicVerifiedAuthor }
+					: {}),
+			},
 			pageMetrics: {
 				pageViewCount: refreshedThread.pageViewCount,
 			},
@@ -204,6 +227,9 @@ export class CommentsService {
 			visitorId: visitor.id,
 		});
 		const settings = await this.repository.getSiteSettings(site.id);
+		const verifiedAuthor = mergeVerifiedAuthorSettings(
+			settings?.verifiedAuthorJson,
+		);
 		const avatarSettings = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
@@ -226,6 +252,7 @@ export class CommentsService {
 			commentDisplay: buildCommentDisplayOptions({
 				metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
 				avatar: avatarSettings,
+				verifiedAuthor,
 			}),
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 		};

@@ -697,6 +697,13 @@ components:
           type: string
           format: uri
           description: Optional Gravatar image URL generated from the comment author email hash. QingYan does not host, proxy, cache, or upload avatar files.
+        badge:
+          type: object
+          required: [label]
+          properties:
+            label:
+              type: string
+          description: Optional trusted author badge. The label is resolved from current site settings and is only emitted for verified comments.
     CommentContent:
       type: object
       required: [raw, html]
@@ -732,6 +739,7 @@ components:
           enum: [chrome, edge, firefox, safari, android, apple, windows, linux, bot, unknown]
     CommentDisplayMeta:
       type: object
+      description: Public display metadata derived from stored author IP and authorUserAgent when the site enables metadata collection. Raw author IP and User-Agent values are not exposed by public comment responses.
       properties:
         location:
           $ref: '#/components/schemas/CommentDisplayLocation'
@@ -869,6 +877,18 @@ components:
           type: boolean
         verified:
           type: boolean
+    BootstrapViewer:
+      type: object
+      properties:
+        verifiedAuthor:
+          type: object
+          required: [displayName, badgeLabel]
+          properties:
+            displayName:
+              type: string
+            badgeLabel:
+              type: string
+          description: Minimal verified author state for the current admin session. Anonymous visitors receive an empty viewer object.
     BootstrapResponse:
       type: object
       required:
@@ -899,6 +919,8 @@ components:
           $ref: '#/components/schemas/PageFeedbackSummary'
         captcha:
           $ref: '#/components/schemas/CaptchaStateResponse'
+        viewer:
+          $ref: '#/components/schemas/BootstrapViewer'
     ThreadResponse:
       type: object
       required: [thread, pagination, comments]

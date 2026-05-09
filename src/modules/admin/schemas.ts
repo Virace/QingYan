@@ -21,6 +21,13 @@ const commentMetadataSchema = z.object({
 		})
 		.optional(),
 });
+const verifiedAuthorSchema = z.object({
+	enabled: z.boolean(),
+	displayName: z.string().trim().min(1),
+	email: z.string().trim().email().or(z.literal("")),
+	website: z.string().trim().url().or(z.literal("")),
+	badgeLabel: z.string().trim().min(1),
+});
 
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
@@ -85,6 +92,12 @@ export const adminCommentPatchBodySchema = z
 	.refine((value) => Object.keys(value).length > 0, {
 		message: "至少需要一个更新字段",
 	});
+
+export const adminCommentReplyBodySchema = z.object({
+	content: z.object({
+		raw: z.string().min(1),
+	}),
+});
 
 export const adminBlacklistQuerySchema = z.object({
 	siteKey: z.string().min(1).optional(),
@@ -151,6 +164,7 @@ export const adminSettingsBodySchema = z
 					})
 					.optional(),
 				metadata: commentMetadataSchema.optional(),
+				verifiedAuthor: verifiedAuthorSchema.optional(),
 			})
 			.optional(),
 		pageFeedback: z

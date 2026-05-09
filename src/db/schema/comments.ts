@@ -24,6 +24,7 @@ export const comments = sqliteTable(
 			.references(() => pageThreads.id),
 		parentId: text("parent_id").references((): AnySQLiteColumn => comments.id),
 		visitorId: integer("visitor_id").references(() => visitors.id),
+		authorIdentity: text("author_identity").notNull().default("visitor"),
 		status: text("status").notNull().default("pending"),
 		authorName: text("author_name").notNull(),
 		authorEmail: text("author_email"),

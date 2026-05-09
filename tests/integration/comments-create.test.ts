@@ -7,6 +7,8 @@ import { eq } from "drizzle-orm";
 import { buildApp } from "../../src/app";
 import { createDatabaseClients } from "../../src/db/client";
 import { comments, siteSettings, sites } from "../../src/db/schema";
+import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { loginAsAdmin } from "../support/admin-login";
 import {
 	applyInitialMigration,
 	createTestConfig,
@@ -143,5 +145,127 @@ describe("POST /api/comments", () => {
 		expect(createdComment?.authorName).toBe("");
 		expect(createdComment?.authorEmail).toBeNull();
 		expect(createdComment?.authorWebsite).toBeNull();
+	});
+
+	it("creates a verified author comment when admin session is present", async () => {
+		const fixture = await createCustomTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:verified-create",
+				pageTitle: "Verified Create",
+				pageUrl: "https://fangyuan.example.com/posts/verified-create/",
+				parentCommentId: null,
+				author: {},
+				content: {
+					raw: "verified comment",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			comment: {
+				status: "approved",
+			},
+		});
+
+		const [createdComment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "verified comment"))
+			.limit(1);
+		expect(createdComment).toMatchObject({
+			authorIdentity: "verified",
+			authorName: "Virace",
+			authorEmail: "owner@example.com",
+			authorWebsite: "https://fangyuan.example.com/about",
+			status: "approved",
+		});
+	});
+
+	it("rejects reserved verified author email for visitor comments", async () => {
+		const fixture = await createCustomTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/api/comments",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:reserved-email",
+				pageTitle: "Reserved Email",
+				pageUrl: "https://fangyuan.example.com/posts/reserved-email/",
+				parentCommentId: null,
+				author: {
+					name: "Visitor",
+					email: "owner@example.com",
+				},
+				content: {
+					raw: "reserved email",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VERIFIED_AUTHOR_EMAIL_RESERVED",
+			},
+		});
 	});
 });

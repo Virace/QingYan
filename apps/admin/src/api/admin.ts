@@ -162,6 +162,13 @@ export interface AdminSettings {
 				};
 			};
 		};
+		verifiedAuthor: {
+			enabled: boolean;
+			displayName: string;
+			email: string;
+			website: string;
+			badgeLabel: string;
+		};
 	};
 	pageFeedback: {
 		allowLike: boolean;
@@ -295,6 +302,19 @@ export function deleteComment(commentId: string) {
 		`/api/admin/comments/${encodeURIComponent(commentId)}`,
 		{
 			method: "DELETE",
+		},
+	);
+}
+
+export function replyToComment(
+	commentId: string,
+	input: { content: { raw: string } },
+) {
+	return requestJson<{ comment: unknown }>(
+		`/api/admin/comments/${encodeURIComponent(commentId)}/reply`,
+		{
+			method: "POST",
+			body: JSON.stringify(input),
 		},
 	);
 }

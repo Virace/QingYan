@@ -151,6 +151,7 @@ security:
 
 - 评论开关、默认审核状态、最大嵌套深度、分页上限。
 - 评论身份字段：`nickname | email | website` 的允许和必填状态。
+- 可信评论作者：`comments.verifiedAuthor.enabled`、`displayName`、`email`、`website`、`badgeLabel`，用于管理员或楼主这类已验证来源回复。
 - 验证码模式：`never | always | threshold` 及阈值窗口。
 - 滥用保护和自动黑名单策略。
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
@@ -158,6 +159,8 @@ security:
 - 邮件通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
+
+可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。
 
 IP 库路径、下载源、缓存策略和自动更新属于全局运维配置，由系统设置维护；站点设置不再重复提供这些字段。
 

@@ -11,6 +11,7 @@ import {
 	listSites,
 	listUsers,
 	listVisitors,
+	replyToComment,
 	updateComment,
 	updateSite,
 } from "@/api/admin";
@@ -26,7 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 import type { AdminView } from "./admin-shell";
-import { EmptyState, inputClass } from "./admin-ui";
+import { EmptyState, inputClass, textareaClass } from "./admin-ui";
 
 function ResourceFilters({
 	search,
@@ -101,6 +102,7 @@ export function CommentsPage({
 	const queryClient = useQueryClient();
 	const [status, setStatus] = useState("");
 	const [limit, setLimit] = useState(20);
+	const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 	const commentsQuery = useQuery({
 		queryKey: ["admin", "comments", siteKey, search, pageKey, status, limit],
 		queryFn: () =>
@@ -125,6 +127,17 @@ export function CommentsPage({
 	const deleteMutation = useMutation({
 		mutationFn: deleteComment,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const replyMutation = useMutation({
+		mutationFn: (input: { commentId: string; raw: string }) =>
+			replyToComment(input.commentId, { content: { raw: input.raw } }),
+		onSuccess: (_data, variables) => {
+			setReplyDrafts((current) => ({
+				...current,
+				[variables.commentId]: "",
+			}));
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
 	});
 	const createBlacklistMutation = useMutation({
 		mutationFn: createBlacklist,
@@ -333,6 +346,44 @@ export function CommentsPage({
 													删除
 												</Button>
 											</div>
+											<form
+												className="mt-3 flex flex-col gap-2"
+												onSubmit={(event) => {
+													event.preventDefault();
+													const raw = (replyDrafts[comment.id] ?? "").trim();
+													if (!raw) {
+														return;
+													}
+													replyMutation.mutate({
+														commentId: comment.id,
+														raw,
+													});
+												}}
+											>
+												<textarea
+													className={textareaClass}
+													rows={2}
+													placeholder="快速回复"
+													value={replyDrafts[comment.id] ?? ""}
+													onChange={(event) =>
+														setReplyDrafts((current) => ({
+															...current,
+															[comment.id]: event.target.value,
+														}))
+													}
+												/>
+												<Button
+													type="submit"
+													size="sm"
+													variant="outline"
+													disabled={
+														replyMutation.isPending ||
+														!(replyDrafts[comment.id] ?? "").trim()
+													}
+												>
+													回复
+												</Button>
+											</form>
 										</td>
 									</tr>
 								))}

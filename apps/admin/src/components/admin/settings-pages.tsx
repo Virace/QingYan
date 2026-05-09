@@ -417,6 +417,101 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							))}
 						</div>
 					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">可信评论作者</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="启用可信作者">
+								<select
+									className={inputClass}
+									value={String(draft.comments.verifiedAuthor.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												verifiedAuthor: {
+													...draft.comments.verifiedAuthor,
+													enabled: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="显示名称">
+								<Input
+									value={draft.comments.verifiedAuthor.displayName}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												verifiedAuthor: {
+													...draft.comments.verifiedAuthor,
+													displayName: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="邮箱">
+								<Input
+									type="email"
+									value={draft.comments.verifiedAuthor.email}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												verifiedAuthor: {
+													...draft.comments.verifiedAuthor,
+													email: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="站点 URL">
+								<Input
+									value={draft.comments.verifiedAuthor.website}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												verifiedAuthor: {
+													...draft.comments.verifiedAuthor,
+													website: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="Badge 文案">
+								<Input
+									value={draft.comments.verifiedAuthor.badgeLabel}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												verifiedAuthor: {
+													...draft.comments.verifiedAuthor,
+													badgeLabel: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
+					</div>
 					<Field label="滥用防护">
 						<select
 							className={inputClass}

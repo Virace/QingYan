@@ -11,6 +11,8 @@ import {
 	voteRecords,
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -371,6 +373,164 @@ describe("GET /api/comments/bootstrap", () => {
 			gravatarUrl: `https://cravatar.cn/avatar/${aliceHash}?s=80&d=404&r=g`,
 		});
 		expect(response.json().comments[0].author.avatarUrl).toBeUndefined();
+	});
+
+	it("returns verified author badge from the current site settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_verified_badge",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_verified_badge"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:verified-badge",
+			pageTitle: "Verified Badge",
+			pageUrl: "/posts/verified-badge/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:verified-badge"));
+		if (!pageThread) {
+			throw new Error("Expected page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_verified_badge",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			authorIdentity: "verified",
+			status: "approved",
+			authorName: "Virace",
+			contentRaw: "verified",
+			contentHtml: "<p>verified</p>",
+			createdAt: "2026-05-09T10:00:00.000Z",
+			updatedAt: "2026-05-09T10:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
+			cookies: {
+				qingyan_visitor: "viewer_verified_badge",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comments[0].author.badge).toEqual({
+			label: "楼主",
+		});
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "博主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const updatedResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
+			cookies: {
+				qingyan_visitor: "viewer_verified_badge",
+			},
+		});
+
+		expect(updatedResponse.statusCode).toBe(200);
+		expect(updatedResponse.json().comments[0].author.badge).toEqual({
+			label: "博主",
+		});
+	});
+
+	it("returns minimal verified author viewer only for logged-in admin", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const publicResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+		});
+		expect(publicResponse.statusCode).toBe(200);
+		expect(publicResponse.json().viewer).toEqual({});
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const adminResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(adminResponse.statusCode).toBe(200);
+		expect(adminResponse.json().viewer).toEqual({
+			verifiedAuthor: {
+				displayName: "Virace",
+				badgeLabel: "楼主",
+			},
+		});
 	});
 
 	it("inlines captcha challenge in bootstrap when captcha mode is always", async () => {

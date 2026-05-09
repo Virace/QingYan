@@ -1,10 +1,21 @@
 import type { SecurityToolkit } from "../../plugins/security";
-import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
+import {
+	AppError,
+	InvalidRequestError,
+	ResourceNotFoundError,
+} from "../shared/errors";
 import { buildCommentForm } from "../comments/comment-form";
 import {
 	defaultCommentMetadata,
 	type CommentMetadataSettings,
 } from "../shared/site-settings-defaults";
+import {
+	mergeVerifiedAuthorSettings,
+	serializeVerifiedAuthorSettings,
+	type VerifiedAuthorSettings,
+} from "../comments/verified-author";
+import { presentComments } from "../comments/presenter";
+import { CommentsWriteRepository } from "../comments/write-repository";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminRepository } from "./repository";
 
@@ -369,6 +380,89 @@ export class AdminManagementService {
 		return comment;
 	}
 
+	public async replyToComment(
+		parentCommentId: string,
+		input: {
+			contentRaw: string;
+			requestId?: string;
+		},
+	) {
+		const context =
+			await this.repository.getCommentReplyContext(parentCommentId);
+		if (!context) {
+			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+
+		const verifiedAuthor = mergeVerifiedAuthorSettings(
+			context.verifiedAuthorJson,
+		);
+		if (!verifiedAuthor.enabled) {
+			throw new AppError(
+				400,
+				"VERIFIED_AUTHOR_DISABLED",
+				"可信评论作者未启用。",
+			);
+		}
+
+		const writeRepository = new CommentsWriteRepository(
+			this.repository.database,
+		);
+		const created = await writeRepository.createComment({
+			siteId: context.siteId,
+			pageThreadId: context.pageThreadId,
+			parentCommentId,
+			visitorId: null,
+			authorIdentity: "verified",
+			authorName: verifiedAuthor.displayName,
+			authorEmail: verifiedAuthor.email || undefined,
+			authorWebsite: verifiedAuthor.website || undefined,
+			contentRaw: input.contentRaw,
+			status: "approved",
+		});
+		const comment = await this.repository.getCommentById(created.commentId);
+		if (!comment) {
+			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: context.siteKey,
+			pageKey: context.pageKey,
+			actorType: "admin",
+			event: "comments.created",
+			message: "管理员已回复评论",
+			targetType: "comment",
+			targetId: created.commentId,
+			payload: {
+				parentCommentId,
+				status: "approved",
+			},
+		});
+
+		const [presentedComment] = presentComments(
+			[
+				{
+					...comment,
+					parentId: null,
+				},
+			],
+			new Map(),
+			{
+				verifiedAuthor: {
+					enabled: verifiedAuthor.enabled,
+					badgeLabel: verifiedAuthor.badgeLabel,
+				},
+			},
+		);
+		if (presentedComment) {
+			presentedComment.parentId = comment.parentId;
+		}
+
+		return {
+			comment: presentedComment,
+		};
+	}
+
 	public async listBlacklist(siteKey?: string) {
 		const siteId = await this.resolveSiteId(siteKey);
 		return this.repository.listBlacklist(siteId);
@@ -505,6 +599,9 @@ export class AdminManagementService {
 					},
 				},
 				metadata: mergeCommentMetadata(settings.commentMetadataJson),
+				verifiedAuthor: mergeVerifiedAuthorSettings(
+					settings.verifiedAuthorJson,
+				),
 			},
 			pageFeedback: {
 				allowLike: settings.allowPageLike,
@@ -543,6 +640,7 @@ export class AdminManagementService {
 					};
 				};
 				metadata?: CommentMetadataPatch;
+				verifiedAuthor?: VerifiedAuthorSettings;
 			};
 			pageFeedback?: {
 				allowLike?: boolean;
@@ -576,6 +674,9 @@ export class AdminManagementService {
 			autoBlacklistTtlSec: input.comments?.abuseGuard?.autoBlacklist?.ttlSec,
 			commentMetadataJson: input.comments?.metadata
 				? JSON.stringify(input.comments.metadata)
+				: undefined,
+			verifiedAuthorJson: input.comments?.verifiedAuthor
+				? serializeVerifiedAuthorSettings(input.comments.verifiedAuthor)
 				: undefined,
 			emailNotificationsEnabled: input.notifications?.emailEnabled,
 		});

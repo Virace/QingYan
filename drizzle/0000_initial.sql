@@ -21,6 +21,7 @@ CREATE TABLE `comments` (
 	`page_thread_id` integer NOT NULL,
 	`parent_id` text,
 	`visitor_id` integer,
+	`author_identity` text DEFAULT 'visitor' NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`author_name` text NOT NULL,
 	`author_email` text,
@@ -150,7 +151,7 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
 	`email_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `verified_author_json` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_settings_site_id_idx` ON `site_settings` (`site_id`);--> statement-breakpoint

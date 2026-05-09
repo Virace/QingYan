@@ -5,8 +5,10 @@ import {
 	blacklistRules,
 	comments,
 	pageThreads,
+	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -153,5 +155,178 @@ describe("admin comments", () => {
 			.from(comments)
 			.where(eq(comments.id, "c_admin_1"));
 		expect(deletedComment?.deletedAt).not.toBeNull();
+	});
+
+	it("creates a verified reply from admin comments API", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:admin-reply",
+			pageTitle: "Admin Reply",
+			pageUrl: "/posts/admin-reply/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:admin-reply"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_admin_reply_root",
+			siteId: site.id,
+			pageThreadId: thread.id,
+			parentId: null,
+			status: "approved",
+			authorName: "Visitor",
+			authorEmail: "visitor@example.com",
+			contentRaw: "root comment",
+			contentHtml: "<p>root comment</p>",
+			replyCount: 0,
+			voteUpCount: 0,
+			voteDownCount: 0,
+			createdAt: "2026-05-09T10:00:00.000Z",
+			updatedAt: "2026-05-09T10:00:00.000Z",
+		});
+
+		const reply = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/comments/c_admin_reply_root/reply",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				content: {
+					raw: "管理员回复",
+				},
+			},
+		});
+
+		expect(reply.statusCode).toBe(200);
+		expect(reply.json().comment.author).toMatchObject({
+			name: "Virace",
+			badge: { label: "楼主" },
+		});
+
+		const [created] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "管理员回复"));
+		expect(created).toMatchObject({
+			parentId: "c_admin_reply_root",
+			authorIdentity: "verified",
+			authorEmail: "owner@example.com",
+			status: "approved",
+		});
+
+		const [updatedRoot] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.id, "c_admin_reply_root"));
+		expect(updatedRoot?.replyCount).toBe(1);
+	});
+
+	it("rejects admin replies when verified author is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: false,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:admin-reply-disabled",
+			pageTitle: "Admin Reply Disabled",
+			pageUrl: "/posts/admin-reply-disabled/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:admin-reply-disabled"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_admin_reply_disabled_root",
+			siteId: site.id,
+			pageThreadId: thread.id,
+			parentId: null,
+			status: "approved",
+			authorName: "Visitor",
+			contentRaw: "root comment",
+			contentHtml: "<p>root comment</p>",
+			replyCount: 0,
+			voteUpCount: 0,
+			voteDownCount: 0,
+			createdAt: "2026-05-09T10:00:00.000Z",
+			updatedAt: "2026-05-09T10:00:00.000Z",
+		});
+
+		const reply = await fixture.app.inject({
+			method: "POST",
+			url: "/api/admin/comments/c_admin_reply_disabled_root/reply",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			payload: {
+				content: {
+					raw: "管理员回复",
+				},
+			},
+		});
+
+		expect(reply.statusCode).toBe(400);
+		expect(reply.json()).toMatchObject({
+			error: {
+				code: "VERIFIED_AUTHOR_DISABLED",
+			},
+		});
 	});
 });

@@ -6,6 +6,7 @@ import { AdminRepository } from "../admin/repository";
 import {
 	adminCommentParamsSchema,
 	adminCommentPatchBodySchema,
+	adminCommentReplyBodySchema,
 	adminCommentsQuerySchema,
 } from "../admin/schemas";
 import { AdminSessionService } from "../admin/session-service";
@@ -55,6 +56,25 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 				requestId: request.context?.requestId,
 			}),
 		};
+	});
+
+	fastify.post("/:commentId/reply", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedParams = adminCommentParamsSchema.safeParse(request.params);
+		const parsedBody = adminCommentReplyBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return service.replyToComment(parsedParams.data.commentId, {
+			contentRaw: parsedBody.data.content.raw,
+			requestId: request.context?.requestId,
+		});
 	});
 
 	fastify.delete("/:commentId", async (request) => {

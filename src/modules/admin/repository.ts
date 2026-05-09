@@ -787,6 +787,26 @@ export class AdminRepository {
 		return comment;
 	}
 
+	public async getCommentReplyContext(commentId: string) {
+		const [row] = await this.db
+			.select({
+				commentId: comments.id,
+				pageThreadId: comments.pageThreadId,
+				siteId: comments.siteId,
+				siteKey: sites.siteKey,
+				pageKey: pageThreads.pageKey,
+				verifiedAuthorJson: siteSettings.verifiedAuthorJson,
+			})
+			.from(comments)
+			.innerJoin(sites, eq(sites.id, comments.siteId))
+			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
+			.innerJoin(siteSettings, eq(siteSettings.siteId, sites.id))
+			.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+			.limit(1);
+
+		return row;
+	}
+
 	public async updateComment(
 		commentId: string,
 		input: {
@@ -976,6 +996,7 @@ export class AdminRepository {
 			autoBlacklistScope?: "post" | "all";
 			autoBlacklistTtlSec?: number;
 			commentMetadataJson?: string;
+			verifiedAuthorJson?: string;
 			emailNotificationsEnabled?: boolean;
 		},
 	) {
@@ -999,6 +1020,7 @@ export class AdminRepository {
 				autoBlacklistScope: input.autoBlacklistScope,
 				autoBlacklistTtlSec: input.autoBlacklistTtlSec,
 				commentMetadataJson: input.commentMetadataJson,
+				verifiedAuthorJson: input.verifiedAuthorJson,
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})

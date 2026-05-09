@@ -9,6 +9,10 @@ import type { CommentsRepository } from "./repository";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import type { CommentMetadataResolver } from "./metadata/resolver";
+import {
+	isReservedVerifiedAuthorEmail,
+	mergeVerifiedAuthorSettings,
+} from "./verified-author";
 import type { CommentsWriteRepository } from "./write-repository";
 
 function resolveIdentity(
@@ -52,6 +56,7 @@ export class CommentsWriteService {
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
+		verifiedAuthorSession?: { type: "admin" };
 	}) {
 		const site = this.readRepository.getRegisteredSite(input.siteKey);
 		if (!site) {
@@ -80,68 +85,97 @@ export class CommentsWriteService {
 			allowWebsite: settings?.allowWebsite,
 			commentRequireJson: settings?.commentRequireJson,
 		});
+		const verifiedAuthor = mergeVerifiedAuthorSettings(
+			settings?.verifiedAuthorJson,
+		);
+		const shouldUseVerifiedAuthor =
+			Boolean(input.verifiedAuthorSession) && verifiedAuthor.enabled;
 		const authorName = input.author.name?.trim() ?? "";
 		const authorEmail = input.author.email?.trim() || undefined;
 		const authorWebsite = input.author.website?.trim() || undefined;
-		if (commentForm.require.includes("nickname") && !authorName) {
+		if (
+			!shouldUseVerifiedAuthor &&
+			commentForm.require.includes("nickname") &&
+			!authorName
+		) {
 			throw new AppError(400, "COMMENT_VALIDATION_FAILED", "评论参数不完整。");
 		}
-		if (commentForm.require.includes("email") && !authorEmail) {
+		if (
+			!shouldUseVerifiedAuthor &&
+			commentForm.require.includes("email") &&
+			!authorEmail
+		) {
 			throw new AppError(400, "COMMENT_VALIDATION_FAILED", "评论参数不完整。");
 		}
-		if (commentForm.require.includes("website") && !authorWebsite) {
+		if (
+			!shouldUseVerifiedAuthor &&
+			commentForm.require.includes("website") &&
+			!authorWebsite
+		) {
 			throw new AppError(400, "COMMENT_VALIDATION_FAILED", "评论参数不完整。");
+		}
+		if (
+			!shouldUseVerifiedAuthor &&
+			isReservedVerifiedAuthorEmail(authorEmail, verifiedAuthor)
+		) {
+			throw new AppError(
+				403,
+				"VERIFIED_AUTHOR_EMAIL_RESERVED",
+				"该邮箱仅允许可信作者登录后使用。",
+			);
 		}
 
-		await this.security.assertNotBlacklisted({
-			requestId: input.requestId,
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			visitorKey: visitor.visitorKey,
-			email: authorEmail,
-			ip: input.ip,
-			requestScope: "write",
-			errorCode: "COMMENT_BLACKLISTED",
-			errorMessage: "当前请求已被拒绝。",
-		});
-		await this.security.consumeRateLimit({
-			key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:comment_create`,
-			rule: this.config.security.rateLimit.commentCreate,
-			errorCode: "COMMENT_RATE_LIMITED",
-			errorMessage: "提交过于频繁，请稍后再试。",
-		});
-		await this.captchaService.markWriteAction({
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			pageTitle: input.pageTitle,
-			pageUrl: input.pageUrl,
-			action: "comment_create",
-			requestId: input.requestId,
-			visitorKey: visitor.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
-		if (input.captcha) {
-			await this.captchaService.consumeInlineCaptcha({
+		if (!shouldUseVerifiedAuthor) {
+			await this.security.assertNotBlacklisted({
+				requestId: input.requestId,
 				siteKey: input.siteKey,
 				pageKey: input.pageKey,
-				challengeId: input.captcha.challengeId,
-				value: input.captcha.value,
+				visitorKey: visitor.visitorKey,
+				email: authorEmail,
+				ip: input.ip,
+				requestScope: "write",
+				errorCode: "COMMENT_BLACKLISTED",
+				errorMessage: "当前请求已被拒绝。",
+			});
+			await this.security.consumeRateLimit({
+				key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:comment_create`,
+				rule: this.config.security.rateLimit.commentCreate,
+				errorCode: "COMMENT_RATE_LIMITED",
+				errorMessage: "提交过于频繁，请稍后再试。",
+			});
+			await this.captchaService.markWriteAction({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				pageTitle: input.pageTitle,
+				pageUrl: input.pageUrl,
 				action: "comment_create",
 				requestId: input.requestId,
 				visitorKey: visitor.visitorKey,
 				ip: input.ip,
 				userAgent: input.userAgent,
 			});
+			if (input.captcha) {
+				await this.captchaService.consumeInlineCaptcha({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					challengeId: input.captcha.challengeId,
+					value: input.captcha.value,
+					action: "comment_create",
+					requestId: input.requestId,
+					visitorKey: visitor.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+				});
+			}
+			await this.captchaService.ensureSatisfied({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				action: "comment_create",
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
 		}
-		await this.captchaService.ensureSatisfied({
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			action: "comment_create",
-			visitorKey: visitor.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
 
 		if (input.parentCommentId) {
 			const parentComment = await this.writeRepository.getCommentById(
@@ -152,9 +186,18 @@ export class CommentsWriteService {
 			}
 		}
 
-		const status = (settings?.defaultStatus ?? "pending") as
-			| "pending"
-			| "approved";
+		const status = shouldUseVerifiedAuthor
+			? "approved"
+			: ((settings?.defaultStatus ?? "pending") as "pending" | "approved");
+		const resolvedAuthorName = shouldUseVerifiedAuthor
+			? verifiedAuthor.displayName
+			: authorName;
+		const resolvedAuthorEmail = shouldUseVerifiedAuthor
+			? verifiedAuthor.email || undefined
+			: authorEmail;
+		const resolvedAuthorWebsite = shouldUseVerifiedAuthor
+			? verifiedAuthor.website || undefined
+			: authorWebsite;
 		const metadataConfig = this.readRepository.resolveCommentMetadata(
 			settings ?? undefined,
 		);
@@ -176,11 +219,13 @@ export class CommentsWriteService {
 			pageThreadId: thread.id,
 			parentCommentId: input.parentCommentId,
 			visitorId: visitor.id,
-			authorName,
-			authorEmail,
-			authorWebsite: commentForm.allow.includes("website")
-				? authorWebsite
-				: undefined,
+			authorIdentity: shouldUseVerifiedAuthor ? "verified" : "visitor",
+			authorName: resolvedAuthorName,
+			authorEmail: resolvedAuthorEmail,
+			authorWebsite:
+				shouldUseVerifiedAuthor || commentForm.allow.includes("website")
+					? resolvedAuthorWebsite
+					: undefined,
 			authorIp: metadataConfig.collectIp ? input.ip : undefined,
 			authorUserAgent: metadataConfig.collectUserAgent
 				? input.userAgent
@@ -194,8 +239,8 @@ export class CommentsWriteService {
 			requestId: input.requestId,
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
-			actorType: "visitor",
-			actorId: visitor.visitorKey,
+			actorType: shouldUseVerifiedAuthor ? "admin" : "visitor",
+			actorId: shouldUseVerifiedAuthor ? "admin_session" : visitor.visitorKey,
 			event: "comments.created",
 			message: status === "pending" ? "评论已提交待审核" : "评论已发布",
 			targetType: "comment",
