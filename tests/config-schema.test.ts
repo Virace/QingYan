@@ -25,7 +25,7 @@ function createStartupConfig() {
 		admin: {
 			session: {
 				cookieName: "qingyan_admin",
-				ttlMinutes: 1440,
+				ttlMinutes: 4320,
 				sameSite: "lax",
 				secure: false,
 			},
@@ -105,6 +105,12 @@ describe("configSchema", () => {
 					restartRequired: true,
 				}),
 				expect.objectContaining({
+					path: "admin.session.ttlMinutes",
+					envName: "QINGYAN_ADMIN_SESSION_TTL_MINUTES",
+					category: "system_settings_seed",
+					restartRequired: false,
+				}),
+				expect.objectContaining({
 					path: "mail.smtp.password",
 					envName: "QINGYAN_SMTP_PASSWORD",
 					category: "system_settings_seed",
@@ -133,7 +139,7 @@ describe("configSchema", () => {
 				"admin:",
 				"  session:",
 				"    cookieName: qingyan_admin",
-				"    ttlMinutes: 1440",
+				"    ttlMinutes: 4320",
 				"    sameSite: lax",
 				"    secure: false",
 				"security:",

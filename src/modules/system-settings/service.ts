@@ -16,6 +16,10 @@ export class RuntimeSystemSettingsService {
 		return (await this.getSettings()).captcha;
 	}
 
+	public async getAdminSessionSettings() {
+		return (await this.getSettings()).admin.session;
+	}
+
 	public async getIpRegionSettings() {
 		return (await this.getSettings()).ipRegion;
 	}

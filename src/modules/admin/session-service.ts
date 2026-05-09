@@ -3,6 +3,7 @@ import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { defaultSystemSettings } from "../system-settings/definitions";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { AppError } from "../shared/errors";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminBootstrap } from "./bootstrap-service";
@@ -26,6 +27,9 @@ export class AdminSessionService {
 		private readonly repository: AdminRepository,
 		private readonly adminBootstrap: AdminBootstrap,
 		private readonly siteRegistry?: SiteRegistry,
+		private readonly systemSettings = new RuntimeSystemSettingsService(
+			repository.database,
+		),
 	) {
 		this.loginChallengeStore = new AdminLoginChallengeStore(
 			defaultSystemSettings.captcha.image.ttlSec,
@@ -34,6 +38,10 @@ export class AdminSessionService {
 
 	public getSessionCookieName() {
 		return this.config.admin.session.cookieName;
+	}
+
+	public async getSessionTtlMinutes() {
+		return (await this.systemSettings.getAdminSessionSettings()).ttlMinutes;
 	}
 
 	private async issueCsrfToken(sessionId: string) {
@@ -64,8 +72,9 @@ export class AdminSessionService {
 
 		const sessionToken = createSessionToken();
 		const sessionId = createSessionToken();
+		const ttlMinutes = await this.getSessionTtlMinutes();
 		const expiresAt = new Date(
-			Date.now() + this.config.admin.session.ttlMinutes * 60 * 1000,
+			Date.now() + ttlMinutes * 60 * 1000,
 		).toISOString();
 		await this.repository.createAdminSession({
 			id: sessionId,
@@ -92,6 +101,7 @@ export class AdminSessionService {
 		return {
 			sessionToken,
 			expiresAt,
+			ttlMinutes,
 			csrf,
 		};
 	}
@@ -263,8 +273,9 @@ export class AdminSessionService {
 
 		const sessionToken = createSessionToken();
 		const sessionId = createSessionToken();
+		const ttlMinutes = await this.getSessionTtlMinutes();
 		const expiresAt = new Date(
-			Date.now() + this.config.admin.session.ttlMinutes * 60 * 1000,
+			Date.now() + ttlMinutes * 60 * 1000,
 		).toISOString();
 		await this.repository.createAdminSession({
 			id: sessionId,
@@ -290,6 +301,7 @@ export class AdminSessionService {
 		return {
 			sessionToken,
 			expiresAt,
+			ttlMinutes,
 			csrf,
 		};
 	}

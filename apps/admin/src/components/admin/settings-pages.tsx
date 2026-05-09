@@ -944,6 +944,35 @@ export function SystemSettingsPage() {
 						<Input value={draft.logging.directory} readOnly />
 					</Field>
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">后台会话</p>
+						<p className="text-sm text-muted-foreground">
+							新登录会话使用这里的有效期；已签发的会话保持原有过期时间。
+						</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="Cookie Session 有效期（分钟）">
+								<Input
+									type="number"
+									min={1}
+									value={draft.admin.session.ttlMinutes}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											admin: {
+												session: {
+													...draft.admin.session,
+													ttlMinutes: Number(event.target.value),
+												},
+											},
+										})
+									}
+								/>
+								<span className="text-xs text-muted-foreground">
+									默认 4320 分钟，即 3 天。
+								</span>
+							</Field>
+						</div>
+					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
 						<p className="text-sm font-medium">头像 / Gravatar</p>
 						<p className="text-sm text-muted-foreground">
 							后端只返回 author.gravatarUrl，不托管、不代理、不缓存头像图片。

@@ -43,7 +43,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 			sameSite: fastify.config.admin.session.sameSite,
 			httpOnly: true,
 			secure: fastify.config.admin.session.secure,
-			maxAge: fastify.config.admin.session.ttlMinutes * 60,
+			maxAge: result.ttlMinutes * 60,
 		});
 
 		return {

@@ -26,6 +26,12 @@ describe("system settings ownership", () => {
 		expect(rows).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
+					category: "admin",
+					key: "session.ttlMinutes",
+					value: 4320,
+					secret: false,
+				}),
+				expect.objectContaining({
 					category: "logging",
 					key: "level",
 					value: "info",

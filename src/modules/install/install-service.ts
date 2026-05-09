@@ -37,6 +37,7 @@ import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import { normalizeOriginList } from "../shared/url-policy";
 import {
 	defaultSystemSettings,
+	defaultAdminSessionTtlMinutes,
 	type SystemSettings,
 	systemSettingsSchema,
 } from "../system-settings/definitions";
@@ -78,7 +79,11 @@ export const installApplySchema = z.object({
 		session: z
 			.object({
 				cookieName: z.string().min(1).default("qingyan_admin"),
-				ttlMinutes: z.number().int().positive().default(1440),
+				ttlMinutes: z
+					.number()
+					.int()
+					.positive()
+					.default(defaultAdminSessionTtlMinutes),
 				sameSite: z.enum(["strict", "lax", "none"]).default("lax"),
 				secure: z.boolean().optional(),
 			})
@@ -330,7 +335,7 @@ function buildStartupConfig(input: NormalizedInstallInput): StartupConfig {
 		admin: {
 			session: {
 				cookieName: session?.cookieName ?? "qingyan_admin",
-				ttlMinutes: session?.ttlMinutes ?? 1440,
+				ttlMinutes: defaultAdminSessionTtlMinutes,
 				sameSite: session?.sameSite ?? "lax",
 				secure: sessionSecure,
 			},
@@ -359,6 +364,41 @@ function previewValue(value: unknown): string | number | boolean | null {
 		return value;
 	}
 	return value === null || value === undefined ? null : String(value);
+}
+
+function parseEnvValue(
+	mapping: { valueKind: string; envName: string },
+	rawValue: string,
+) {
+	if (mapping.valueKind === "number") {
+		const value = Number(rawValue);
+		if (!Number.isFinite(value)) {
+			throw new Error(`${mapping.envName} must be a number.`);
+		}
+		return value;
+	}
+	if (mapping.valueKind === "boolean") {
+		const normalized = rawValue.trim().toLowerCase();
+		if (normalized === "true") {
+			return true;
+		}
+		if (normalized === "false") {
+			return false;
+		}
+		throw new Error(`${mapping.envName} must be true or false.`);
+	}
+	if (mapping.valueKind === "sameSite") {
+		const normalized = rawValue.trim().toLowerCase();
+		if (
+			normalized === "strict" ||
+			normalized === "lax" ||
+			normalized === "none"
+		) {
+			return normalized;
+		}
+		throw new Error(`${mapping.envName} must be strict, lax, or none.`);
+	}
+	return rawValue;
 }
 
 function mergePlainObject(base: unknown, override: unknown): unknown {
@@ -417,9 +457,19 @@ function splitSystemSettingPath(settingPath: string): {
 function buildSystemSettingSeeds(
 	environment: NodeJS.ProcessEnv,
 	systemSettingsInput: unknown,
+	adminSessionInput?: InstallApplyInput["admin"]["session"],
 ): InstallSystemSettingSeed[] {
 	const seeds: InstallSystemSettingSeed[] = flattenSystemSettings(
-		buildSystemSettingsInput(systemSettingsInput),
+		buildSystemSettingsInput(
+			mergePlainObject(systemSettingsInput, {
+				admin: {
+					session: {
+						ttlMinutes:
+							adminSessionInput?.ttlMinutes ?? defaultAdminSessionTtlMinutes,
+					},
+				},
+			}),
+		),
 	).map((row) => ({
 		category: row.category,
 		key: row.key,
@@ -440,7 +490,7 @@ function buildSystemSettingSeeds(
 		}
 		const seed: InstallSystemSettingSeed = {
 			...splitSystemSettingPath(mapping.path),
-			value,
+			value: parseEnvValue(mapping, value),
 			source: "environment",
 			envName: mapping.envName,
 			secret: mapping.secret,
@@ -519,6 +569,7 @@ function buildValueMeta(input: {
 	for (const seed of buildSystemSettingSeeds(
 		input.environment,
 		input.normalized.systemSettings,
+		input.normalized.admin.session,
 	)) {
 		if (seed.source !== "environment") {
 			continue;
@@ -547,6 +598,7 @@ function resolveInstallConfigInput(input: {
 	const systemSettings = buildSystemSettingSeeds(
 		environment,
 		normalized.systemSettings,
+		normalized.admin.session,
 	);
 	return {
 		...normalized,
@@ -567,12 +619,18 @@ function resolveInstallConfigInput(input: {
 function buildApplyPayload(
 	input: ResolvedInstallInput,
 ): Omit<InstallApplyInput, "token"> {
+	const adminSession = {
+		...input.startupConfig.admin.session,
+		ttlMinutes:
+			input.admin.session?.ttlMinutes ??
+			input.startupConfig.admin.session.ttlMinutes,
+	};
 	const adminPayload: Omit<InstallApplyInput["admin"], "password"> & {
 		password?: string;
 	} = {
 		consolePath: input.admin.consolePath,
 		username: input.admin.username,
-		session: input.startupConfig.admin.session,
+		session: adminSession,
 	};
 	if (!input.admin.passwordGenerated) {
 		adminPayload.password = input.admin.password;
@@ -734,7 +792,11 @@ export async function buildInstallPlan(input: {
 			source: "env" as const,
 			valuePreview: mapping.secret
 				? "configured"
-				: previewValue(readPathValue(resolved.startupConfig, mapping.path)),
+				: previewValue(
+						mapping.category === "system_settings_seed"
+							? parseEnvValue(mapping, environment[mapping.envName] ?? "")
+							: readPathValue(resolved.startupConfig, mapping.path),
+					),
 		}));
 	const restoreDryRun = resolved.restore
 		? await buildRestoreDryRun(resolved.restore)

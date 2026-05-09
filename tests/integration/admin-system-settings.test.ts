@@ -58,6 +58,11 @@ describe("admin system settings", () => {
 					baseUrl: "https://gravatar.com/avatar",
 				},
 			},
+			admin: {
+				session: {
+					ttlMinutes: 4320,
+				},
+			},
 		});
 
 		const updateResponse = await fixture.app.inject({
@@ -277,6 +282,59 @@ describe("admin system settings", () => {
 				gravatar: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar",
+				},
+			},
+		});
+	});
+
+	it("updates admin session ttl setting", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					session: {
+						ttlMinutes: 10080,
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json()).toMatchObject({
+			admin: {
+				session: {
+					ttlMinutes: 10080,
+				},
+			},
+		});
+
+		const getResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(getResponse.statusCode).toBe(200);
+		expect(getResponse.json()).toMatchObject({
+			admin: {
+				session: {
+					ttlMinutes: 10080,
 				},
 			},
 		});

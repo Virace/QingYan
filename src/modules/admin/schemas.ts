@@ -213,6 +213,13 @@ export const adminSettingsBodySchema = z
 	});
 
 export const adminSystemSettingsBodySchema = z.object({
+	admin: z
+		.object({
+			session: z.object({
+				ttlMinutes: z.number().int().positive(),
+			}),
+		})
+		.optional(),
 	logging: z.object({
 		level: z.enum(["error", "warn", "info", "debug"]),
 		retentionDays: z.number().int().min(1).max(3650),

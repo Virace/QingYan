@@ -89,7 +89,7 @@ export function createTestConfig(
 			},
 			session: {
 				cookieName: "qingyan_admin",
-				ttlMinutes: 1440,
+				ttlMinutes: 4320,
 				sameSite: "lax",
 				secure: false,
 			},

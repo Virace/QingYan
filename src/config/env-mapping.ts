@@ -70,11 +70,11 @@ export const envMappings: EnvMapping[] = [
 	{
 		path: "admin.session.ttlMinutes",
 		envName: "QINGYAN_ADMIN_SESSION_TTL_MINUTES",
-		category: "startup",
+		category: "system_settings_seed",
 		valueKind: "number",
 		secret: false,
 		readable: true,
-		restartRequired: true,
+		restartRequired: false,
 	},
 	{
 		path: "admin.session.sameSite",

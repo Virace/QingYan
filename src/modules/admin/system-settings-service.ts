@@ -10,6 +10,7 @@ import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
 
 type AdminSystemSettingsInput = {
+	admin?: SystemSettings["admin"];
 	logging: SystemSettings["logging"];
 	mail?: {
 		enabled: boolean;
@@ -71,6 +72,7 @@ export class AdminSystemSettingsService {
 		const current = readSystemSettingsRows(rows);
 		const next: SystemSettings = {
 			...current,
+			admin: input.admin ?? current.admin,
 			logging: input.logging,
 			mail: input.mail
 				? {

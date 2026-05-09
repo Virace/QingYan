@@ -665,6 +665,11 @@ describe("install bootstrap", () => {
 		expect(planResponse.json()).toMatchObject({
 			systemSettings: expect.arrayContaining([
 				expect.objectContaining({
+					category: "admin",
+					key: "session.ttlMinutes",
+					valuePreview: 30,
+				}),
+				expect.objectContaining({
 					category: "logging",
 					key: "level",
 					valuePreview: "debug",
@@ -723,7 +728,7 @@ describe("install bootstrap", () => {
 		const config = await loadConfig(workspace.configPath, {});
 		expect(config.admin.session).toMatchObject({
 			cookieName: "custom_admin",
-			ttlMinutes: 30,
+			ttlMinutes: 4320,
 			sameSite: "strict",
 			secure: true,
 		});
@@ -750,6 +755,11 @@ describe("install bootstrap", () => {
 			const rows = await db.select().from(systemSettings);
 			expect(rows).toEqual(
 				expect.arrayContaining([
+					expect.objectContaining({
+						category: "admin",
+						key: "session.ttlMinutes",
+						valueJson: "30",
+					}),
 					expect.objectContaining({
 						category: "logging",
 						key: "level",
@@ -921,6 +931,11 @@ describe("install bootstrap", () => {
 					envName: "QINGYAN_ADMIN_SESSION_COOKIE_NAME",
 					valuePreview: "qy_admin",
 				}),
+				expect.objectContaining({
+					path: "admin.session.ttlMinutes",
+					envName: "QINGYAN_ADMIN_SESSION_TTL_MINUTES",
+					valuePreview: 60,
+				}),
 			]),
 		);
 
@@ -948,10 +963,25 @@ describe("install bootstrap", () => {
 		expect(config.database.sqlite.file).toBe(envDatabaseFile);
 		expect(config.admin.session).toMatchObject({
 			cookieName: "qy_admin",
-			ttlMinutes: 60,
+			ttlMinutes: 4320,
 			sameSite: "strict",
 			secure: true,
 		});
+		const { db, sqlite } = createDatabaseClients(envDatabaseFile);
+		try {
+			const rows = await db.select().from(systemSettings);
+			expect(rows).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						category: "admin",
+						key: "session.ttlMinutes",
+						valueJson: "60",
+					}),
+				]),
+			);
+		} finally {
+			sqlite.close();
+		}
 		expect(existsSync(envDatabaseFile)).toBe(true);
 	});
 

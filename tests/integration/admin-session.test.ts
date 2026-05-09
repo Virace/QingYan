@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { blacklistRules } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import {
 	decodeSvgDataUrl,
 	getForcedTestCaptchaAnswer,
@@ -18,6 +19,59 @@ afterEach(async () => {
 });
 
 describe("admin session", () => {
+	it("uses the database system setting for new session expiry", async () => {
+		await withForcedTestCaptchaAnswer(async () => {
+			const fixture = await createTestApp();
+			cleanups.push(fixture.cleanup);
+
+			await new AdminSystemSettingsRepository(fixture.app.db).upsert(
+				"admin",
+				"session.ttlMinutes",
+				10080,
+			);
+
+			const captchaResponse = await fixture.app.inject({
+				method: "GET",
+				url: "/api/admin/session/captcha",
+			});
+			const { challenge } = captchaResponse.json() as {
+				challenge: {
+					challengeId: string;
+				};
+			};
+
+			const beforeLogin = Date.now();
+			const loginResponse = await fixture.app.inject({
+				method: "POST",
+				url: "/api/admin/session/login",
+				payload: {
+					username: "admin",
+					password: "replace-me",
+					challengeId: challenge.challengeId,
+					captchaValue: getForcedTestCaptchaAnswer(),
+				},
+			});
+			const afterLogin = Date.now();
+
+			expect(loginResponse.statusCode).toBe(200);
+			const adminCookie = loginResponse.cookies.find(
+				(cookie) => cookie.name === "qingyan_admin",
+			);
+			expect(adminCookie?.maxAge).toBe(604_800);
+
+			const expiresAt = new Date(
+				(loginResponse.json() as { session: { expiresAt: string } }).session
+					.expiresAt,
+			).getTime();
+			expect(expiresAt).toBeGreaterThanOrEqual(
+				beforeLogin + 10080 * 60 * 1000 - 1000,
+			);
+			expect(expiresAt).toBeLessThanOrEqual(
+				afterLogin + 10080 * 60 * 1000 + 1000,
+			);
+		});
+	});
+
 	it("returns csrf token on login and me", async () => {
 		await withForcedTestCaptchaAnswer(async () => {
 			const fixture = await createTestApp();
@@ -250,7 +304,7 @@ describe("admin session", () => {
 					};
 				}
 			).csrf?.token;
-			expect(adminCookie?.maxAge).toBe(86_400);
+			expect(adminCookie?.maxAge).toBe(259_200);
 			expect(csrfToken).toBeTruthy();
 
 			const meResponse = await fixture.app.inject({

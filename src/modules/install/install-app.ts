@@ -7,6 +7,7 @@ import {
 	buildInstallPlan,
 	installApplySchema,
 } from "./install-service";
+import { defaultAdminSessionTtlMinutes } from "../system-settings/definitions";
 import { envMappings, type EnvMapping } from "../../config/env-mapping";
 import { defaultSystemSettings } from "../system-settings/definitions";
 import type {
@@ -180,7 +181,7 @@ function renderInstallHtml(
 			password: "",
 			session: {
 				cookieName: "qingyan_admin",
-				ttlMinutes: 1440,
+				ttlMinutes: defaultAdminSessionTtlMinutes,
 				sameSite: "lax",
 				secure: false,
 			},

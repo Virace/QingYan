@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const systemSettingCategories = [
+	"admin",
 	"logging",
 	"mail",
 	"captcha",
@@ -9,6 +10,8 @@ export const systemSettingCategories = [
 ] as const;
 
 export type SystemSettingCategory = (typeof systemSettingCategories)[number];
+
+export const defaultAdminSessionTtlMinutes = 4320;
 
 export const captchaProviderSchema = z.enum([
 	"image",
@@ -19,6 +22,11 @@ export const captchaProviderSchema = z.enum([
 ]);
 
 export const systemSettingsSchema = z.object({
+	admin: z.object({
+		session: z.object({
+			ttlMinutes: z.number().int().positive(),
+		}),
+	}),
 	logging: z.object({
 		level: z.enum(["error", "warn", "info", "debug"]),
 		retentionDays: z.number().int().min(1).max(3650),
@@ -100,6 +108,11 @@ export const systemSettingsSchema = z.object({
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 
 export const defaultSystemSettings: SystemSettings = {
+	admin: {
+		session: {
+			ttlMinutes: defaultAdminSessionTtlMinutes,
+		},
+	},
 	logging: {
 		level: "info",
 		retentionDays: 7,

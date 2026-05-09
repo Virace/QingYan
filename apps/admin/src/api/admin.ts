@@ -179,6 +179,11 @@ export interface AdminSettings {
 }
 
 export interface AdminSystemSettings {
+	admin: {
+		session: {
+			ttlMinutes: number;
+		};
+	};
 	logging: {
 		level: "error" | "warn" | "info" | "debug";
 		retentionDays: number;
