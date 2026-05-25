@@ -17,15 +17,16 @@ export function nextMonthlyIpRegionUpdate(now = new Date()): Date {
 
 export class IpRegionAutoUpdateScheduler {
 	private timer: NodeJS.Timeout | null = null;
-	private readonly updater: IpRegionUpdater;
+	private readonly updater: Pick<IpRegionUpdater, "update">;
 
 	public constructor(
 		db: AppDatabase,
 		private readonly loadIpRegionSettings: () => Promise<
 			SystemSettings["ipRegion"]
 		>,
+		options: { updater?: Pick<IpRegionUpdater, "update"> } = {},
 	) {
-		this.updater = new IpRegionUpdater(db);
+		this.updater = options.updater ?? new IpRegionUpdater(db);
 	}
 
 	public async start(): Promise<void> {

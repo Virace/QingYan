@@ -25,10 +25,11 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
 
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/docs/openapi.yaml ./docs/openapi.yaml
 COPY --from=build /app/config/qingyan.example.yml ./config/qingyan.example.yml
 
-RUN mkdir -p /app/data /app/config /app/docs
+RUN mkdir -p /app/data /app/config /app/docs /app/logs
 
 EXPOSE 4401
 

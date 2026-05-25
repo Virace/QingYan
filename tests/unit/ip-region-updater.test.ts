@@ -225,24 +225,51 @@ describe("IpRegionUpdater", () => {
 			"https://example.com/scheduler-v6.xdb",
 		]);
 
-		const scheduler = new IpRegionAutoUpdateScheduler(fixture.db, () =>
-			new RuntimeSystemSettingsService(fixture.db).getIpRegionSettings(),
+		const updateCalls: Array<{
+			ipVersion: "v4" | "v6";
+			config: typeof fixture.config;
+		}> = [];
+		const scheduler = new IpRegionAutoUpdateScheduler(
+			fixture.db,
+			() => new RuntimeSystemSettingsService(fixture.db).getIpRegionSettings(),
+			{
+				updater: {
+					update: async (input) => {
+						updateCalls.push(input);
+						return {
+							status: "failed",
+							refreshedComments: 0,
+							errorMessage: "all_sources_failed",
+						};
+					},
+				},
+			},
 		);
 
 		await scheduler.runNow();
 
-		const runs = await fixture.db.select().from(ipRegionUpdateRuns);
-		expect(runs).toEqual(
+		expect(updateCalls).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
 					ipVersion: "v4",
-					status: "failed",
-					errorMessage: "all_sources_failed",
+					config: expect.objectContaining({
+						enabled: true,
+						autoUpdate: expect.objectContaining({ enabled: true }),
+						ipv4: expect.objectContaining({
+							dbPath,
+							sources: ["https://example.com/scheduler-v4.xdb"],
+						}),
+					}),
 				}),
 				expect.objectContaining({
 					ipVersion: "v6",
-					status: "failed",
-					errorMessage: "all_sources_failed",
+					config: expect.objectContaining({
+						enabled: true,
+						autoUpdate: expect.objectContaining({ enabled: true }),
+						ipv6: expect.objectContaining({
+							sources: ["https://example.com/scheduler-v6.xdb"],
+						}),
+					}),
 				}),
 			]),
 		);
