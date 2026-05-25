@@ -8,8 +8,10 @@ import { PageFeedbackRepository } from "./repository";
 import { pageLikeBodySchema } from "./schemas";
 import { PageFeedbackService } from "./service";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { qingyanCookiePath } from "../../config/public-path";
 
 export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
+	const visitorCookiePath = qingyanCookiePath(fastify.config.server.publicPath);
 	const commentsRepository = new CommentsRepository(
 		fastify.db,
 		fastify.siteRegistry,
@@ -47,7 +49,7 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -64,7 +66,7 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});

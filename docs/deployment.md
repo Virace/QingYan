@@ -31,7 +31,20 @@
 https://qingyan.example.com
 ```
 
-Nginx / 1Panel / Caddy 反代到容器内 `http://127.0.0.1:4401`。反代应转发常规头：
+Nginx / 1Panel / Caddy 反代到容器内 `http://127.0.0.1:4401`。QingYan 默认只对外占用 `/qingyan/*`，反代不需要 rewrite：
+
+```nginx
+location ^~ /qingyan/ {
+    proxy_pass http://127.0.0.1:4401;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+反代应转发常规头：
 
 ```nginx
 proxy_set_header Host $host;
@@ -81,13 +94,13 @@ docker compose logs -f qingyan
 日志中应出现类似：
 
 ```text
-install.url=http://127.0.0.1:4401/admin/install
+install.url=http://127.0.0.1:4401/qingyan/admin/install
 ```
 
 通过反代域名访问：
 
 ```text
-https://qingyan.example.com/admin/install
+https://qingyan.example.com/qingyan/admin/install
 ```
 
 ### 4. 安装表单建议值
@@ -96,7 +109,8 @@ https://qingyan.example.com/admin/install
 
 - `server.host`: `0.0.0.0`
 - `server.port`: `4401`
-- `server.publicBaseUrl`: 真实 HTTPS 入口，例如 `https://qingyan.example.com`
+- `server.publicBaseUrl`: 真实 HTTPS origin，例如 `https://qingyan.example.com`
+- `server.publicPath`: `/qingyan`
 - `server.trustProxy`: `true`
 - `database.sqlite.file`: `./data/qingyan.db`
 - `admin.session.secure`: HTTPS 下设为 `true`
@@ -126,11 +140,11 @@ docker compose logs --tail=200 qingyan
 ### 2. 基础 HTTP
 
 ```bash
-curl -i https://qingyan.example.com/healthz
-curl -i https://qingyan.example.com/openapi.json
+curl -i https://qingyan.example.com/qingyan/healthz
+curl -i https://qingyan.example.com/qingyan/openapi.json
 ```
 
-`/healthz` 应返回 `200`，内容包含 `status: ok`。
+`/qingyan/healthz` 应返回 `200`，内容包含 `status: ok`。
 
 ### 3. Admin Console
 
@@ -155,7 +169,7 @@ docker compose exec qingyan qyctl admin repass
 
 ### 4. FangYuan / x-item 集成
 
-在 FangYuan / x-item 测试配置中把评论 API 指向 QingYan 测试域名后，至少验证：
+在 FangYuan / x-item 测试配置中把评论 API 指向 QingYan 测试域名后，至少验证。若与 x-item 同域部署，推荐配置 `qingyanConfig.apiBase: /qingyan/api`，一条 `/qingyan/` 反代即可接入 QingYan：
 
 - 评论 bootstrap 正常返回。
 - 评论列表分页正常。
@@ -197,10 +211,10 @@ docker compose logs --tail=200 qingyan
 如果新版本启动进入 Web Upgrade Mode，日志会输出：
 
 ```text
-upgrade.url=http://127.0.0.1:4401/upgrade
+upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
 ```
 
-此时访问反代后的 `/upgrade`，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
+此时访问反代后的 `/qingyan/upgrade`，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
 
 ```bash
 docker compose exec qingyan qyctl upgrade --dry-run
@@ -226,7 +240,7 @@ docker compose exec qingyan qyctl upgrade --dry-run
 - 上传到服务器的受限路径。
 - 更新前执行 `qyctl backup`。
 - 替换程序或镜像。
-- 启动服务并检查 `/healthz`。
+- 启动服务并检查 `/qingyan/healthz`。
 - 如果进入 `upgrade_required`，停止自动流程并要求人工确认 UpgradePlan。
 
 在这些条件未固定前，不建议把 QingYan 绑定到 x-item 的静态站部署 workflow。

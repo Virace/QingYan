@@ -21,8 +21,10 @@ import { CommentsWriteService } from "./write-service";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
+import { qingyanCookiePath } from "../../config/public-path";
 
 export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
+	const visitorCookiePath = qingyanCookiePath(fastify.config.server.publicPath);
 	const readRepository = new CommentsRepository(
 		fastify.db,
 		fastify.siteRegistry,
@@ -79,7 +81,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -98,7 +100,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});
@@ -142,7 +144,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -159,7 +161,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});
@@ -202,7 +204,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -229,7 +231,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});
@@ -264,7 +266,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -286,7 +288,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});
@@ -315,7 +317,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -333,7 +335,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});
@@ -362,7 +364,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			if (result.visitorKey) {
 				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: "/",
+					path: visitorCookiePath,
 					sameSite: "lax",
 					httpOnly: true,
 				});
@@ -380,7 +382,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		if (result.visitorKey) {
 			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: "/",
+				path: visitorCookiePath,
 				sameSite: "lax",
 				httpOnly: true,
 			});

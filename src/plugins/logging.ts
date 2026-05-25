@@ -4,16 +4,22 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { LoggerManager } from "../logging/logger-manager";
 import type { AccessEventName } from "../logging/types";
 import { AppError } from "../modules/shared/errors";
+import { stripPublicPath } from "../config/public-path";
 
 function resolveRequestPath(request: FastifyRequest): string {
 	const [pathWithoutQuery] = request.url.split("?");
 	return pathWithoutQuery ?? request.url;
 }
 
-function shouldLogAccess(pathname: string, statusCode: number): boolean {
+function shouldLogAccess(
+	pathname: string,
+	statusCode: number,
+	publicPath: string,
+): boolean {
+	const internalPathname = stripPublicPath(publicPath, pathname) ?? pathname;
 	return (
-		pathname.startsWith("/api") ||
-		pathname.startsWith("/admin") ||
+		internalPathname.startsWith("/api") ||
+		internalPathname.startsWith("/admin") ||
 		statusCode >= 400
 	);
 }
@@ -48,7 +54,13 @@ const loggingPlugin: FastifyPluginAsync = async (fastify) => {
 
 	fastify.addHook("onSend", async (request, reply, payload) => {
 		const pathname = resolveRequestPath(request);
-		if (!shouldLogAccess(pathname, reply.statusCode)) {
+		if (
+			!shouldLogAccess(
+				pathname,
+				reply.statusCode,
+				fastify.config.server.publicPath,
+			)
+		) {
 			return payload;
 		}
 

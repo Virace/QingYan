@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import { qingyanCookiePath } from "../../config/public-path";
 import type { AppRuntimeOptions } from "../../config/runtime-options";
 import {
 	bootstrapQuerySchema,
@@ -38,11 +39,11 @@ export function createDevMemoryRoutes(input: {
 			throw new Error("Dev memory mode requires a seed site.");
 		}
 
-		fastify.post("/api/dev/session", async (request, reply) => {
+		fastify.post("/dev/session", async (request, reply) => {
 			const parsed = assertParsed(devSessionBodySchema.safeParse(request.body));
 			const session = sessions.create(parsed.token);
 			reply.setCookie(sessions.getCookieName(), session.sessionToken, {
-				path: "/",
+				path: qingyanCookiePath(fastify.config.server.publicPath),
 				sameSite: fastify.config.admin.session.sameSite,
 				httpOnly: true,
 				secure: fastify.config.admin.session.secure,
@@ -54,7 +55,7 @@ export function createDevMemoryRoutes(input: {
 			};
 		});
 
-		fastify.get("/api/admin/session/me", async (request) => {
+		fastify.get("/admin/session/me", async (request) => {
 			const session = sessions.require(request);
 			return {
 				authenticated: true,
@@ -63,18 +64,20 @@ export function createDevMemoryRoutes(input: {
 			};
 		});
 
-		fastify.post("/api/admin/session/logout", async (request, reply) => {
+		fastify.post("/admin/session/logout", async (request, reply) => {
 			sessions.delete(request);
-			reply.clearCookie(sessions.getCookieName(), { path: "/" });
+			reply.clearCookie(sessions.getCookieName(), {
+				path: qingyanCookiePath(fastify.config.server.publicPath),
+			});
 			return { authenticated: false };
 		});
 
-		fastify.get("/api/admin/sites", async (request) => {
+		fastify.get("/admin/sites", async (request) => {
 			sessions.require(request);
 			return { items: [buildSiteSummary(seedSite)] };
 		});
 
-		fastify.get("/api/dev/state", async (request) => {
+		fastify.get("/dev/state", async (request) => {
 			sessions.require(request);
 			const parsed = assertParsed(devStateQuerySchema.safeParse(request.query));
 			return input.devMockService.inspect(
@@ -84,7 +87,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.post("/api/dev/reset", async (request) => {
+		fastify.post("/dev/reset", async (request) => {
 			sessions.require(request);
 			const parsed = assertParsed(devResetBodySchema.safeParse(request.body));
 			return input.devMockService.resetPageState(
@@ -93,7 +96,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.post("/api/dev/scenario", async (request) => {
+		fastify.post("/dev/scenario", async (request) => {
 			sessions.require(request);
 			const parsed = assertParsed(
 				devScenarioBodySchema.safeParse(request.body),
@@ -101,7 +104,7 @@ export function createDevMemoryRoutes(input: {
 			return input.devMockService.applyScenario(parsed);
 		});
 
-		fastify.get("/api/comments/bootstrap", async (request, reply) => {
+		fastify.get("/comments/bootstrap", async (request, reply) => {
 			const parsed = assertParsed(
 				bootstrapQuerySchema.safeParse(request.query),
 			);
@@ -114,7 +117,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.get("/api/comments/thread", async (request, reply) => {
+		fastify.get("/comments/thread", async (request, reply) => {
 			const parsed = assertParsed(threadQuerySchema.safeParse(request.query));
 			return setVisitorCookie(
 				reply,
@@ -127,7 +130,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.post("/api/comments", async (request, reply) => {
+		fastify.post("/comments", async (request, reply) => {
 			const parsed = assertParsed(
 				createCommentBodySchema.safeParse(request.body),
 			);
@@ -147,7 +150,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.post("/api/comments/:commentId/vote", async (request, reply) => {
+		fastify.post("/comments/:commentId/vote", async (request, reply) => {
 			const params = assertParsed(
 				voteCommentParamsSchema.safeParse(request.params),
 			);
@@ -165,7 +168,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.get("/api/comments/captcha/state", async (request, reply) => {
+		fastify.get("/comments/captcha/state", async (request, reply) => {
 			const parsed = assertParsed(
 				captchaStateQuerySchema.safeParse(request.query),
 			);
@@ -178,7 +181,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.post("/api/comments/captcha/refresh", async (request, reply) => {
+		fastify.post("/comments/captcha/refresh", async (request, reply) => {
 			const parsed = assertParsed(
 				captchaRefreshBodySchema.safeParse(request.body),
 			);
@@ -191,7 +194,7 @@ export function createDevMemoryRoutes(input: {
 			);
 		});
 
-		fastify.post("/api/comments/captcha/verify", async (request) => {
+		fastify.post("/comments/captcha/verify", async (request) => {
 			const parsed = assertParsed(
 				captchaVerifyBodySchema.safeParse(request.body),
 			);
@@ -205,7 +208,7 @@ export function createDevMemoryRoutes(input: {
 			return result.body;
 		});
 
-		fastify.post("/api/page-feedback/like", async (request, reply) => {
+		fastify.post("/page-feedback/like", async (request, reply) => {
 			const parsed = assertParsed(pageLikeBodySchema.safeParse(request.body));
 			return setVisitorCookie(
 				reply,

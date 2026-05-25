@@ -20,7 +20,7 @@ describe("admin system settings", () => {
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -67,7 +67,7 @@ describe("admin system settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -102,7 +102,7 @@ describe("admin system settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -185,7 +185,7 @@ describe("admin system settings", () => {
 
 		const afterUpdate = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -235,7 +235,7 @@ describe("admin system settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -266,7 +266,7 @@ describe("admin system settings", () => {
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -295,7 +295,7 @@ describe("admin system settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -324,7 +324,7 @@ describe("admin system settings", () => {
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -348,7 +348,7 @@ describe("admin system settings", () => {
 
 		const invalidResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/system-settings",
+			url: "/qingyan/api/admin/system-settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,

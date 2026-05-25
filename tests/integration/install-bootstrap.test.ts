@@ -56,6 +56,7 @@ function createMinimalConfig(configPath: string): MinimalInstallConfig {
 		configPath,
 		host: "127.0.0.1",
 		port: 4401,
+		publicPath: "/qingyan",
 		token: "install-token",
 		disabled: false,
 		restartMode: "manual",
@@ -270,7 +271,7 @@ function installFormPayload(databaseFile: string) {
 async function getInstallCookie(app: ReturnType<typeof buildInstallApp>) {
 	const installPage = await app.inject({
 		method: "GET",
-		url: "/admin/install",
+		url: "/qingyan/admin/install",
 	});
 	return installPage.cookies.find(
 		(cookie) => cookie.name === "qingyan_install",
@@ -394,7 +395,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "GET",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -456,7 +457,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "GET",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -478,17 +479,17 @@ describe("install bootstrap", () => {
 
 		const admin = await app.inject({
 			method: "GET",
-			url: "/admin",
+			url: "/qingyan/admin",
 		});
 		expect(admin.statusCode).toBe(302);
-		expect(admin.headers.location).toBe("/admin/install");
+		expect(admin.headers.location).toBe("/qingyan/admin/install");
 
 		const adminSlash = await app.inject({
 			method: "GET",
-			url: "/admin/",
+			url: "/qingyan/admin/",
 		});
 		expect(adminSlash.statusCode).toBe(302);
-		expect(adminSlash.headers.location).toBe("/admin/install");
+		expect(adminSlash.headers.location).toBe("/qingyan/admin/install");
 	});
 
 	it("exposes only the install mini-app route set before bootstrap", async () => {
@@ -499,11 +500,11 @@ describe("install bootstrap", () => {
 		cleanups.push(() => app.close());
 
 		const allowed = [
-			["GET", "/admin"],
-			["GET", "/admin/"],
-			["GET", "/admin/install"],
-			["POST", "/admin/install/plan"],
-			["POST", "/admin/install"],
+			["GET", "/qingyan/admin"],
+			["GET", "/qingyan/admin/"],
+			["GET", "/qingyan/admin/install"],
+			["POST", "/qingyan/admin/install/plan"],
+			["POST", "/qingyan/admin/install"],
 		] as const;
 
 		for (const [method, url] of allowed) {
@@ -520,10 +521,10 @@ describe("install bootstrap", () => {
 
 		const blocked = [
 			["GET", "/install"],
-			["GET", "/api/install/state"],
-			["GET", "/api/admin/install/state"],
-			["GET", "/api/admin/session/me"],
-			["GET", "/api/comments/bootstrap?siteKey=default&pageKey=home"],
+			["GET", "/qingyan/api/install/state"],
+			["GET", "/qingyan/api/admin/install/state"],
+			["GET", "/qingyan/api/admin/session/me"],
+			["GET", "/qingyan/api/comments/bootstrap?siteKey=default&pageKey=home"],
 		] as const;
 
 		for (const [method, url] of blocked) {
@@ -540,7 +541,7 @@ describe("install bootstrap", () => {
 
 		const installPage = await app.inject({
 			method: "GET",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 		});
 		const installCookie = installPage.cookies.find(
 			(cookie) => cookie.name === "qingyan_install",
@@ -548,7 +549,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -602,7 +603,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -654,7 +655,7 @@ describe("install bootstrap", () => {
 		const payload = installCompleteConfigPayload(workspace.databaseFile);
 		const planResponse = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -714,7 +715,7 @@ describe("install bootstrap", () => {
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -820,7 +821,7 @@ describe("install bootstrap", () => {
 
 		const installPage = await app.inject({
 			method: "GET",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 		});
 		const installCookie = installPage.cookies.find(
 			(cookie) => cookie.name === "qingyan_install",
@@ -828,7 +829,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -904,7 +905,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -941,7 +942,7 @@ describe("install bootstrap", () => {
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -950,7 +951,7 @@ describe("install bootstrap", () => {
 
 		expect(apply.statusCode).toBe(201);
 		expect(apply.json()).toMatchObject({
-			adminUrl: "https://comments.example.test/admin",
+			adminUrl: "https://comments.example.test/qingyan/admin",
 			databasePath: path.resolve(process.cwd(), envDatabaseFile),
 		});
 		const config = await loadConfig(workspace.configPath, {});
@@ -994,7 +995,7 @@ describe("install bootstrap", () => {
 
 		const state = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installFormPayload(workspace.databaseFile),
 		});
 		expect(state.statusCode).toBe(403);
@@ -1006,7 +1007,7 @@ describe("install bootstrap", () => {
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installPayload(workspace.databaseFile, "bad-token"),
 		});
 		expect(apply.statusCode).toBe(403);
@@ -1028,7 +1029,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1037,7 +1038,7 @@ describe("install bootstrap", () => {
 
 		expect(response.statusCode).toBe(201);
 		expect(response.json()).toMatchObject({
-			adminUrl: "http://localhost:4401/admin",
+			adminUrl: "http://localhost:4401/qingyan/admin",
 			username: "admin",
 			initialPassword: "adminadmin",
 			configPath: workspace.configPath,
@@ -1045,8 +1046,8 @@ describe("install bootstrap", () => {
 			lockPath: resolveInstallLockPath(workspace.configPath),
 			transition: {
 				mode: "manual",
-				adminUrl: "http://localhost:4401/admin",
-				pollUrl: "http://localhost:4401/admin",
+				adminUrl: "http://localhost:4401/qingyan/admin",
+				pollUrl: "http://localhost:4401/qingyan/admin",
 				restartRequired: true,
 			},
 			systemSettings: expect.arrayContaining([
@@ -1130,7 +1131,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const plan = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1140,7 +1141,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1255,7 +1256,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const plan = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1269,7 +1270,7 @@ describe("install bootstrap", () => {
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1330,7 +1331,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: "install-token",
 			},
@@ -1340,7 +1341,7 @@ describe("install bootstrap", () => {
 		expect(response.statusCode).toBe(201);
 		const result = response.json();
 		expect(result.adminUrl).toMatch(
-			/^http:\/\/localhost:4401\/qy-[A-Za-z0-9]{12}$/,
+			/^http:\/\/localhost:4401\/qingyan\/qy-[A-Za-z0-9]{12}$/,
 		);
 		expect(result.username).toBe("admin");
 		expect(result.initialPassword.length).toBeGreaterThanOrEqual(18);
@@ -1365,7 +1366,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const plan = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1380,7 +1381,7 @@ describe("install bootstrap", () => {
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1391,7 +1392,7 @@ describe("install bootstrap", () => {
 		expect(apply.json().username).toBe("admin");
 		expect(apply.json().initialPassword.length).toBeGreaterThanOrEqual(18);
 		expect(apply.json().adminUrl).toBe(
-			`http://localhost:4401${applyPayload.admin.consolePath}`,
+			`http://localhost:4401/qingyan${applyPayload.admin.consolePath}`,
 		);
 	});
 
@@ -1412,7 +1413,7 @@ describe("install bootstrap", () => {
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installPayload(workspace.databaseFile),
 		});
 
@@ -1442,7 +1443,7 @@ describe("install bootstrap", () => {
 
 		await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installPayload(workspace.databaseFile),
 		});
 
@@ -1454,20 +1455,20 @@ describe("install bootstrap", () => {
 		);
 		const response = await app.inject({
 			method: "GET",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 		});
 		expect(response.statusCode).toBe(410);
 
 		const apply = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installPayload(workspace.databaseFile),
 		});
 		expect(apply.statusCode).toBe(410);
 
 		const plan = await app.inject({
 			method: "POST",
-			url: "/admin/install/plan",
+			url: "/qingyan/admin/install/plan",
 			payload: installPayload(workspace.databaseFile),
 		});
 		expect(plan.statusCode).toBe(410);
@@ -1481,7 +1482,7 @@ describe("install bootstrap", () => {
 
 		await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installPayload(workspace.databaseFile),
 		});
 		rmSync(resolveInstallLockPath(workspace.configPath), { force: true });
@@ -1496,7 +1497,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "GET",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 		});
 		expect(response.statusCode).toBe(200);
 		expect(response.body).toContain("QingYan Install");
@@ -1525,7 +1526,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1536,7 +1537,7 @@ describe("install bootstrap", () => {
 		expect(response.json()).toMatchObject({
 			transition: {
 				mode: "manual",
-				adminUrl: "http://localhost:4401/admin",
+				adminUrl: "http://localhost:4401/qingyan/admin",
 				restartRequired: true,
 			},
 		});
@@ -1559,7 +1560,7 @@ describe("install bootstrap", () => {
 		const installCookie = await getInstallCookie(app);
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
@@ -1570,7 +1571,7 @@ describe("install bootstrap", () => {
 		expect(response.json()).toMatchObject({
 			transition: {
 				mode: "exit",
-				adminUrl: "http://localhost:4401/admin",
+				adminUrl: "http://localhost:4401/qingyan/admin",
 				restartRequired: true,
 			},
 		});
@@ -1592,7 +1593,7 @@ describe("install bootstrap", () => {
 
 		const response = await app.inject({
 			method: "POST",
-			url: "/admin/install",
+			url: "/qingyan/admin/install",
 			payload: installPayload(workspace.databaseFile, "bad-token"),
 		});
 
@@ -1615,25 +1616,25 @@ describe("install bootstrap", () => {
 
 		const legacyApi = await app.inject({
 			method: "GET",
-			url: "/api/install/state?token=install-token",
+			url: "/qingyan/api/install/state?token=install-token",
 		});
 		expect(legacyApi.statusCode).toBe(404);
 
 		const adminInstallApi = await app.inject({
 			method: "GET",
-			url: "/api/admin/install/state?token=install-token",
+			url: "/qingyan/api/admin/install/state?token=install-token",
 		});
 		expect(adminInstallApi.statusCode).toBe(404);
 
 		const adminSession = await app.inject({
 			method: "GET",
-			url: "/api/admin/session/me",
+			url: "/qingyan/api/admin/session/me",
 		});
 		expect(adminSession.statusCode).toBe(404);
 
 		const publicApi = await app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=default&pageKey=home",
+			url: "/qingyan/api/comments/bootstrap?siteKey=default&pageKey=home",
 		});
 		expect(publicApi.statusCode).toBe(404);
 	});

@@ -21,7 +21,7 @@ describe("comment captcha", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:threshold-idle",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:threshold-idle",
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -42,7 +42,7 @@ describe("comment captcha", () => {
 
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha",
 			headers: {
 				"user-agent": "captcha-test",
 			},
@@ -72,7 +72,7 @@ describe("comment captcha", () => {
 		};
 		const invalidResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -93,7 +93,7 @@ describe("comment captcha", () => {
 
 		const verifiedResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -121,7 +121,7 @@ describe("comment captcha", () => {
 
 		const initialState = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
 		});
 		expect(initialState.statusCode).toBe(200);
 
@@ -153,7 +153,7 @@ describe("comment captcha", () => {
 
 		const repeatedState = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -163,7 +163,7 @@ describe("comment captcha", () => {
 
 		const refreshedState = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/refresh",
+			url: "/qingyan/api/comments/captcha/refresh",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -204,7 +204,7 @@ describe("comment captcha", () => {
 
 		const staleVerify = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -225,7 +225,7 @@ describe("comment captcha", () => {
 
 		const refreshedVerify = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},

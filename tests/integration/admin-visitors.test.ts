@@ -95,7 +95,7 @@ describe("admin visitors", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/visitors?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/visitors?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},

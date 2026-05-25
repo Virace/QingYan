@@ -70,14 +70,14 @@ async function createCustomTestApp(options?: {
 	};
 }
 
-describe("POST /api/comments", () => {
+describe("POST /qingyan/api/comments", () => {
 	it("rejects requests missing configured required identity fields", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:required-email",
@@ -113,7 +113,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:anonymous",
@@ -174,7 +174,7 @@ describe("POST /api/comments", () => {
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -241,7 +241,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:reserved-email",

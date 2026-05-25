@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { validateAdminConsolePath } from "./admin-console-path";
+import { DEFAULT_PUBLIC_PATH, normalizePublicPath } from "./public-path";
 
 const rateLimitRuleSchema = z.object({
 	windowSec: z.number().int().positive(),
@@ -52,6 +53,12 @@ const startupAdminSchema = z
 	})
 	.strict();
 
+const publicPathSchema = z
+	.string()
+	.optional()
+	.transform((value) => normalizePublicPath(value))
+	.default(DEFAULT_PUBLIC_PATH);
+
 export const configSchema = z
 	.object({
 		server: z
@@ -59,6 +66,7 @@ export const configSchema = z
 				host: z.string().min(1),
 				port: z.number().int().positive(),
 				publicBaseUrl: z.string().url(),
+				publicPath: publicPathSchema,
 				trustProxy: z.boolean(),
 			})
 			.strict(),

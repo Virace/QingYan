@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
+
+import {
+	DEFAULT_PUBLIC_PATH,
+	normalizePublicPath,
+} from "../config/public-path";
 
 export interface OpenApiDocument {
 	yamlText: string;
@@ -10,17 +15,23 @@ export interface OpenApiDocument {
 
 const OPENAPI_PATH = path.resolve(process.cwd(), "docs/openapi.yaml");
 
-export async function loadOpenApiDocument(): Promise<OpenApiDocument> {
+export async function loadOpenApiDocument(
+	publicPath = DEFAULT_PUBLIC_PATH,
+): Promise<OpenApiDocument> {
 	const yamlText = await readFile(OPENAPI_PATH, "utf-8");
-	const json = parse(yamlText) as unknown;
+	const json = parse(yamlText) as Record<string, unknown>;
+	const runtimeJson = {
+		...json,
+		servers: [{ url: normalizePublicPath(publicPath) }],
+	};
 
 	return {
-		yamlText,
-		json,
+		yamlText: stringify(runtimeJson),
+		json: runtimeJson,
 	};
 }
 
-export function renderOpenApiHtml(): string {
+export function renderOpenApiHtml(specUrl = "/openapi.yaml"): string {
 	return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -58,7 +69,7 @@ export function renderOpenApiHtml(): string {
       <h1>QingYan API</h1>
       <p>当前页面展示仓库内 docs/openapi.yaml 的运行时文档视图。</p>
     </header>
-    <redoc spec-url="/openapi.yaml"></redoc>
+    <redoc spec-url="${specUrl}"></redoc>
     <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"></script>
   </body>
 </html>`;

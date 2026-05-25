@@ -27,7 +27,7 @@ describe("admin sites", () => {
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "PATCH",
-			url: "/api/admin/sites/fangyuan",
+			url: "/qingyan/api/admin/sites/fangyuan",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -47,7 +47,7 @@ describe("admin sites", () => {
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const createResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/sites",
+			url: "/qingyan/api/admin/sites",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -96,7 +96,7 @@ describe("admin sites", () => {
 
 		const settingsResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/sites/docs/settings",
+			url: "/qingyan/api/admin/sites/docs/settings",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -125,7 +125,7 @@ describe("admin sites", () => {
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/sites/fangyuan/settings",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -160,7 +160,7 @@ describe("admin sites", () => {
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "PATCH",
-			url: "/api/admin/sites/fangyuan",
+			url: "/qingyan/api/admin/sites/fangyuan",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -282,7 +282,7 @@ describe("admin sites", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/sites",
+			url: "/qingyan/api/admin/sites",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},

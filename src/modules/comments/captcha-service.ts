@@ -1,4 +1,5 @@
 import type { AppConfig } from "../../config/types";
+import { joinPublicPath } from "../../config/public-path";
 import type { SecurityToolkit } from "../../plugins/security";
 import type { SystemSettings } from "../system-settings/definitions";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
@@ -217,6 +218,10 @@ export class CaptchaService {
 		const expiresAt = new Date(
 			Date.now() + input.settings.image.ttlSec * 1000,
 		).toISOString();
+		const widgetPath = joinPublicPath(
+			this.config.server.publicPath,
+			"/api/comments/captcha/widget",
+		);
 
 		let created:
 			| ReturnType<typeof createImageCaptchaChallenge>
@@ -237,6 +242,7 @@ export class CaptchaService {
 					challengeId,
 					siteKey: input.siteKey,
 					pageKey: input.pageKey,
+					widgetPath,
 				});
 				break;
 			case "hcaptcha":
@@ -244,6 +250,7 @@ export class CaptchaService {
 					challengeId,
 					siteKey: input.siteKey,
 					pageKey: input.pageKey,
+					widgetPath,
 				});
 				break;
 			case "recaptcha":
@@ -251,6 +258,7 @@ export class CaptchaService {
 					challengeId,
 					siteKey: input.siteKey,
 					pageKey: input.pageKey,
+					widgetPath,
 				});
 				break;
 			case "geetest":
@@ -258,6 +266,7 @@ export class CaptchaService {
 					challengeId,
 					siteKey: input.siteKey,
 					pageKey: input.pageKey,
+					widgetPath,
 				});
 				break;
 			default:
@@ -654,7 +663,10 @@ export class CaptchaService {
 		const providerKind =
 			(activeSession.providerKind as PublicCaptchaProviderKind | null) ??
 			this.getCurrentProviderKind(captchaSettings);
-		const completePath = "/api/comments/captcha/complete";
+		const completePath = joinPublicPath(
+			this.config.server.publicPath,
+			"/api/comments/captcha/complete",
+		);
 
 		switch (providerKind) {
 			case "turnstile": {

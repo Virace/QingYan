@@ -8,6 +8,7 @@ import {
 	applyStartupEnvOverrides,
 	envMappings,
 } from "../../config/env-mapping";
+import { buildPublicUrl } from "../../config/public-path";
 import { configSchema, type StartupConfig } from "../../config/types";
 import { createDatabaseClients } from "../../db/client";
 import { applyDatabaseMigrations } from "../../db/migrations";
@@ -67,6 +68,7 @@ export const installApplySchema = z.object({
 		host: z.string().min(1).default("0.0.0.0"),
 		port: z.number().int().positive().default(4401),
 		publicBaseUrl: z.string().url(),
+		publicPath: configSchema.shape.server.shape.publicPath,
 		trustProxy: z.boolean().default(true),
 	}),
 	database: z.object({
@@ -324,6 +326,7 @@ function buildStartupConfig(input: NormalizedInstallInput): StartupConfig {
 			host: input.server.host,
 			port: input.server.port,
 			publicBaseUrl: input.server.publicBaseUrl,
+			publicPath: input.server.publicPath,
 			trustProxy: input.server.trustProxy,
 		},
 		database: {
@@ -640,6 +643,7 @@ function buildApplyPayload(
 			host: input.startupConfig.server.host,
 			port: input.startupConfig.server.port,
 			publicBaseUrl: input.startupConfig.server.publicBaseUrl,
+			publicPath: input.startupConfig.server.publicPath,
 			trustProxy: input.startupConfig.server.trustProxy,
 		},
 		database: {
@@ -896,10 +900,11 @@ export async function applyInstall(input: {
 	});
 
 	return {
-		adminUrl: new URL(
-			resolved.admin.consolePath,
+		adminUrl: buildPublicUrl(
 			startupConfig.server.publicBaseUrl,
-		).toString(),
+			startupConfig.server.publicPath,
+			resolved.admin.consolePath,
+		),
 		username: resolved.admin.username,
 		initialPassword: resolved.admin.password,
 		configPath: input.minimalConfig.configPath,

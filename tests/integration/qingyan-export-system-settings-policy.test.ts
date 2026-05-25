@@ -55,7 +55,7 @@ describe("QingYan export system settings policy", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/export",
+			url: "/qingyan/api/admin/import-export/export",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -103,7 +103,7 @@ describe("QingYan export system settings policy", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -143,7 +143,7 @@ describe("QingYan export system settings policy", () => {
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -177,7 +177,7 @@ describe("QingYan export system settings policy", () => {
 
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/qingyan/jobs/${dryRunResponse.json().job.id}/apply`,
+			url: `/qingyan/api/admin/import-export/qingyan/jobs/${dryRunResponse.json().job.id}/apply`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",

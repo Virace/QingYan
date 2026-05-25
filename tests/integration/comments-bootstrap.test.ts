@@ -23,7 +23,7 @@ afterEach(async () => {
 	}
 });
 
-describe("GET /api/comments/bootstrap", () => {
+describe("GET /qingyan/api/comments/bootstrap", () => {
 	it("returns bootstrap payload with threaded comments, viewer vote and page feedback", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -112,7 +112,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:welcome&pageTitle=Welcome&pageUrl=https://fangyuan.example.com/posts/welcome/&sortBy=newest&limit=20&offset=0",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:welcome&pageTitle=Welcome&pageUrl=https://fangyuan.example.com/posts/welcome/&sortBy=newest&limit=20&offset=0",
 			cookies: {
 				qingyan_visitor: "viewer_seed",
 			},
@@ -265,7 +265,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:metadata-display&pageTitle=Metadata&pageUrl=https://fangyuan.example.com/posts/metadata-display/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:metadata-display&pageTitle=Metadata&pageUrl=https://fangyuan.example.com/posts/metadata-display/",
 			cookies: {
 				qingyan_visitor: "viewer_metadata",
 			},
@@ -361,7 +361,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:gravatar&pageTitle=Gravatar&pageUrl=https://fangyuan.example.com/posts/gravatar/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:gravatar&pageTitle=Gravatar&pageUrl=https://fangyuan.example.com/posts/gravatar/",
 			cookies: {
 				qingyan_visitor: "viewer_gravatar",
 			},
@@ -445,7 +445,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
 			cookies: {
 				qingyan_visitor: "viewer_verified_badge",
 			},
@@ -471,7 +471,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const updatedResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
 			cookies: {
 				qingyan_visitor: "viewer_verified_badge",
 			},
@@ -510,7 +510,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const publicResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
 		});
 		expect(publicResponse.statusCode).toBe(200);
 		expect(publicResponse.json().viewer).toEqual({});
@@ -518,7 +518,7 @@ describe("GET /api/comments/bootstrap", () => {
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const adminResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -542,7 +542,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:always&pageTitle=Always&pageUrl=https://fangyuan.example.com/posts/always/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:always&pageTitle=Always&pageUrl=https://fangyuan.example.com/posts/always/",
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -562,7 +562,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:path-only-bootstrap&pageTitle=Path%20Only&pageUrl=%2Fposts%2Fpath-only-bootstrap%2F",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:path-only-bootstrap&pageTitle=Path%20Only&pageUrl=%2Fposts%2Fpath-only-bootstrap%2F",
 		});
 
 		expect(response.statusCode).toBe(200);

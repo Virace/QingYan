@@ -20,7 +20,7 @@ describe("admin blacklist", () => {
 
 		const createResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/blacklist",
+			url: "/qingyan/api/admin/blacklist",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -44,7 +44,7 @@ describe("admin blacklist", () => {
 
 		const listResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/blacklist?siteKey=fangyuan",
+			url: "/qingyan/api/admin/blacklist?siteKey=fangyuan",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -63,7 +63,7 @@ describe("admin blacklist", () => {
 
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
-			url: `/api/admin/blacklist/${ruleId}`,
+			url: `/qingyan/api/admin/blacklist/${ruleId}`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(deleteResponse.statusCode).toBe(200);

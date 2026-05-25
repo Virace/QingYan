@@ -10,6 +10,11 @@ import {
 import { defaultAdminSessionTtlMinutes } from "../system-settings/definitions";
 import { envMappings, type EnvMapping } from "../../config/env-mapping";
 import { defaultSystemSettings } from "../system-settings/definitions";
+import {
+	joinPublicPath,
+	normalizePublicPath,
+	qingyanCookiePath,
+} from "../../config/public-path";
 import type {
 	InstallRestartMode,
 	MinimalInstallConfig,
@@ -55,8 +60,8 @@ function readInstallCookie(
 	return undefined;
 }
 
-function createInstallCookie(token: string): string {
-	return `${INSTALL_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${INSTALL_PATH}; HttpOnly; SameSite=Lax`;
+function createInstallCookie(token: string, publicPath: string): string {
+	return `${INSTALL_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${qingyanCookiePath(publicPath)}; HttpOnly; SameSite=Lax`;
 }
 
 function resolveDefaultPublicBaseUrl(input: MinimalInstallConfig): string {
@@ -165,11 +170,13 @@ function renderInstallHtml(
 	input: MinimalInstallConfig,
 	environment: NodeJS.ProcessEnv = process.env,
 ): string {
+	const publicPath = normalizePublicPath(input.publicPath);
 	const defaults = {
 		server: {
 			host: "0.0.0.0",
 			port: input.port,
 			publicBaseUrl: resolveDefaultPublicBaseUrl(input),
+			publicPath,
 			trustProxy: true,
 		},
 		database: {
@@ -271,6 +278,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>监听端口<input data-path="server.port" type="number" min="1" step="1" data-type="number" required><span class="hint" data-hint-for="server.port"></span></label>
 </div>
 <label>公开访问地址<input data-path="server.publicBaseUrl" autocomplete="url" required><span class="hint" data-hint-for="server.publicBaseUrl"></span></label>
+<label>公开挂载路径<input data-path="server.publicPath" autocomplete="off" required><span class="hint" data-hint-for="server.publicPath"></span></label>
 <label class="check"><input data-path="server.trustProxy" data-type="boolean" type="checkbox">信任反向代理头<span class="hint" data-hint-for="server.trustProxy">来自环境变量时不可修改</span></label>
 </fieldset>
 <fieldset>
@@ -741,7 +749,7 @@ form.addEventListener("submit", async (event) => {
 	setMessage("", "");
 	try {
 		plannedPayload = collectPayload();
-		const plan = await requestJson("${INSTALL_PLAN_PATH}", plannedPayload);
+		const plan = await requestJson("${joinPublicPath(publicPath, INSTALL_PLAN_PATH)}", plannedPayload);
 		plannedPayload = renderPlan(plan);
 		applyButton.disabled = false;
 	} catch (error) {
@@ -757,7 +765,7 @@ applyButton.addEventListener("click", async () => {
 	applyButton.disabled = true;
 	setMessage("", "");
 	try {
-		const result = await requestJson("${INSTALL_PATH}", plannedPayload);
+		const result = await requestJson("${joinPublicPath(publicPath, INSTALL_PATH)}", plannedPayload);
 		const backupText = result.backupPath ? " 原配置备份: " + result.backupPath + "。" : "";
 		const restoreText = result.restore ? "恢复站点 " + result.restore.siteKey + "，写入评论 " + result.restore.apply.summary.createdComments + " 条。" : "";
 		const transition = result.transition;
@@ -835,6 +843,10 @@ export function buildInstallApp(input: {
 	environment?: NodeJS.ProcessEnv;
 	scheduleRestart?: (transition: InstallTransition) => void;
 }): FastifyInstance {
+	const publicPath = normalizePublicPath(input.minimalConfig.publicPath);
+	const installPath = joinPublicPath(publicPath, INSTALL_PATH);
+	const installPlanPath = joinPublicPath(publicPath, INSTALL_PLAN_PATH);
+	const adminPath = joinPublicPath(publicPath, "/admin");
 	const app = Fastify({
 		logger: true,
 		disableRequestLogging: true,
@@ -864,15 +876,15 @@ export function buildInstallApp(input: {
 		});
 	});
 
-	app.get("/admin", async (_, reply) => {
-		return reply.redirect(INSTALL_PATH);
+	app.get(adminPath, async (_, reply) => {
+		return reply.redirect(installPath);
 	});
 
-	app.get("/admin/", async (_, reply) => {
-		return reply.redirect(INSTALL_PATH);
+	app.get(`${adminPath}/`, async (_, reply) => {
+		return reply.redirect(installPath);
 	});
 
-	app.get(INSTALL_PATH, async (_request, reply) => {
+	app.get(installPath, async (_request, reply) => {
 		const blocked = await assertInstallOpen({
 			minimalConfig: input.minimalConfig,
 			environment: input.environment,
@@ -881,12 +893,15 @@ export function buildInstallApp(input: {
 			return reply.status(410).send({ installed: true });
 		}
 		return reply
-			.header("Set-Cookie", createInstallCookie(input.minimalConfig.token))
+			.header(
+				"Set-Cookie",
+				createInstallCookie(input.minimalConfig.token, publicPath),
+			)
 			.type("text/html; charset=utf-8")
 			.send(renderInstallHtml(input.minimalConfig, input.environment));
 	});
 
-	app.post(INSTALL_PLAN_PATH, async (request, reply) => {
+	app.post(installPlanPath, async (request, reply) => {
 		const payload = parseInstallPayload(request.body);
 		const blocked = await assertInstallOpen({
 			minimalConfig: input.minimalConfig,
@@ -910,7 +925,7 @@ export function buildInstallApp(input: {
 		});
 	});
 
-	app.post(INSTALL_PATH, async (request, reply) => {
+	app.post(installPath, async (request, reply) => {
 		const payload = parseInstallPayload(request.body);
 		const blocked = await assertInstallOpen({
 			minimalConfig: input.minimalConfig,

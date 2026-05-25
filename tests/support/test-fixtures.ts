@@ -71,6 +71,7 @@ export function createTestConfig(
 			host: "127.0.0.1",
 			port: 4401,
 			publicBaseUrl: "http://localhost:4401",
+			publicPath: "/qingyan",
 			trustProxy: false,
 		},
 		database: {

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "../../config/types";
+import { joinPublicPath, qingyanCookiePath } from "../../config/public-path";
 import type { SqliteClient } from "../../db/client";
 import { AppError } from "../shared/errors";
 import {
@@ -30,8 +31,8 @@ export interface CreateUpgradeAppInput {
 	now?: () => Date;
 }
 
-function createUpgradeCookie(token: string): string {
-	return `${UPGRADE_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${UPGRADE_PATH}; HttpOnly; SameSite=Lax`;
+function createUpgradeCookie(token: string, publicPath: string): string {
+	return `${UPGRADE_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${qingyanCookiePath(publicPath)}; HttpOnly; SameSite=Lax`;
 }
 
 function renderValue(value: unknown): string {
@@ -41,7 +42,7 @@ function renderValue(value: unknown): string {
 		.replaceAll(">", "&gt;");
 }
 
-function renderUpgradeHtml(state: unknown): string {
+function renderUpgradeHtml(state: unknown, applyPath: string): string {
 	return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -89,7 +90,7 @@ applyButton.addEventListener("click", async () => {
 	applyButton.disabled = true;
 	message.textContent = "";
 	try {
-		const response = await fetch("/api/upgrade/apply", {
+		const response = await fetch("${applyPath}", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ confirm: confirmInput.value }),
@@ -119,6 +120,9 @@ export function createUpgradeApp(
 	});
 	const token = input.token ?? `qy_upgrade_${randomUUID()}`;
 	const service = new UpgradeService(input);
+	const publicPath = input.loadedConfig?.server.publicPath ?? "/qingyan";
+	const upgradePath = joinPublicPath(publicPath, UPGRADE_PATH);
+	const upgradeApiPath = joinPublicPath(publicPath, "/api/upgrade");
 
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.id;
@@ -144,15 +148,17 @@ export function createUpgradeApp(
 		});
 	});
 
-	app.get(UPGRADE_PATH, async (_request, reply) =>
+	app.get(upgradePath, async (_request, reply) =>
 		reply
-			.header("Set-Cookie", createUpgradeCookie(token))
+			.header("Set-Cookie", createUpgradeCookie(token, publicPath))
 			.type("text/html; charset=utf-8")
-			.send(renderUpgradeHtml(service.publicState())),
+			.send(
+				renderUpgradeHtml(service.publicState(), `${upgradeApiPath}/apply`),
+			),
 	);
 
 	void app.register(upgradeRoutes, {
-		prefix: "/api/upgrade",
+		prefix: upgradeApiPath,
 		service,
 		token,
 	});

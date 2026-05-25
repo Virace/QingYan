@@ -18,7 +18,7 @@ afterEach(async () => {
 	}
 });
 
-describe("POST /api/comments/:commentId/vote", () => {
+describe("POST /qingyan/api/comments/:commentId/vote", () => {
 	it("casts one vote and blocks duplicate votes from the same visitor", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -62,7 +62,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 
 		const firstVote = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/c_vote_target/vote",
+			url: "/qingyan/api/comments/c_vote_target/vote",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:vote",
@@ -82,7 +82,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 		);
 		const duplicateVote = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/c_vote_target/vote",
+			url: "/qingyan/api/comments/c_vote_target/vote",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -146,7 +146,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 
 		const blockedVote = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/c_vote_captcha/vote",
+			url: "/qingyan/api/comments/c_vote_captcha/vote",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:vote-captcha",
@@ -162,7 +162,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:vote-captcha",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:vote-captcha",
 		});
 		const visitorCookie = stateResponse.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -184,7 +184,7 @@ describe("POST /api/comments/:commentId/vote", () => {
 
 		const vote = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/c_vote_captcha/vote",
+			url: "/qingyan/api/comments/c_vote_captcha/vote",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},

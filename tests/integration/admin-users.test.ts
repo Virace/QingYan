@@ -98,7 +98,7 @@ describe("admin users", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/users?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/users?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -136,7 +136,7 @@ describe("admin users", () => {
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const createResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/blacklist",
+			url: "/qingyan/api/admin/blacklist",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -157,7 +157,7 @@ describe("admin users", () => {
 
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
-			url: "/api/admin/blacklist/target",
+			url: "/qingyan/api/admin/blacklist/target",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",

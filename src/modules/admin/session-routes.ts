@@ -4,8 +4,10 @@ import { InvalidRequestError } from "../shared/errors";
 import { AdminRepository } from "./repository";
 import { adminLoginBodySchema } from "./schemas";
 import { AdminSessionService } from "./session-service";
+import { qingyanCookiePath } from "../../config/public-path";
 
 export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
+	const sessionCookiePath = qingyanCookiePath(fastify.config.server.publicPath);
 	const service = new AdminSessionService(
 		fastify.config,
 		fastify.security,
@@ -39,7 +41,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 			userAgent: request.context?.userAgent,
 		});
 		reply.setCookie(service.getSessionCookieName(), result.sessionToken, {
-			path: "/",
+			path: sessionCookiePath,
 			sameSite: fastify.config.admin.session.sameSite,
 			httpOnly: true,
 			secure: fastify.config.admin.session.secure,
@@ -61,7 +63,7 @@ export const adminSessionRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.post("/logout", async (request, reply) => {
 		await service.logout(request);
 		reply.clearCookie(service.getSessionCookieName(), {
-			path: "/",
+			path: sessionCookiePath,
 		});
 		return {
 			authenticated: false,

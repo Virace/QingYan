@@ -90,7 +90,7 @@ describe("admin comments", () => {
 
 		const listResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -118,7 +118,7 @@ describe("admin comments", () => {
 
 		const patchResponse = await fixture.app.inject({
 			method: "PATCH",
-			url: "/api/admin/comments/c_admin_1",
+			url: "/qingyan/api/admin/comments/c_admin_1",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -139,7 +139,7 @@ describe("admin comments", () => {
 
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
-			url: "/api/admin/comments/c_admin_1",
+			url: "/qingyan/api/admin/comments/c_admin_1",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -219,7 +219,7 @@ describe("admin comments", () => {
 
 		const reply = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/comments/c_admin_reply_root/reply",
+			url: "/qingyan/api/admin/comments/c_admin_reply_root/reply",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -314,7 +314,7 @@ describe("admin comments", () => {
 
 		const reply = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/comments/c_admin_reply_disabled_root/reply",
+			url: "/qingyan/api/admin/comments/c_admin_reply_disabled_root/reply",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,

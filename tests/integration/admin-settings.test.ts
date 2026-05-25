@@ -20,7 +20,7 @@ describe("admin settings", () => {
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/sites/fangyuan/settings",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -69,7 +69,7 @@ describe("admin settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/sites/fangyuan/settings",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				comments: {
@@ -171,7 +171,7 @@ describe("admin settings", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/sites/default/settings",
+			url: "/qingyan/api/admin/sites/default/settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -196,7 +196,7 @@ describe("admin settings", () => {
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/sites/default/settings",
+			url: "/qingyan/api/admin/sites/default/settings",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				comments: {
@@ -208,7 +208,7 @@ describe("admin settings", () => {
 
 		const readResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/sites/default/settings",
+			url: "/qingyan/api/admin/sites/default/settings",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -230,7 +230,7 @@ describe("admin settings", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/settings?siteKey=fangyuan",
+			url: "/qingyan/api/admin/settings?siteKey=fangyuan",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},

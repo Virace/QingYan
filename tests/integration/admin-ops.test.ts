@@ -32,7 +32,7 @@ describe("admin ops routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/ops/status",
+			url: "/qingyan/api/admin/ops/status",
 		});
 
 		expect(response.statusCode).toBe(401);
@@ -46,7 +46,7 @@ describe("admin ops routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/ops/status",
+			url: "/qingyan/api/admin/ops/status",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -101,7 +101,7 @@ describe("admin ops routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/ops/update/plan",
+			url: "/qingyan/api/admin/ops/update/plan",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 
@@ -123,7 +123,7 @@ describe("admin ops routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/ops/update/check",
+			url: "/qingyan/api/admin/ops/update/check",
 		});
 
 		expect(response.statusCode).toBe(401);
@@ -137,7 +137,7 @@ describe("admin ops routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/ops/upgrade/dry-run",
+			url: "/qingyan/api/admin/ops/upgrade/dry-run",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 

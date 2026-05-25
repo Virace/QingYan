@@ -13,7 +13,7 @@ afterEach(async () => {
 	}
 });
 
-describe("GET /api/comments/thread", () => {
+describe("GET /qingyan/api/comments/thread", () => {
 	it("returns thread-only payload and sets a visitor cookie for new viewers", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -61,7 +61,7 @@ describe("GET /api/comments/thread", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/thread?siteKey=fangyuan&pageKey=post:thread-only&sortBy=oldest&limit=20&offset=0",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:thread-only&sortBy=oldest&limit=20&offset=0",
 			headers: {
 				"user-agent": "thread-test",
 			},
@@ -161,7 +161,7 @@ describe("GET /api/comments/thread", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/thread?siteKey=fangyuan&pageKey=post:gravatar-thread",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:gravatar-thread",
 			cookies: {
 				qingyan_visitor: "viewer_gravatar_thread",
 			},

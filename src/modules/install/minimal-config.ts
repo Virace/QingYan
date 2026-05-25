@@ -2,6 +2,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { resolveConfigPath } from "../../config/load-config";
+import { buildPublicUrl, normalizePublicPath } from "../../config/public-path";
 
 export type InstallRestartMode = "manual" | "exit";
 
@@ -9,6 +10,7 @@ export interface MinimalInstallConfig {
 	configPath: string;
 	host: string;
 	port: number;
+	publicPath: string;
 	token: string;
 	disabled: boolean;
 	restartMode: InstallRestartMode;
@@ -42,6 +44,7 @@ export function resolveMinimalInstallConfig(
 		configPath: resolveConfigPath(environment.QINGYAN_CONFIG_PATH),
 		host: environment.QINGYAN_SERVER_HOST ?? "127.0.0.1",
 		port: parsePort(environment.QINGYAN_SERVER_PORT, 4401),
+		publicPath: normalizePublicPath(environment.QINGYAN_PUBLIC_PATH),
 		token: environment.QINGYAN_INSTALL_TOKEN ?? `qy_install_${randomUUID()}`,
 		disabled: environment.QINGYAN_INSTALL_DISABLED === "true",
 		restartMode: parseRestartMode(environment.QINGYAN_INSTALL_RESTART_MODE),
@@ -49,10 +52,11 @@ export function resolveMinimalInstallConfig(
 }
 
 export function resolveInstallUrl(input: MinimalInstallConfig): string {
-	return new URL(
-		"/admin/install",
+	return buildPublicUrl(
 		`http://${input.host}:${input.port}`,
-	).toString();
+		input.publicPath,
+		"/admin/install",
+	);
 }
 
 export function resolveInstallPath(

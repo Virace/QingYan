@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import { joinPublicPath } from "../../config/public-path";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
@@ -24,7 +25,10 @@ export const adminOverviewRoutes: FastifyPluginAsync = async (fastify) => {
 		const logging = fastify.loggerManager.getRuntimeSettings();
 
 		return service.getOverview({
-			consolePath: fastify.adminBootstrap.consolePath,
+			consolePath: joinPublicPath(
+				fastify.config.server.publicPath,
+				fastify.adminBootstrap.consolePath,
+			),
 			devMode: fastify.runtimeOptions.devMode.enabled,
 			logging: {
 				level: logging.level,

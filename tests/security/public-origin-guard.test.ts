@@ -50,7 +50,7 @@ describe("public origin guard", () => {
 
 		const response = await fixture.app.inject({
 			method: "OPTIONS",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				origin: "http://localhost:4321",
 				"access-control-request-method": "POST",
@@ -80,7 +80,7 @@ describe("public origin guard", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				origin: "http://localhost:4321",
 			},
@@ -102,7 +102,7 @@ describe("public origin guard", () => {
 
 		const update = await fixture.app.inject({
 			method: "PATCH",
-			url: "/api/admin/sites/fangyuan",
+			url: "/qingyan/api/admin/sites/fangyuan",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				allowedOrigins: ["https://new.example.com"],
@@ -112,7 +112,7 @@ describe("public origin guard", () => {
 
 		const oldOrigin = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				origin: "http://localhost:4321",
 			},
@@ -122,7 +122,7 @@ describe("public origin guard", () => {
 
 		const newOrigin = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				origin: "https://new.example.com",
 			},
@@ -139,7 +139,7 @@ describe("public origin guard", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				origin: "https://evil.example",
 			},
@@ -162,7 +162,7 @@ describe("public origin guard", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:missing-origin",
@@ -187,7 +187,7 @@ describe("public origin guard", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:missing-origin-opt-out",
@@ -208,7 +208,7 @@ describe("public origin guard", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			payload: {
 				siteKey: "default",
 				pageKey: "post:dev-origin",

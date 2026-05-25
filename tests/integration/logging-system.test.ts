@@ -28,7 +28,7 @@ describe("logging system", () => {
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging",
 		});
 
 		expect(bootstrap.statusCode).toBe(200);
@@ -53,13 +53,13 @@ describe("logging system", () => {
 
 		const healthz = await fixture.app.inject({
 			method: "GET",
-			url: "/healthz",
+			url: "/qingyan/healthz",
 		});
 		expect(healthz.statusCode).toBe(200);
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging-access",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging-access",
 		});
 
 		expect(bootstrap.statusCode).toBe(200);
@@ -70,8 +70,8 @@ describe("logging system", () => {
 		);
 		expect(accessJsonl).toContain('"channel":"access"');
 		expect(accessJsonl).toContain('"event":"request.completed"');
-		expect(accessJsonl).toContain('"/api/comments/bootstrap"');
+		expect(accessJsonl).toContain('"/qingyan/api/comments/bootstrap"');
 		expect(accessJsonl).toContain('"pageKey":"post:logging-access"');
-		expect(accessJsonl).not.toContain("/healthz");
+		expect(accessJsonl).not.toContain("/qingyan/healthz");
 	});
 });

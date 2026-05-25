@@ -18,7 +18,7 @@ describe("dev session bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/session",
+			url: "/qingyan/api/dev/session",
 			payload: {
 				token: "dev-token",
 			},
@@ -36,7 +36,7 @@ describe("dev session bootstrap", () => {
 
 		const login = await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/session",
+			url: "/qingyan/api/dev/session",
 			payload: {
 				token: "dev-token",
 			},
@@ -52,7 +52,7 @@ describe("dev session bootstrap", () => {
 
 		const me = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/session/me",
+			url: "/qingyan/api/admin/session/me",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -80,7 +80,7 @@ describe("dev session bootstrap", () => {
 
 		const login = await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/session",
+			url: "/qingyan/api/dev/session",
 			payload: {
 				token: "dev-token",
 			},
@@ -91,7 +91,7 @@ describe("dev session bootstrap", () => {
 
 		const me = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/session/me",
+			url: "/qingyan/api/admin/session/me",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},

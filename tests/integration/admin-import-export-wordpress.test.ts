@@ -45,7 +45,7 @@ async function analyzeResolvedWordPressJob(
 ) {
 	const response = await fixture.app.inject({
 		method: "POST",
-		url: "/api/admin/import-export/wordpress/analyze",
+		url: "/qingyan/api/admin/import-export/wordpress/analyze",
 		...withAdminWriteAuth({ adminCookie, csrfToken }),
 		payload: {
 			siteKey: "fangyuan",
@@ -76,7 +76,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/wordpress/analyze",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
 			payload: {
 				siteKey: "fangyuan",
 				fileName: "wordpress.xml",
@@ -93,7 +93,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/wordpress/analyze",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -133,7 +133,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/wordpress/analyze?siteKey=fangyuan&fileName=large.xml&sourceBasePath=/",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze?siteKey=fangyuan&fileName=large.xml&sourceBasePath=/",
 			headers: {
 				"content-type": "application/xml",
 				...withAdminWriteAuth({ adminCookie, csrfToken }).headers,
@@ -162,7 +162,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/wordpress/analyze",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				siteKey: "fangyuan",
@@ -191,7 +191,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 
@@ -211,7 +211,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/jobs/${jobId}/dry-run`,
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/dry-run`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
@@ -246,7 +246,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(planResponse.statusCode).toBe(200);
@@ -302,7 +302,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/jobs/${jobId}/dry-run`,
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/dry-run`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "skip_existing",
@@ -332,14 +332,14 @@ describe("admin import/export WordPress routes", () => {
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(planResponse.statusCode).toBe(200);
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/jobs/${jobId}/dry-run`,
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/dry-run`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
@@ -349,7 +349,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/jobs/${jobId}/apply`,
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/apply`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",
@@ -439,7 +439,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const jobsResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/import-export/jobs?siteKey=fangyuan",
+			url: "/qingyan/api/admin/import-export/jobs?siteKey=fangyuan",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -461,7 +461,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const detailResponse = await fixture.app.inject({
 			method: "GET",
-			url: `/api/admin/import-export/jobs/${jobId}`,
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}`,
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -489,7 +489,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const planResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(planResponse.statusCode).toBe(200);
@@ -545,7 +545,7 @@ describe("admin import/export WordPress routes", () => {
 
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/jobs/${jobId}/apply`,
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/apply`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
 				existingStrategy: "fail_on_existing",

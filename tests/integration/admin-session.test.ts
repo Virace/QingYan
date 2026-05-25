@@ -32,7 +32,7 @@ describe("admin session", () => {
 
 			const captchaResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/captcha",
+				url: "/qingyan/api/admin/session/captcha",
 			});
 			const { challenge } = captchaResponse.json() as {
 				challenge: {
@@ -43,7 +43,7 @@ describe("admin session", () => {
 			const beforeLogin = Date.now();
 			const loginResponse = await fixture.app.inject({
 				method: "POST",
-				url: "/api/admin/session/login",
+				url: "/qingyan/api/admin/session/login",
 				payload: {
 					username: "admin",
 					password: "replace-me",
@@ -79,7 +79,7 @@ describe("admin session", () => {
 
 			const captchaResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/captcha",
+				url: "/qingyan/api/admin/session/captcha",
 			});
 			const { challenge } = captchaResponse.json() as {
 				challenge: {
@@ -89,7 +89,7 @@ describe("admin session", () => {
 
 			const loginResponse = await fixture.app.inject({
 				method: "POST",
-				url: "/api/admin/session/login",
+				url: "/qingyan/api/admin/session/login",
 				payload: {
 					username: "admin",
 					password: "replace-me",
@@ -111,7 +111,7 @@ describe("admin session", () => {
 			);
 			const meResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/me",
+				url: "/qingyan/api/admin/session/me",
 				cookies: {
 					qingyan_admin: adminCookie?.value ?? "",
 				},
@@ -132,7 +132,7 @@ describe("admin session", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/session/login",
+			url: "/qingyan/api/admin/session/login",
 			payload: {
 				username: "admin",
 				password: "replace-me",
@@ -155,7 +155,7 @@ describe("admin session", () => {
 			for (let index = 1; index <= 5; index += 1) {
 				const captchaResponse = await fixture.app.inject({
 					method: "GET",
-					url: "/api/admin/session/captcha",
+					url: "/qingyan/api/admin/session/captcha",
 				});
 				expect(captchaResponse.statusCode).toBe(200);
 
@@ -171,7 +171,7 @@ describe("admin session", () => {
 
 				const response = await fixture.app.inject({
 					method: "POST",
-					url: "/api/admin/session/login",
+					url: "/qingyan/api/admin/session/login",
 					payload: {
 						username: "admin",
 						password: "wrong-password",
@@ -195,7 +195,7 @@ describe("admin session", () => {
 
 			const captchaResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/captcha",
+				url: "/qingyan/api/admin/session/captcha",
 			});
 			expect(captchaResponse.statusCode).toBe(403);
 			expect(captchaResponse.json()).toMatchObject({
@@ -218,7 +218,7 @@ describe("admin session", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/session/captcha",
+			url: "/qingyan/api/admin/session/captcha",
 		});
 
 		expect(response.statusCode).toBe(403);
@@ -236,7 +236,7 @@ describe("admin session", () => {
 
 			const invalidCaptcha = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/captcha",
+				url: "/qingyan/api/admin/session/captcha",
 			});
 			const invalidChallenge = invalidCaptcha.json() as {
 				challenge: {
@@ -250,7 +250,7 @@ describe("admin session", () => {
 
 			const invalidLogin = await fixture.app.inject({
 				method: "POST",
-				url: "/api/admin/session/login",
+				url: "/qingyan/api/admin/session/login",
 				payload: {
 					username: "admin",
 					password: "wrong-password",
@@ -267,7 +267,7 @@ describe("admin session", () => {
 
 			const captchaResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/captcha",
+				url: "/qingyan/api/admin/session/captcha",
 			});
 			expect(captchaResponse.statusCode).toBe(200);
 			const challenge = captchaResponse.json() as {
@@ -282,7 +282,7 @@ describe("admin session", () => {
 
 			const loginResponse = await fixture.app.inject({
 				method: "POST",
-				url: "/api/admin/session/login",
+				url: "/qingyan/api/admin/session/login",
 				payload: {
 					username: "admin",
 					password: "replace-me",
@@ -309,7 +309,7 @@ describe("admin session", () => {
 
 			const meResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/me",
+				url: "/qingyan/api/admin/session/me",
 				cookies: {
 					qingyan_admin: adminCookie?.value ?? "",
 				},
@@ -330,7 +330,7 @@ describe("admin session", () => {
 
 			const logoutResponse = await fixture.app.inject({
 				method: "POST",
-				url: "/api/admin/session/logout",
+				url: "/qingyan/api/admin/session/logout",
 				cookies: {
 					qingyan_admin: adminCookie?.value ?? "",
 				},
@@ -346,7 +346,7 @@ describe("admin session", () => {
 
 			const meAfterLogout = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/me",
+				url: "/qingyan/api/admin/session/me",
 				cookies: {
 					qingyan_admin: adminCookie?.value ?? "",
 				},
@@ -367,7 +367,7 @@ describe("admin session", () => {
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "PATCH",
-			url: "/api/admin/sites/fangyuan",
+			url: "/qingyan/api/admin/sites/fangyuan",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -400,7 +400,7 @@ describe("admin session", () => {
 
 			const captchaResponse = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/captcha",
+				url: "/qingyan/api/admin/session/captcha",
 			});
 			expect(captchaResponse.statusCode).toBe(200);
 			const challenge = captchaResponse.json() as {
@@ -411,7 +411,7 @@ describe("admin session", () => {
 
 			const loginResponse = await fixture.app.inject({
 				method: "POST",
-				url: "/api/admin/session/login",
+				url: "/qingyan/api/admin/session/login",
 				payload: {
 					username: "admin",
 					password: "admin",

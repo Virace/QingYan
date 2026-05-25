@@ -38,7 +38,7 @@ describe("logging business events", () => {
 			for (let index = 1; index <= 5; index += 1) {
 				const captchaResponse = await fixture.app.inject({
 					method: "GET",
-					url: "/api/admin/session/captcha",
+					url: "/qingyan/api/admin/session/captcha",
 					headers: {
 						"x-request-id": `req_admin_${index}`,
 					},
@@ -54,7 +54,7 @@ describe("logging business events", () => {
 
 				const loginResponse = await fixture.app.inject({
 					method: "POST",
-					url: "/api/admin/session/login",
+					url: "/qingyan/api/admin/session/login",
 					headers: {
 						"x-request-id": `req_admin_${index}`,
 					},
@@ -87,7 +87,7 @@ describe("logging business events", () => {
 
 		const captchaState = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:logging-events",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:logging-events",
 			headers: {
 				"x-request-id": "req_captcha_state",
 			},
@@ -101,7 +101,7 @@ describe("logging business events", () => {
 
 		const invalidVerify = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			headers: {
 				"x-request-id": "req_captcha_failed",
 			},
@@ -134,7 +134,7 @@ describe("logging business events", () => {
 
 		const validVerify = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			headers: {
 				"x-request-id": "req_captcha_verified",
 			},
@@ -153,7 +153,7 @@ describe("logging business events", () => {
 
 		const createComment = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				"x-request-id": "req_comment_created",
 			},
@@ -183,7 +183,7 @@ describe("logging business events", () => {
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const updateSettings = await fixture.app.inject({
 			method: "PUT",
-			url: "/api/admin/sites/fangyuan/settings",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
 			headers: {
 				"x-request-id": "req_settings_updated",
 				...withAdminWriteAuth({ adminCookie, csrfToken }).headers,

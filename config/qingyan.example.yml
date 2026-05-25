@@ -2,6 +2,7 @@ server:
   host: 0.0.0.0
   port: 4401
   publicBaseUrl: http://localhost:4401
+  publicPath: /qingyan
   trustProxy: false
 
 database:

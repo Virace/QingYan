@@ -89,7 +89,7 @@ describe("admin pages", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/pages?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/pages?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},

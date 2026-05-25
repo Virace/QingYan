@@ -19,14 +19,6 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 
-declare global {
-	interface Window {
-		__QINGYAN_ADMIN__?: {
-			basePath?: string;
-		};
-	}
-}
-
 function createQueryClient(onUnauthorized: () => void) {
 	return new QueryClient({
 		queryCache: new QueryCache({

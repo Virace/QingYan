@@ -9,12 +9,14 @@ export async function loginAsAdmin(
 	app: FastifyInstance,
 	options?: {
 		password?: string;
+		apiBase?: string;
 	},
 ) {
+	const apiBase = options?.apiBase ?? "/qingyan/api";
 	return withForcedTestCaptchaAnswer(async () => {
 		const captchaResponse = await app.inject({
 			method: "GET",
-			url: "/api/admin/session/captcha",
+			url: `${apiBase}/admin/session/captcha`,
 		});
 		if (captchaResponse.statusCode !== 200) {
 			throw new Error(
@@ -31,7 +33,7 @@ export async function loginAsAdmin(
 
 		const loginResponse = await app.inject({
 			method: "POST",
-			url: "/api/admin/session/login",
+			url: `${apiBase}/admin/session/login`,
 			payload: {
 				username: "admin",
 				password: options?.password ?? "replace-me",

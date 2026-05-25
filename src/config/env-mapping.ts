@@ -41,6 +41,15 @@ export const envMappings: EnvMapping[] = [
 		restartRequired: true,
 	},
 	{
+		path: "server.publicPath",
+		envName: "QINGYAN_PUBLIC_PATH",
+		category: "startup",
+		valueKind: "string",
+		secret: false,
+		readable: true,
+		restartRequired: true,
+	},
+	{
 		path: "server.trustProxy",
 		envName: "QINGYAN_TRUST_PROXY",
 		category: "startup",

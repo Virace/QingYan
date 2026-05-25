@@ -21,7 +21,7 @@ async function createDevAdminCookie() {
 
 	const session = await fixture.app.inject({
 		method: "POST",
-		url: "/api/dev/session",
+		url: "/qingyan/api/dev/session",
 		payload: {
 			token: "dev-token",
 		},
@@ -43,7 +43,7 @@ afterEach(async () => {
 });
 
 describe("dev control routes", () => {
-	it("requires an admin session for /api/dev/state", async () => {
+	it("requires an admin session for /qingyan/api/dev/state", async () => {
 		const fixture = await createTestApp({
 			devMode: true,
 			devAdminToken: "dev-token",
@@ -52,7 +52,7 @@ describe("dev control routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/dev/state?siteKey=default&pageKey=post:dev-state",
+			url: "/qingyan/api/dev/state?siteKey=default&pageKey=post:dev-state",
 		});
 
 		expect(response.statusCode).toBe(401);
@@ -63,7 +63,7 @@ describe("dev control routes", () => {
 
 		const stateBeforeReset = await fixture.app.inject({
 			method: "GET",
-			url: "/api/dev/state?siteKey=default&pageKey=post:dev-state",
+			url: "/qingyan/api/dev/state?siteKey=default&pageKey=post:dev-state",
 			cookies: {
 				qingyan_admin: adminCookie,
 			},
@@ -80,7 +80,7 @@ describe("dev control routes", () => {
 
 		const reset = await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/reset",
+			url: "/qingyan/api/dev/reset",
 			cookies: {
 				qingyan_admin: adminCookie,
 			},
@@ -93,7 +93,7 @@ describe("dev control routes", () => {
 
 		const stateAfterReset = await fixture.app.inject({
 			method: "GET",
-			url: "/api/dev/state?siteKey=default&pageKey=post:dev-state",
+			url: "/qingyan/api/dev/state?siteKey=default&pageKey=post:dev-state",
 			cookies: {
 				qingyan_admin: adminCookie,
 			},
@@ -112,7 +112,7 @@ describe("dev control routes", () => {
 
 		const scenario = await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/scenario",
+			url: "/qingyan/api/dev/scenario",
 			cookies: {
 				qingyan_admin: adminCookie,
 			},
@@ -128,7 +128,7 @@ describe("dev control routes", () => {
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=default&pageKey=post:always&pageTitle=Always%20Captcha&pageUrl=https://example.test/posts/always",
+			url: "/qingyan/api/comments/bootstrap?siteKey=default&pageKey=post:always&pageTitle=Always%20Captcha&pageUrl=https://example.test/posts/always",
 		});
 		expect(bootstrap.statusCode).toBe(200);
 		expect(bootstrap.json()).toMatchObject({
@@ -157,7 +157,7 @@ describe("dev control routes", () => {
 
 		await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/scenario",
+			url: "/qingyan/api/dev/scenario",
 			cookies: {
 				qingyan_admin: adminCookie,
 			},
@@ -170,7 +170,7 @@ describe("dev control routes", () => {
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=default&pageKey=post:threshold&pageTitle=Threshold%20Page&pageUrl=https://example.test/posts/threshold",
+			url: "/qingyan/api/comments/bootstrap?siteKey=default&pageKey=post:threshold&pageTitle=Threshold%20Page&pageUrl=https://example.test/posts/threshold",
 		});
 		expect(bootstrap.statusCode).toBe(200);
 		const visitorCookie = bootstrap.cookies.find(
@@ -179,7 +179,7 @@ describe("dev control routes", () => {
 
 		const createComment = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -212,7 +212,7 @@ describe("dev control routes", () => {
 		const devState = await fixture.app.inject({
 			method: "GET",
 			url:
-				"/api/dev/state?siteKey=default&pageKey=post:threshold&visitorKey=" +
+				"/qingyan/api/dev/state?siteKey=default&pageKey=post:threshold&visitorKey=" +
 				(visitorCookie?.value ?? ""),
 			cookies: {
 				qingyan_admin: adminCookie,
@@ -238,7 +238,7 @@ describe("dev control routes", () => {
 
 		await fixture.app.inject({
 			method: "POST",
-			url: "/api/dev/scenario",
+			url: "/qingyan/api/dev/scenario",
 			cookies: {
 				qingyan_admin: adminCookie,
 			},
@@ -253,7 +253,7 @@ describe("dev control routes", () => {
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=default&pageKey=post:seeded&pageTitle=Seeded%20Thread&pageUrl=https://example.test/posts/seeded",
+			url: "/qingyan/api/comments/bootstrap?siteKey=default&pageKey=post:seeded&pageTitle=Seeded%20Thread&pageUrl=https://example.test/posts/seeded",
 		});
 
 		expect(bootstrap.statusCode).toBe(200);

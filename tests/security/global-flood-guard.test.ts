@@ -19,7 +19,8 @@ describe("global flood guard", () => {
 		fixture.app.config.security.globalFloodGuard.windowSec = 10;
 		fixture.app.config.security.globalFloodGuard.maxRequests = 2;
 
-		const url = "/api/comments/thread?siteKey=fangyuan&pageKey=post:flood";
+		const url =
+			"/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:flood";
 
 		expect((await fixture.app.inject({ method: "GET", url })).statusCode).toBe(
 			200,

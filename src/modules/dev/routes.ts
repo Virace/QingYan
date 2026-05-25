@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import type { AppRuntimeOptions } from "../../config/runtime-options";
+import { qingyanCookiePath } from "../../config/public-path";
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
 import { CaptchaService } from "../comments/captcha-service";
@@ -20,7 +21,13 @@ import { DevModeService } from "./service";
 export function registerDatabaseDevRoutes(
 	app: FastifyInstance,
 	runtimeOptions: AppRuntimeOptions,
+	options: {
+		prefix: string;
+	} = {
+		prefix: "",
+	},
 ): void {
+	const routePath = (path: string) => `${options.prefix}${path}`;
 	const seedSite = runtimeOptions.devMode.seed?.site;
 	const devMockService = seedSite ? new DevMockService(seedSite) : undefined;
 	app.decorate("devMockService", devMockService);
@@ -49,7 +56,7 @@ export function registerDatabaseDevRoutes(
 		adminSessionService,
 	);
 
-	app.post("/api/dev/session", async (request, reply) => {
+	app.post(routePath("/dev/session"), async (request, reply) => {
 		const parsed = devSessionBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -68,7 +75,7 @@ export function registerDatabaseDevRoutes(
 			adminSessionService.getSessionCookieName(),
 			result.sessionToken,
 			{
-				path: "/",
+				path: qingyanCookiePath(app.config.server.publicPath),
 				sameSite: app.config.admin.session.sameSite,
 				httpOnly: true,
 				secure: app.config.admin.session.secure,
@@ -83,7 +90,7 @@ export function registerDatabaseDevRoutes(
 		};
 	});
 
-	app.get("/api/dev/state", async (request) => {
+	app.get(routePath("/dev/state"), async (request) => {
 		await devService.requireAdminSession(request);
 		const parsed = devStateQuerySchema.safeParse(request.query);
 		if (!parsed.success) {
@@ -112,7 +119,7 @@ export function registerDatabaseDevRoutes(
 		);
 	});
 
-	app.post("/api/dev/reset", async (request) => {
+	app.post(routePath("/dev/reset"), async (request) => {
 		await devService.requireAdminSession(request);
 		const parsed = devResetBodySchema.safeParse(request.body);
 		if (!parsed.success) {
@@ -131,7 +138,7 @@ export function registerDatabaseDevRoutes(
 		return devService.resetPageState(parsed.data.siteKey, parsed.data.pageKey);
 	});
 
-	app.post("/api/dev/scenario", async (request) => {
+	app.post(routePath("/dev/scenario"), async (request) => {
 		await devService.requireAdminSession(request);
 		const parsed = devScenarioBodySchema.safeParse(request.body);
 		if (!parsed.success) {

@@ -5,6 +5,7 @@ import path from "node:path";
 import { parse } from "yaml";
 
 import { loadConfig } from "../src/config/load-config";
+import { joinPublicPath, normalizePublicPath } from "../src/config/public-path";
 import { createDatabaseClients } from "../src/db/client";
 import { adminBootstrapState } from "../src/db/schema";
 import {
@@ -20,6 +21,7 @@ interface DevConfig {
 
 const DEFAULT_API_PORT = 4401;
 const DEFAULT_ADMIN_PATH = "/admin";
+const DEFAULT_PUBLIC_PATH = "/qingyan";
 
 async function readAdminPathFromDatabase(
 	configPath: string,
@@ -44,15 +46,17 @@ async function readDevConfig(
 	const sourcePath = existsSync(configPath) ? configPath : fallbackPath;
 	const config = parse(readFileSync(sourcePath, "utf-8")) as {
 		admin?: { console?: { path?: string } };
-		server?: { port?: number };
+		server?: { port?: number; publicPath?: string };
 	};
 	const apiPort = config.server?.port ?? DEFAULT_API_PORT;
-	const adminPath =
+	const publicPath = normalizePublicPath(config.server?.publicPath);
+	const internalAdminPath =
 		(sourcePath === configPath
 			? await readAdminPathFromDatabase(configPath, environment)
 			: undefined) ??
 		config.admin?.console?.path ??
 		DEFAULT_ADMIN_PATH;
+	const adminPath = joinPublicPath(publicPath, internalAdminPath);
 
 	return {
 		adminPath,
@@ -101,9 +105,17 @@ function startProcess(
 }
 
 function buildAdminDevPaths(adminPath: string): string {
-	return adminPath === DEFAULT_ADMIN_PATH
-		? DEFAULT_ADMIN_PATH
-		: `${adminPath},${DEFAULT_ADMIN_PATH}`;
+	const defaultAdminPath = joinPublicPath(
+		DEFAULT_PUBLIC_PATH,
+		DEFAULT_ADMIN_PATH,
+	);
+	return adminPath === defaultAdminPath
+		? defaultAdminPath
+		: `${adminPath},${defaultAdminPath}`;
+}
+
+function defaultExternalAdminPath(): string {
+	return joinPublicPath(DEFAULT_PUBLIC_PATH, DEFAULT_ADMIN_PATH);
 }
 
 const devAdminUsername = process.env.QINGYAN_DEV_ADMIN_USERNAME ?? "admin";
@@ -167,9 +179,9 @@ async function main(): Promise<void> {
 
 	console.log(`QingYan API dev server: ${apiOrigin}`);
 	console.log(`QingYan Admin dev server: http://localhost:5173${adminPath}`);
-	if (adminPath !== DEFAULT_ADMIN_PATH) {
+	if (adminPath !== defaultExternalAdminPath()) {
 		console.log(
-			`QingYan Admin dev alias: http://localhost:5173${DEFAULT_ADMIN_PATH}`,
+			`QingYan Admin dev alias: http://localhost:5173${defaultExternalAdminPath()}`,
 		);
 	}
 	console.log(`QingYan Dev Admin: ${devAdminUsername} / ${devAdminPassword}`);

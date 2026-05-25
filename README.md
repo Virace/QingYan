@@ -18,8 +18,8 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 
 ## 当前能力
 
-- 评论首屏 bootstrap：`GET /api/comments/bootstrap`
-- 评论线程分页：`GET /api/comments/thread`
+- 评论首屏 bootstrap：`GET /qingyan/api/comments/bootstrap`
+- 评论线程分页：`GET /qingyan/api/comments/thread`
 - 评论创建、投票、验证码验证
 - bootstrap 返回 `commentForm.allow / require`，前端可按 `nickname | email | website` 动态渲染必填项
 - 页面点赞
@@ -28,7 +28,7 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 - 本地 `logs/access` 与 `logs/app` 双通道日志
 - 文本 `.log` + 结构化 `.jsonl` 双格式落盘
 - 后台可动态调整日志等级和保留天数
-- 浏览器后台入口：`GET /admin`
+- 默认浏览器后台入口：`GET /qingyan/admin`
 - SQLite + Drizzle migration 基线
 - Docker / Compose 本地或单机部署
 
@@ -51,12 +51,12 @@ pnpm dev:api
 当 `config/qingyan.yml` 不存在时，后端会启动 minimal install app，并在终端输出一次性安装地址：
 
 ```text
-install.url=http://127.0.0.1:4401/admin/install
+install.url=http://127.0.0.1:4401/qingyan/admin/install
 ```
 
-浏览器访问 `/admin/` 或 `/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中。
+浏览器访问 `/qingyan/admin/` 或 `/qingyan/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中。
 
-安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后重启服务进入正常模式；安装锁存在时不会启动 install app，正常后台中的 `${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/admin` 会跳转到安装页，正常 `/api/*` 接口不会注册；安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定。
+安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后重启服务进入正常模式；安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/qingyan/admin` 会跳转到安装页，正常 `/qingyan/api/*` 接口不会注册；安装完成后的外部后台入口由 `server.publicPath + admin.consolePath` 决定。
 
 需要指定配置路径或安装 token 时可使用：
 
@@ -89,12 +89,12 @@ pnpm dev
 默认监听地址：
 
 - API: `http://localhost:4401`
-- Admin: `http://localhost:5173/admin`
-- OpenAPI JSON: `http://localhost:4401/openapi.json`
-- OpenAPI YAML: `http://localhost:4401/openapi.yaml`
-- API Docs: `http://localhost:4401/docs`
+- Admin: `http://localhost:5173/qingyan/admin`
+- OpenAPI JSON: `http://localhost:4401/qingyan/openapi.json`
+- OpenAPI YAML: `http://localhost:4401/qingyan/openapi.yaml`
+- API Docs: `http://localhost:4401/qingyan/docs`
 
-`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按已安装的后台入口生成主入口，并把 `/api/*` 代理到后端。dev mode 下 `/admin/` 始终作为额外开发入口可用；如果安装时生成或设置了其他后台路径，`/admin/` 和该路径会同时可用，`/admin/` 不会在非 dev 启动中开放为别名。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm admin:dev`。
+`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按已安装的后台入口生成主入口，并把 `/qingyan/api/*` 代理到后端。dev mode 下 `/qingyan/admin/` 始终作为额外开发入口可用；如果安装时生成或设置了其他后台路径，`/qingyan/admin/` 和该路径会同时可用，`/qingyan/admin/` 不会在非 dev 启动中开放为别名。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm admin:dev`。
 
 `pnpm dev` 默认启用快速开发模式，Admin 登录固定为：
 
@@ -175,10 +175,10 @@ qyctl update plan
 当前尚无正式 release，不为旧未发布状态提供兼容升级。首次正式 release 后，如果启动时检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是启动正常评论 API 或 Admin Console。终端会输出：
 
 ```text
-upgrade.url=http://127.0.0.1:4401/upgrade
+upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
 ```
 
-浏览器访问 `/upgrade` 可查看脱敏后的 `UpgradePlan`，确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
+浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
 
 CLI 仍是底层运维入口，适合服务器、Docker、CI 或 Web 无法启动的场景：
 
@@ -192,9 +192,9 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 ## OpenAPI
 
 - 规格文件：[`docs/openapi.yaml`](docs/openapi.yaml)
-- 运行时 YAML：`GET /openapi.yaml`
-- 运行时 JSON：`GET /openapi.json`
-- 文档页：`GET /docs`
+- 运行时 YAML：`GET /qingyan/openapi.yaml`
+- 运行时 JSON：`GET /qingyan/openapi.json`
+- 文档页：`GET /qingyan/docs`
 
 公开 OpenAPI 只覆盖内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口。Admin Console Web 使用的 `/api/admin/*` 管理接口不进入公开 OpenAPI；开发者调试或扩展内置后台时可参考 [`docs/admin-console-api.md`](docs/admin-console-api.md)。
 
@@ -217,7 +217,7 @@ docker compose up --build
 - 暴露 `4401:4401`
 - 挂载 `./config:/app/config`
 - 挂载 `./data:/app/data`
-- 使用 `/healthz` 做健康检查
+- 使用 `/qingyan/healthz` 做健康检查
 
 ## 数据库与 `drizzle/`
 
@@ -286,6 +286,6 @@ QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 
 无数据库模式会自动启用 dev mode，并使用进程内存状态提供完整 dev mock 控制面和前台业务 API；进程重启后 mock 状态会丢失。
 
-dev mode 只新增 `/api/dev/*` 控制面；正常业务接口仍然是 `/api/*` 与 `/admin`。前端在 dev mode 下依然需要显式传 `siteKey: "default"`。
+dev mode 只新增 `/qingyan/api/dev/*` 控制面；正常业务接口仍然是 `/qingyan/api/*` 与 `/qingyan/admin`。前端在 dev mode 下依然需要显式传 `siteKey: "default"`。
 
 更详细的下游联调方式、场景调用顺序、错误处理与 UI 对接建议见 [docs/dev-mode-integration.md](docs/dev-mode-integration.md)。

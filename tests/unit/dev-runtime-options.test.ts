@@ -17,6 +17,7 @@ async function createInstalledDevWorkspace(adminConsolePath = "/admin") {
 		configPath,
 		host: "127.0.0.1",
 		port: 4401,
+		publicPath: "/qingyan",
 		token: "install-token",
 		disabled: false,
 		restartMode: "manual",
@@ -29,6 +30,7 @@ async function createInstalledDevWorkspace(adminConsolePath = "/admin") {
 				host: "127.0.0.1",
 				port: 4401,
 				publicBaseUrl: "http://localhost:4401",
+				publicPath: "/qingyan",
 				trustProxy: false,
 			},
 			database: {
@@ -176,10 +178,10 @@ describe("resolveRuntimeOptions", () => {
 
 			const output = `${result.stdout}\n${result.stderr}`;
 			expect(output).toContain(
-				"QingYan Admin dev server: http://localhost:5173/hidden-admin",
+				"QingYan Admin dev server: http://localhost:5173/qingyan/hidden-admin",
 			);
 			expect(output).toContain(
-				"QingYan Admin dev alias: http://localhost:5173/admin",
+				"QingYan Admin dev alias: http://localhost:5173/qingyan/admin",
 			);
 			expect(output).not.toContain("QINGYAN_ADMIN_DEV_PATHS");
 		} finally {
@@ -212,7 +214,7 @@ describe("resolveRuntimeOptions", () => {
 			const output = `${result.stdout}\n${result.stderr}`;
 			expect(output).toContain("QingYan install mode:");
 			expect(output).toContain(
-				"install.url=http://127.0.0.1:4401/admin/install",
+				"install.url=http://127.0.0.1:4401/qingyan/admin/install",
 			);
 			expect(output).not.toContain("QingYan Admin dev server:");
 			expect(output).not.toContain("QingYan Dev Admin:");

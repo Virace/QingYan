@@ -13,11 +13,12 @@ export function createGeeTestChallenge(input: {
 	challengeId: string;
 	siteKey: string;
 	pageKey: string;
+	widgetPath: string;
 }) {
 	const publicChallenge = {
 		challengeId: input.challengeId,
 		mode: "iframe_widget" as const,
-		iframeSrc: `/api/comments/captcha/widget?siteKey=${encodeURIComponent(input.siteKey)}&pageKey=${encodeURIComponent(input.pageKey)}&challengeId=${encodeURIComponent(input.challengeId)}`,
+		iframeSrc: `${input.widgetPath}?siteKey=${encodeURIComponent(input.siteKey)}&pageKey=${encodeURIComponent(input.pageKey)}&challengeId=${encodeURIComponent(input.challengeId)}`,
 		width: DEFAULT_WIDTH,
 		height: DEFAULT_HEIGHT,
 	};

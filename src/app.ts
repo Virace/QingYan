@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppRuntimeOptions } from "./config/runtime-options";
+import { joinPublicPath } from "./config/public-path";
 import type { AppConfig } from "./config/types";
 import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
@@ -40,17 +41,23 @@ interface BuildAppOptions {
 function registerBaseRoutes(
 	app: FastifyInstance,
 	openApi: OpenApiDocument,
+	publicPath: string,
 ): void {
-	app.get("/healthz", async () => ({
+	app.get(joinPublicPath(publicPath, "/healthz"), async () => ({
 		service: "QingYan",
 		status: "ok",
 	}));
-	app.get("/openapi.yaml", async (_, reply) =>
+	app.get(joinPublicPath(publicPath, "/openapi.yaml"), async (_, reply) =>
 		reply.type("application/yaml; charset=utf-8").send(openApi.yamlText),
 	);
-	app.get("/openapi.json", async () => openApi.json);
-	app.get("/docs", async (_, reply) =>
-		reply.type("text/html; charset=utf-8").send(renderOpenApiHtml()),
+	app.get(
+		joinPublicPath(publicPath, "/openapi.json"),
+		async () => openApi.json,
+	);
+	app.get(joinPublicPath(publicPath, "/docs"), async (_, reply) =>
+		reply
+			.type("text/html; charset=utf-8")
+			.send(renderOpenApiHtml(joinPublicPath(publicPath, "/openapi.yaml"))),
 	);
 }
 
@@ -78,7 +85,8 @@ export async function buildApp(
 		},
 		trustProxy: config.server.trustProxy,
 	});
-	const openApi = await loadOpenApiDocument();
+	const publicPath = config.server.publicPath;
+	const openApi = await loadOpenApiDocument(publicPath);
 	const devSeedSite = runtimeOptions.devMode.seed?.site;
 
 	app.decorate("config", config);
@@ -158,8 +166,10 @@ export async function buildApp(
 			generatedPassword: runtimeOptions.devMode.adminPassword ?? "admin",
 		});
 		await app.register(requestContextPlugin);
-		registerBaseRoutes(app, openApi);
+		registerBaseRoutes(app, openApi, publicPath);
 		await app.register(adminUiRoutes, {
+			prefix: publicPath,
+			publicPath,
 			distDirectory: options.adminDistDirectory,
 		});
 		await app.register(
@@ -167,6 +177,7 @@ export async function buildApp(
 				devMockService,
 				runtimeOptions,
 			}),
+			{ prefix: joinPublicPath(publicPath, "/api") },
 		);
 		return app;
 	}
@@ -176,33 +187,61 @@ export async function buildApp(
 	await app.register(securityPlugin);
 	await app.register(loggingPlugin);
 
-	registerBaseRoutes(app, openApi);
+	registerBaseRoutes(app, openApi, publicPath);
 
 	await app.register(adminUiRoutes, {
+		prefix: publicPath,
+		publicPath,
 		distDirectory: options.adminDistDirectory,
 	});
-	await app.register(adminSessionRoutes, { prefix: "/api/admin/session" });
-	await app.register(captchaWidgetRoutes, { prefix: "/api" });
+	await app.register(adminSessionRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/session"),
+	});
+	await app.register(captchaWidgetRoutes, {
+		prefix: joinPublicPath(publicPath, "/api"),
+	});
 
 	if (runtimeOptions.devMode.enabled) {
-		registerDatabaseDevRoutes(app, runtimeOptions);
+		registerDatabaseDevRoutes(app, runtimeOptions, {
+			prefix: joinPublicPath(publicPath, "/api"),
+		});
 	}
 
-	await app.register(adminOverviewRoutes, { prefix: "/api/admin/overview" });
-	await app.register(adminOpsRoutes, { prefix: "/api/admin/ops" });
-	await app.register(commentsPublicRoutes, { prefix: "/api" });
-	await app.register(pageFeedbackPublicRoutes, { prefix: "/api" });
-	await app.register(commentsAdminRoutes, { prefix: "/api/admin/comments" });
-	await app.register(adminPagesRoutes, { prefix: "/api/admin/pages" });
-	await app.register(adminUsersRoutes, { prefix: "/api/admin/users" });
-	await app.register(adminVisitorsRoutes, { prefix: "/api/admin/visitors" });
-	await app.register(adminBlacklistRoutes, { prefix: "/api/admin/blacklist" });
-	await app.register(adminSitesRoutes, { prefix: "/api/admin/sites" });
+	await app.register(adminOverviewRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/overview"),
+	});
+	await app.register(adminOpsRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/ops"),
+	});
+	await app.register(commentsPublicRoutes, {
+		prefix: joinPublicPath(publicPath, "/api"),
+	});
+	await app.register(pageFeedbackPublicRoutes, {
+		prefix: joinPublicPath(publicPath, "/api"),
+	});
+	await app.register(commentsAdminRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/comments"),
+	});
+	await app.register(adminPagesRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/pages"),
+	});
+	await app.register(adminUsersRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/users"),
+	});
+	await app.register(adminVisitorsRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/visitors"),
+	});
+	await app.register(adminBlacklistRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/blacklist"),
+	});
+	await app.register(adminSitesRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/sites"),
+	});
 	await app.register(adminSystemSettingsRoutes, {
-		prefix: "/api/admin/system-settings",
+		prefix: joinPublicPath(publicPath, "/api/admin/system-settings"),
 	});
 	await app.register(adminImportExportRoutes, {
-		prefix: "/api/admin/import-export",
+		prefix: joinPublicPath(publicPath, "/api/admin/import-export"),
 	});
 
 	return app;

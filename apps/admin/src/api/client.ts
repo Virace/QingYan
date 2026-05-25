@@ -10,6 +10,19 @@ export interface ApiErrorPayload {
 let adminCsrfHeader = "x-qingyan-csrf-token";
 let adminCsrfToken: string | null = null;
 
+declare global {
+	interface Window {
+		__QINGYAN_ADMIN__?: {
+			basePath?: string;
+			apiBase?: string;
+		};
+	}
+}
+
+type AdminRuntimeGlobal = typeof globalThis & {
+	__QINGYAN_ADMIN__?: Window["__QINGYAN_ADMIN__"];
+};
+
 export class ApiError extends Error {
 	public constructor(
 		message: string,
@@ -35,6 +48,15 @@ export function clearAdminCsrf(): void {
 	adminCsrfToken = null;
 }
 
+function resolveRequestPath(pathname: string): string {
+	if (!pathname.startsWith("/api/")) {
+		return pathname;
+	}
+	const apiBase =
+		(globalThis as AdminRuntimeGlobal).__QINGYAN_ADMIN__?.apiBase ?? "/api";
+	return `${apiBase.replace(/\/+$/u, "")}${pathname.slice("/api".length)}`;
+}
+
 export async function requestJson<T>(
 	pathname: string,
 	init: RequestInit = {},
@@ -52,7 +74,7 @@ export async function requestJson<T>(
 		headers.set(adminCsrfHeader, adminCsrfToken);
 	}
 
-	const response = await fetch(pathname, {
+	const response = await fetch(resolveRequestPath(pathname), {
 		credentials: "include",
 		...init,
 		headers,

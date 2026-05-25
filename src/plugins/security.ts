@@ -19,6 +19,7 @@ import type {
 import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
 import { AppError } from "../modules/shared/errors";
 import { adminSessions, auditLogs, blacklistRules } from "../db/schema";
+import { joinPublicPath, stripPublicPath } from "../config/public-path";
 
 const PUBLIC_WRITE_ROUTES = [
 	{ method: "POST", pattern: /^\/api\/comments$/ },
@@ -95,15 +96,13 @@ function resolvePathname(rawUrl: string): string {
 	}
 }
 
-function isPublicWriteRequest(method: string, rawUrl: string): boolean {
-	const pathname = resolvePathname(rawUrl);
+function isPublicWriteRequest(method: string, pathname: string): boolean {
 	return PUBLIC_WRITE_ROUTES.some(
 		(route) => route.method === method && route.pattern.test(pathname),
 	);
 }
 
-function isAdminWriteRequest(method: string, rawUrl: string): boolean {
-	const pathname = resolvePathname(rawUrl);
+function isAdminWriteRequest(method: string, pathname: string): boolean {
 	if (!pathname.startsWith("/api/admin/")) {
 		return false;
 	}
@@ -394,31 +393,39 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 	};
 
 	fastify.decorate("security", security);
-	fastify.options("/api/*", async (request, reply) => {
-		const origin = readOrigin(request.headers.origin);
-		if (!origin) {
+	fastify.options(
+		joinPublicPath(fastify.config.server.publicPath, "/api/*"),
+		async (request, reply) => {
+			const origin = readOrigin(request.headers.origin);
+			if (!origin) {
+				return reply.status(204).send();
+			}
+
+			const originAllowed = fastify.siteRegistry
+				.listRegisteredSites()
+				.some((site) => site.allowedOrigins.includes(origin));
+			if (originAllowed) {
+				const requestedHeaders =
+					request.headers["access-control-request-headers"];
+				setCorsHeaders(
+					reply,
+					origin,
+					typeof requestedHeaders === "string" ? requestedHeaders : undefined,
+				);
+			}
+
 			return reply.status(204).send();
-		}
-
-		const originAllowed = fastify.siteRegistry
-			.listRegisteredSites()
-			.some((site) => site.allowedOrigins.includes(origin));
-		if (originAllowed) {
-			const requestedHeaders =
-				request.headers["access-control-request-headers"];
-			setCorsHeaders(
-				reply,
-				origin,
-				typeof requestedHeaders === "string" ? requestedHeaders : undefined,
-			);
-		}
-
-		return reply.status(204).send();
-	});
+		},
+	);
 
 	fastify.addHook("preHandler", async (request, reply) => {
 		const url = request.raw.url ?? "";
-		if (!url.startsWith("/api")) {
+		const pathname = resolvePathname(url);
+		const internalPathname = stripPublicPath(
+			fastify.config.server.publicPath,
+			pathname,
+		);
+		if (!internalPathname?.startsWith("/api")) {
 			return;
 		}
 
@@ -436,7 +443,7 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 		if (
 			fastify.config.security.publicOriginGuard.enabled &&
-			isPublicWriteRequest(request.method, url)
+			isPublicWriteRequest(request.method, internalPathname)
 		) {
 			if (!origin) {
 				if (
@@ -464,7 +471,7 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 		if (
 			!fastify.config.security.adminOriginGuard.enabled ||
-			!isAdminWriteRequest(request.method, url)
+			!isAdminWriteRequest(request.method, internalPathname)
 		) {
 			return;
 		}

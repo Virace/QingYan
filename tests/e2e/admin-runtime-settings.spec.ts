@@ -11,13 +11,13 @@ const authStatePath = path.resolve(
 );
 
 async function isLoggedIn(page: Page): Promise<boolean> {
-	await page.goto("/admin/");
-	const response = await page.request.get("/api/admin/session/me");
+	await page.goto("/qingyan/admin/");
+	const response = await page.request.get("/qingyan/api/admin/session/me");
 	return response.ok();
 }
 
 async function login(page: Page): Promise<void> {
-	await page.goto("/admin/");
+	await page.goto("/qingyan/admin/");
 	await page.getByLabel("用户名").fill("admin");
 	await page.getByLabel("密码").fill("admin");
 	await page.locator("#admin-captcha").fill("2468");

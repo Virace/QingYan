@@ -180,7 +180,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -230,7 +230,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/export",
+			url: "/qingyan/api/admin/import-export/export",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -306,7 +306,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -341,7 +341,7 @@ describe("admin import/export QingYan routes", () => {
 		const jobId = dryRunResponse.json().job.id as string;
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/qingyan/jobs/${jobId}/apply`,
+			url: `/qingyan/api/admin/import-export/qingyan/jobs/${jobId}/apply`,
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -424,7 +424,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const conflictResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -462,7 +462,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const replaceResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -490,7 +490,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const applyResponse = await fixture.app.inject({
 			method: "POST",
-			url: `/api/admin/import-export/qingyan/jobs/${replaceResponse.json().job.id}/apply`,
+			url: `/qingyan/api/admin/import-export/qingyan/jobs/${replaceResponse.json().job.id}/apply`,
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -563,7 +563,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const conflictResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -592,7 +592,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const skipResponse = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,
@@ -627,7 +627,7 @@ describe("admin import/export QingYan routes", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/admin/import-export/qingyan/dry-run",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
 			...withAdminWriteAuth({
 				adminCookie,
 				csrfToken,

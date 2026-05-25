@@ -17,14 +17,14 @@ afterEach(async () => {
 	}
 });
 
-describe("POST /api/page-feedback/like", () => {
+describe("POST /qingyan/api/page-feedback/like", () => {
 	it("likes a page once and blocks repeated likes from the same visitor", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const firstLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:like",
@@ -47,7 +47,7 @@ describe("POST /api/page-feedback/like", () => {
 		);
 		const secondLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -76,7 +76,7 @@ describe("POST /api/page-feedback/like", () => {
 
 		const blockedLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:like-threshold",
@@ -92,7 +92,7 @@ describe("POST /api/page-feedback/like", () => {
 		});
 		const captchaState = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:like-threshold",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:like-threshold",
 		});
 		expect(captchaState.statusCode).toBe(200);
 		const visitorCookie = captchaState.cookies.find(
@@ -116,7 +116,7 @@ describe("POST /api/page-feedback/like", () => {
 
 		const like = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			cookies: {
 				qingyan_visitor: cookieValue,
 			},
@@ -151,7 +151,7 @@ describe("POST /api/page-feedback/like", () => {
 
 		const firstLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			payload: {
 				siteKey: "default",
 				pageKey: "post:dev-like",
@@ -174,7 +174,7 @@ describe("POST /api/page-feedback/like", () => {
 		);
 		const secondLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},

@@ -18,7 +18,7 @@ afterEach(async () => {
 	}
 });
 
-describe("POST /api/comments", () => {
+describe("POST /qingyan/api/comments", () => {
 	it("rejects a dangerous author website scheme", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -28,7 +28,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:dangerous-website",
@@ -66,7 +66,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:create-comment-no-captcha",
@@ -103,7 +103,7 @@ describe("POST /api/comments", () => {
 
 		const blocked = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:create-comment",
@@ -131,7 +131,7 @@ describe("POST /api/comments", () => {
 
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:create-comment",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:create-comment",
 		});
 		const visitorCookie = stateResponse.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -153,7 +153,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -215,7 +215,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:path-only-comment",
@@ -257,7 +257,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				"user-agent": "Mozilla/5.0 metadata-test",
 				"x-forwarded-for": "203.0.113.8",
@@ -312,7 +312,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				"user-agent": "Mozilla/5.0 disabled-metadata-test",
 				"x-forwarded-for": "203.0.113.9",
@@ -364,7 +364,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				"user-agent": "Mozilla/5.0 runtime-disabled-metadata-test",
 				"x-forwarded-for": "203.0.113.42",
@@ -424,7 +424,7 @@ describe("POST /api/comments", () => {
 
 		const response = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			headers: {
 				"user-agent": "Mozilla/5.0 metadata-test",
 				"x-forwarded-for": "203.0.113.10",
@@ -469,7 +469,7 @@ describe("POST /api/comments", () => {
 
 		const first = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:threshold-comment",
@@ -495,7 +495,7 @@ describe("POST /api/comments", () => {
 		);
 		const requestBase = {
 			method: "POST" as const,
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -565,7 +565,7 @@ describe("POST /api/comments", () => {
 			(
 				await fixture.app.inject({
 					method: "POST",
-					url: "/api/comments",
+					url: "/qingyan/api/comments",
 					payload: makePayload("1"),
 				})
 			).statusCode,
@@ -574,7 +574,7 @@ describe("POST /api/comments", () => {
 			(
 				await fixture.app.inject({
 					method: "POST",
-					url: "/api/comments",
+					url: "/qingyan/api/comments",
 					payload: makePayload("2"),
 				})
 			).statusCode,
@@ -583,7 +583,7 @@ describe("POST /api/comments", () => {
 			(
 				await fixture.app.inject({
 					method: "POST",
-					url: "/api/comments",
+					url: "/qingyan/api/comments",
 					payload: makePayload("3"),
 				})
 			).statusCode,
@@ -591,7 +591,7 @@ describe("POST /api/comments", () => {
 
 		const blocked = await fixture.app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			payload: makePayload("4"),
 		});
 

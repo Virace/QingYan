@@ -58,7 +58,7 @@ describe("dev memory mode", () => {
 
 		const session = await app.inject({
 			method: "POST",
-			url: "/api/dev/session",
+			url: "/qingyan/api/dev/session",
 			payload: {
 				token: "dev-token",
 			},
@@ -71,7 +71,7 @@ describe("dev memory mode", () => {
 
 		const me = await app.inject({
 			method: "GET",
-			url: "/api/admin/session/me",
+			url: "/qingyan/api/admin/session/me",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -84,7 +84,7 @@ describe("dev memory mode", () => {
 
 		const scenario = await app.inject({
 			method: "POST",
-			url: "/api/dev/scenario",
+			url: "/qingyan/api/dev/scenario",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -100,7 +100,7 @@ describe("dev memory mode", () => {
 
 		const bootstrap = await app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=default&pageKey=post:memory&pageTitle=Memory%20Mode&pageUrl=http://localhost:4321/posts/memory",
+			url: "/qingyan/api/comments/bootstrap?siteKey=default&pageKey=post:memory&pageTitle=Memory%20Mode&pageUrl=http://localhost:4321/posts/memory",
 		});
 		expect(bootstrap.statusCode).toBe(200);
 		expect(bootstrap.json()).toMatchObject({
@@ -118,7 +118,7 @@ describe("dev memory mode", () => {
 		);
 		const like = await app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -139,7 +139,7 @@ describe("dev memory mode", () => {
 
 		const state = await app.inject({
 			method: "GET",
-			url: "/api/dev/state?siteKey=default&pageKey=post:memory",
+			url: "/qingyan/api/dev/state?siteKey=default&pageKey=post:memory",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -172,7 +172,7 @@ describe("dev memory mode", () => {
 			const pageKey = "post:default-seeded";
 			const bootstrap = await app.inject({
 				method: "GET",
-				url: `/api/comments/bootstrap?siteKey=default&pageKey=${encodeURIComponent(pageKey)}&pageTitle=Default%20Seeded&pageUrl=http://localhost:4321/posts/default-seeded&limit=5`,
+				url: `/qingyan/api/comments/bootstrap?siteKey=default&pageKey=${encodeURIComponent(pageKey)}&pageTitle=Default%20Seeded&pageUrl=http://localhost:4321/posts/default-seeded&limit=5`,
 			});
 			expect(bootstrap.statusCode).toBe(200);
 			const bootstrapBody = bootstrap.json();
@@ -205,7 +205,7 @@ describe("dev memory mode", () => {
 
 			const secondPage = await app.inject({
 				method: "GET",
-				url: `/api/comments/thread?siteKey=default&pageKey=${encodeURIComponent(pageKey)}&limit=5&offset=5`,
+				url: `/qingyan/api/comments/thread?siteKey=default&pageKey=${encodeURIComponent(pageKey)}&limit=5&offset=5`,
 				cookies: {
 					qingyan_visitor: visitorCookie?.value ?? "",
 				},
@@ -227,7 +227,7 @@ describe("dev memory mode", () => {
 
 			const captchaBlockedVote = await app.inject({
 				method: "POST",
-				url: `/api/comments/${captchaCommentId}/vote`,
+				url: `/qingyan/api/comments/${captchaCommentId}/vote`,
 				cookies: {
 					qingyan_visitor: visitorCookie?.value ?? "",
 				},
@@ -246,7 +246,7 @@ describe("dev memory mode", () => {
 
 			const captchaState = await app.inject({
 				method: "GET",
-				url: `/api/comments/captcha/state?siteKey=default&pageKey=${encodeURIComponent(pageKey)}`,
+				url: `/qingyan/api/comments/captcha/state?siteKey=default&pageKey=${encodeURIComponent(pageKey)}`,
 				cookies: {
 					qingyan_visitor: visitorCookie?.value ?? "",
 				},
@@ -260,7 +260,7 @@ describe("dev memory mode", () => {
 			const challengeId = captchaState.json().challenge.challengeId as string;
 			const verify = await app.inject({
 				method: "POST",
-				url: "/api/comments/captcha/verify",
+				url: "/qingyan/api/comments/captcha/verify",
 				cookies: {
 					qingyan_visitor: visitorCookie?.value ?? "",
 				},
@@ -276,7 +276,7 @@ describe("dev memory mode", () => {
 
 			const votedAfterCaptcha = await app.inject({
 				method: "POST",
-				url: `/api/comments/${captchaCommentId}/vote`,
+				url: `/qingyan/api/comments/${captchaCommentId}/vote`,
 				cookies: {
 					qingyan_visitor: visitorCookie?.value ?? "",
 				},
@@ -294,7 +294,7 @@ describe("dev memory mode", () => {
 
 			const blacklistVote = await app.inject({
 				method: "POST",
-				url: `/api/comments/${blacklistCommentId}/vote`,
+				url: `/qingyan/api/comments/${blacklistCommentId}/vote`,
 				cookies: {
 					qingyan_visitor: visitorCookie?.value ?? "",
 				},

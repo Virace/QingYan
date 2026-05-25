@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { buildApp } from "./app";
+import { buildPublicUrl } from "./config/public-path";
 import { resolveRuntimeOptions } from "./config/runtime-options";
 import { buildInstallApp } from "./modules/install/install-app";
 import {
@@ -12,10 +13,6 @@ import {
 import { resolveInstallState } from "./modules/install/state";
 import { createUpgradeApp } from "./modules/upgrade/upgrade-app";
 import { resolveStartupMode } from "./startup-mode";
-
-function resolveAdminUrl(publicBaseUrl: string, consolePath: string): string {
-	return new URL(consolePath, publicBaseUrl).toString();
-}
 
 function readPackageVersion(): string {
 	const packagePath = path.resolve(process.cwd(), "package.json");
@@ -88,7 +85,13 @@ async function main(): Promise<void> {
 			listenConfig.host === "0.0.0.0" || listenConfig.host === "::"
 				? "localhost"
 				: listenConfig.host;
-		console.log(`upgrade.url=http://${host}:${listenConfig.port}/upgrade`);
+		console.log(
+			`upgrade.url=${buildPublicUrl(
+				`http://${host}:${listenConfig.port}`,
+				listenConfig.publicPath,
+				"/upgrade",
+			)}`,
+		);
 		console.log(`upgrade.state=${startupMode.state.state}`);
 		return;
 	}
@@ -113,7 +116,7 @@ async function main(): Promise<void> {
 	});
 
 	console.log(
-		`admin.console.url=${resolveAdminUrl(config.server.publicBaseUrl, app.adminBootstrap.consolePath)}`,
+		`admin.console.url=${buildPublicUrl(config.server.publicBaseUrl, config.server.publicPath, app.adminBootstrap.consolePath)}`,
 	);
 	console.log(`admin.username=${app.adminBootstrap.username}`);
 	if (app.adminBootstrap.generatedPassword) {

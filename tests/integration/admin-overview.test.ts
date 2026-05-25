@@ -26,7 +26,7 @@ describe("admin overview", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/overview",
+			url: "/qingyan/api/admin/overview",
 		});
 
 		expect(response.statusCode).toBe(401);
@@ -102,7 +102,7 @@ describe("admin overview", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/admin/overview",
+			url: "/qingyan/api/admin/overview",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
@@ -111,7 +111,7 @@ describe("admin overview", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			console: {
-				path: "/admin",
+				path: "/qingyan/admin",
 			},
 			runtime: {
 				devMode: false,

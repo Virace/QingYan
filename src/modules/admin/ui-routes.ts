@@ -4,8 +4,11 @@ import path from "node:path";
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
+import { joinPublicPath } from "../../config/public-path";
+
 interface AdminUiRouteOptions {
 	distDirectory?: string;
+	publicPath?: string;
 }
 
 interface AdminDistPaths {
@@ -30,7 +33,16 @@ export const adminUiRoutes: FastifyPluginAsync<AdminUiRouteOptions> = async (
 	}
 
 	for (const basePath of adminPaths) {
-		registerAdminUiPath(fastify, basePath, distPaths);
+		const externalBasePath =
+			options.publicPath && basePath.startsWith("/")
+				? joinPublicPath(options.publicPath, basePath)
+				: basePath;
+		registerAdminUiPath(fastify, basePath, distPaths, {
+			externalBasePath,
+			apiBase: options.publicPath
+				? joinPublicPath(options.publicPath, "/api")
+				: "/api",
+		});
 	}
 };
 
@@ -38,12 +50,17 @@ function registerAdminUiPath(
 	fastify: Parameters<FastifyPluginAsync>[0],
 	basePath: string,
 	distPaths: AdminDistPaths,
+	options: {
+		externalBasePath: string;
+		apiBase: string;
+	},
 ): void {
 	const renderShell = async () =>
 		existsSync(distPaths.indexHtml)
 			? injectAdminRuntime(
 					await readFile(distPaths.indexHtml, "utf-8"),
-					basePath,
+					options.externalBasePath,
+					options.apiBase,
 				)
 			: undefined;
 
@@ -82,7 +99,10 @@ function registerAdminUiPath(
 	});
 
 	fastify.get(basePath, async (request, reply) => {
-		const redirectUrl = resolveMissingSlashRedirect(basePath, request);
+		const redirectUrl = resolveMissingSlashRedirect(
+			options.externalBasePath,
+			request,
+		);
 		if (redirectUrl) {
 			return reply.redirect(redirectUrl);
 		}
@@ -128,8 +148,12 @@ function buildRedirectUrl(pathname: string, requestUrl: string): string {
 		: `${pathname}${requestUrl.slice(queryStart)}`;
 }
 
-function injectAdminRuntime(html: string, basePath: string): string {
-	const runtimeScript = `<script>window.__QINGYAN_ADMIN__=${JSON.stringify({ basePath })};</script>`;
+function injectAdminRuntime(
+	html: string,
+	basePath: string,
+	apiBase: string,
+): string {
+	const runtimeScript = `<script>window.__QINGYAN_ADMIN__=${JSON.stringify({ basePath, apiBase })};</script>`;
 	return html.replace("</head>", `${runtimeScript}</head>`);
 }
 

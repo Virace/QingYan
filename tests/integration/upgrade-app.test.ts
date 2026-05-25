@@ -116,14 +116,17 @@ describe("upgrade app", () => {
 	it("serves upgrade page and state without registering normal admin APIs", async () => {
 		const fixture = buildUpgradeFixture();
 		try {
-			const page = await fixture.app.inject({ method: "GET", url: "/upgrade" });
+			const page = await fixture.app.inject({
+				method: "GET",
+				url: "/qingyan/upgrade",
+			});
 			expect(page.statusCode).toBe(200);
 			expect(page.headers["set-cookie"]).toContain("qingyan_upgrade=");
 			expect(page.body).toContain("QingYan Upgrade");
 
 			const state = await fixture.app.inject({
 				method: "GET",
-				url: "/api/upgrade/state",
+				url: "/qingyan/api/upgrade/state",
 			});
 			expect(state.json()).toMatchObject({
 				state: "upgrade_required",
@@ -134,7 +137,7 @@ describe("upgrade app", () => {
 
 			const admin = await fixture.app.inject({
 				method: "GET",
-				url: "/api/admin/session/me",
+				url: "/qingyan/api/admin/session/me",
 			});
 			expect(admin.statusCode).toBe(404);
 		} finally {
@@ -147,7 +150,7 @@ describe("upgrade app", () => {
 		try {
 			const missingToken = await fixture.app.inject({
 				method: "POST",
-				url: "/api/upgrade/apply",
+				url: "/qingyan/api/upgrade/apply",
 				payload: { confirm: "UPGRADE QINGYAN" },
 			});
 			expect(missingToken.statusCode).toBe(403);
@@ -155,7 +158,7 @@ describe("upgrade app", () => {
 
 			const badConfirm = await fixture.app.inject({
 				method: "POST",
-				url: "/api/upgrade/apply",
+				url: "/qingyan/api/upgrade/apply",
 				headers: { cookie: "qingyan_upgrade=upgrade-token" },
 				payload: { confirm: "upgrade" },
 			});
@@ -171,7 +174,7 @@ describe("upgrade app", () => {
 		try {
 			const response = await fixture.app.inject({
 				method: "POST",
-				url: "/api/upgrade/apply",
+				url: "/qingyan/api/upgrade/apply",
 				headers: { cookie: "qingyan_upgrade=upgrade-token" },
 				payload: { confirm: "UPGRADE QINGYAN" },
 			});
@@ -191,7 +194,7 @@ describe("upgrade app", () => {
 		try {
 			const response = await fixture.app.inject({
 				method: "POST",
-				url: "/api/upgrade/apply",
+				url: "/qingyan/api/upgrade/apply",
 				headers: { cookie: "qingyan_upgrade=upgrade-token" },
 				payload: { confirm: "UPGRADE QINGYAN" },
 			});
@@ -217,13 +220,13 @@ describe("upgrade app", () => {
 		try {
 			const state = await app.inject({
 				method: "GET",
-				url: "/api/upgrade/state",
+				url: "/qingyan/api/upgrade/state",
 			});
 			expect(state.json()).toMatchObject({
 				state: "broken_config",
 				reason: "database.sqlite.file is required",
 			});
-			const page = await app.inject({ method: "GET", url: "/upgrade" });
+			const page = await app.inject({ method: "GET", url: "/qingyan/upgrade" });
 			expect(page.body).toContain("broken_config");
 		} finally {
 			await app.close();

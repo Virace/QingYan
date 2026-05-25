@@ -19,12 +19,12 @@ QingYan 把配置来源分成四类：
 如果 `QINGYAN_CONFIG_PATH` 指向的配置文件不存在，服务会进入 minimal install app。启动日志会输出一次性安装地址：
 
 ```text
-install.url=http://127.0.0.1:4401/admin/install
+install.url=http://127.0.0.1:4401/qingyan/admin/install
 ```
 
-浏览器访问 `/admin/` 或 `/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中；脚本化安装仍可显式提交 token。
+浏览器访问 `/qingyan/admin/` 或 `/qingyan/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中；脚本化安装仍可显式提交 token。
 
-安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/admin` 会跳转到安装页 `/admin/install`，正常 `/api/*` 接口不会注册；安装完成后重启服务进入正常模式，安装锁存在时不会启动 install app，正常后台中的 `${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由安装时写入的 `admin.consolePath` 决定，可用于隐藏管理入口。
+安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/qingyan/admin` 会跳转到安装页 `/qingyan/admin/install`，正常 `/qingyan/api/*` 接口不会注册；安装完成后重启服务进入正常模式，安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由 `server.publicPath + admin.consolePath` 组成，`admin.consolePath` 本身仍只表示 QingYan 内部后台路径，例如 `/admin` 或 `/hidden-admin`。
 
 startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应中不会返回明文。如果目标 startup config 已存在但无效，安装器会在替换前创建同目录 `.bak-YYYYMMDDHHmmss` 备份。
 
@@ -37,6 +37,7 @@ startup 环境变量会覆盖安装表单中对应字段，并在安装计划中
 | `QINGYAN_INSTALL_DISABLED=true` | 缺配置或坏配置时直接失败，不开放 install app |
 | `QINGYAN_SERVER_HOST` | install app 监听 host |
 | `QINGYAN_SERVER_PORT` | install app 监听 port |
+| `QINGYAN_PUBLIC_PATH` | QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径 |
 
 ## Startup Config
 
@@ -47,6 +48,7 @@ server:
   host: 0.0.0.0
   port: 4401
   publicBaseUrl: http://localhost:4401
+  publicPath: /qingyan
   trustProxy: false
 
 database:
@@ -92,7 +94,8 @@ security:
 
 - `host`: Fastify 监听地址。
 - `port`: Fastify 监听端口。
-- `publicBaseUrl`: 对外公开基础地址，应与实际网关或反代入口一致。
+- `publicBaseUrl`: 对外公开 origin，应与实际网关或反代入口一致，不包含 QingYan 挂载路径。
+- `publicPath`: QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径。`qingyan`、`/qingyan` 和 `/qingyan/` 会规范化为 `/qingyan`。公开 API、Admin、Install、Upgrade、OpenAPI、health check 和 QingYan cookie path 都会使用该前缀。
 - `trustProxy`: 部署在 CDN、Nginx、Caddy、Traefik 或 Docker 反向代理后时设为 `true`，否则真实 IP 解析可能拿到代理或网桥地址。
 
 ### `database`
@@ -126,6 +129,7 @@ security:
 | `server.host` | `QINGYAN_SERVER_HOST` | 启动监听地址 |
 | `server.port` | `QINGYAN_SERVER_PORT` | 启动监听端口 |
 | `server.publicBaseUrl` | `QINGYAN_PUBLIC_BASE_URL` | 对外公开基础地址 |
+| `server.publicPath` | `QINGYAN_PUBLIC_PATH` | 对外挂载路径，默认 `/qingyan` |
 | `server.trustProxy` | `QINGYAN_TRUST_PROXY` | 是否信任反向代理 |
 | `database.sqlite.file` | `QINGYAN_SQLITE_FILE` | SQLite 文件路径 |
 | `admin.session.cookieName` | `QINGYAN_ADMIN_SESSION_COOKIE_NAME` | 后台会话 cookie 名 |
@@ -145,7 +149,7 @@ security:
 - `name`
 - `allowedOrigins`
 
-每个站点的行为由 `site_settings` 持久化，并通过 QingYan 自带 Admin Console 维护。对应的 `/api/admin/*` 路径不纳入公开 OpenAPI；开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`。
+每个站点的行为由 `site_settings` 持久化，并通过 QingYan 自带 Admin Console 维护。对应的 `${server.publicPath}/api/admin/*` 路径不纳入公开 OpenAPI；开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`。
 
 站点设置包含：
 
@@ -199,7 +203,7 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 
 Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
 
-`/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
+`${server.publicPath}/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
 
 日志目录仍属于部署环境，不在后台修改。后台 cookie 名称、SameSite 和 Secure 仍属于启动配置；新登录会话 TTL、logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
 
@@ -273,13 +277,13 @@ Admin 数据管理中的 WordPress WXR 导入和 QingYan JSON 导入在真实 ap
 
 当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`。
 
-启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `/upgrade` 地址；浏览器访问该页面后，会通过 HttpOnly `qingyan_upgrade` cookie 完成一次性升级令牌校验。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `/admin/install` 语义。
+启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，会通过 HttpOnly `qingyan_upgrade` cookie 完成一次性升级令牌校验。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
 Web Upgrade Mode 暴露最小接口：
 
-- `GET /upgrade`: 最小升级页面。
-- `GET /api/upgrade/state`: 返回公开脱敏的 UpgradePlan，或 recovery / broken config 状态。
-- `POST /api/upgrade/apply`: 需要升级 token 和精确确认文本 `UPGRADE QINGYAN`。
+- `GET /qingyan/upgrade`: 最小升级页面。
+- `GET /qingyan/api/upgrade/state`: 返回公开脱敏的 UpgradePlan，或 recovery / broken config 状态。
+- `POST /qingyan/api/upgrade/apply`: 需要升级 token 和精确确认文本 `UPGRADE QINGYAN`。
 
 confirmed upgrade 的写入顺序固定为：重新检测状态、创建 partial marker、创建 SQLite 数据库备份和 startup config / UpgradePlan 备份、执行 schema migrations、执行 application upgrades、写入 `__qingyan_upgrades` ledger、成功后清理 partial marker。若备份失败，不写 upgrade ledger；若任一步失败，partial marker 会保留，下次启动进入 `recovery_required`，不会继续启动 normal app。
 
@@ -350,10 +354,10 @@ QINGYAN_DATABASE_MODE=none
 - dev seed 不从 startup config 的 `sites[]` 派生。
 - DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite。
 - dev mode 会临时注入开发管理员账号，默认 `admin / admin`；安装时随机生成或用户设置的管理员用户名、密码不会用于本地 dev 登录。
-- dev mode 保留已安装的后台入口，同时额外开放 `/admin/` 作为本地开发别名；非 dev 启动不会开放这个别名。
+- dev mode 保留已安装的后台入口，同时额外开放 `${server.publicPath}/admin/` 作为本地开发别名；非 dev 启动不会开放这个别名。
 - `QINGYAN_DATABASE_MODE=none` 时不连接 SQLite，mock 状态只保存在当前进程内存中。
 - 前端仍然必须显式传 `siteKey: "default"`。
-- 生产环境不会暴露 `/api/dev/*`。
+- 生产环境不会暴露 `${server.publicPath}/api/dev/*`。
 
 详细调用方式见 [docs/dev-mode-integration.md](dev-mode-integration.md)。
 

@@ -4,6 +4,7 @@ import type {
 	AppRuntimeOptions,
 	DevSiteSeed,
 } from "../../config/runtime-options";
+import { qingyanCookiePath } from "../../config/public-path";
 import { createSessionToken } from "../admin/session-utils";
 import { buildCommentForm } from "../comments/comment-form";
 import { AppError, InvalidRequestError } from "../shared/errors";
@@ -75,7 +76,7 @@ export function setVisitorCookie<T>(
 ) {
 	if (result.visitorKey) {
 		reply.setCookie("qingyan_visitor", result.visitorKey, {
-			path: "/",
+			path: qingyanCookiePath(reply.server.config.server.publicPath),
 			sameSite: "lax",
 			httpOnly: true,
 		});
