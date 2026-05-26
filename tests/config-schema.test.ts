@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { envMappings } from "../src/config/env-mapping";
 import { loadConfig } from "../src/config/load-config";
 import { configSchema } from "../src/config/types";
+import { createSystemSettingsDefaults } from "../src/modules/system-settings/definitions";
 
 function createStartupConfig() {
 	return {
@@ -77,6 +78,20 @@ describe("configSchema", () => {
 		expect("captcha" in parsed).toBe(false);
 		expect("logging" in parsed).toBe(false);
 		expect("mail" in parsed).toBe(false);
+	});
+
+	it("fills runtime defaults for optional startup security fields", () => {
+		const parsed = configSchema.parse(createStartupConfig());
+		const defaults = createSystemSettingsDefaults({
+			adminSession: { ttlMinutes: parsed.admin.session.ttlMinutes },
+			security: parsed.security,
+		});
+
+		expect(defaults.security.rateLimit.adminLogin).toEqual({
+			windowSec: 600,
+			maxFailures: 5,
+			autoBlacklistSec: 1800,
+		});
 	});
 
 	it("rejects old DB-owned top-level configuration fields", () => {

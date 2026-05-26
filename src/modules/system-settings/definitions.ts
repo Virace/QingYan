@@ -319,18 +319,32 @@ export function createSystemSettingsDefaults(input?: {
 		defaults.admin.session = structuredClone(input.adminSession);
 	}
 	if (input?.security) {
+		const startupRateLimit = input.security.rateLimit;
 		defaults.security = securitySettingsSchema.parse({
 			globalFloodGuard: input.security.globalFloodGuard,
 			publicOriginGuard: input.security.publicOriginGuard,
 			adminOriginGuard: input.security.adminOriginGuard,
 			rateLimit: {
-				adminLogin: input.security.rateLimit.adminLogin,
-				commentCreate: input.security.rateLimit.commentCreate,
-				commentVote: input.security.rateLimit.commentVote,
-				captchaVerify: input.security.rateLimit.captchaVerify,
-				pageLike:
-					input.security.rateLimit.pageLike ??
-					defaultSystemSettings.security.rateLimit.pageLike,
+				adminLogin: {
+					...defaultSystemSettings.security.rateLimit.adminLogin,
+					...startupRateLimit.adminLogin,
+				},
+				commentCreate: {
+					...defaultSystemSettings.security.rateLimit.commentCreate,
+					...startupRateLimit.commentCreate,
+				},
+				commentVote: {
+					...defaultSystemSettings.security.rateLimit.commentVote,
+					...startupRateLimit.commentVote,
+				},
+				captchaVerify: {
+					...defaultSystemSettings.security.rateLimit.captchaVerify,
+					...startupRateLimit.captchaVerify,
+				},
+				pageLike: {
+					...defaultSystemSettings.security.rateLimit.pageLike,
+					...(startupRateLimit.pageLike ?? {}),
+				},
 			},
 		});
 	}

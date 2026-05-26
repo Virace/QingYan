@@ -28,6 +28,7 @@ RUN pnpm prune --prod
 FROM base AS runtime
 
 ENV NODE_ENV=production
+ENV TZ=Asia/Shanghai
 
 COPY package.json pnpm-lock.yaml ./
 COPY --from=prod-deps /app/node_modules ./node_modules
