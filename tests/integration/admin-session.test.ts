@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { blacklistRules } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { loginAsAdmin } from "../support/admin-login";
 import {
 	decodeSvgDataUrl,
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
 } from "../support/captcha";
-import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -385,6 +385,38 @@ describe("admin session", () => {
 				code: "ADMIN_CSRF_REQUIRED",
 			},
 		});
+	});
+
+	it("accepts the previous csrf token after session refresh rotates csrf", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const meResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/session/me",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(meResponse.statusCode).toBe(200);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/sites/fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			headers: {
+				origin: "http://localhost:4401",
+				"x-qingyan-csrf-token": csrfToken,
+			},
+			payload: {
+				name: "FangYuan",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
 	});
 
 	it("uses the fixed dev password for admin login in dev mode", async () => {

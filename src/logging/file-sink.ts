@@ -3,9 +3,60 @@ import path from "node:path";
 
 import type { LogChannel } from "./types";
 
+const DEFAULT_LOG_DATE_TIME_ZONE = "Asia/Shanghai";
+
 function parseDateKey(dateKey: string): number | null {
-	const timestamp = Date.parse(`${dateKey}T00:00:00.000Z`);
+	const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+	if (!matched) {
+		return null;
+	}
+	const [, year, month, day] = matched;
+	const timestamp = new Date(
+		Number(year),
+		Number(month) - 1,
+		Number(day),
+	).getTime();
 	return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function resolveLogDateTimeZone(): string {
+	return (
+		process.env.QINGYAN_LOG_DATE_TIME_ZONE ??
+		process.env.TZ ??
+		DEFAULT_LOG_DATE_TIME_ZONE
+	);
+}
+
+function formatLocalDateKey(date: Date): string {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
+}
+
+export function formatLogDateKey(isoTimestamp: string): string {
+	const date = new Date(isoTimestamp);
+	if (Number.isNaN(date.getTime())) {
+		return isoTimestamp.slice(0, 10);
+	}
+	const fallbackDateKey = formatLocalDateKey(date);
+	try {
+		const parts = new Intl.DateTimeFormat("en-US", {
+			timeZone: resolveLogDateTimeZone(),
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+		}).formatToParts(date);
+		const year = parts.find((part) => part.type === "year")?.value;
+		const month = parts.find((part) => part.type === "month")?.value;
+		const day = parts.find((part) => part.type === "day")?.value;
+		if (year && month && day) {
+			return `${year}-${month}-${day}`;
+		}
+	} catch {
+		return fallbackDateKey;
+	}
+	return fallbackDateKey;
 }
 
 export class LogFileSink {
@@ -21,7 +72,7 @@ export class LogFileSink {
 		jsonlLine: string;
 		retentionDays: number;
 	}) {
-		const dateKey = input.ts.slice(0, 10);
+		const dateKey = formatLogDateKey(input.ts);
 		const channelDirectory = path.join(this.rootDirectory, input.channel);
 		await mkdir(channelDirectory, { recursive: true });
 

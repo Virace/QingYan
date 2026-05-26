@@ -1,7 +1,7 @@
-import Database from "better-sqlite3";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { applyInitialMigration } from "../support/test-fixtures";
@@ -145,6 +145,9 @@ describe("initial migration", () => {
 			const blacklistRuleColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(blacklist_rules)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const adminSessionColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(admin_sessions)")
+				.all() as Array<{ name: string; type: string }>;
 			const adminBootstrapColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(admin_bootstrap_state)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -218,6 +221,14 @@ describe("initial migration", () => {
 			);
 			expect(blacklistRuleColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining(["scope", "match_mode"]),
+			);
+			expect(adminSessionColumns).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "previous_csrf_token_hash",
+						type: "TEXT",
+					}),
+				]),
 			);
 			expect(adminBootstrapColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
@@ -314,11 +325,14 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("uses a single unreleased baseline migration", () => {
+	it("keeps schema migrations ordered for fresh and existing databases", () => {
 		const migrationFiles = readdirSync(path.resolve(process.cwd(), "drizzle"))
 			.filter((fileName) => fileName.endsWith(".sql"))
 			.sort();
 
-		expect(migrationFiles).toEqual(["0000_initial.sql"]);
+		expect(migrationFiles).toEqual([
+			"0000_initial.sql",
+			"0001_admin_sessions_previous_csrf.sql",
+		]);
 	});
 });

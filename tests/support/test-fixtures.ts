@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,6 +8,7 @@ import { buildApp } from "../../src/app";
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
 import { createDatabaseClients } from "../../src/db/client";
+import { applyDatabaseMigrations } from "../../src/db/migrations";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import {
 	createSiteRegistry,
@@ -31,16 +32,7 @@ function createTempWorkspace() {
 
 export function applyInitialMigration(databaseFile: string): void {
 	const sqlite = new Database(databaseFile);
-	const migrationDirectory = path.resolve(process.cwd(), "drizzle");
-	const migrationFiles = readdirSync(migrationDirectory)
-		.filter((fileName) => fileName.endsWith(".sql"))
-		.sort();
-
-	for (const fileName of migrationFiles) {
-		const sql = readFileSync(path.join(migrationDirectory, fileName), "utf-8");
-		sqlite.exec(sql);
-	}
-
+	applyDatabaseMigrations(sqlite);
 	sqlite.close();
 }
 

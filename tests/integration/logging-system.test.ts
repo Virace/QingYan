@@ -3,9 +3,14 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { formatLogDateKey } from "../../src/logging/file-sink";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
+
+function currentLocalDateKey(): string {
+	return formatLogDateKey(new Date().toISOString());
+}
 
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
@@ -14,10 +19,14 @@ afterEach(async () => {
 });
 
 describe("logging system", () => {
+	it("uses the configured log date timezone for daily file names", () => {
+		expect(formatLogDateKey("2026-05-26T17:00:00.000Z")).toBe("2026-05-27");
+	});
+
 	it("creates access and app text/jsonl files under the configured logs directory", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		const today = new Date().toISOString().slice(0, 10);
+		const today = currentLocalDateKey();
 
 		await fixture.app.loggerManager.logApp({
 			level: "info",
@@ -49,7 +58,7 @@ describe("logging system", () => {
 	it("writes request facts into the access jsonl channel", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		const today = new Date().toISOString().slice(0, 10);
+		const today = currentLocalDateKey();
 
 		const healthz = await fixture.app.inject({
 			method: "GET",

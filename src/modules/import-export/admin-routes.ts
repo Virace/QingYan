@@ -333,12 +333,74 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 				throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 			}
 
-			const result = wordpressService.analyze(data);
+			await fastify.loggerManager.logApp({
+				level: "info",
+				channel: "app",
+				event: "import.wordpress.analyze.started",
+				requestId: request.context?.requestId,
+				siteKey: data.siteKey,
+				actorType: "admin",
+				targetType: "import",
+				targetId: data.fileName,
+				message: "WordPress WXR 分析已开始",
+				data: {
+					source: "xml_body",
+					fileName: data.fileName,
+					contentType: request.headers["content-type"],
+					xmlBytes: Buffer.byteLength(data.xml),
+					sourceBasePath: data.sourceBasePath,
+					pageKeyStrategy: data.pageKeyStrategy,
+					hasMapping: Boolean(data.mapping),
+				},
+			});
+			let result: ReturnType<WordPressAdminImportService["analyze"]>;
+			try {
+				result = wordpressService.analyze(data);
+			} catch (error) {
+				await fastify.loggerManager.logApp({
+					level: "warn",
+					channel: "app",
+					event: "import.wordpress.analyze.failed",
+					requestId: request.context?.requestId,
+					siteKey: data.siteKey,
+					actorType: "admin",
+					targetType: "import",
+					targetId: data.fileName,
+					message: "WordPress WXR 分析失败",
+					data: {
+						source: "xml_body",
+						fileName: data.fileName,
+						errorName: error instanceof Error ? error.name : typeof error,
+						errorMessage:
+							error instanceof Error ? error.message : String(error),
+					},
+				});
+				throw error;
+			}
 			await jobService.createWordPressAnalyzeJob({
 				siteId: site.id,
 				xml: data.xml,
 				result,
 				options: parsed.data,
+			});
+			await fastify.loggerManager.logApp({
+				level: "info",
+				channel: "app",
+				event: "import.wordpress.analyze.succeeded",
+				requestId: request.context?.requestId,
+				siteKey: data.siteKey,
+				actorType: "admin",
+				targetType: "import",
+				targetId: result.job.id,
+				message: "WordPress WXR 分析已完成",
+				data: {
+					source: "xml_body",
+					fileName: data.fileName,
+					jobId: result.job.id,
+					totalItems: result.report.summary.totalItems,
+					totalComments: result.report.summary.totalComments,
+					warningCount: result.report.summary.warningCount,
+				},
 			});
 			return result;
 		}
@@ -354,7 +416,48 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
-		const result = wordpressService.analyze(parsed.data);
+		await fastify.loggerManager.logApp({
+			level: "info",
+			channel: "app",
+			event: "import.wordpress.analyze.started",
+			requestId: request.context?.requestId,
+			siteKey: parsed.data.siteKey,
+			actorType: "admin",
+			targetType: "import",
+			targetId: parsed.data.fileName,
+			message: "WordPress WXR 分析已开始",
+			data: {
+				source: "json_body",
+				fileName: parsed.data.fileName,
+				xmlBytes: Buffer.byteLength(parsed.data.xml),
+				sourceBasePath: parsed.data.sourceBasePath,
+				pageKeyStrategy: parsed.data.pageKeyStrategy,
+				hasMapping: Boolean(parsed.data.mapping),
+			},
+		});
+		let result: ReturnType<WordPressAdminImportService["analyze"]>;
+		try {
+			result = wordpressService.analyze(parsed.data);
+		} catch (error) {
+			await fastify.loggerManager.logApp({
+				level: "warn",
+				channel: "app",
+				event: "import.wordpress.analyze.failed",
+				requestId: request.context?.requestId,
+				siteKey: parsed.data.siteKey,
+				actorType: "admin",
+				targetType: "import",
+				targetId: parsed.data.fileName,
+				message: "WordPress WXR 分析失败",
+				data: {
+					source: "json_body",
+					fileName: parsed.data.fileName,
+					errorName: error instanceof Error ? error.name : typeof error,
+					errorMessage: error instanceof Error ? error.message : String(error),
+				},
+			});
+			throw error;
+		}
 		await jobService.createWordPressAnalyzeJob({
 			siteId: site.id,
 			xml: parsed.data.xml,
@@ -362,6 +465,25 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 			options: {
 				...parsed.data,
 				xml: undefined,
+			},
+		});
+		await fastify.loggerManager.logApp({
+			level: "info",
+			channel: "app",
+			event: "import.wordpress.analyze.succeeded",
+			requestId: request.context?.requestId,
+			siteKey: parsed.data.siteKey,
+			actorType: "admin",
+			targetType: "import",
+			targetId: result.job.id,
+			message: "WordPress WXR 分析已完成",
+			data: {
+				source: "json_body",
+				fileName: parsed.data.fileName,
+				jobId: result.job.id,
+				totalItems: result.report.summary.totalItems,
+				totalComments: result.report.summary.totalComments,
+				warningCount: result.report.summary.warningCount,
 			},
 		});
 		return result;

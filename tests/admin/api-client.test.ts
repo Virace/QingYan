@@ -17,41 +17,39 @@ describe("admin API client", () => {
 			header: "x-qingyan-csrf-token",
 			token: "stale-token",
 		});
-		const fetchMock = vi.fn(
-			async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url = String(input);
-				if (url === "/api/admin/import-export/wordpress/analyze") {
-					const token = new Headers(init?.headers).get("x-qingyan-csrf-token");
-					if (token === "stale-token") {
-						return new Response(
-							JSON.stringify({
-								error: {
-									code: "ADMIN_CSRF_INVALID",
-									message: "后台写请求 CSRF token 无效。",
-								},
-							}),
-							{
-								status: 403,
-								headers: { "content-type": "application/json" },
+		const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === "/api/admin/import-export/wordpress/analyze") {
+				const token = new Headers(init?.headers).get("x-qingyan-csrf-token");
+				if (token === "stale-token") {
+					return new Response(
+						JSON.stringify({
+							error: {
+								code: "ADMIN_CSRF_INVALID",
+								message: "后台写请求 CSRF token 无效。",
 							},
-						);
-					}
-					return Response.json({ ok: true });
-				}
-				if (url === "/api/admin/session/me") {
-					return Response.json({
-						authenticated: true,
-						session: { expiresAt: "2026-05-27T00:00:00.000Z" },
-						csrf: {
-							header: "x-qingyan-csrf-token",
-							token: "fresh-token",
+						}),
+						{
+							status: 403,
+							headers: { "content-type": "application/json" },
 						},
-						sites: [],
-					});
+					);
 				}
-				return new Response("not found", { status: 404 });
-			},
-		);
+				return Response.json({ ok: true });
+			}
+			if (url === "/api/admin/session/me") {
+				return Response.json({
+					authenticated: true,
+					session: { expiresAt: "2026-05-27T00:00:00.000Z" },
+					csrf: {
+						header: "x-qingyan-csrf-token",
+						token: "fresh-token",
+					},
+					sites: [],
+				});
+			}
+			return new Response("not found", { status: 404 });
+		});
 		vi.stubGlobal("fetch", fetchMock);
 
 		const result = await requestJson<{ ok: true }>(
