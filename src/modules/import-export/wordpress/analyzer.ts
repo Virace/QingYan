@@ -161,6 +161,9 @@ function classifyItem(input: {
 	) {
 		return "needs_user_mapping";
 	}
+	if (input.pageKey.source === "explicit_mapping") {
+		return "ready";
+	}
 	switch (input.evidence.status) {
 		case "verified":
 			return input.evidence.confidence >= 80 ? "ready" : "unverified";

@@ -148,6 +148,67 @@ describe("analyzeWordPressComments", () => {
 		expect(report.summary.conflict).toBe(2);
 	});
 
+	it("treats explicitly confirmed mappings as ready even when static index evidence is missing", () => {
+		const report = analyzeWordPressComments({
+			xml: wxrWithItems(
+				`${wxrItem({
+					id: "437",
+					title: "友情链接",
+					link: "https://x-item.com/links",
+				})}${wxrItem({
+					id: "1495",
+					title: "留言板",
+					link: "https://x-item.com/guestbook",
+					commentId: "2",
+				})}`,
+			),
+			fileName: "fixture.xml",
+			siteKey: "fangyuan",
+			sourceBasePath: "/",
+			targetDistRoot: `
+				<rss version="2.0">
+					<channel>
+						<item>
+							<title>Other</title>
+							<link>https://x-item.com/other/</link>
+						</item>
+					</channel>
+				</rss>
+			`,
+			mapping: {
+				items: [
+					{
+						wpPostId: "437",
+						decision: "map",
+						target: { pageKey: "links", pageUrl: "/links/" },
+					},
+					{
+						wpPostId: "1495",
+						decision: "map",
+						target: { pageKey: "guestbook", pageUrl: "/guestbook/" },
+					},
+				],
+			},
+		});
+
+		expect(report.items.map((item) => item.state)).toEqual(["ready", "ready"]);
+		expect(report.items.map((item) => item.target)).toEqual([
+			expect.objectContaining({
+				pageKey: "links",
+				pageUrl: "/links/",
+				confidence: 100,
+				source: "explicit_mapping",
+			}),
+			expect.objectContaining({
+				pageKey: "guestbook",
+				pageUrl: "/guestbook/",
+				confidence: 100,
+				source: "explicit_mapping",
+			}),
+		]);
+		expect(report.summary.ready).toBe(2);
+	});
+
 	it("matches existing site pages by stored page URL and title", () => {
 		const report = analyzeWordPressComments({
 			xml: wxrWithItems(
