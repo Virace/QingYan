@@ -33,7 +33,16 @@ import type {
 import { QingYanImportService } from "../import-export/qingyan/import-service";
 import { InvalidRequestError } from "../shared/errors";
 import { createSiteRegistry } from "../shared/site-registry";
-import { flattenSystemSettings } from "../system-settings/codec";
+import {
+	flattenSystemSettings,
+	readSystemSettingsRows,
+	type SystemSettingRow,
+} from "../system-settings/codec";
+import {
+	IpRegionUpdater,
+	type IpRegionUpdateResult,
+	type IpVersion,
+} from "../comments/metadata/ip-region-updater";
 import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import { normalizeOriginList } from "../shared/url-policy";
 import {
@@ -151,6 +160,17 @@ type InstallSystemSettingSeed = {
 	envName?: string;
 	secret?: boolean;
 };
+
+export type InstallIpRegionBootstrapResult = IpRegionUpdateResult & {
+	ipVersion: IpVersion;
+};
+
+export interface InstallIpRegionUpdater {
+	update(input: {
+		ipVersion: IpVersion;
+		config: SystemSettings["ipRegion"];
+	}): Promise<IpRegionUpdateResult>;
+}
 
 type ResolvedInstallInput = NormalizedInstallInput & {
 	startupConfig: StartupConfig;
@@ -703,7 +723,11 @@ async function seedDatabase(input: {
 	site: InstallApplyInput["site"];
 	systemSettings: InstallSystemSettingSeed[];
 	restore?: InstallRestoreOptions;
-}): Promise<QingYanApplyResult | undefined> {
+	ipRegionUpdater?: InstallIpRegionUpdater;
+}): Promise<{
+	restoreApply?: QingYanApplyResult;
+	ipRegionBootstrap: InstallIpRegionBootstrapResult[];
+}> {
 	const { db, sqlite } = createDatabaseClients(input.databaseFile);
 	try {
 		applyDatabaseMigrations(sqlite);
@@ -720,13 +744,44 @@ async function seedDatabase(input: {
 		for (const seed of input.systemSettings) {
 			await systemSettings.upsert(seed.category, seed.key, seed.value);
 		}
-		if (!input.restore) {
-			return undefined;
-		}
-		return applyRestoreImport(sqlite, input.restore);
+		const restoreApply = input.restore
+			? applyRestoreImport(sqlite, input.restore)
+			: undefined;
+		const ipRegionBootstrap = await bootstrapIpRegionDatabase({
+			db,
+			settings: (await new AdminSystemSettingsRepository(
+				db,
+			).listAll()) as SystemSettingRow[],
+			updater: input.ipRegionUpdater,
+		});
+		return {
+			restoreApply,
+			ipRegionBootstrap,
+		};
 	} finally {
 		sqlite.close();
 	}
+}
+
+async function bootstrapIpRegionDatabase(input: {
+	db: ReturnType<typeof createDatabaseClients>["db"];
+	settings: SystemSettingRow[];
+	updater?: InstallIpRegionUpdater;
+}): Promise<InstallIpRegionBootstrapResult[]> {
+	const ipRegion = readSystemSettingsRows(input.settings).ipRegion;
+	if (!ipRegion.enabled) {
+		return [];
+	}
+	const updater = input.updater ?? new IpRegionUpdater(input.db);
+	const results: InstallIpRegionBootstrapResult[] = [];
+	for (const ipVersion of ["v4", "v6"] as const) {
+		const result = await updater.update({ ipVersion, config: ipRegion });
+		results.push({
+			ipVersion,
+			...result,
+		});
+	}
+	return results;
 }
 
 async function buildRestoreDryRun(
@@ -867,6 +922,7 @@ export async function applyInstall(input: {
 	minimalConfig: MinimalInstallConfig;
 	payload: InstallApplyInput;
 	environment?: NodeJS.ProcessEnv;
+	ipRegionUpdater?: InstallIpRegionUpdater;
 }) {
 	if (input.payload.token !== input.minimalConfig.token) {
 		throw new Error("INSTALL_TOKEN_INVALID");
@@ -886,12 +942,13 @@ export async function applyInstall(input: {
 		startupConfig.database.sqlite.file,
 	);
 	await mkdir(path.dirname(databaseFile), { recursive: true });
-	const restoreApply = await seedDatabase({
+	const seedResult = await seedDatabase({
 		databaseFile,
 		admin: resolved.admin,
 		site: resolved.site,
 		systemSettings: resolved.systemSettingSeeds,
 		restore: resolved.restore,
+		ipRegionUpdater: input.ipRegionUpdater,
 	});
 	const lockPath = await writeInstallLock({
 		configPath: input.minimalConfig.configPath,
@@ -926,9 +983,10 @@ export async function applyInstall(input: {
 					siteKey: resolved.restore.site.siteKey,
 					importMode: resolved.restore.importMode,
 					settingsStrategy: resolved.restore.settingsStrategy,
-					apply: restoreApply,
+					apply: seedResult.restoreApply,
 				}
 			: undefined,
+		ipRegionBootstrap: seedResult.ipRegionBootstrap,
 		restartRequired: true,
 	};
 }

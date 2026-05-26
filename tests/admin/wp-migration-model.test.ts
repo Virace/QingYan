@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { MigrationReportItem } from "../../apps/admin/src/api/import-export";
 import {
 	acceptByConfidence,
+	acceptImportableItems,
 	acceptCandidate,
 	formatMappingOverlay,
 	hasBlockingUnresolvedItems,
+	lowConfidenceImportableItems,
 	mapToPage,
 	skipItem,
 } from "../../apps/admin/src/components/admin/wp-migration-model";
@@ -119,6 +121,27 @@ describe("wp migration model", () => {
 		);
 
 		expect(items.map((item) => item.wpPostId)).toEqual(["1", "2"]);
+	});
+
+	it("accepts all importable rows and reports low-confidence risk", () => {
+		const reportItems = [
+			reportItem({ wpPostId: "1", confidence: 100, pageKey: "one.html" }),
+			reportItem({ wpPostId: "2", confidence: 70, pageKey: "two.html" }),
+			reportItem({
+				wpPostId: "3",
+				state: "conflict",
+				confidence: 100,
+				pageKey: "same.html",
+			}),
+			reportItem({ wpPostId: "4", state: "skipped", confidence: 100 }),
+		];
+
+		expect(
+			acceptImportableItems([], reportItems).map((item) => item.wpPostId),
+		).toEqual(["1", "2"]);
+		expect(lowConfidenceImportableItems(reportItems, 90)).toEqual([
+			reportItems[1],
+		]);
 	});
 
 	it("detects blocking unresolved rows", () => {

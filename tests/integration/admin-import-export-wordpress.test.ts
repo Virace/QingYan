@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { pageThreads, sites } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+	globalThis.fetch = originalFetch;
+});
 
 function wxrFixture() {
 	return `<?xml version="1.0" encoding="UTF-8" ?>
@@ -166,6 +172,66 @@ describe("admin import/export WordPress routes", () => {
 				pageUrl: "https://x-item.com/termux.html",
 				confidence: 95,
 				source: "metadata",
+			},
+		});
+	});
+
+	it("uses a sitemap URL as a static site source when analyzing WordPress comments", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		globalThis.fetch = vi.fn(async () =>
+			Response.json(
+				{},
+				{
+					status: 200,
+					headers: { "content-type": "application/xml" },
+				},
+			),
+		) as typeof fetch;
+		vi.mocked(globalThis.fetch)
+			.mockResolvedValueOnce(
+				new Response(
+					`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+						<sitemap><loc>https://x-item.com/post-sitemap.xml</loc></sitemap>
+					</sitemapindex>`,
+					{ status: 200, headers: { "content-type": "application/xml" } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+						<url><loc>https://x-item.com/termux.html</loc></url>
+					</urlset>`,
+					{ status: 200, headers: { "content-type": "application/xml" } },
+				),
+			);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "wordpress.xml",
+				xml: wxrFixture(),
+				sourceBasePath: "/",
+				targetDistRoot: "https://x-item.com/sitemap-index.xml",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledWith(
+			"https://x-item.com/sitemap-index.xml",
+		);
+		expect(globalThis.fetch).toHaveBeenCalledWith(
+			"https://x-item.com/post-sitemap.xml",
+		);
+		expect(response.json().report.items[0]).toMatchObject({
+			state: "ready",
+			evidence: {
+				status: "verified",
+				confidence: 80,
+				reasons: ["static_index_url_match"],
 			},
 		});
 	});

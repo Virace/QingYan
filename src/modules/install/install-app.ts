@@ -12,8 +12,14 @@ import {
 	defaultSystemSettings,
 } from "../system-settings/definitions";
 import {
+	getSettingLabel,
+	getSettingOptionLabel,
+	settingUiMetadata,
+} from "../system-settings/ui-metadata";
+import {
 	applyInstall,
 	buildInstallPlan,
+	type InstallIpRegionUpdater,
 	installApplySchema,
 } from "./install-service";
 import type {
@@ -164,6 +170,10 @@ function buildEnvLocks(environment: NodeJS.ProcessEnv) {
 		});
 }
 
+function optionLabel(path: string, value: string): string {
+	return getSettingOptionLabel(path, value);
+}
+
 function renderInstallHtml(
 	input: MinimalInstallConfig,
 	environment: NodeJS.ProcessEnv = process.env,
@@ -203,6 +213,9 @@ function renderInstallHtml(
 			payload: "",
 		},
 	};
+	const settingLabels = Object.fromEntries(
+		Object.keys(settingUiMetadata).map((path) => [path, getSettingLabel(path)]),
+	);
 	return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -302,7 +315,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>会话 TTL 分钟<input data-path="admin.session.ttlMinutes" type="number" min="1" step="1" data-type="number" required><span class="hint" data-hint-for="admin.session.ttlMinutes"></span></label>
 </div>
 <div class="grid">
-<label>SameSite<select data-path="admin.session.sameSite"><option value="strict">strict</option><option value="lax">lax</option><option value="none">none</option></select><span class="hint" data-hint-for="admin.session.sameSite">浏览器跨站请求是否携带后台登录 Cookie；不做跨站嵌入时通常保持 lax。</span></label>
+<label>SameSite<select data-path="admin.session.sameSite"><option value="strict">${optionLabel("admin.session.sameSite", "strict")}</option><option value="lax">${optionLabel("admin.session.sameSite", "lax")}</option><option value="none">${optionLabel("admin.session.sameSite", "none")}</option></select><span class="hint" data-hint-for="admin.session.sameSite">浏览器跨站请求是否携带后台登录 Cookie；不做跨站嵌入时通常保持 lax。</span></label>
 <label class="check"><input data-path="admin.session.secure" data-type="boolean" type="checkbox">仅 HTTPS Secure Cookie<span class="hint" data-hint-for="admin.session.secure">HTTPS 部署建议启用；HTTP 本地测试不要启用，否则浏览器不会发送后台登录 Cookie。</span></label>
 </div>
 </fieldset>
@@ -357,7 +370,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <fieldset>
 <legend>日志与邮件</legend>
 <div class="grid">
-<label>日志级别<select data-path="systemSettings.logging.level"><option value="error">error</option><option value="warn">warn</option><option value="info">info</option><option value="debug">debug</option></select><span class="hint" data-hint-for="systemSettings.logging.level"></span></label>
+<label>日志级别<select data-path="systemSettings.logging.level"><option value="error">${optionLabel("systemSettings.logging.level", "error")}</option><option value="warn">${optionLabel("systemSettings.logging.level", "warn")}</option><option value="info">${optionLabel("systemSettings.logging.level", "info")}</option><option value="debug">${optionLabel("systemSettings.logging.level", "debug")}</option></select><span class="hint" data-hint-for="systemSettings.logging.level"></span></label>
 <label>日志保留天数<input data-path="systemSettings.logging.retentionDays" type="number" min="1" max="3650" step="1" data-type="number" required><span class="hint" data-hint-for="systemSettings.logging.retentionDays"></span></label>
 </div>
 <label class="check"><input data-path="systemSettings.mail.enabled" data-type="boolean" type="checkbox">启用邮件通知<span class="hint" data-hint-for="systemSettings.mail.enabled"></span></label>
@@ -379,7 +392,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </fieldset>
 <fieldset>
 <legend>验证码</legend>
-<label>验证码类型 Provider<select data-path="systemSettings.captcha.provider"><option value="image">内置图片 image</option><option value="turnstile">Cloudflare Turnstile</option><option value="hcaptcha">hCaptcha</option><option value="recaptcha">Google reCAPTCHA</option><option value="geetest">极验 GeeTest</option></select><span class="hint" data-hint-for="systemSettings.captcha.provider">选择后只显示该验证码服务需要填写的配置项。</span></label>
+<label>验证码服务<select data-path="systemSettings.captcha.provider"><option value="image">${optionLabel("systemSettings.captcha.provider", "image")}</option><option value="turnstile">${optionLabel("systemSettings.captcha.provider", "turnstile")}</option><option value="hcaptcha">${optionLabel("systemSettings.captcha.provider", "hcaptcha")}</option><option value="recaptcha">${optionLabel("systemSettings.captcha.provider", "recaptcha")}</option><option value="geetest">${optionLabel("systemSettings.captcha.provider", "geetest")}</option></select><span class="hint" data-hint-for="systemSettings.captcha.provider">选择后只显示该验证码服务需要填写的配置项。</span></label>
 <div class="captcha-panel" data-captcha-panel="image">
 <div class="grid three">
 <label>图片宽度<input data-path="systemSettings.captcha.image.width" type="number" min="1" step="1" data-type="number"><span class="hint" data-hint-for="systemSettings.captcha.image.width"></span></label>
@@ -406,7 +419,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </div>
 <div class="captcha-panel" data-captcha-panel="recaptcha" hidden>
 <div class="grid three">
-<label>reCAPTCHA Variant<select data-path="systemSettings.captcha.recaptcha.variant"><option value="score_based">score_based</option><option value="policy_based_challenge">policy_based_challenge</option></select><span class="hint" data-hint-for="systemSettings.captcha.recaptcha.variant"></span></label>
+<label>reCAPTCHA 验证模式<select data-path="systemSettings.captcha.recaptcha.variant"><option value="score_based">${optionLabel("systemSettings.captcha.recaptcha.variant", "score_based")}</option><option value="policy_based_challenge">${optionLabel("systemSettings.captcha.recaptcha.variant", "policy_based_challenge")}</option></select><span class="hint" data-hint-for="systemSettings.captcha.recaptcha.variant"></span></label>
 <label>reCAPTCHA Project ID<input data-path="systemSettings.captcha.recaptcha.projectId"><span class="hint" data-hint-for="systemSettings.captcha.recaptcha.projectId"></span></label>
 <label>reCAPTCHA Site Key<input data-path="systemSettings.captcha.recaptcha.siteKey"><span class="hint" data-hint-for="systemSettings.captcha.recaptcha.siteKey"></span></label>
 </div>
@@ -431,8 +444,8 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <legend>IP 地域库</legend>
 <div class="grid three">
 <label class="check"><input data-path="systemSettings.ipRegion.enabled" data-type="boolean" type="checkbox">启用 IP 地域解析<span class="hint" data-hint-for="systemSettings.ipRegion.enabled"></span></label>
-<label>缓存策略<select data-path="systemSettings.ipRegion.cachePolicy"><option value="file">file</option><option value="vectorIndex">vectorIndex</option><option value="content">content</option></select><span class="hint" data-hint-for="systemSettings.ipRegion.cachePolicy"></span></label>
-<label>精度<select data-path="systemSettings.ipRegion.precision"><option value="country">country</option><option value="province">province</option><option value="city">city</option></select><span class="hint" data-hint-for="systemSettings.ipRegion.precision"></span></label>
+<label>加载方式<select data-path="systemSettings.ipRegion.cachePolicy"><option value="file">${optionLabel("systemSettings.ipRegion.cachePolicy", "file")}</option><option value="vectorIndex">${optionLabel("systemSettings.ipRegion.cachePolicy", "vectorIndex")}</option><option value="content">${optionLabel("systemSettings.ipRegion.cachePolicy", "content")}</option></select><span class="hint" data-hint-for="systemSettings.ipRegion.cachePolicy"></span></label>
+<label>地域精度<select data-path="systemSettings.ipRegion.precision"><option value="country">${optionLabel("systemSettings.ipRegion.precision", "country")}</option><option value="province">${optionLabel("systemSettings.ipRegion.precision", "province")}</option><option value="city">${optionLabel("systemSettings.ipRegion.precision", "city")}</option></select><span class="hint" data-hint-for="systemSettings.ipRegion.precision"></span></label>
 </div>
 <label class="check"><input data-path="systemSettings.ipRegion.autoUpdate.enabled" data-type="boolean" type="checkbox">每月自动更新<span class="hint" data-hint-for="systemSettings.ipRegion.autoUpdate.enabled"></span></label>
 <div class="grid">
@@ -470,6 +483,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <script>
 const defaults = ${JSON.stringify(defaults)};
 const envLocks = ${JSON.stringify(buildEnvLocks(environment))};
+const settingLabels = ${JSON.stringify(settingLabels)};
 const form = document.getElementById("install-form");
 const planButton = document.getElementById("install-plan");
 const applyButton = document.getElementById("install-apply");
@@ -649,6 +663,9 @@ function formatSource(source) {
 	if (source === "default") return "默认值";
 	return "输入";
 }
+function formatPathLabel(path) {
+	return settingLabels[path] || settingLabels["systemSettings." + path] || path;
+}
 function setMessage(kind, text) {
 	message.dataset.kind = kind;
 	message.textContent = text;
@@ -712,16 +729,16 @@ function renderPlan(plan) {
 			: item.valuePreview === null || item.valuePreview === undefined
 				? "空"
 				: String(item.valuePreview);
-		return item.path + ": " + preview + "（" + formatSource(item.source) + env + "）";
+		return formatPathLabel(item.path) + ": " + preview + "（" + formatSource(item.source) + env + "）";
 	});
 	const systemReview = [
 		"默认系统设置: " + plan.systemSettingsReview.defaultSeedCount + " 项",
 		...plan.systemSettingsReview.environmentSeeds.map((item) =>
-			item.path + ": " + (item.secret ? "已配置" : item.valuePreview) + "（" + item.envName + "）"
+			formatPathLabel(item.path) + ": " + (item.secret ? "已配置" : item.valuePreview) + "（" + item.envName + "）"
 		),
 	];
 	const envFields = plan.env.length
-		? plan.env.map((item) => item.envName + " -> " + item.path + (item.secret ? "（已隐藏）" : "")).join(", ")
+		? plan.env.map((item) => item.envName + " -> " + formatPathLabel(item.path) + (item.secret ? "（已隐藏）" : "")).join(", ")
 		: "无";
 const restoreText = plan.restore
 		? "<br>恢复来源: " + plan.restore.fileName +
@@ -870,6 +887,7 @@ function resolveInstallToken(input: {
 export function buildInstallApp(input: {
 	minimalConfig: MinimalInstallConfig;
 	environment?: NodeJS.ProcessEnv;
+	ipRegionUpdater?: InstallIpRegionUpdater;
 	scheduleTransition?: (transition: InstallTransition) => void;
 	scheduleRestart?: (transition: InstallTransition) => void;
 }): FastifyInstance {
@@ -977,6 +995,7 @@ export function buildInstallApp(input: {
 					token,
 				},
 				environment: input.environment,
+				ipRegionUpdater: input.ipRegionUpdater,
 			});
 			const transition = buildInstallTransition({
 				mode: input.minimalConfig.transitionMode,

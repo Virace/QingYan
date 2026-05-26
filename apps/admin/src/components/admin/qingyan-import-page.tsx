@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/card";
 
 import { Field, inputClass } from "./admin-ui";
+import { qingyanExistingStrategyLabels } from "./display-labels";
 
 export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 	const [file, setFile] = useState<File | null>(null);
@@ -56,7 +57,7 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<div className="grid gap-3 md:grid-cols-3">
-					<Field label="siteKey">
+					<Field label="目标站点">
 						<input className={inputClass} value={siteKey} readOnly />
 					</Field>
 					<Field label="JSON 文件">
@@ -69,7 +70,7 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 							}
 						/>
 					</Field>
-					<Field label="existingStrategy">
+					<Field label="已有数据处理方式">
 						<select
 							className={inputClass}
 							value={existingStrategy}
@@ -79,8 +80,12 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 								)
 							}
 						>
-							<option value="fail_on_existing">fail_on_existing</option>
-							<option value="skip_existing">skip_existing</option>
+							<option value="fail_on_existing">
+								{qingyanExistingStrategyLabels.fail_on_existing}
+							</option>
+							<option value="skip_existing">
+								{qingyanExistingStrategyLabels.skip_existing}
+							</option>
 						</select>
 					</Field>
 				</div>

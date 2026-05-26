@@ -24,6 +24,16 @@ import {
 import { Input } from "@/components/ui/input";
 
 import { EmptyState, Field, inputClass, textareaClass } from "./admin-ui";
+import {
+	blacklistMatchModeLabels,
+	blacklistTargetTypeLabels,
+	captchaProviderLabels,
+	ipRegionCachePolicyLabels,
+	labelFor,
+	loggingLevelLabels,
+	recaptchaVariantLabels,
+	scopeLabels,
+} from "./display-labels";
 
 export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
@@ -144,7 +154,9 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 								<div>
 									<p className="font-medium">{rule.targetValue}</p>
 									<p className="text-xs text-muted-foreground">
-										{rule.targetType} / {rule.matchMode} / {rule.scope}
+										{labelFor(blacklistTargetTypeLabels, rule.targetType)} /{" "}
+										{labelFor(blacklistMatchModeLabels, rule.matchMode)} /{" "}
+										{labelFor(scopeLabels, rule.scope)}
 									</p>
 								</div>
 								<Button
@@ -977,10 +989,10 @@ export function SystemSettingsPage() {
 								})
 							}
 						>
-							<option value="error">error</option>
-							<option value="warn">warn</option>
-							<option value="info">info</option>
-							<option value="debug">debug</option>
+							<option value="error">{loggingLevelLabels.error}</option>
+							<option value="warn">{loggingLevelLabels.warn}</option>
+							<option value="info">{loggingLevelLabels.info}</option>
+							<option value="debug">{loggingLevelLabels.debug}</option>
 						</select>
 					</Field>
 					<Field label="保留天数">
@@ -1652,7 +1664,7 @@ export function SystemSettingsPage() {
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
 						<p className="text-sm font-medium">验证码服务</p>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="验证码类型 Provider">
+							<Field label="验证码服务">
 								<select
 									className={inputClass}
 									value={draft.captcha.provider}
@@ -1667,11 +1679,19 @@ export function SystemSettingsPage() {
 										})
 									}
 								>
-									<option value="image">内置图片 image</option>
-									<option value="turnstile">Cloudflare Turnstile</option>
-									<option value="hcaptcha">hCaptcha</option>
-									<option value="recaptcha">Google reCAPTCHA</option>
-									<option value="geetest">极验 GeeTest</option>
+									<option value="image">{captchaProviderLabels.image}</option>
+									<option value="turnstile">
+										{captchaProviderLabels.turnstile}
+									</option>
+									<option value="hcaptcha">
+										{captchaProviderLabels.hcaptcha}
+									</option>
+									<option value="recaptcha">
+										{captchaProviderLabels.recaptcha}
+									</option>
+									<option value="geetest">
+										{captchaProviderLabels.geetest}
+									</option>
 								</select>
 							</Field>
 						</div>
@@ -1883,7 +1903,7 @@ export function SystemSettingsPage() {
 								<p className="text-sm font-medium md:col-span-2">
 									Google reCAPTCHA
 								</p>
-								<Field label="reCAPTCHA Variant">
+								<Field label="reCAPTCHA 验证模式">
 									<select
 										className={inputClass}
 										value={draft.captcha.recaptcha.variant}
@@ -1901,9 +1921,11 @@ export function SystemSettingsPage() {
 											})
 										}
 									>
-										<option value="score_based">score_based</option>
+										<option value="score_based">
+											{recaptchaVariantLabels.score_based}
+										</option>
 										<option value="policy_based_challenge">
-											policy_based_challenge
+											{recaptchaVariantLabels.policy_based_challenge}
 										</option>
 									</select>
 								</Field>
@@ -2127,7 +2149,7 @@ export function SystemSettingsPage() {
 									<option value="false">关闭</option>
 								</select>
 							</Field>
-							<Field label="缓存策略">
+							<Field label="加载方式">
 								<select
 									className={inputClass}
 									value={draft.ipRegion.cachePolicy}
@@ -2144,9 +2166,13 @@ export function SystemSettingsPage() {
 										})
 									}
 								>
-									<option value="file">file</option>
-									<option value="vectorIndex">vectorIndex</option>
-									<option value="content">content</option>
+									<option value="file">{ipRegionCachePolicyLabels.file}</option>
+									<option value="vectorIndex">
+										{ipRegionCachePolicyLabels.vectorIndex}
+									</option>
+									<option value="content">
+										{ipRegionCachePolicyLabels.content}
+									</option>
 								</select>
 							</Field>
 							<Field label="默认地域精度">

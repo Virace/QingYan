@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
+import { existsSync, statSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 
@@ -13,6 +14,7 @@ import { ImportJobService } from "./job-service";
 import { QingYanExportService } from "./qingyan/export-service";
 import { QingYanImportService } from "./qingyan/import-service";
 import { WordPressAdminImportService } from "./wordpress/admin-service";
+import { parseSitemapIndexUrls } from "./wordpress/dist-verifier";
 
 const explicitMappingSchema = z.object({
 	siteKey: z.string().optional(),
@@ -139,6 +141,46 @@ function parseJsonField(value: string | null | undefined) {
 		return null;
 	}
 	return JSON.parse(value) as unknown;
+}
+
+function isUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === "http:" || url.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
+async function fetchText(url: string): Promise<string> {
+	const response = await fetch(url);
+	if (!response.ok) {
+		throw new InvalidRequestError({
+			message: `静态站点来源获取失败：${response.status} ${response.statusText}`,
+		});
+	}
+	return response.text();
+}
+
+async function resolveStaticSiteSource(
+	targetDistRoot: string | undefined,
+): Promise<string | undefined> {
+	if (!targetDistRoot) {
+		return targetDistRoot;
+	}
+	if (!isUrl(targetDistRoot)) {
+		if (existsSync(targetDistRoot) && statSync(targetDistRoot).isFile()) {
+			return readFileSync(targetDistRoot, "utf-8");
+		}
+		return targetDistRoot;
+	}
+	const rootXml = await fetchText(targetDistRoot);
+	const childUrls = parseSitemapIndexUrls(rootXml);
+	if (childUrls.length === 0) {
+		return rootXml;
+	}
+	const childXml = await Promise.all(childUrls.map((url) => fetchText(url)));
+	return [rootXml, ...childXml].join("\n");
 }
 
 function summarizeJobPayload(value: string) {
@@ -356,6 +398,7 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 			const result = wordpressService.analyze({
 				...data,
+				targetDistRoot: await resolveStaticSiteSource(data.targetDistRoot),
 				existingPages,
 			});
 			await jobService.createWordPressAnalyzeJob({
@@ -384,6 +427,7 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 		const result = wordpressService.analyze({
 			...parsed.data,
+			targetDistRoot: await resolveStaticSiteSource(parsed.data.targetDistRoot),
 			existingPages,
 		});
 		await jobService.createWordPressAnalyzeJob({

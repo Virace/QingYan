@@ -89,6 +89,24 @@ export function acceptByConfidence(
 		.reduce((current, item) => acceptCandidate(current, item), items);
 }
 
+export function acceptImportableItems(
+	items: MappingOverlayItem[],
+	reportItems: MigrationReportItem[],
+) {
+	return reportItems
+		.filter((item) => canAcceptCandidate(item))
+		.reduce((current, item) => acceptCandidate(current, item), items);
+}
+
+export function lowConfidenceImportableItems(
+	reportItems: MigrationReportItem[],
+	minConfidence: number,
+) {
+	return reportItems
+		.filter((item) => canAcceptCandidate(item))
+		.filter((item) => itemConfidence(item) < minConfidence);
+}
+
 export function hasBlockingUnresolvedItems(items: MigrationReportItem[]) {
 	return items.some((item) => {
 		if (

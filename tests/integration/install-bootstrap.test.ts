@@ -452,6 +452,12 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("validateStep(currentStep)");
 		expect(response.body).toContain('data-path="admin.session.cookieName"');
 		expect(response.body).toContain("浏览器跨站请求是否携带后台登录 Cookie");
+		expect(response.body).toContain("常规站点访问");
+		expect(response.body).toContain("仅错误");
+		expect(response.body).toContain("分数判断");
+		expect(response.body).toContain("向量索引缓存");
+		expect(response.body).not.toContain(">score_based</option>");
+		expect(response.body).not.toContain(">vectorIndex</option>");
 		expect(response.body).toContain("请求洪泛防护");
 		expect(response.body).toContain("启用公开 Origin guard");
 		expect(response.body).toContain(
@@ -503,6 +509,9 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain('"path":"server.host"');
 		expect(response.body).toContain(
 			'"path":"systemSettings.mail.smtp.password"',
+		);
+		expect(response.body).toContain(
+			'"systemSettings.mail.smtp.password":"SMTP 密码"',
 		);
 		expect(response.body).not.toContain("super-secret-password");
 	});
@@ -685,7 +694,21 @@ describe("install bootstrap", () => {
 	it("plans and applies complete startup and system settings config", async () => {
 		const workspace = createWorkspace();
 		const minimalConfig = createMinimalConfig(workspace.configPath);
-		const app = buildInstallApp({ minimalConfig });
+		const ipRegionUpdates: Array<{ ipVersion: "v4" | "v6" }> = [];
+		const app = buildInstallApp({
+			minimalConfig,
+			ipRegionUpdater: {
+				update: async (input) => {
+					ipRegionUpdates.push({ ipVersion: input.ipVersion });
+					return {
+						status: "success",
+						sourceUrl: `https://example.com/${input.ipVersion}.xdb`,
+						nextHash: `${input.ipVersion}-hash`,
+						refreshedComments: 0,
+					};
+				},
+			},
+		});
 		cleanups.push(() => app.close());
 
 		const installCookie = await getInstallCookie(app);
@@ -749,7 +772,6 @@ describe("install bootstrap", () => {
 				},
 			},
 		});
-
 		const apply = await app.inject({
 			method: "POST",
 			url: "/qingyan/admin/install",
@@ -760,6 +782,19 @@ describe("install bootstrap", () => {
 		});
 
 		expect(apply.statusCode).toBe(201);
+		expect(apply.json().ipRegionBootstrap).toEqual([
+			expect.objectContaining({
+				ipVersion: "v4",
+				status: "success",
+				nextHash: "v4-hash",
+			}),
+			expect.objectContaining({
+				ipVersion: "v6",
+				status: "success",
+				nextHash: "v6-hash",
+			}),
+		]);
+		expect(ipRegionUpdates).toEqual([{ ipVersion: "v4" }, { ipVersion: "v6" }]);
 		expect(apply.body).not.toContain("smtp-password");
 		expect(apply.body).not.toContain("turnstile-secret");
 

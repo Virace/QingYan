@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	getDistHtmlCandidates,
+	parseStaticSiteIndex,
+	parseSitemapIndexUrls,
 	verifyDistTarget,
 } from "../../../src/modules/import-export/wordpress/dist-verifier";
 
@@ -121,5 +123,90 @@ describe("verifyDistTarget", () => {
 			status: "verified",
 			confidence: 85,
 		});
+	});
+
+	it("verifies URL-only sitemap entries by canonical path", () => {
+		expect(
+			verifyDistTarget({
+				targetDistRoot: `
+					<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+						<url><loc>https://x-item.com/termux.html</loc></url>
+					</urlset>
+				`,
+				targetPath: "termux.html",
+				sourceTitle: "Termux",
+				sourcePath: "/termux.html",
+				sourceRelativePath: "termux.html",
+				wpPostId: "1",
+			}),
+		).toMatchObject({
+			status: "verified",
+			confidence: 80,
+			reasons: ["static_index_url_match"],
+		});
+	});
+
+	it("uses RSS title entries as stronger static index evidence", () => {
+		expect(
+			verifyDistTarget({
+				targetDistRoot: `
+					<rss version="2.0">
+						<channel>
+							<item>
+								<title>Termux</title>
+								<link>https://x-item.com/termux.html</link>
+							</item>
+						</channel>
+					</rss>
+				`,
+				targetPath: "termux.html",
+				sourceTitle: "Termux",
+				sourcePath: "/termux.html",
+				sourceRelativePath: "termux.html",
+				wpPostId: "1",
+			}),
+		).toMatchObject({
+			status: "verified",
+			confidence: 90,
+			reasons: ["static_index_url_match", "static_index_title_match"],
+		});
+	});
+});
+
+describe("parseStaticSiteIndex", () => {
+	it("parses sitemap and RSS entries", () => {
+		expect(
+			parseStaticSiteIndex(`
+				<urlset><url><loc>https://x-item.com/sitemap-only.html</loc></url></urlset>
+			`),
+		).toEqual([
+			{
+				url: "https://x-item.com/sitemap-only.html",
+			},
+		]);
+		expect(
+			parseStaticSiteIndex(`
+				<rss><channel><item><title><![CDATA[RSS Title]]></title><link><![CDATA[https://x-item.com/rss.html]]></link></item></channel></rss>
+			`),
+		).toEqual([
+			{
+				url: "https://x-item.com/rss.html",
+				title: "RSS Title",
+			},
+		]);
+	});
+
+	it("parses sitemap index child URLs", () => {
+		expect(
+			parseSitemapIndexUrls(`
+				<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+					<sitemap><loc>https://x-item.com/post-sitemap.xml</loc></sitemap>
+					<sitemap><loc>https://x-item.com/page-sitemap.xml</loc></sitemap>
+				</sitemapindex>
+			`),
+		).toEqual([
+			"https://x-item.com/post-sitemap.xml",
+			"https://x-item.com/page-sitemap.xml",
+		]);
 	});
 });

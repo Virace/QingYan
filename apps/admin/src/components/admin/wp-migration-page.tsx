@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
 	BanIcon,
 	CheckIcon,
+	DatabaseIcon,
 	DownloadIcon,
 	FileSearchIcon,
 	MapPinIcon,
@@ -32,10 +33,12 @@ import {
 
 import { Field, inputClass, textareaClass } from "./admin-ui";
 import {
+	acceptImportableItems,
 	acceptByConfidence,
 	acceptCandidate,
 	formatMappingOverlay,
 	hasBlockingUnresolvedItems,
+	lowConfidenceImportableItems,
 	type MappingOverlayItem,
 	mapToPage,
 	skipItem,
@@ -51,6 +54,20 @@ const stateLabels: Record<MigrationItemState, string> = {
 	conflict: "冲突",
 	skipped: "已跳过",
 };
+
+const pageKeyStrategyOptions = [
+	{
+		value: "path_without_leading_slash",
+		label: "使用路径作为页面 Key（去掉开头斜杠）",
+	},
+	{
+		value: "path_with_leading_slash",
+		label: "使用路径作为页面 Key（保留开头斜杠）",
+	},
+	{ value: "page_url_path", label: "使用页面 URL 路径" },
+	{ value: "custom_template", label: "使用下方路径模板" },
+	{ value: "explicit_only", label: "只使用手动映射" },
+] as const;
 
 function queueForItem(item: MigrationReportItem): QueueName {
 	const confidence = item.target?.confidence ?? item.evidence.confidence;
@@ -90,16 +107,26 @@ function summaryEntries(result: WordPressAnalyzeResult) {
 	const { summary } = result.report;
 	return [
 		["总条目", summary.totalItems],
-		["ready", summary.ready],
-		["needs_user_mapping", summary.needsUserMapping],
-		["ambiguous", summary.ambiguous],
-		["unverified", summary.unverified],
-		["conflict", summary.conflict],
-		["skipped", summary.skipped],
+		["可导入", summary.ready],
+		["需要手动映射", summary.needsUserMapping],
+		["候选不明确", summary.ambiguous],
+		["待确认", summary.unverified],
+		["冲突", summary.conflict],
+		["已跳过", summary.skipped],
 		["评论", summary.totalComments],
 		["最大深度", summary.maxCommentDepth],
 		["警告", summary.warningCount],
 	];
+}
+
+function confirmLowConfidence(items: MigrationReportItem[]) {
+	const lowConfidenceItems = lowConfidenceImportableItems(items, 90);
+	if (lowConfidenceItems.length === 0) {
+		return true;
+	}
+	return window.confirm(
+		`有 ${lowConfidenceItems.length} 个候选匹配分数低于 90 分。低分候选可能把评论导入到错误页面，继续前请确认报告行中的标题、路径和目标页面 Key。是否继续接受？`,
+	);
 }
 
 function TargetSiteSummary({ site }: { site: AdminSiteSummary }) {
@@ -138,21 +165,20 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 	const [manualTargets, setManualTargets] = useState<
 		Record<string, { pageKey: string; pageUrl: string }>
 	>({});
+	function buildAnalyzeMapping(items: MappingOverlayItem[]) {
+		if (items.length > 0) {
+			return formatMappingOverlay(siteKey, sourceBasePath.trim() || "/", items);
+		}
+		return mappingJson.trim()
+			? (JSON.parse(mappingJson) as unknown)
+			: undefined;
+	}
 	const analyzeMutation = useMutation({
-		async mutationFn() {
+		async mutationFn(input?: { mappingItems?: MappingOverlayItem[] }) {
 			if (!file) {
 				throw new Error("请选择 WXR XML 文件。");
 			}
-			const mapping =
-				mappingItems.length > 0
-					? formatMappingOverlay(
-							siteKey,
-							sourceBasePath.trim() || "/",
-							mappingItems,
-						)
-					: mappingJson.trim()
-						? (JSON.parse(mappingJson) as unknown)
-						: undefined;
+			const nextMappingItems = input?.mappingItems ?? mappingItems;
 			return analyzeWordPressMigration({
 				siteKey,
 				fileName: file.name,
@@ -162,7 +188,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 				pageKeyStrategy,
 				postPathTemplate: postPathTemplate.trim() || undefined,
 				pagePathTemplate: pagePathTemplate.trim() || undefined,
-				mapping,
+				mapping: buildAnalyzeMapping(nextMappingItems),
 			});
 		},
 	});
@@ -191,6 +217,39 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 			});
 		},
 	});
+	const acceptAndImportMutation = useMutation({
+		async mutationFn() {
+			if (!result) {
+				throw new Error("请先分析 WXR。");
+			}
+			if (!confirmLowConfidence(result.report.items)) {
+				throw new Error("已取消接受和导入。");
+			}
+			const accepted = acceptImportableItems(mappingItems, result.report.items);
+			setMappingItems(accepted);
+			const refreshed = await analyzeMutation.mutateAsync({
+				mappingItems: accepted,
+			});
+			if (hasBlockingUnresolvedItems(refreshed.report.items)) {
+				throw new Error("仍有未解决或低可信映射，不能导入数据库。");
+			}
+			const plan = await planMutation.mutateAsync(refreshed.job.id);
+			const dryRun = await dryRunMutation.mutateAsync({
+				jobId: plan.job.id,
+				existingStrategy,
+			});
+			if (
+				dryRun.job.status !== "dry_run_passed" ||
+				dryRun.dryRun.summary.conflicts > 0
+			) {
+				throw new Error("写入前检查仍存在冲突，不能导入数据库。");
+			}
+			return applyMutation.mutateAsync({
+				jobId: plan.job.id,
+				existingStrategy,
+			});
+		},
+	});
 	const result = analyzeMutation.data;
 	const hasBlockingItems = result
 		? hasBlockingUnresolvedItems(result.report.items)
@@ -199,6 +258,8 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 		dryRunMutation.data?.job.status === "dry_run_passed" &&
 		dryRunMutation.data.dryRun.summary.conflicts === 0 &&
 		!applyMutation.data;
+	const planError: unknown = planMutation.error;
+	const dryRunError: unknown = dryRunMutation.error;
 	const queues = useMemo(() => {
 		const grouped: Record<QueueName, MigrationReportItem[]> = {
 			needsAction: [],
@@ -211,6 +272,10 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 		}
 		return grouped;
 	}, [result]);
+	function acceptAndReanalyze(nextItems: MappingOverlayItem[]) {
+		setMappingItems(nextItems);
+		analyzeMutation.mutate({ mappingItems: nextItems });
+	}
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -241,12 +306,12 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 								onChange={(event) => setSourceBasePath(event.target.value)}
 							/>
 						</Field>
-						<Field label="静态站点 dist 目录">
+						<Field label="静态站点来源">
 							<input
 								className={inputClass}
 								value={targetDistRoot}
 								onChange={(event) => setTargetDistRoot(event.target.value)}
-								placeholder="可选，本机 dist 目录"
+								placeholder="可选，本机静态目录、sitemap URL 或 RSS/Atom URL"
 							/>
 						</Field>
 						<Field label="页面 Key 策略">
@@ -255,15 +320,11 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 								value={pageKeyStrategy}
 								onChange={(event) => setPageKeyStrategy(event.target.value)}
 							>
-								<option value="path_without_leading_slash">
-									path_without_leading_slash
-								</option>
-								<option value="path_with_leading_slash">
-									path_with_leading_slash
-								</option>
-								<option value="page_url_path">page_url_path</option>
-								<option value="custom_template">custom_template</option>
-								<option value="explicit_only">explicit_only</option>
+								{pageKeyStrategyOptions.map((option) => (
+									<option key={option.value} value={option.value}>
+										{option.label}
+									</option>
+								))}
 							</select>
 						</Field>
 						<Field label="文章路径模板">
@@ -271,7 +332,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 								className={inputClass}
 								value={postPathTemplate}
 								onChange={(event) => setPostPathTemplate(event.target.value)}
-								placeholder="%sourceRelativePath%"
+								placeholder="留空则使用默认文章路径"
 							/>
 						</Field>
 						<Field label="页面路径模板">
@@ -279,11 +340,11 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 								className={inputClass}
 								value={pagePathTemplate}
 								onChange={(event) => setPagePathTemplate(event.target.value)}
-								placeholder="%sourceRelativePath%"
+								placeholder="留空则使用默认页面路径"
 							/>
 						</Field>
 						<div className="lg:col-span-2">
-							<Field label="映射 JSON">
+							<Field label="手动映射 JSON">
 								<textarea
 									className={textareaClass}
 									value={mappingJson}
@@ -296,7 +357,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 					<div className="flex flex-wrap gap-2">
 						<Button
 							type="button"
-							onClick={() => analyzeMutation.mutate()}
+							onClick={() => analyzeMutation.mutate({})}
 							disabled={analyzeMutation.isPending || !siteKey}
 						>
 							<FileSearchIcon data-icon="inline-start" />
@@ -305,10 +366,26 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 						<Button
 							type="button"
 							variant="outline"
+							disabled={!result || analyzeMutation.isPending}
+							onClick={() => {
+								if (!result || !confirmLowConfidence(result.report.items)) {
+									return;
+								}
+								acceptAndReanalyze(
+									acceptImportableItems(mappingItems, result.report.items),
+								);
+							}}
+						>
+							<CheckIcon data-icon="inline-start" />
+							接受全部可映射项
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
 							disabled={!result}
 							onClick={() =>
 								result
-									? setMappingItems(
+									? acceptAndReanalyze(
 											acceptByConfidence(
 												mappingItems,
 												result.report.items,
@@ -327,7 +404,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 							disabled={!result}
 							onClick={() =>
 								result
-									? setMappingItems(
+									? acceptAndReanalyze(
 											acceptByConfidence(mappingItems, result.report.items, 90),
 										)
 									: undefined
@@ -350,7 +427,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 							}
 						>
 							<DownloadIcon data-icon="inline-start" />
-							下载 report
+							下载分析报告
 						</Button>
 						<Button
 							type="button"
@@ -366,7 +443,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 							}
 						>
 							<DownloadIcon data-icon="inline-start" />
-							下载 mapping
+							下载映射建议
 						</Button>
 						<Button
 							type="button"
@@ -384,7 +461,24 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 							}
 						>
 							<DownloadIcon data-icon="inline-start" />
-							导出 overlay
+							导出映射覆盖
+						</Button>
+						<Button
+							type="button"
+							disabled={
+								!result ||
+								acceptAndImportMutation.isPending ||
+								analyzeMutation.isPending ||
+								planMutation.isPending ||
+								dryRunMutation.isPending ||
+								applyMutation.isPending
+							}
+							onClick={() => acceptAndImportMutation.mutate()}
+						>
+							<DatabaseIcon data-icon="inline-start" />
+							{acceptAndImportMutation.isPending
+								? "正在接受并导入"
+								: `接受全部并导入 ${site.name}`}
 						</Button>
 					</div>
 					{analyzeMutation.error ? (
@@ -393,6 +487,16 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 							<AlertDescription>
 								{analyzeMutation.error instanceof Error
 									? analyzeMutation.error.message
+									: "请求失败。"}
+							</AlertDescription>
+						</Alert>
+					) : null}
+					{acceptAndImportMutation.error ? (
+						<Alert variant="destructive">
+							<AlertTitle>接受或导入失败</AlertTitle>
+							<AlertDescription>
+								{acceptAndImportMutation.error instanceof Error
+									? acceptAndImportMutation.error.message
 									: "请求失败。"}
 							</AlertDescription>
 						</Alert>
@@ -422,8 +526,8 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 						<CardHeader>
 							<CardTitle className="text-lg">处理队列</CardTitle>
 							<CardDescription>
-								当前 overlay {mappingItems.length} 项；修改后重新点击分析 WXR
-								即可生成新 report。
+								当前手动确认 {mappingItems.length}{" "}
+								项；修改后会重新分析并生成新的分析结果。
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="grid gap-3 md:grid-cols-5">
@@ -529,7 +633,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 										}
 									>
 										<FileSearchIcon data-icon="inline-start" />
-										{dryRunMutation.isPending ? "检查中" : "Dry-run 检查"}
+										{dryRunMutation.isPending ? "检查中" : "写入前检查"}
 									</Button>
 									<Button
 										type="button"
@@ -555,15 +659,38 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 										</AlertDescription>
 									</Alert>
 								) : null}
+								{planError ? (
+									<Alert variant="destructive">
+										<AlertTitle>生成计划失败</AlertTitle>
+										<AlertDescription>
+											{planError instanceof Error
+												? planError.message
+												: "请求失败。"}
+										</AlertDescription>
+									</Alert>
+								) : null}
+								{dryRunError ? (
+									<Alert variant="destructive">
+										<AlertTitle>写入前检查失败</AlertTitle>
+										<AlertDescription>
+											{dryRunError instanceof Error
+												? dryRunError.message
+												: "请求失败。"}
+										</AlertDescription>
+									</Alert>
+								) : null}
 							</CardContent>
 						</Card>
 					) : null}
 					{dryRunMutation.data ? (
 						<Card>
 							<CardHeader>
-								<CardTitle className="text-lg">Dry-run 检查结果</CardTitle>
+								<CardTitle className="text-lg">写入前检查结果</CardTitle>
 								<CardDescription>
-									状态 {dryRunMutation.data.job.status}
+									状态{" "}
+									{dryRunMutation.data.job.status === "dry_run_passed"
+										? "通过"
+										: "失败"}
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="grid gap-3 md:grid-cols-3">
@@ -644,10 +771,10 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 									<tr className="border-b text-xs text-muted-foreground">
 										<th className="p-2 font-medium">状态</th>
 										<th className="p-2 font-medium">分数</th>
-										<th className="p-2 font-medium">WP Post ID</th>
+										<th className="p-2 font-medium">WordPress 文章 ID</th>
 										<th className="p-2 font-medium">标题</th>
-										<th className="p-2 font-medium">sourceRelativePath</th>
-										<th className="p-2 font-medium">候选 pageKey</th>
+										<th className="p-2 font-medium">源相对路径</th>
+										<th className="p-2 font-medium">候选页面 Key</th>
 										<th className="p-2 font-medium">评论</th>
 										<th className="p-2 font-medium">深度</th>
 										<th className="p-2 font-medium">警告</th>
@@ -672,7 +799,10 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 													{overlayItem ? (
 														<div className="mt-2">
 															<Badge variant="outline">
-																overlay: {overlayItem.decision}
+																已确认:{" "}
+																{overlayItem.decision === "map"
+																	? "导入"
+																	: "跳过"}
 															</Badge>
 														</div>
 													) : null}
@@ -739,7 +869,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 																		},
 																	})
 																}
-																placeholder="pageKey"
+																placeholder="页面 Key"
 															/>
 															<input
 																className={inputClass}
@@ -753,7 +883,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 																		},
 																	})
 																}
-																placeholder="pageUrl"
+																placeholder="页面 URL"
 															/>
 															<Button
 																type="button"
