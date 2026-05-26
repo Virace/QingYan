@@ -8,7 +8,7 @@ export const inlineCaptchaPayloadSchema = z.object({
 
 export const bootstrapQuerySchema = z.object({
 	siteKey: z.string().min(1),
-	pageKey: z.string().min(1),
+	pageKey: z.string().min(1).optional(),
 	pageTitle: z.string().min(1).optional(),
 	pageUrl: pageUrlInputSchema.optional(),
 	sortBy: z.enum(["newest", "oldest"]).default("newest"),
@@ -26,9 +26,9 @@ export const threadQuerySchema = bootstrapQuerySchema.pick({
 
 export const createCommentBodySchema = z.object({
 	siteKey: z.string().min(1),
-	pageKey: z.string().min(1),
+	pageKey: z.string().min(1).optional(),
 	pageTitle: z.string().min(1),
-	pageUrl: pageUrlInputSchema,
+	pageUrl: pageUrlInputSchema.optional(),
 	parentCommentId: z.string().min(1).nullable(),
 	author: z.object({
 		name: z.string().trim().optional().default(""),
@@ -50,14 +50,14 @@ export const voteCommentParamsSchema = z.object({
 
 export const voteCommentBodySchema = z.object({
 	siteKey: z.string().min(1),
-	pageKey: z.string().min(1),
+	pageKey: z.string().min(1).optional(),
 	choice: z.enum(["up", "down"]),
 	captcha: inlineCaptchaPayloadSchema.optional().nullable(),
 });
 
 export const captchaStateQuerySchema = z.object({
 	siteKey: z.string().min(1),
-	pageKey: z.string().min(1),
+	pageKey: z.string().min(1).optional(),
 	pageTitle: z.string().min(1).optional(),
 	pageUrl: pageUrlInputSchema.optional(),
 });
@@ -66,7 +66,7 @@ export const captchaRefreshBodySchema = captchaStateQuerySchema;
 
 export const captchaVerifyBodySchema = z.object({
 	siteKey: z.string().min(1),
-	pageKey: z.string().min(1),
+	pageKey: z.string().min(1).optional(),
 	challengeId: z.string().min(1),
 	mode: z.literal("inline_value"),
 	value: z.string().min(1),

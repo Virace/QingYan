@@ -7,6 +7,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -63,6 +69,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 			method: "GET",
 			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:thread-only&sortBy=oldest&limit=20&offset=0",
 			headers: {
+				...refererFor("post:thread-only"),
 				"user-agent": "thread-test",
 			},
 		});
@@ -165,6 +172,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 			cookies: {
 				qingyan_visitor: "viewer_gravatar_thread",
 			},
+			headers: refererFor("post:gravatar-thread"),
 		});
 
 		expect(response.statusCode).toBe(200);

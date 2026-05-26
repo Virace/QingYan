@@ -9,6 +9,7 @@ import { createDatabaseClients } from "../../src/db/client";
 import {
 	commentModeration,
 	comments,
+	pageThreads,
 	siteSettings,
 	sites,
 	systemSettings,
@@ -98,6 +99,56 @@ async function createCustomTestApp(options?: {
 }
 
 describe("POST /qingyan/api/comments", () => {
+	it("creates page threads from Referer when legacy comment payload identity is stale", async () => {
+		const fixture = await createCustomTestApp({
+			require: [],
+		});
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/lol_voice_collation.html",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "lol_voice_collation",
+				pageTitle: "HTML Comment Page",
+				pageUrl: "https://x-item.com/lol_voice_collation.html",
+				parentCommentId: null,
+				author: {},
+				content: {
+					raw: "comment on html page",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "lol_voice_collation.html"))
+			.limit(1);
+		expect(thread).toMatchObject({
+			pageKey: "lol_voice_collation.html",
+			pageUrl: "/lol_voice_collation.html",
+			pageTitle: "HTML Comment Page",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+
+		const staleThreads = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "lol_voice_collation"));
+		expect(staleThreads).toEqual([]);
+	});
+
 	it("rejects requests missing configured required identity fields", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
@@ -105,6 +156,9 @@ describe("POST /qingyan/api/comments", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/post:required-email",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:required-email",
@@ -200,6 +254,7 @@ describe("POST /qingyan/api/comments", () => {
 				method: "POST",
 				url: "/qingyan/api/comments",
 				headers: {
+					referer: `http://localhost:4321/post:${testCase.name}`,
 					"x-forwarded-for": "203.0.113.10",
 				},
 				payload: {
@@ -256,6 +311,9 @@ describe("POST /qingyan/api/comments", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/post:anonymous",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:anonymous",
@@ -319,6 +377,9 @@ describe("POST /qingyan/api/comments", () => {
 			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_admin: adminCookie.value,
+			},
+			headers: {
+				referer: "http://localhost:4321/post:verified-create",
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -384,6 +445,9 @@ describe("POST /qingyan/api/comments", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/post:reserved-email",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:reserved-email",

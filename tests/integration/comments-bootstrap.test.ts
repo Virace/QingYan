@@ -117,6 +117,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				qingyan_visitor: "viewer_seed",
 			},
 			headers: {
+				referer: "http://localhost:4321/post:welcome",
 				"user-agent": "bootstrap-test",
 			},
 		});
@@ -177,6 +178,166 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(payload.comments[0].children[0]).toMatchObject({
 			id: "c_child",
 			parentId: "c_root",
+		});
+	});
+
+	it("resolves imported html page keys from Referer instead of legacy query values", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_html_import",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_html_import"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "lol_voice_collation.html",
+			pageTitle: "英雄联盟音频文件整理计划——15.15",
+			pageUrl: "/lol_voice_collation.html",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "lol_voice_collation.html"));
+		if (!pageThread) {
+			throw new Error("Expected imported page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_html_import",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			status: "approved",
+			authorName: "Alice",
+			contentRaw: "imported comment",
+			contentHtml: "<p>imported comment</p>",
+			createdAt: "2026-05-27T10:00:00.000Z",
+			updatedAt: "2026-05-27T10:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=lol_voice_collation&pageTitle=%E8%8B%B1%E9%9B%84%E8%81%94%E7%9B%9F%E9%9F%B3%E9%A2%91%E6%96%87%E4%BB%B6%E6%95%B4%E7%90%86%E8%AE%A1%E5%88%92%E2%80%94%E2%80%9415.15&pageUrl=https%3A%2F%2Fx-item.com%2Flol_voice_collation.html&sortBy=newest&limit=5&offset=0",
+			headers: {
+				referer: "http://localhost:4321/lol_voice_collation.html",
+			},
+			cookies: {
+				qingyan_visitor: "viewer_html_import",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			thread: {
+				siteKey: "fangyuan",
+				pageKey: "lol_voice_collation.html",
+				pageTitle: "英雄联盟音频文件整理计划——15.15",
+			},
+			pagination: {
+				totalCount: 1,
+				rootCount: 1,
+			},
+		});
+		expect(response.json().comments).toHaveLength(1);
+		expect(response.json().comments[0]).toMatchObject({
+			id: "c_html_import",
+		});
+
+		const allThreads = await fixture.app.db.select().from(pageThreads);
+		expect(allThreads.map((thread) => thread.pageKey).sort()).toEqual([
+			"lol_voice_collation.html",
+		]);
+	});
+
+	it("does not create page threads for unknown bootstrap pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Unknown",
+			headers: {
+				referer: "http://localhost:4321/posts/unknown-bootstrap/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			thread: {
+				siteKey: "fangyuan",
+				pageKey: "posts/unknown-bootstrap/",
+				pageTitle: "Unknown",
+			},
+			pagination: {
+				totalCount: 0,
+				rootCount: 0,
+			},
+			pageMetrics: {
+				pageViewCount: 0,
+			},
+			pageFeedback: {
+				likeCount: 0,
+				liked: false,
+			},
+		});
+		expect(response.json().comments).toEqual([]);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
+	it("rejects bootstrap requests without Referer", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Missing",
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PUBLIC_REFERER_REQUIRED",
+			},
+		});
+	});
+
+	it("rejects bootstrap requests from a foreign Referer origin", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Foreign",
+			headers: {
+				referer: "https://evil.example/posts/foreign/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PUBLIC_REFERER_FORBIDDEN",
+			},
 		});
 	});
 
@@ -268,6 +429,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:metadata-display&pageTitle=Metadata&pageUrl=https://fangyuan.example.com/posts/metadata-display/",
 			cookies: {
 				qingyan_visitor: "viewer_metadata",
+			},
+			headers: {
+				referer: "http://localhost:4321/post:metadata-display",
 			},
 		});
 
@@ -365,6 +529,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			cookies: {
 				qingyan_visitor: "viewer_gravatar",
 			},
+			headers: {
+				referer: "http://localhost:4321/post:gravatar",
+			},
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -449,6 +616,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			cookies: {
 				qingyan_visitor: "viewer_verified_badge",
 			},
+			headers: {
+				referer: "http://localhost:4321/post:verified-badge",
+			},
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -474,6 +644,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
 			cookies: {
 				qingyan_visitor: "viewer_verified_badge",
+			},
+			headers: {
+				referer: "http://localhost:4321/post:verified-badge",
 			},
 		});
 
@@ -511,6 +684,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const publicResponse = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+			headers: {
+				referer: "http://localhost:4321/post:viewer-state",
+			},
 		});
 		expect(publicResponse.statusCode).toBe(200);
 		expect(publicResponse.json().viewer).toEqual({});
@@ -521,6 +697,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
 			cookies: {
 				qingyan_admin: adminCookie.value,
+			},
+			headers: {
+				referer: "http://localhost:4321/post:viewer-state",
 			},
 		});
 
@@ -539,10 +718,26 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:always",
+			pageTitle: "Always",
+			pageUrl: "/post:always",
+		});
 
 		const response = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:always&pageTitle=Always&pageUrl=https://fangyuan.example.com/posts/always/",
+			headers: {
+				referer: "http://localhost:4321/post:always",
+			},
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -556,21 +751,20 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(response.json().captcha.challenge.challengeId).toMatch(/^cap_/);
 	});
 
-	it("accepts path-only pageUrl in bootstrap requests and stores the normalized path", async () => {
+	it("accepts legacy path-only pageUrl in bootstrap requests without storing unknown pages", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const response = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:path-only-bootstrap&pageTitle=Path%20Only&pageUrl=%2Fposts%2Fpath-only-bootstrap%2F",
+			headers: {
+				referer: "http://localhost:4321/post:path-only-bootstrap",
+			},
 		});
 
 		expect(response.statusCode).toBe(200);
-
-		const [pageThread] = await fixture.app.db
-			.select()
-			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:path-only-bootstrap"));
-		expect(pageThread?.pageUrl).toBe("/posts/path-only-bootstrap/");
+		expect(response.json().thread.pageKey).toBe("post:path-only-bootstrap");
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
 });

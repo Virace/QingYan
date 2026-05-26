@@ -12,6 +12,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -63,6 +69,7 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		const firstVote = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/c_vote_target/vote",
+			headers: refererFor("post:vote"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:vote",
@@ -86,6 +93,7 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:vote"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:vote",
@@ -147,6 +155,7 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		const blockedVote = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/c_vote_captcha/vote",
+			headers: refererFor("post:vote-captcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:vote-captcha",
@@ -163,6 +172,7 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:vote-captcha",
+			headers: refererFor("post:vote-captcha"),
 		});
 		const visitorCookie = stateResponse.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -188,6 +198,7 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:vote-captcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:vote-captcha",

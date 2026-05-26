@@ -4,6 +4,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -24,14 +30,30 @@ describe("global flood guard", () => {
 		const url =
 			"/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:flood";
 
-		expect((await fixture.app.inject({ method: "GET", url })).statusCode).toBe(
-			200,
-		);
-		expect((await fixture.app.inject({ method: "GET", url })).statusCode).toBe(
-			200,
-		);
+		expect(
+			(
+				await fixture.app.inject({
+					method: "GET",
+					url,
+					headers: refererFor("post:flood"),
+				})
+			).statusCode,
+		).toBe(200);
+		expect(
+			(
+				await fixture.app.inject({
+					method: "GET",
+					url,
+					headers: refererFor("post:flood"),
+				})
+			).statusCode,
+		).toBe(200);
 
-		const blocked = await fixture.app.inject({ method: "GET", url });
+		const blocked = await fixture.app.inject({
+			method: "GET",
+			url,
+			headers: refererFor("post:flood"),
+		});
 
 		expect(blocked.statusCode).toBe(429);
 		expect(blocked.json()).toMatchObject({

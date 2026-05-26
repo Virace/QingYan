@@ -27,6 +27,22 @@ import {
 	devStateQuerySchema,
 } from "./schemas";
 
+function requireLegacyPageKey(pageKey?: string): string {
+	if (!pageKey) {
+		throw new Error("Dev memory routes require pageKey.");
+	}
+
+	return pageKey;
+}
+
+function requireLegacyPageUrl(pageUrl?: string): string {
+	if (!pageUrl) {
+		throw new Error("Dev memory routes require pageUrl.");
+	}
+
+	return pageUrl;
+}
+
 export function createDevMemoryRoutes(input: {
 	devMockService: DevMockService;
 	runtimeOptions: AppRuntimeOptions;
@@ -118,6 +134,7 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.getBootstrap({
 					...parsed,
+					pageKey: requireLegacyPageKey(parsed.pageKey),
 					visitorKey: request.context?.visitor?.key,
 				}),
 			);
@@ -129,6 +146,7 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.getThread({
 					...parsed,
+					pageKey: requireLegacyPageKey(parsed.pageKey),
 					pageTitle: undefined,
 					pageUrl: undefined,
 					visitorKey: request.context?.visitor?.key,
@@ -144,9 +162,9 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.createComment({
 					siteKey: parsed.siteKey,
-					pageKey: parsed.pageKey,
+					pageKey: requireLegacyPageKey(parsed.pageKey),
 					pageTitle: parsed.pageTitle,
-					pageUrl: parsed.pageUrl,
+					pageUrl: requireLegacyPageUrl(parsed.pageUrl),
 					parentCommentId: parsed.parentCommentId,
 					author: parsed.author,
 					contentRaw: parsed.content.raw,
@@ -165,7 +183,7 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.castVote({
 					siteKey: body.siteKey,
-					pageKey: body.pageKey,
+					pageKey: requireLegacyPageKey(body.pageKey),
 					commentId: params.commentId,
 					choice: body.choice,
 					captcha: body.captcha,
@@ -182,6 +200,7 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.getCaptchaState({
 					...parsed,
+					pageKey: requireLegacyPageKey(parsed.pageKey),
 					visitorKey: request.context?.visitor?.key,
 				}),
 			);
@@ -195,6 +214,7 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.refreshCaptcha({
 					...parsed,
+					pageKey: requireLegacyPageKey(parsed.pageKey),
 					visitorKey: request.context?.visitor?.key,
 				}),
 			);
@@ -206,7 +226,7 @@ export function createDevMemoryRoutes(input: {
 			);
 			const result = await input.devMockService.verifyCaptcha({
 				siteKey: parsed.siteKey,
-				pageKey: parsed.pageKey,
+				pageKey: requireLegacyPageKey(parsed.pageKey),
 				challengeId: parsed.challengeId,
 				value: parsed.value,
 				visitorKey: request.context?.visitor?.key,
@@ -220,6 +240,8 @@ export function createDevMemoryRoutes(input: {
 				reply,
 				await input.devMockService.likePage({
 					...parsed,
+					pageKey: requireLegacyPageKey(parsed.pageKey),
+					pageUrl: requireLegacyPageUrl(parsed.pageUrl),
 					visitorKey: request.context?.visitor?.key,
 				}),
 			);

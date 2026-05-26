@@ -9,6 +9,23 @@ import { pageLikeBodySchema } from "./schemas";
 import { PageFeedbackService } from "./service";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { qingyanCookiePath } from "../../config/public-path";
+import { resolvePublicPageContext } from "../shared/page-context";
+
+function requireLegacyPageKey(pageKey?: string): string {
+	if (!pageKey) {
+		throw new InvalidRequestError();
+	}
+
+	return pageKey;
+}
+
+function requireLegacyPageUrl(pageUrl?: string): string {
+	if (!pageUrl) {
+		throw new InvalidRequestError();
+	}
+
+	return pageUrl;
+}
 
 export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	const visitorCookiePath = qingyanCookiePath(fastify.config.server.publicPath);
@@ -40,10 +57,11 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.likePage({
 				...parsed.data,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageUrl: requireLegacyPageUrl(parsed.data.pageUrl),
 				visitorKey: request.context?.visitor?.key,
 			});
 			if (result.visitorKey) {
@@ -57,8 +75,15 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+			pageTitle: parsed.data.pageTitle,
+		});
 		const result = await service.likePage({
 			...parsed.data,
+			...pageContext,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,

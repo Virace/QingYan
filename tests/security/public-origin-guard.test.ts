@@ -42,6 +42,12 @@ function commentPayload(pageKey = "post:origin-guard") {
 	};
 }
 
+function refererFor(pageKey: string, origin = "http://localhost:4321") {
+	return {
+		referer: `${origin}/${pageKey}`,
+	};
+}
+
 describe("public origin guard", () => {
 	it("answers CORS preflight for a configured frontend origin", async () => {
 		const fixture = await createTestApp({
@@ -84,6 +90,7 @@ describe("public origin guard", () => {
 			url: "/qingyan/api/comments",
 			headers: {
 				origin: "http://localhost:4321",
+				...refererFor("post:allowed-origin"),
 			},
 			payload: commentPayload("post:allowed-origin"),
 		});
@@ -116,6 +123,7 @@ describe("public origin guard", () => {
 			url: "/qingyan/api/comments",
 			headers: {
 				origin: "http://localhost:4321",
+				...refererFor("post:old-origin"),
 			},
 			payload: commentPayload("post:old-origin"),
 		});
@@ -126,6 +134,7 @@ describe("public origin guard", () => {
 			url: "/qingyan/api/comments",
 			headers: {
 				origin: "https://new.example.com",
+				...refererFor("post:new-origin", "https://new.example.com"),
 			},
 			payload: commentPayload("post:new-origin"),
 		});
@@ -143,6 +152,7 @@ describe("public origin guard", () => {
 			url: "/qingyan/api/comments",
 			headers: {
 				origin: "https://evil.example",
+				...refererFor("post:blocked-origin", "https://evil.example"),
 			},
 			payload: commentPayload("post:blocked-origin"),
 		});
@@ -164,6 +174,7 @@ describe("public origin guard", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
+			headers: refererFor("post:missing-origin"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:missing-origin",
@@ -189,6 +200,7 @@ describe("public origin guard", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
+			headers: refererFor("post:missing-origin-opt-out"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:missing-origin-opt-out",
@@ -217,6 +229,7 @@ describe("public origin guard", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
+			headers: refererFor("post:runtime-missing-origin"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:runtime-missing-origin",

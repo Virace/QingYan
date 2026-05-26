@@ -25,6 +25,9 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		const firstLike = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:like",
@@ -51,6 +54,9 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: {
+				referer: "http://localhost:4321/post:like",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:like",
@@ -67,6 +73,36 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		});
 	});
 
+	it("creates page threads from Referer when legacy like payload identity is stale", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/lol_voice_collation.html",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "lol_voice_collation",
+				pageTitle: "Like HTML Page",
+				pageUrl: "https://x-item.com/lol_voice_collation.html",
+			},
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			pageKey: "lol_voice_collation.html",
+			pageUrl: "/lol_voice_collation.html",
+			pageTitle: "Like HTML Page",
+			pageLikeCount: 1,
+		});
+	});
+
 	it("accepts captcha payload inline when retrying page like", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -77,6 +113,9 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		const blockedLike = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like-threshold",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:like-threshold",
@@ -93,6 +132,9 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		const captchaState = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:like-threshold",
+			headers: {
+				referer: "http://localhost:4321/post:like-threshold",
+			},
 		});
 		expect(captchaState.statusCode).toBe(200);
 		const visitorCookie = captchaState.cookies.find(
@@ -119,6 +161,9 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			url: "/qingyan/api/page-feedback/like",
 			cookies: {
 				qingyan_visitor: cookieValue,
+			},
+			headers: {
+				referer: "http://localhost:4321/post:like-threshold",
 			},
 			payload: {
 				siteKey: "fangyuan",

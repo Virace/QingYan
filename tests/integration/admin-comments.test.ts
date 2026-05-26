@@ -337,6 +337,9 @@ describe("admin comments", () => {
 		const publicThread = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:moderation-statuses",
+			headers: {
+				referer: "http://localhost:4321/post:moderation-statuses",
+			},
 		});
 		expect(publicThread.statusCode).toBe(200);
 		expect(publicThread.json().comments).toEqual([]);

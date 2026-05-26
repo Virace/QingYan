@@ -14,6 +14,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 function readAppJsonl(logsDirectory: string): string {
 	const today = new Date().toISOString().slice(0, 10);
 	return readFileSync(
@@ -89,6 +95,7 @@ describe("logging business events", () => {
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:logging-events",
 			headers: {
+				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_state",
 			},
 		});
@@ -103,6 +110,7 @@ describe("logging business events", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			headers: {
+				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_failed",
 			},
 			cookies: {
@@ -136,6 +144,7 @@ describe("logging business events", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			headers: {
+				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_verified",
 			},
 			cookies: {
@@ -155,6 +164,7 @@ describe("logging business events", () => {
 			method: "POST",
 			url: "/qingyan/api/comments",
 			headers: {
+				...refererFor("post:logging-events"),
 				"x-request-id": "req_comment_created",
 			},
 			cookies: {

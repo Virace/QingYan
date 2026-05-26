@@ -174,9 +174,7 @@ function classifyItem(input: {
 		case "unverified":
 			return "unverified";
 		case "skipped":
-			return input.pageKey.source === "explicit_mapping"
-				? "ready"
-				: "unverified";
+			return "unverified";
 	}
 }
 

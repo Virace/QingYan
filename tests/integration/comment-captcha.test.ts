@@ -8,6 +8,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -22,6 +28,7 @@ describe("comment captcha", () => {
 		const response = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:threshold-idle",
+			headers: refererFor("post:threshold-idle"),
 		});
 
 		expect(response.statusCode).toBe(200);
@@ -44,6 +51,7 @@ describe("comment captcha", () => {
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha",
 			headers: {
+				...refererFor("post:captcha"),
 				"user-agent": "captcha-test",
 			},
 		});
@@ -76,6 +84,7 @@ describe("comment captcha", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:captcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:captcha",
@@ -97,6 +106,7 @@ describe("comment captcha", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:captcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:captcha",
@@ -122,6 +132,7 @@ describe("comment captcha", () => {
 		const initialState = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
+			headers: refererFor("post:captcha-refresh"),
 		});
 		expect(initialState.statusCode).toBe(200);
 
@@ -157,6 +168,7 @@ describe("comment captcha", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:captcha-refresh"),
 		});
 		expect(repeatedState.statusCode).toBe(200);
 		expect(repeatedState.json().challenge).toEqual(initialChallenge);
@@ -167,6 +179,7 @@ describe("comment captcha", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:captcha-refresh"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:captcha-refresh",
@@ -208,6 +221,7 @@ describe("comment captcha", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:captcha-refresh"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:captcha-refresh",
@@ -229,6 +243,7 @@ describe("comment captcha", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:captcha-refresh"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:captcha-refresh",

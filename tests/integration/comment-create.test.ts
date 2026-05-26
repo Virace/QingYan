@@ -12,6 +12,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -29,6 +35,7 @@ describe("POST /qingyan/api/comments", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: refererFor("post:dangerous-website"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:dangerous-website",
@@ -67,6 +74,7 @@ describe("POST /qingyan/api/comments", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: refererFor("post:create-comment-no-captcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:create-comment-no-captcha",
@@ -104,6 +112,7 @@ describe("POST /qingyan/api/comments", () => {
 		const blocked = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: refererFor("post:create-comment"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:create-comment",
@@ -132,6 +141,7 @@ describe("POST /qingyan/api/comments", () => {
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:create-comment",
+			headers: refererFor("post:create-comment"),
 		});
 		const visitorCookie = stateResponse.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -157,6 +167,7 @@ describe("POST /qingyan/api/comments", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:create-comment"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:create-comment",
@@ -203,7 +214,7 @@ describe("POST /qingyan/api/comments", () => {
 			.where(eq(pageThreads.pageKey, "post:create-comment"));
 		expect(thread?.commentCount).toBe(1);
 		expect(thread?.rootCommentCount).toBe(1);
-		expect(thread?.pageUrl).toBe("/posts/create-comment/");
+		expect(thread?.pageUrl).toBe("/post:create-comment");
 	});
 
 	it("accepts path-only pageUrl input and stores the normalized path", async () => {
@@ -216,6 +227,7 @@ describe("POST /qingyan/api/comments", () => {
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: refererFor("post:path-only-comment"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:path-only-comment",
@@ -241,7 +253,7 @@ describe("POST /qingyan/api/comments", () => {
 			.select()
 			.from(pageThreads)
 			.where(eq(pageThreads.pageKey, "post:path-only-comment"));
-		expect(thread?.pageUrl).toBe("/posts/path-only-comment/");
+		expect(thread?.pageUrl).toBe("/post:path-only-comment");
 	});
 
 	it("stores request ip and user agent without exposing them in the public response", async () => {
@@ -259,6 +271,7 @@ describe("POST /qingyan/api/comments", () => {
 			method: "POST",
 			url: "/qingyan/api/comments",
 			headers: {
+				...refererFor("post:request-metadata"),
 				"user-agent": "Mozilla/5.0 metadata-test",
 				"x-forwarded-for": "203.0.113.8",
 			},
@@ -314,6 +327,7 @@ describe("POST /qingyan/api/comments", () => {
 			method: "POST",
 			url: "/qingyan/api/comments",
 			headers: {
+				...refererFor("post:request-metadata-disabled"),
 				"user-agent": "Mozilla/5.0 disabled-metadata-test",
 				"x-forwarded-for": "203.0.113.9",
 			},
@@ -366,6 +380,7 @@ describe("POST /qingyan/api/comments", () => {
 			method: "POST",
 			url: "/qingyan/api/comments",
 			headers: {
+				...refererFor("post:runtime-metadata-disabled"),
 				"user-agent": "Mozilla/5.0 runtime-disabled-metadata-test",
 				"x-forwarded-for": "203.0.113.42",
 			},
@@ -426,6 +441,7 @@ describe("POST /qingyan/api/comments", () => {
 			method: "POST",
 			url: "/qingyan/api/comments",
 			headers: {
+				...refererFor("post:missing-region-db"),
 				"user-agent": "Mozilla/5.0 metadata-test",
 				"x-forwarded-for": "203.0.113.10",
 			},
@@ -470,6 +486,7 @@ describe("POST /qingyan/api/comments", () => {
 		const first = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: refererFor("post:threshold-comment"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:threshold-comment",
@@ -499,6 +516,7 @@ describe("POST /qingyan/api/comments", () => {
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
+			headers: refererFor("post:threshold-comment"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:threshold-comment",
@@ -566,6 +584,7 @@ describe("POST /qingyan/api/comments", () => {
 				await fixture.app.inject({
 					method: "POST",
 					url: "/qingyan/api/comments",
+					headers: refererFor("post:auto-blacklist"),
 					payload: makePayload("1"),
 				})
 			).statusCode,
@@ -575,6 +594,7 @@ describe("POST /qingyan/api/comments", () => {
 				await fixture.app.inject({
 					method: "POST",
 					url: "/qingyan/api/comments",
+					headers: refererFor("post:auto-blacklist"),
 					payload: makePayload("2"),
 				})
 			).statusCode,
@@ -584,6 +604,7 @@ describe("POST /qingyan/api/comments", () => {
 				await fixture.app.inject({
 					method: "POST",
 					url: "/qingyan/api/comments",
+					headers: refererFor("post:auto-blacklist"),
 					payload: makePayload("3"),
 				})
 			).statusCode,
@@ -592,6 +613,7 @@ describe("POST /qingyan/api/comments", () => {
 		const blocked = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			headers: refererFor("post:auto-blacklist"),
 			payload: makePayload("4"),
 		});
 

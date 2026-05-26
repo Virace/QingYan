@@ -7,6 +7,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -29,6 +35,7 @@ describe("logging system", () => {
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging",
+			headers: refererFor("post:logging"),
 		});
 
 		expect(bootstrap.statusCode).toBe(200);
@@ -60,6 +67,7 @@ describe("logging system", () => {
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging-access",
+			headers: refererFor("post:logging-access"),
 		});
 
 		expect(bootstrap.statusCode).toBe(200);

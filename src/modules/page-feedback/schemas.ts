@@ -4,8 +4,8 @@ import { inlineCaptchaPayloadSchema } from "../comments/schemas";
 
 export const pageLikeBodySchema = z.object({
 	siteKey: z.string().min(1),
-	pageKey: z.string().min(1),
+	pageKey: z.string().min(1).optional(),
 	pageTitle: z.string().min(1),
-	pageUrl: pageUrlInputSchema,
+	pageUrl: pageUrlInputSchema.optional(),
 	captcha: inlineCaptchaPayloadSchema.optional().nullable(),
 });

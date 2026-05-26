@@ -213,6 +213,21 @@ export class CommentsRepository {
 		return thread;
 	}
 
+	public async getPageThread(input: { siteId: number; pageKey: string }) {
+		const [thread] = await this.db
+			.select()
+			.from(pageThreads)
+			.where(
+				and(
+					eq(pageThreads.siteId, input.siteId),
+					eq(pageThreads.pageKey, input.pageKey),
+				),
+			)
+			.limit(1);
+
+		return thread;
+	}
+
 	public async recordPageView(input: {
 		pageThreadId: number;
 		visitorId: number;

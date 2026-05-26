@@ -24,6 +24,23 @@ import { AdminSessionService } from "../admin/session-service";
 import { qingyanCookiePath } from "../../config/public-path";
 import { ModerationService } from "./moderation-service";
 import { AkismetClient } from "./akismet-client";
+import { resolvePublicPageContext } from "../shared/page-context";
+
+function requireLegacyPageKey(pageKey?: string): string {
+	if (!pageKey) {
+		throw new InvalidRequestError();
+	}
+
+	return pageKey;
+}
+
+function requireLegacyPageUrl(pageUrl?: string): string {
+	if (!pageUrl) {
+		throw new InvalidRequestError();
+	}
+
+	return pageUrl;
+}
 
 export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	const visitorCookiePath = qingyanCookiePath(fastify.config.server.publicPath);
@@ -80,10 +97,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.getBootstrap({
 				...parsed.data,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
 				visitorKey: request.context?.visitor?.key,
 			});
 			if (result.visitorKey) {
@@ -97,9 +114,16 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+			pageTitle: parsed.data.pageTitle,
+		});
 		const adminSession = await adminSessionService.getOptionalSession(request);
 		const result = await readService.getBootstrap({
 			...parsed.data,
+			...pageContext,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
@@ -117,7 +141,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			capability: result.capability,
 			commentForm: result.commentForm,
 			thread: {
-				siteKey: parsed.data.siteKey,
+				siteKey: pageContext.siteKey,
 				pageKey: result.thread.pageKey,
 				pageTitle: result.thread.pageTitle,
 			},
@@ -141,10 +165,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.getThread({
 				...parsed.data,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
 				pageTitle: undefined,
 				pageUrl: undefined,
 				visitorKey: request.context?.visitor?.key,
@@ -160,8 +184,14 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+		});
 		const result = await readService.getThread({
 			...parsed.data,
+			...pageContext,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
@@ -176,7 +206,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 
 		return {
 			thread: {
-				siteKey: parsed.data.siteKey,
+				siteKey: pageContext.siteKey,
 				pageKey: result.thread.pageKey,
 				pageTitle: result.thread.pageTitle,
 			},
@@ -196,13 +226,12 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.createComment({
 				siteKey: parsed.data.siteKey,
-				pageKey: parsed.data.pageKey,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
 				pageTitle: parsed.data.pageTitle,
-				pageUrl: parsed.data.pageUrl,
+				pageUrl: requireLegacyPageUrl(parsed.data.pageUrl),
 				parentCommentId: parsed.data.parentCommentId,
 				author: parsed.data.author,
 				contentRaw: parsed.data.content.raw,
@@ -220,12 +249,18 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+			pageTitle: parsed.data.pageTitle,
+		});
 		const adminSession = await adminSessionService.getOptionalSession(request);
 		const result = await writeService.createComment({
-			siteKey: parsed.data.siteKey,
-			pageKey: parsed.data.pageKey,
+			siteKey: pageContext.siteKey,
+			pageKey: pageContext.pageKey,
 			pageTitle: parsed.data.pageTitle,
-			pageUrl: parsed.data.pageUrl,
+			pageUrl: pageContext.pageUrl,
 			parentCommentId: parsed.data.parentCommentId,
 			author: parsed.data.author,
 			contentRaw: parsed.data.content.raw,
@@ -261,11 +296,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				],
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsedBody.data.siteKey)) {
 			const result = await fastify.devMockService.castVote({
 				siteKey: parsedBody.data.siteKey,
-				pageKey: parsedBody.data.pageKey,
+				pageKey: requireLegacyPageKey(parsedBody.data.pageKey),
 				commentId: parsedParams.data.commentId,
 				choice: parsedBody.data.choice,
 				captcha: parsedBody.data.captcha,
@@ -282,10 +316,15 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsedBody.data.siteKey,
+		});
 		const result = await writeService.castVote({
 			commentId: parsedParams.data.commentId,
-			siteKey: parsedBody.data.siteKey,
-			pageKey: parsedBody.data.pageKey,
+			siteKey: pageContext.siteKey,
+			pageKey: pageContext.pageKey,
 			choice: parsedBody.data.choice,
 			captcha: parsedBody.data.captcha,
 			requestId: request.context?.requestId,
@@ -316,10 +355,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.getCaptchaState({
 				...parsed.data,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
 				visitorKey: request.context?.visitor?.key,
 			});
 			if (result.visitorKey) {
@@ -333,8 +372,15 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+			pageTitle: parsed.data.pageTitle,
+		});
 		const result = await captchaService.getState({
 			...parsed.data,
+			...pageContext,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
@@ -363,10 +409,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.refreshCaptcha({
 				...parsed.data,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
 				visitorKey: request.context?.visitor?.key,
 			});
 			if (result.visitorKey) {
@@ -380,8 +426,15 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+			pageTitle: parsed.data.pageTitle,
+		});
 		const result = await captchaService.refreshState({
 			...parsed.data,
+			...pageContext,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
@@ -410,11 +463,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.verifyCaptcha({
 				siteKey: parsed.data.siteKey,
-				pageKey: parsed.data.pageKey,
+				pageKey: requireLegacyPageKey(parsed.data.pageKey),
 				challengeId: parsed.data.challengeId,
 				value: parsed.data.value,
 				visitorKey: request.context?.visitor?.key,
@@ -422,8 +474,14 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			return result.body;
 		}
 
+		const pageContext = resolvePublicPageContext({
+			siteRegistry: fastify.siteRegistry,
+			request,
+			siteKey: parsed.data.siteKey,
+		});
 		return captchaService.verify({
 			...parsed.data,
+			...pageContext,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
@@ -431,7 +489,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			checkRateLimit: async (identityKey) => {
 				const rule = await fastify.security.getRateLimitRule("captchaVerify");
 				const snapshot = fastify.security.peekRateLimit({
-					key: `public:${parsed.data.siteKey}:${identityKey}:captcha_verify`,
+					key: `public:${pageContext.siteKey}:${identityKey}:captcha_verify`,
 					rule,
 				});
 				if (snapshot.limit !== null && snapshot.count >= snapshot.limit) {
@@ -447,7 +505,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			},
 			consumeRateLimit: async (identityKey) => {
 				await fastify.security.consumeRateLimit({
-					key: `public:${parsed.data.siteKey}:${identityKey}:captcha_verify`,
+					key: `public:${pageContext.siteKey}:${identityKey}:captcha_verify`,
 					rule: await fastify.security.getRateLimitRule("captchaVerify"),
 					errorCode: "COMMENT_RATE_LIMITED",
 					errorMessage: "验证码尝试次数过多，请稍后再试。",
