@@ -4,6 +4,7 @@ import type { AppDatabase, SqliteClient } from "../db/client";
 import type { LoggerManager } from "../logging/logger-manager";
 import type { AdminBootstrap } from "../modules/admin/bootstrap-service";
 import type { DevMockService } from "../modules/dev/mock-service";
+import type { AkismetClient } from "../modules/comments/akismet-client";
 import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
 import type { SiteRegistry } from "../modules/shared/site-registry";
@@ -37,6 +38,7 @@ declare module "fastify" {
 		sqlite: SqliteClient;
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
+		akismetClient?: Pick<AkismetClient, "commentCheck">;
 		devMockService?: DevMockService;
 	}
 

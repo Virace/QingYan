@@ -153,7 +153,8 @@ Query：
 {
   siteKey?: string;
   pageKey?: string;
-  status?: "pending" | "approved";
+  status?: "pending" | "approved" | "spam" | "trash";
+  statusGroup?: "hidden"; // spam + trash，用于后台“垃圾与回收站”合并视图
   search?: string;
   limit?: number;  // default 20, max 100
   offset?: number; // default 0
@@ -179,7 +180,7 @@ Query：
 {
   id: string;
   parentId: string | null;
-  status: "pending" | "approved";
+  status: "pending" | "approved" | "spam" | "trash";
   authorName: string;
   authorEmail: string | null;
   authorIp: string | null;
@@ -210,7 +211,7 @@ Query：
 
 ```ts
 {
-  status?: "pending" | "approved";
+  status?: "pending" | "approved" | "spam" | "trash";
   isPinned?: boolean;
   isFolded?: boolean;
   contentRaw?: string;
@@ -475,6 +476,15 @@ Query：
   comments: {
     enabled: boolean;
     defaultStatus: "pending" | "approved";
+    moderation: {
+      mode: "none" | "akismet_auto" | "manual_with_akismet" | "manual";
+      provider: "none" | "akismet";
+      akismet: {
+        blogUrl?: string;
+        failPolicy: "pending";
+        discardBlatantSpam: boolean;
+      };
+    };
     identity: {
       allow: Array<"nickname" | "email" | "website">;
       require: Array<"nickname" | "email" | "website">;
@@ -583,6 +593,15 @@ AdminSettings
   comments: {
     enabled: boolean;
     defaultStatus: "pending" | "approved";
+    moderation: {
+      mode: "none" | "akismet_auto" | "manual_with_akismet" | "manual";
+      provider: "none" | "akismet";
+      akismet: {
+        blogUrl?: string;
+        failPolicy: "pending";
+        discardBlatantSpam: boolean;
+      };
+    };
     maxDepth: number;
     rootLimit: number;
     identity: {
@@ -742,6 +761,12 @@ AdminSystemSettings
     gravatar: {
       enabled: boolean;
       baseUrl: string;
+    };
+  };
+  antiSpam: {
+    akismet: {
+      apiKey?: string;
+      apiKeyConfigured: boolean;
     };
   };
 }

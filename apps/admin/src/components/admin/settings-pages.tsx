@@ -275,6 +275,63 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							<option value="approved">直接通过</option>
 						</select>
 					</Field>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">评论审核</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="审核模式">
+								<select
+									className={inputClass}
+									value={draft.comments.moderation.mode}
+									onChange={(event) => {
+										const mode = event.target
+											.value as AdminSettings["comments"]["moderation"]["mode"];
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												moderation: {
+													...draft.comments.moderation,
+													mode,
+													provider:
+														mode === "akismet_auto" ||
+														mode === "manual_with_akismet"
+															? "akismet"
+															: "none",
+												},
+											},
+										});
+									}}
+								>
+									<option value="manual">纯手动审核</option>
+									<option value="none">不审核，直接通过</option>
+									<option value="akismet_auto">Akismet 自动审核</option>
+									<option value="manual_with_akismet">
+										手动审核 + Akismet 辅助
+									</option>
+								</select>
+							</Field>
+							<Field label="Akismet Blog URL">
+								<Input
+									value={draft.comments.moderation.akismet.blogUrl ?? ""}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												moderation: {
+													...draft.comments.moderation,
+													akismet: {
+														...draft.comments.moderation.akismet,
+														blogUrl: event.target.value || undefined,
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
+					</div>
 					<Field label="验证码模式">
 						<select
 							className={inputClass}
@@ -854,6 +911,9 @@ function withoutEmptySecrets(
 	}
 	if (next.captcha.geetest.captchaKey === "") {
 		delete next.captcha.geetest.captchaKey;
+	}
+	if (next.antiSpam.akismet.apiKey === "") {
+		delete next.antiSpam.akismet.apiKey;
 	}
 
 	return next;
@@ -1586,6 +1646,33 @@ export function SystemSettingsPage() {
 								</Field>
 							</div>
 						) : null}
+					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">反垃圾服务</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="Akismet API Key">
+								<Input
+									type="password"
+									autoComplete="new-password"
+									placeholder={secretPlaceholder(
+										draft.antiSpam.akismet.apiKeyConfigured,
+									)}
+									value={draft.antiSpam.akismet.apiKey ?? ""}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											antiSpam: {
+												...draft.antiSpam,
+												akismet: {
+													...draft.antiSpam.akismet,
+													apiKey: event.target.value,
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
 					</div>
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
 						<p className="text-sm font-medium">IP 数据库</p>

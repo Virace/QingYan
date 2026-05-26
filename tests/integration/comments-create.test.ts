@@ -6,8 +6,16 @@ import { eq } from "drizzle-orm";
 
 import { buildApp } from "../../src/app";
 import { createDatabaseClients } from "../../src/db/client";
-import { comments, siteSettings, sites } from "../../src/db/schema";
+import {
+	commentModeration,
+	comments,
+	siteSettings,
+	sites,
+	systemSettings,
+} from "../../src/db/schema";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
+import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
 import { loginAsAdmin } from "../support/admin-login";
 import {
 	applyInitialMigration,
@@ -27,6 +35,8 @@ afterEach(async () => {
 async function createCustomTestApp(options?: {
 	require?: Array<"nickname" | "email" | "website">;
 	allowWebsite?: boolean;
+	moderation?: ReturnType<typeof serializeSiteModerationSettings>;
+	akismetVerdict?: AkismetReviewResult["verdict"];
 }) {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), "qingyan-comments-create-"),
@@ -53,13 +63,30 @@ async function createCustomTestApp(options?: {
 					options?.require ?? ["nickname", "email"],
 				),
 				allowWebsite: options?.allowWebsite ?? true,
+				moderationJson: options?.moderation,
 			})
 			.where(eq(siteSettings.siteId, site.id));
+		if (options?.akismetVerdict) {
+			await db.insert(systemSettings).values({
+				category: "antiSpam",
+				key: "akismet.apiKey",
+				valueJson: JSON.stringify("akismet-test-key"),
+			});
+		}
 	} finally {
 		sqlite.close();
 	}
 
-	const app = await buildApp(config);
+	const app = await buildApp(config, undefined, {
+		akismetClient: options?.akismetVerdict
+			? {
+					commentCheck: async () => ({
+						verdict: options.akismetVerdict ?? "ham",
+						checkedAt: "2026-05-26T10:00:00.000Z",
+					}),
+				}
+			: undefined,
+	});
 
 	return {
 		app,
@@ -102,6 +129,121 @@ describe("POST /qingyan/api/comments", () => {
 				code: "COMMENT_VALIDATION_FAILED",
 			},
 		});
+	});
+
+	it("applies moderation modes when creating visitor comments", async () => {
+		const cases = [
+			{
+				name: "none",
+				moderation: serializeSiteModerationSettings({
+					mode: "none",
+					provider: "none",
+					akismet: {
+						failPolicy: "pending",
+						discardBlatantSpam: false,
+					},
+				}),
+				expectedStoredStatus: "approved",
+				expectedPublicStatus: "approved",
+			},
+			{
+				name: "manual",
+				moderation: serializeSiteModerationSettings({
+					mode: "manual",
+					provider: "none",
+					akismet: {
+						failPolicy: "pending",
+						discardBlatantSpam: false,
+					},
+				}),
+				expectedStoredStatus: "pending",
+				expectedPublicStatus: "pending",
+			},
+			{
+				name: "manual_with_akismet_spam",
+				moderation: serializeSiteModerationSettings({
+					mode: "manual_with_akismet",
+					provider: "akismet",
+					akismet: {
+						failPolicy: "pending",
+						discardBlatantSpam: false,
+					},
+				}),
+				akismetVerdict: "spam" as const,
+				expectedStoredStatus: "spam",
+				expectedPublicStatus: "pending",
+			},
+			{
+				name: "akismet_auto_ham",
+				moderation: serializeSiteModerationSettings({
+					mode: "akismet_auto",
+					provider: "akismet",
+					akismet: {
+						failPolicy: "pending",
+						discardBlatantSpam: false,
+					},
+				}),
+				akismetVerdict: "ham" as const,
+				expectedStoredStatus: "approved",
+				expectedPublicStatus: "approved",
+			},
+		];
+
+		for (const testCase of cases) {
+			const fixture = await createCustomTestApp({
+				moderation: testCase.moderation,
+				akismetVerdict: testCase.akismetVerdict,
+			});
+			cleanups.push(fixture.cleanup);
+
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/comments",
+				headers: {
+					"x-forwarded-for": "203.0.113.10",
+				},
+				payload: {
+					siteKey: "fangyuan",
+					pageKey: `post:${testCase.name}`,
+					pageTitle: testCase.name,
+					pageUrl: `https://fangyuan.example.com/posts/${testCase.name}/`,
+					parentCommentId: null,
+					author: {
+						name: "Alice",
+						email: "alice@example.com",
+					},
+					content: {
+						raw: `comment ${testCase.name}`,
+					},
+					options: {
+						notifyOnReply: false,
+					},
+				},
+			});
+
+			expect(response.statusCode).toBe(200);
+			expect(response.json()).toMatchObject({
+				comment: {
+					status: testCase.expectedPublicStatus,
+				},
+			});
+
+			const [createdComment] = await fixture.app.db
+				.select()
+				.from(comments)
+				.where(eq(comments.contentRaw, `comment ${testCase.name}`))
+				.limit(1);
+			expect(createdComment?.status).toBe(testCase.expectedStoredStatus);
+
+			const [moderation] = await fixture.app.db
+				.select()
+				.from(commentModeration)
+				.where(eq(commentModeration.commentId, createdComment?.id ?? ""))
+				.limit(1);
+			expect(moderation).toMatchObject({
+				status: testCase.expectedStoredStatus,
+			});
+		}
 	});
 
 	it("accepts fully anonymous comments when no identity field is required", async () => {

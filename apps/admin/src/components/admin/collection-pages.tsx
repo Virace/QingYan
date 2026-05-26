@@ -12,6 +12,7 @@ import {
 	listUsers,
 	listVisitors,
 	replyToComment,
+	type CommentStatus,
 	updateComment,
 	updateSite,
 } from "@/api/admin";
@@ -71,6 +72,7 @@ function ResourceFilters({
 					<option value="">全部状态</option>
 					<option value="pending">待审</option>
 					<option value="approved">已通过</option>
+					<option value="hidden">垃圾与回收站</option>
 				</select>
 			) : null}
 			{setLimit ? (
@@ -101,16 +103,33 @@ export function CommentsPage({
 }) {
 	const queryClient = useQueryClient();
 	const [status, setStatus] = useState("");
+	const [hiddenStatus, setHiddenStatus] = useState("");
 	const [limit, setLimit] = useState(20);
 	const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 	const commentsQuery = useQuery({
-		queryKey: ["admin", "comments", siteKey, search, pageKey, status, limit],
+		queryKey: [
+			"admin",
+			"comments",
+			siteKey,
+			search,
+			pageKey,
+			status,
+			hiddenStatus,
+			limit,
+		],
 		queryFn: () =>
 			listComments({
 				siteKey,
 				pageKey,
 				search,
-				status: status || undefined,
+				status:
+					status === "hidden"
+						? ((hiddenStatus || undefined) as "spam" | "trash" | undefined)
+						: status === "pending" || status === "approved"
+							? status
+							: undefined,
+				statusGroup:
+					status === "hidden" && !hiddenStatus ? "hidden" : undefined,
 				limit,
 				offset: 0,
 			}),
@@ -118,7 +137,7 @@ export function CommentsPage({
 	const updateMutation = useMutation({
 		mutationFn: (input: {
 			id: string;
-			status?: "pending" | "approved";
+			status?: CommentStatus;
 			isPinned?: boolean;
 			isFolded?: boolean;
 		}) => updateComment(input.id, input),
@@ -185,12 +204,37 @@ export function CommentsPage({
 					search={search}
 					setSearch={setSearch}
 					status={status}
-					setStatus={setStatus}
+					setStatus={(value) => {
+						setStatus(value);
+						if (value !== "hidden") {
+							setHiddenStatus("");
+						}
+					}}
 					pageKey={pageKey}
 					setPageKey={setPageKey}
 					limit={limit}
 					setLimit={setLimit}
 				/>
+				{status === "hidden" ? (
+					<div className="flex max-w-xs flex-col gap-2">
+						<label
+							className="text-xs text-muted-foreground"
+							htmlFor="admin-comments-hidden-status"
+						>
+							垃圾与回收站状态
+						</label>
+						<select
+							id="admin-comments-hidden-status"
+							className={inputClass}
+							value={hiddenStatus}
+							onChange={(event) => setHiddenStatus(event.target.value)}
+						>
+							<option value="">全部</option>
+							<option value="spam">Akismet 垃圾</option>
+							<option value="trash">回收站</option>
+						</select>
+					</div>
+				) : null}
 				<p className="text-xs text-muted-foreground">
 					共 {commentsQuery.data?.pagination.totalCount ?? "-"} 条，当前显示{" "}
 					{commentsQuery.data?.items.length ?? 0} 条。
@@ -215,10 +259,18 @@ export function CommentsPage({
 												variant={
 													comment.status === "approved"
 														? "secondary"
-														: "outline"
+														: comment.status === "spam"
+															? "destructive"
+															: "outline"
 												}
 											>
-												{comment.status === "approved" ? "已通过" : "待审"}
+												{comment.status === "approved"
+													? "已通过"
+													: comment.status === "spam"
+														? "Akismet 垃圾"
+														: comment.status === "trash"
+															? "回收站"
+															: "待审"}
 											</Badge>
 										</td>
 										<td className="p-3">
@@ -271,6 +323,51 @@ export function CommentsPage({
 												>
 													{comment.status === "approved" ? "待审" : "通过"}
 												</Button>
+												{comment.status !== "pending" ? (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														onClick={() =>
+															updateMutation.mutate({
+																id: comment.id,
+																status: "pending",
+															})
+														}
+													>
+														待审
+													</Button>
+												) : null}
+												{comment.status !== "spam" ? (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														onClick={() =>
+															updateMutation.mutate({
+																id: comment.id,
+																status: "spam",
+															})
+														}
+													>
+														垃圾
+													</Button>
+												) : null}
+												{comment.status !== "trash" ? (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														onClick={() =>
+															updateMutation.mutate({
+																id: comment.id,
+																status: "trash",
+															})
+														}
+													>
+														回收站
+													</Button>
+												) : null}
 												<Button
 													type="button"
 													size="sm"

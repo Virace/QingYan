@@ -5,12 +5,15 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { AppDatabase } from "../../db/client";
 import {
 	captchaSessions,
+	commentModeration,
 	comments,
 	pageThreads,
 	voteRecords,
 } from "../../db/schema";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import type { CommentMetadataSnapshot } from "./metadata/resolver";
+import type { CommentStatus } from "./moderation-types";
+import type { ModerationReviewResult } from "./moderation-service";
 import type { CommentAuthorIdentity } from "./verified-author";
 
 export type CaptchaAction = "comment_create" | "comment_vote" | "page_like";
@@ -125,7 +128,8 @@ export class CommentsWriteRepository {
 		authorUserAgent?: string;
 		metadata?: CommentMetadataSnapshot;
 		contentRaw: string;
-		status: "pending" | "approved";
+		status: CommentStatus;
+		moderation?: ModerationReviewResult;
 	}) {
 		const commentId = createEntityId("c");
 		const nowIso = new Date().toISOString();
@@ -168,6 +172,27 @@ export class CommentsWriteRepository {
 			createdAt: nowIso,
 			updatedAt: nowIso,
 		});
+		if (input.moderation) {
+			await this.db.insert(commentModeration).values({
+				commentId,
+				provider: input.moderation.provider,
+				mode: input.moderation.mode,
+				decision: input.moderation.decision,
+				status: input.moderation.status,
+				reason: input.moderation.reason,
+				akismetVerdict: input.moderation.akismetVerdict,
+				akismetProTip: input.moderation.akismetProTip,
+				akismetRecheckAfterSec: input.moderation.akismetRecheckAfterSec,
+				akismetDebugHelp: input.moderation.akismetDebugHelp,
+				checkedAt: input.moderation.checkedAt,
+				requestSnapshotJson: input.moderation.requestSnapshot
+					? JSON.stringify({
+							...input.moderation.requestSnapshot,
+							apiKey: undefined,
+						})
+					: undefined,
+			});
+		}
 
 		if (input.parentCommentId) {
 			await this.db

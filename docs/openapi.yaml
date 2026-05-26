@@ -778,6 +778,7 @@ components:
         status:
           type: string
           enum: [pending, approved]
+          description: Public responses never expose internal spam/trash states. Comments stored as spam or trash are hidden from public thread lists, and create responses normalize non-approved internal states to pending.
         isPinned:
           type: boolean
         isFolded:

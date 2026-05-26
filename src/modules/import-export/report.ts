@@ -1,3 +1,4 @@
+import type { CommentStatus } from "../comments/moderation-types";
 import type { MigrationItemState } from "./import-plan";
 
 export interface MigrationReportSource {
@@ -21,7 +22,7 @@ export interface MigrationReportSummary {
 export interface MigrationReportComment {
 	oldCommentId: string;
 	oldParentCommentId: string | null;
-	status: "approved" | "pending" | "skipped";
+	status: CommentStatus | "skipped";
 	skipReason?: string;
 	authorName: string;
 	authorEmail?: string;

@@ -40,6 +40,14 @@ describe("admin settings", () => {
 					thresholdWindowSec: 60,
 					thresholdMaxActions: 3,
 				},
+				moderation: {
+					mode: "manual",
+					provider: "none",
+					akismet: {
+						failPolicy: "pending",
+						discardBlatantSpam: false,
+					},
+				},
 				abuseGuard: {
 					enabled: true,
 					windowSec: 600,
@@ -106,6 +114,15 @@ describe("admin settings", () => {
 							},
 						},
 					},
+					moderation: {
+						mode: "manual_with_akismet",
+						provider: "akismet",
+						akismet: {
+							blogUrl: "https://fangyuan.example.com",
+							failPolicy: "pending",
+							discardBlatantSpam: false,
+						},
+					},
 				},
 				pageFeedback: {
 					allowLike: false,
@@ -152,6 +169,15 @@ describe("admin settings", () => {
 						},
 					},
 				},
+				moderation: {
+					mode: "manual_with_akismet",
+					provider: "akismet",
+					akismet: {
+						blogUrl: "https://fangyuan.example.com",
+						failPolicy: "pending",
+						discardBlatantSpam: false,
+					},
+				},
 			},
 			pageFeedback: {
 				allowLike: false,
@@ -183,6 +209,9 @@ describe("admin settings", () => {
 			comments: {
 				enabled: true,
 				defaultStatus: "pending",
+				moderation: {
+					mode: "manual",
+				},
 			},
 		});
 	});

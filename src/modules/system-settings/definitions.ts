@@ -7,6 +7,7 @@ export const systemSettingCategories = [
 	"captcha",
 	"ipRegion",
 	"avatar",
+	"antiSpam",
 ] as const;
 
 export type SystemSettingCategory = (typeof systemSettingCategories)[number];
@@ -103,6 +104,12 @@ export const systemSettingsSchema = z.object({
 			baseUrl: z.string().url(),
 		}),
 	}),
+	antiSpam: z.object({
+		akismet: z.object({
+			apiKey: z.string().optional(),
+			apiKeyConfigured: z.boolean(),
+		}),
+	}),
 });
 
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
@@ -192,6 +199,12 @@ export const defaultSystemSettings: SystemSettings = {
 			baseUrl: "https://gravatar.com/avatar",
 		},
 	},
+	antiSpam: {
+		akismet: {
+			apiKey: "",
+			apiKeyConfigured: false,
+		},
+	},
 };
 
 export const secretSystemSettingPaths = new Set([
@@ -200,4 +213,5 @@ export const secretSystemSettingPaths = new Set([
 	"captcha.hcaptcha.secretKey",
 	"captcha.recaptcha.apiKey",
 	"captcha.geetest.captchaKey",
+	"antiSpam.akismet.apiKey",
 ]);

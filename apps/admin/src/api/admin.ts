@@ -9,10 +9,27 @@ export interface Page<T> {
 	};
 }
 
+export type CommentStatus = "pending" | "approved" | "spam" | "trash";
+export type ModerationMode =
+	| "none"
+	| "akismet_auto"
+	| "manual_with_akismet"
+	| "manual";
+
+export interface SiteModerationSettings {
+	mode: ModerationMode;
+	provider: "none" | "akismet";
+	akismet: {
+		blogUrl?: string;
+		failPolicy: "pending";
+		discardBlatantSpam: boolean;
+	};
+}
+
 export interface AdminComment {
 	id: string;
 	parentId: string | null;
-	status: "pending" | "approved";
+	status: CommentStatus;
 	authorName: string;
 	authorEmail: string | null;
 	authorIp: string | null;
@@ -100,6 +117,7 @@ export interface AdminSite {
 	comments: {
 		enabled: boolean;
 		defaultStatus: "pending" | "approved";
+		moderation: SiteModerationSettings;
 		identity: {
 			allow: Array<"nickname" | "email" | "website">;
 			require: Array<"nickname" | "email" | "website">;
@@ -126,6 +144,7 @@ export interface AdminSettings {
 	comments: {
 		enabled: boolean;
 		defaultStatus: "pending" | "approved";
+		moderation: SiteModerationSettings;
 		maxDepth: number;
 		rootLimit: number;
 		identity: {
@@ -261,6 +280,12 @@ export interface AdminSystemSettings {
 			baseUrl: string;
 		};
 	};
+	antiSpam: {
+		akismet: {
+			apiKey?: string;
+			apiKeyConfigured: boolean;
+		};
+	};
 }
 
 function queryString(input: Record<string, string | number | undefined>) {
@@ -277,7 +302,8 @@ function queryString(input: Record<string, string | number | undefined>) {
 export function listComments(input: {
 	siteKey?: string;
 	pageKey?: string;
-	status?: string;
+	status?: CommentStatus;
+	statusGroup?: "hidden";
 	search?: string;
 	limit?: number;
 	offset?: number;

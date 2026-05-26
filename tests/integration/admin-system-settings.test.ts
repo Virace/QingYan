@@ -58,6 +58,11 @@ describe("admin system settings", () => {
 					baseUrl: "https://gravatar.com/avatar",
 				},
 			},
+			antiSpam: {
+				akismet: {
+					apiKeyConfigured: false,
+				},
+			},
 			admin: {
 				session: {
 					ttlMinutes: 4320,
@@ -285,6 +290,62 @@ describe("admin system settings", () => {
 				},
 			},
 		});
+	});
+
+	it("updates global Akismet settings without returning the API key", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				antiSpam: {
+					akismet: {
+						apiKey: "akismet-secret",
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.body).not.toContain("akismet-secret");
+		expect(updateResponse.json()).toMatchObject({
+			antiSpam: {
+				akismet: {
+					apiKeyConfigured: true,
+				},
+			},
+		});
+
+		const afterUpdate = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "debug",
+					retentionDays: 14,
+				},
+			},
+		});
+
+		expect(afterUpdate.statusCode).toBe(200);
+		expect(afterUpdate.body).not.toContain("akismet-secret");
+		expect(afterUpdate.json().antiSpam.akismet.apiKeyConfigured).toBe(true);
 	});
 
 	it("updates admin session ttl setting", async () => {

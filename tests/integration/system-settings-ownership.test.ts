@@ -42,6 +42,11 @@ describe("system settings ownership", () => {
 					key: "smtp.password",
 					secret: true,
 				}),
+				expect.objectContaining({
+					category: "antiSpam",
+					key: "akismet.apiKey",
+					secret: true,
+				}),
 			]),
 		);
 	});
@@ -50,6 +55,7 @@ describe("system settings ownership", () => {
 		const settings = structuredClone(defaultSystemSettings);
 		settings.mail.smtp.password = "smtp-secret";
 		settings.captcha.turnstile.secretKey = "turnstile-secret";
+		settings.antiSpam.akismet.apiKey = "akismet-secret";
 
 		const masked = maskSystemSettings(settings);
 
@@ -57,5 +63,7 @@ describe("system settings ownership", () => {
 		expect(masked.mail.smtp.passwordConfigured).toBe(true);
 		expect(masked.captcha.turnstile.secretKey).toBeUndefined();
 		expect(masked.captcha.turnstile.secretKeyConfigured).toBe(true);
+		expect(masked.antiSpam.akismet.apiKey).toBeUndefined();
+		expect(masked.antiSpam.akismet.apiKeyConfigured).toBe(true);
 	});
 });

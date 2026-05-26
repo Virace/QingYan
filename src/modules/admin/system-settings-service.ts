@@ -45,6 +45,9 @@ type AdminSystemSettingsInput = {
 	};
 	ipRegion?: SystemSettings["ipRegion"];
 	avatar?: SystemSettings["avatar"];
+	antiSpam?: {
+		akismet: Omit<SystemSettings["antiSpam"]["akismet"], "apiKeyConfigured">;
+	};
 	requestId?: string;
 };
 
@@ -147,6 +150,21 @@ export class AdminSystemSettingsService {
 						},
 					}
 				: current.avatar,
+			antiSpam: input.antiSpam
+				? {
+						akismet: {
+							...current.antiSpam.akismet,
+							...input.antiSpam.akismet,
+							apiKey:
+								input.antiSpam.akismet.apiKey ??
+								current.antiSpam.akismet.apiKey,
+							apiKeyConfigured: Boolean(
+								input.antiSpam.akismet.apiKey ??
+									current.antiSpam.akismet.apiKey,
+							),
+						},
+					}
+				: current.antiSpam,
 		};
 
 		for (const row of flattenSystemSettings(next)) {

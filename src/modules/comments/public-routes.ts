@@ -22,6 +22,8 @@ import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
 import { qingyanCookiePath } from "../../config/public-path";
+import { ModerationService } from "./moderation-service";
+import { AkismetClient } from "./akismet-client";
 
 export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	const visitorCookiePath = qingyanCookiePath(fastify.config.server.publicPath);
@@ -50,6 +52,10 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
 	const metadataResolver = new DefaultCommentMetadataResolver();
+	const moderationService = new ModerationService({
+		akismetClient: fastify.akismetClient ?? new AkismetClient(),
+		loadSystemSettings: () => systemSettingsService.getSettings(),
+	});
 	fastify.addHook("onClose", async () => {
 		metadataResolver.close();
 	});
@@ -64,6 +70,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		captchaService,
 		metadataResolver,
 		() => systemSettingsService.getIpRegionSettings(),
+		moderationService,
 	);
 
 	fastify.get("/comments/bootstrap", async (request, reply) => {

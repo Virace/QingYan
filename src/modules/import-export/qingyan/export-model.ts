@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { commentStatusSchema } from "../../comments/moderation-types";
+
 export const QINGYAN_EXPORT_FORMAT = "qingyan.export.v1";
 export const QINGYAN_EXPORT_FORMAT_VERSION = 2;
 export const QINGYAN_EXPORT_SOURCE_TYPE = "qingyan-export";
@@ -84,7 +86,7 @@ export const qingyanExportSchema = z.object({
 					pageKey: z.string().min(1),
 					parentId: z.string().nullable().optional(),
 					visitorKey: z.string().nullable().optional(),
-					status: z.enum(["pending", "approved"]),
+					status: commentStatusSchema,
 					author: z
 						.object({
 							name: z.string().min(1),

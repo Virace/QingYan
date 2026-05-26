@@ -16,6 +16,7 @@ import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminUsersRoutes } from "./modules/admin/users-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
+import type { AkismetClient } from "./modules/comments/akismet-client";
 import { captchaWidgetRoutes } from "./modules/comments/captcha-widget-routes";
 import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { createDevMemoryRoutes } from "./modules/dev/memory-routes";
@@ -36,6 +37,7 @@ type OpenApiDocument = Awaited<ReturnType<typeof loadOpenApiDocument>>;
 
 interface BuildAppOptions {
 	adminDistDirectory?: string;
+	akismetClient?: Pick<AkismetClient, "commentCheck">;
 }
 
 function registerBaseRoutes(
@@ -92,6 +94,9 @@ export async function buildApp(
 	app.decorate("config", config);
 	app.decorate("runtimeOptions", runtimeOptions);
 	app.decorate("siteRegistry", createSiteRegistry());
+	if (options.akismetClient) {
+		app.decorate("akismetClient", options.akismetClient);
+	}
 
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.context?.requestId ?? request.id;

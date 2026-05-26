@@ -15,6 +15,12 @@ import {
 	mergeVerifiedAuthorSettings,
 } from "./verified-author";
 import type { CommentsWriteRepository } from "./write-repository";
+import {
+	mergeSiteModerationSettings,
+	resolvePublicCommentStatus,
+	type CommentStatus,
+} from "./moderation-types";
+import type { ModerationService } from "./moderation-service";
 
 function resolveIdentity(
 	siteKey: string,
@@ -35,6 +41,7 @@ export class CommentsWriteService {
 		private readonly loadIpRegionSettings?: () => Promise<
 			SystemSettings["ipRegion"]
 		>,
+		private readonly moderationService?: ModerationService,
 	) {}
 
 	public async createComment(input: {
@@ -190,9 +197,31 @@ export class CommentsWriteService {
 			}
 		}
 
-		const status = shouldUseVerifiedAuthor
+		const legacyStatus = (settings?.defaultStatus ?? "pending") as
+			| "pending"
+			| "approved";
+		const siteModeration = mergeSiteModerationSettings(
+			settings?.moderationJson,
+			legacyStatus,
+		);
+		const moderation = shouldUseVerifiedAuthor
+			? undefined
+			: await this.moderationService?.reviewComment({
+					siteModeration,
+					blog: this.config.server.publicBaseUrl,
+					userIp: input.ip,
+					userAgent: input.userAgent,
+					permalink: input.pageUrl,
+					commentType: input.parentCommentId ? "reply" : "comment",
+					commentAuthor: authorName,
+					commentAuthorEmail: authorEmail,
+					commentAuthorUrl: authorWebsite,
+					commentContent: input.contentRaw,
+					commentDateGmt: new Date().toISOString(),
+				});
+		const status: CommentStatus = shouldUseVerifiedAuthor
 			? "approved"
-			: ((settings?.defaultStatus ?? "pending") as "pending" | "approved");
+			: (moderation?.status ?? legacyStatus);
 		const resolvedAuthorName = shouldUseVerifiedAuthor
 			? verifiedAuthor.displayName
 			: authorName;
@@ -237,6 +266,7 @@ export class CommentsWriteService {
 			metadata: requestMetadata,
 			contentRaw: input.contentRaw,
 			status,
+			moderation,
 		});
 
 		await this.security.writeAudit({
@@ -277,9 +307,11 @@ export class CommentsWriteService {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 			comment: {
 				id: created.commentId,
-				status,
+				status: resolvePublicCommentStatus(status),
 				message:
-					status === "pending" ? "评论已提交，等待审核。" : "评论已发布。",
+					resolvePublicCommentStatus(status) === "pending"
+						? "评论已提交，等待审核。"
+						: "评论已发布。",
 			},
 			thread: {
 				commentCount: created.thread.commentCount,

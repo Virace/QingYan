@@ -4,6 +4,7 @@ import {
 	type ImportPlanComment,
 	type ImportPlanItem,
 } from "../import-plan";
+import type { CommentStatus } from "../../comments/moderation-types";
 import type { MigrationReport, MigrationReportItem } from "../report";
 
 export interface ConvertReportInput {
@@ -30,7 +31,7 @@ function sortParentBeforeChild(
 function isImportableComment(
 	comment: MigrationReportItem["comments"][number],
 ): comment is MigrationReportItem["comments"][number] & {
-	status: "approved" | "pending";
+	status: CommentStatus;
 } {
 	return comment.status !== "skipped";
 }

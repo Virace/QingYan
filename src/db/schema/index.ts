@@ -1,6 +1,7 @@
 export * from "./admin-bootstrap";
 export * from "./captcha";
 export * from "./comment-metadata";
+export * from "./comment-moderation";
 export * from "./comments";
 export * from "./engagement";
 export * from "./import-jobs";

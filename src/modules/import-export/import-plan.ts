@@ -1,3 +1,5 @@
+import type { CommentStatus } from "../comments/moderation-types";
+
 export type MigrationItemState =
 	| "ready"
 	| "needs_user_mapping"
@@ -21,7 +23,7 @@ export interface ImportPlanCommentSource {
 
 export interface ImportPlanComment {
 	source: ImportPlanCommentSource;
-	status: "approved" | "pending";
+	status: CommentStatus;
 	authorName: string;
 	authorEmail?: string;
 	authorUrl?: string;

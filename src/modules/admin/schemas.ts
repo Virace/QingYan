@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import {
+	commentStatusSchema,
+	siteModerationSettingsSchema,
+} from "../comments/moderation-types";
 import { isSafeHttpUrl, normalizeOrigin } from "../shared/url-policy";
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
@@ -46,7 +50,8 @@ export const adminLoginBodySchema = z.object({
 export const adminCommentsQuerySchema = z.object({
 	siteKey: z.string().min(1).optional(),
 	pageKey: z.string().min(1).optional(),
-	status: z.enum(["pending", "approved"]).optional(),
+	status: commentStatusSchema.optional(),
+	statusGroup: z.enum(["hidden"]).optional(),
 	search: z.string().min(1).optional(),
 	limit: z.coerce.number().int().positive().max(100).default(20),
 	offset: z.coerce.number().int().min(0).default(0),
@@ -114,7 +119,7 @@ export const adminCommentParamsSchema = z.object({
 
 export const adminCommentPatchBodySchema = z
 	.object({
-		status: z.enum(["pending", "approved"]).optional(),
+		status: commentStatusSchema.optional(),
 		isPinned: z.boolean().optional(),
 		isFolded: z.boolean().optional(),
 		contentRaw: z.string().min(1).optional(),
@@ -195,6 +200,7 @@ export const adminSettingsBodySchema = z
 					.optional(),
 				metadata: commentMetadataSchema.optional(),
 				verifiedAuthor: verifiedAuthorSchema.optional(),
+				moderation: siteModerationSettingsSchema.optional(),
 			})
 			.optional(),
 		pageFeedback: z
@@ -310,6 +316,13 @@ export const adminSystemSettingsBodySchema = z.object({
 			gravatar: z.object({
 				enabled: z.boolean(),
 				baseUrl: z.string().url(),
+			}),
+		})
+		.optional(),
+	antiSpam: z
+		.object({
+			akismet: z.object({
+				apiKey: z.string().min(1).optional(),
 			}),
 		})
 		.optional(),

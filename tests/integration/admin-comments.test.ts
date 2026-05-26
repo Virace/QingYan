@@ -159,6 +159,189 @@ describe("admin comments", () => {
 		expect(deletedComment?.deletedAt).not.toBeNull();
 	});
 
+	it("lists and updates spam and trash comments without exposing them publicly", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:moderation-statuses",
+			pageTitle: "Moderation Statuses",
+			pageUrl: "/posts/moderation-statuses/",
+			commentCount: 3,
+			rootCommentCount: 3,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:moderation-statuses"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_admin_spam",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "spam",
+				authorName: "Spam",
+				contentRaw: "spam comment",
+				contentHtml: "<p>spam comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-26T10:00:00.000Z",
+				updatedAt: "2026-05-26T10:00:00.000Z",
+			},
+			{
+				id: "c_admin_trash",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "trash",
+				authorName: "Trash",
+				contentRaw: "trash comment",
+				contentHtml: "<p>trash comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-26T10:01:00.000Z",
+				updatedAt: "2026-05-26T10:01:00.000Z",
+			},
+			{
+				id: "c_admin_public",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "Public",
+				contentRaw: "public comment",
+				contentHtml: "<p>public comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-26T10:02:00.000Z",
+				updatedAt: "2026-05-26T10:02:00.000Z",
+			},
+		]);
+
+		const spamList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&status=spam&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(spamList.statusCode).toBe(200);
+		expect(spamList.json()).toMatchObject({
+			items: [
+				{
+					id: "c_admin_spam",
+					status: "spam",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+
+		const trashList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&status=trash&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(trashList.statusCode).toBe(200);
+		expect(trashList.json()).toMatchObject({
+			items: [
+				{
+					id: "c_admin_trash",
+					status: "trash",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+
+		const hiddenList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&statusGroup=hidden&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(hiddenList.statusCode).toBe(200);
+		expect(hiddenList.json()).toMatchObject({
+			items: [
+				{
+					id: "c_admin_trash",
+					status: "trash",
+				},
+				{
+					id: "c_admin_spam",
+					status: "spam",
+				},
+			],
+			pagination: {
+				totalCount: 2,
+			},
+		});
+
+		const patchToSpam = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/comments/c_admin_public",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				status: "spam",
+			},
+		});
+		expect(patchToSpam.statusCode).toBe(200);
+		expect(patchToSpam.json().comment).toMatchObject({
+			id: "c_admin_public",
+			status: "spam",
+		});
+
+		const patchToTrash = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/comments/c_admin_public",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				status: "trash",
+			},
+		});
+		expect(patchToTrash.statusCode).toBe(200);
+		expect(patchToTrash.json().comment).toMatchObject({
+			id: "c_admin_public",
+			status: "trash",
+		});
+
+		const publicThread = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:moderation-statuses",
+		});
+		expect(publicThread.statusCode).toBe(200);
+		expect(publicThread.json().comments).toEqual([]);
+	});
+
 	it("creates a verified reply from admin comments API", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

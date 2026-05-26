@@ -45,6 +45,26 @@ CREATE TABLE `comments` (
 CREATE INDEX `comments_thread_idx` ON `comments` (`page_thread_id`);--> statement-breakpoint
 CREATE INDEX `comments_parent_idx` ON `comments` (`parent_id`);--> statement-breakpoint
 CREATE INDEX `comments_visitor_idx` ON `comments` (`visitor_id`);--> statement-breakpoint
+CREATE TABLE `comment_moderation` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`comment_id` text NOT NULL,
+	`provider` text DEFAULT 'none' NOT NULL,
+	`mode` text NOT NULL,
+	`decision` text NOT NULL,
+	`status` text NOT NULL,
+	`reason` text,
+	`akismet_verdict` text,
+	`akismet_pro_tip` text,
+	`akismet_recheck_after_sec` integer,
+	`akismet_debug_help` text,
+	`checked_at` text,
+	`request_snapshot_json` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`comment_id`) REFERENCES `comments`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `comment_moderation_comment_idx` ON `comment_moderation` (`comment_id`);--> statement-breakpoint
+CREATE INDEX `comment_moderation_status_idx` ON `comment_moderation` (`status`);--> statement-breakpoint
 CREATE TABLE `vote_records` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`comment_id` text NOT NULL,
@@ -153,7 +173,7 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
 	`email_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `verified_author_json` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `verified_author_json` text, `moderation_json` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_settings_site_id_idx` ON `site_settings` (`site_id`);--> statement-breakpoint

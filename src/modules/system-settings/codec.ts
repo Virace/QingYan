@@ -107,5 +107,9 @@ export function maskSystemSettings(settings: SystemSettings): SystemSettings {
 	next.captcha.geetest.captchaKeyConfigured = Boolean(
 		settings.captcha.geetest.captchaKey,
 	);
+	next.antiSpam.akismet.apiKey = undefined;
+	next.antiSpam.akismet.apiKeyConfigured = Boolean(
+		settings.antiSpam.akismet.apiKey,
+	);
 	return next;
 }

@@ -14,6 +14,12 @@ import {
 	serializeVerifiedAuthorSettings,
 	type VerifiedAuthorSettings,
 } from "../comments/verified-author";
+import {
+	mergeSiteModerationSettings,
+	serializeSiteModerationSettings,
+	type CommentStatus,
+	type SiteModerationSettings,
+} from "../comments/moderation-types";
 import { presentComments } from "../comments/presenter";
 import { CommentsWriteRepository } from "../comments/write-repository";
 import {
@@ -102,7 +108,8 @@ export class AdminManagementService {
 	public async listComments(input: {
 		siteKey?: string;
 		pageKey?: string;
-		status?: "pending" | "approved";
+		status?: CommentStatus;
+		statusGroup?: "hidden";
 		search?: string;
 		limit: number;
 		offset: number;
@@ -112,6 +119,7 @@ export class AdminManagementService {
 			siteId,
 			pageKey: input.pageKey,
 			status: input.status,
+			statusGroup: input.statusGroup,
 			search: input.search,
 			limit: input.limit,
 			offset: input.offset,
@@ -225,6 +233,10 @@ export class AdminManagementService {
 							}),
 							allowWebsite: item.comments.allowWebsite,
 							captcha: item.comments.captcha,
+							moderation: mergeSiteModerationSettings(
+								item.comments.moderationJson,
+								item.comments.defaultStatus as "pending" | "approved",
+							),
 						},
 						pageFeedback: item.pageFeedback,
 						notifications: item.notifications,
@@ -344,7 +356,7 @@ export class AdminManagementService {
 	public async updateComment(
 		commentId: string,
 		input: {
-			status?: "pending" | "approved";
+			status?: CommentStatus;
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
@@ -608,6 +620,10 @@ export class AdminManagementService {
 				verifiedAuthor: mergeVerifiedAuthorSettings(
 					settings.verifiedAuthorJson,
 				),
+				moderation: mergeSiteModerationSettings(
+					settings.moderationJson,
+					settings.defaultStatus as "pending" | "approved",
+				),
 			},
 			pageFeedback: {
 				allowLike: settings.allowPageLike,
@@ -647,6 +663,7 @@ export class AdminManagementService {
 				};
 				metadata?: CommentMetadataPatch;
 				verifiedAuthor?: VerifiedAuthorSettings;
+				moderation?: SiteModerationSettings;
 			};
 			pageFeedback?: {
 				allowLike?: boolean;
@@ -689,6 +706,9 @@ export class AdminManagementService {
 								input.comments.verifiedAuthor.website,
 							) ?? "",
 					})
+				: undefined,
+			moderationJson: input.comments?.moderation
+				? serializeSiteModerationSettings(input.comments.moderation)
 				: undefined,
 			emailNotificationsEnabled: input.notifications?.emailEnabled,
 		});

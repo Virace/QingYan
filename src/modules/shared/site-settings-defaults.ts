@@ -2,6 +2,10 @@ import {
 	defaultVerifiedAuthor,
 	serializeVerifiedAuthorSettings,
 } from "../comments/verified-author";
+import {
+	defaultSiteModerationSettings,
+	serializeSiteModerationSettings,
+} from "../comments/moderation-types";
 
 export type CommentMetadataSettings = {
 	collectIp: boolean;
@@ -59,6 +63,9 @@ export function buildDefaultSiteSettings(siteId: number) {
 		autoBlacklistTtlSec: 1800,
 		commentMetadataJson: JSON.stringify(defaultCommentMetadata),
 		verifiedAuthorJson: serializeVerifiedAuthorSettings(defaultVerifiedAuthor),
+		moderationJson: serializeSiteModerationSettings(
+			defaultSiteModerationSettings,
+		),
 		emailNotificationsEnabled: false,
 	};
 }

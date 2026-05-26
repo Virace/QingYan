@@ -27,6 +27,7 @@ import { resolvePublicPageUrl } from "../shared/page-url";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
+import type { CommentStatus } from "../comments/moderation-types";
 
 function parseStringArray(payload?: string | null): string[] {
 	if (!payload) {
@@ -261,7 +262,8 @@ export class AdminRepository {
 	public async listComments(input: {
 		siteId?: number;
 		pageKey?: string;
-		status?: string;
+		status?: CommentStatus;
+		statusGroup?: "hidden";
 		search?: string;
 		limit: number;
 		offset: number;
@@ -269,6 +271,9 @@ export class AdminRepository {
 		const conditions = [
 			input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 			input.status ? eq(comments.status, input.status) : undefined,
+			input.statusGroup === "hidden"
+				? inArray(comments.status, ["spam", "trash"])
+				: undefined,
 			isNull(comments.deletedAt),
 		].filter((condition) => condition !== undefined);
 
@@ -707,6 +712,7 @@ export class AdminRepository {
 				commentRequireJson: siteSettings.commentRequireJson,
 				allowWebsite: siteSettings.allowWebsite,
 				captchaMode: siteSettings.captchaMode,
+				moderationJson: siteSettings.moderationJson,
 				allowPageLike: siteSettings.allowPageLike,
 				emailNotificationsEnabled: siteSettings.emailNotificationsEnabled,
 			})
@@ -780,6 +786,7 @@ export class AdminRepository {
 				captcha: {
 					mode: row.captchaMode,
 				},
+				moderationJson: row.moderationJson,
 			},
 			pageFeedback: {
 				allowLike: row.allowPageLike,
@@ -813,6 +820,7 @@ export class AdminRepository {
 				siteKey: sites.siteKey,
 				pageKey: pageThreads.pageKey,
 				verifiedAuthorJson: siteSettings.verifiedAuthorJson,
+				moderationJson: siteSettings.moderationJson,
 			})
 			.from(comments)
 			.innerJoin(sites, eq(sites.id, comments.siteId))
@@ -827,7 +835,7 @@ export class AdminRepository {
 	public async updateComment(
 		commentId: string,
 		input: {
-			status?: "pending" | "approved";
+			status?: CommentStatus;
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
@@ -1014,6 +1022,7 @@ export class AdminRepository {
 			autoBlacklistTtlSec?: number;
 			commentMetadataJson?: string;
 			verifiedAuthorJson?: string;
+			moderationJson?: string;
 			emailNotificationsEnabled?: boolean;
 		},
 	) {
@@ -1038,6 +1047,7 @@ export class AdminRepository {
 				autoBlacklistTtlSec: input.autoBlacklistTtlSec,
 				commentMetadataJson: input.commentMetadataJson,
 				verifiedAuthorJson: input.verifiedAuthorJson,
+				moderationJson: input.moderationJson,
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})

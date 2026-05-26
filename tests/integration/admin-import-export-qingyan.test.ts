@@ -227,6 +227,36 @@ describe("admin import/export QingYan routes", () => {
 				"alice@example.com",
 				"hello",
 			);
+		fixture.app.sqlite
+			.prepare(
+				`INSERT INTO comments (
+					id, site_id, page_thread_id, status, author_name, author_email, content_raw
+				) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"c_exported_spam",
+				1,
+				thread.id,
+				"spam",
+				"Spammer",
+				"spam@example.com",
+				"spam",
+			);
+		fixture.app.sqlite
+			.prepare(
+				`INSERT INTO comments (
+					id, site_id, page_thread_id, status, author_name, author_email, content_raw
+				) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"c_exported_trash",
+				1,
+				thread.id,
+				"trash",
+				"Trash",
+				"trash@example.com",
+				"trash",
+			);
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -291,6 +321,14 @@ describe("admin import/export QingYan routes", () => {
 							raw: "hello",
 						},
 					},
+					{
+						id: "c_exported_spam",
+						status: "spam",
+					},
+					{
+						id: "c_exported_trash",
+						status: "trash",
+					},
 				],
 			},
 		});
@@ -303,6 +341,19 @@ describe("admin import/export QingYan routes", () => {
 		const fixture = await createTestApp();
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 		const payload = qingyanExportPayload();
+		payload.data.comments.push({
+			...payload.data.comments[0],
+			id: "comment_spam",
+			source: {
+				type: "qingyan",
+				id: "c_spam_source",
+			},
+			status: "spam",
+			content: {
+				raw: "imported spam",
+				html: "<p>imported spam</p>",
+			},
+		});
 
 		const dryRunResponse = await fixture.app.inject({
 			method: "POST",
@@ -329,7 +380,7 @@ describe("admin import/export QingYan routes", () => {
 				summary: {
 					willCreatePageThreads: 1,
 					willCreateVisitors: 1,
-					willCreateComments: 1,
+					willCreateComments: 2,
 					conflicts: 0,
 				},
 				settings: {
@@ -362,10 +413,10 @@ describe("admin import/export QingYan routes", () => {
 				summary: {
 					createdPageThreads: 1,
 					createdVisitors: 1,
-					createdComments: 1,
+					createdComments: 2,
 					createdPageFeedbackRecords: 1,
 					createdBlacklistRules: 1,
-					importRecordsCreated: 5,
+					importRecordsCreated: 6,
 					settingsUpdated: false,
 				},
 			},
@@ -401,6 +452,16 @@ describe("admin import/export QingYan routes", () => {
 			author_name: "Alice",
 			content_raw: "hello from export",
 			page_key: "post/imported",
+		});
+		const importedSpam = fixture.app.sqlite
+			.prepare("SELECT status, content_raw FROM comments WHERE content_raw = ?")
+			.get("imported spam") as {
+			status: string;
+			content_raw: string;
+		};
+		expect(importedSpam).toMatchObject({
+			status: "spam",
+			content_raw: "imported spam",
 		});
 		const feedbackCount = fixture.app.sqlite
 			.prepare("SELECT COUNT(*) AS value FROM page_feedback_records")
