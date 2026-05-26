@@ -1652,8 +1652,7 @@ export function SystemSettingsPage() {
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="Akismet API Key">
 								<Input
-									type="password"
-									autoComplete="new-password"
+									autoComplete="off"
 									placeholder={secretPlaceholder(
 										draft.antiSpam.akismet.apiKeyConfigured,
 									)}

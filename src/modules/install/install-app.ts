@@ -444,7 +444,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </fieldset>
 <fieldset>
 <legend>Akismet 反垃圾评论</legend>
-<label>Akismet API Key<input data-path="systemSettings.antiSpam.akismet.apiKey" type="password" autocomplete="new-password"><span class="hint" data-hint-for="systemSettings.antiSpam.akismet.apiKey">可选。填写后会写入全局 anti-spam 设置，站点评论审核模式可在安装后后台中选择 Akismet 自动审核或辅助审核。</span></label>
+<label>Akismet API Key<input data-path="systemSettings.antiSpam.akismet.apiKey" autocomplete="off"><span class="hint" data-hint-for="systemSettings.antiSpam.akismet.apiKey">可选。填写后会写入全局 anti-spam 设置，站点评论审核模式可在安装后后台中选择 Akismet 自动审核或辅助审核。</span></label>
 </fieldset>
 </section>
 <section class="step-panel" data-step="4" hidden>

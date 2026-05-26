@@ -466,7 +466,7 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("Gravatar Base URL");
 		expect(response.body).toContain("Akismet");
 		expect(response.body).toContain(
-			'data-path="systemSettings.antiSpam.akismet.apiKey"',
+			'<label>Akismet API Key<input data-path="systemSettings.antiSpam.akismet.apiKey" autocomplete="off">',
 		);
 		expect(response.body).toContain('data-captcha-panel="image"');
 		expect(response.body).toContain('data-captcha-panel="turnstile" hidden');
