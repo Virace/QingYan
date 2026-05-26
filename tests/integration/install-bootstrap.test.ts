@@ -12,7 +12,7 @@ import path from "node:path";
 
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
+import { buildApp } from "../../src/app";
 import { loadConfig } from "../../src/config/load-config";
 import { createDatabaseClients } from "../../src/db/client";
 import {
@@ -413,11 +413,11 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("QingYan Install");
 		expect(response.body).toContain("生成安装计划");
 		expect(response.body).toContain("确认安装");
-		expect(response.body).toContain("正在切换到正常服务并进入管理后台");
-		expect(response.body).toContain("正在等待守护进程重新拉起 QingYan");
-		expect(response.body).toContain("waitForAdmin");
-		expect(response.body).toContain('mode: "no-cors"');
-		expect(response.body).toContain("transition.adminUrl");
+		expect(response.body).not.toContain("正在切换到正常服务并进入管理后台");
+		expect(response.body).not.toContain("正在等待守护进程重新拉起 QingYan");
+		expect(response.body).not.toContain("waitForAdmin");
+		expect(response.body).not.toContain('mode: "no-cors"');
+		expect(response.body).not.toContain("window.location.href");
 		expect(response.body).toContain("服务与数据库");
 		expect(response.body).toContain("管理员与会话");
 		expect(response.body).toContain("站点与安全");
@@ -432,8 +432,14 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("HTTPS 部署建议启用");
 		expect(response.body).toContain("填写加载评论组件的前端站点 origin");
 		expect(response.body).toContain("选择 QingYan JSON 文件");
+		expect(response.body).toContain("不选择文件则执行全新安装");
+		expect(response.body).toContain("浏览器会在本地读取文件内容");
 		expect(response.body).toContain("data-restore-file");
 		expect(response.body).toContain("整站 qyctl backup 包不能在这里恢复");
+		expect(response.body).not.toContain("导出文件名");
+		expect(response.body).not.toContain("粘贴 QingYan 导出 JSON");
+		expect(response.body).not.toContain('data-path="restore.fileName"');
+		expect(response.body).not.toContain('data-path="restore.payload"');
 		expect(response.body).toContain("window.location.origin");
 		expect(response.body).toContain("secureTouched");
 		expect(response.body).toContain("file.text()");
@@ -458,12 +464,15 @@ describe("install bootstrap", () => {
 			'data-path="systemSettings.avatar.gravatar.baseUrl"',
 		);
 		expect(response.body).toContain("Gravatar Base URL");
+		expect(response.body).toContain("Akismet");
+		expect(response.body).toContain(
+			'data-path="systemSettings.antiSpam.akismet.apiKey"',
+		);
 		expect(response.body).toContain('data-captcha-panel="image"');
 		expect(response.body).toContain('data-captcha-panel="turnstile" hidden');
 		expect(response.body).toContain("updateCaptchaPanel()");
 		expect(response.body).toContain('type="number" min="1" step="1"');
 		expect(response.body).toContain('min="0" max="1" step="0.01"');
-		expect(response.body).toContain('data-path="restore.payload"');
 		expect(response.body).not.toContain("从导出包恢复");
 		expect(response.body).not.toContain("Use <code>POST");
 		expect(response.body).not.toContain("install-token");
@@ -1229,6 +1238,47 @@ describe("install bootstrap", () => {
 		} finally {
 			sqlite.close();
 		}
+	});
+
+	it("serves only the installed custom admin path after normal startup", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const installApp = buildInstallApp({ minimalConfig });
+		cleanups.unshift(() => installApp.close());
+
+		const installCookie = await getInstallCookie(installApp);
+		const payload = installFormPayload(workspace.databaseFile);
+		payload.admin.consolePath = "/hidden-admin";
+		const response = await installApp.inject({
+			method: "POST",
+			url: "/qingyan/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload,
+		});
+		expect(response.statusCode).toBe(201);
+		expect(response.json().adminUrl).toBe(
+			"http://localhost:4401/qingyan/hidden-admin",
+		);
+		await installApp.close();
+
+		const app = await buildApp(await loadConfig(workspace.configPath, {}));
+		cleanups.unshift(() => app.close());
+
+		expect(app.adminBootstrap.consolePath).toBe("/hidden-admin");
+		const configuredRoute = await app.inject({
+			method: "GET",
+			url: "/qingyan/hidden-admin/",
+		});
+		const defaultRoute = await app.inject({
+			method: "GET",
+			url: "/qingyan/admin/",
+		});
+
+		expect(configuredRoute.statusCode).toBe(200);
+		expect(configuredRoute.body).toContain("QingYan Admin");
+		expect(defaultRoute.statusCode).toBe(404);
 	});
 
 	it("applies install restore while keeping admin bootstrap local to this install", async () => {

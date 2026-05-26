@@ -1,20 +1,21 @@
-import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
-
-import { AppError, InvalidRequestError } from "../shared/errors";
-import {
-	applyInstall,
-	buildInstallPlan,
-	installApplySchema,
-} from "./install-service";
-import { defaultAdminSessionTtlMinutes } from "../system-settings/definitions";
-import { envMappings, type EnvMapping } from "../../config/env-mapping";
-import { defaultSystemSettings } from "../system-settings/definitions";
+import Fastify from "fastify";
+import { type EnvMapping, envMappings } from "../../config/env-mapping";
 import {
 	joinPublicPath,
 	normalizePublicPath,
 	qingyanCookiePath,
 } from "../../config/public-path";
+import { AppError, InvalidRequestError } from "../shared/errors";
+import {
+	defaultAdminSessionTtlMinutes,
+	defaultSystemSettings,
+} from "../system-settings/definitions";
+import {
+	applyInstall,
+	buildInstallPlan,
+	installApplySchema,
+} from "./install-service";
 import type {
 	InstallTransitionMode,
 	MinimalInstallConfig,
@@ -25,8 +26,6 @@ const INSTALL_PATH = "/admin/install";
 const INSTALL_PLAN_PATH = "/admin/install/plan";
 const INSTALL_COOKIE_NAME = "qingyan_install";
 const INSTALL_RESTART_AFTER_MS = 1200;
-const INSTALL_POLL_INTERVAL_MS = 1000;
-const INSTALL_POLL_TIMEOUT_MS = 60000;
 
 export interface InstallTransition {
 	mode: InstallTransitionMode;
@@ -34,8 +33,6 @@ export interface InstallTransition {
 	pollUrl: string;
 	restartRequired: true;
 	restartAfterMs: number;
-	pollIntervalMs: number;
-	timeoutMs: number;
 	message: string;
 }
 
@@ -86,8 +83,6 @@ function buildInstallTransition(input: {
 		pollUrl: input.adminUrl,
 		restartRequired: true,
 		restartAfterMs: INSTALL_RESTART_AFTER_MS,
-		pollIntervalMs: INSTALL_POLL_INTERVAL_MS,
-		timeoutMs: INSTALL_POLL_TIMEOUT_MS,
 		message,
 	};
 }
@@ -238,6 +233,8 @@ legend { font-weight: 650; margin-bottom: 2px; }
 .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 label, .field { display: grid; gap: 7px; font-size: 14px; color: #3f3f46; }
 .field-title { font-weight: 500; }
+.restore-note { border: 1px solid #ccfbf1; border-radius: 6px; padding: 12px 14px; color: #115e59; background: #f0fdfa; font-size: 13px; line-height: 1.6; }
+.restore-options { margin: 8px 0 0; padding-left: 18px; color: #3f3f46; }
 input, textarea, select { border: 1px solid #d4d4d8; border-radius: 6px; font: inherit; color: #18181b; background: #fff; box-sizing: border-box; }
 input, select { height: 38px; padding: 0 11px; }
 textarea { min-height: 92px; resize: vertical; padding: 10px 11px; line-height: 1.5; }
@@ -445,13 +442,16 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>IPv4 下载源<textarea data-path="systemSettings.ipRegion.ipv4.sources" data-type="stringArray"></textarea><span class="hint" data-hint-for="systemSettings.ipRegion.ipv4.sources">每行一个 URL，按顺序尝试下载；默认优先 Gitee，失败后回退 GitHub。</span></label>
 <label>IPv6 下载源<textarea data-path="systemSettings.ipRegion.ipv6.sources" data-type="stringArray"></textarea><span class="hint" data-hint-for="systemSettings.ipRegion.ipv6.sources">每行一个 URL，按顺序尝试下载；默认优先 Gitee，失败后回退 GitHub。</span></label>
 </fieldset>
+<fieldset>
+<legend>Akismet 反垃圾评论</legend>
+<label>Akismet API Key<input data-path="systemSettings.antiSpam.akismet.apiKey" type="password" autocomplete="new-password"><span class="hint" data-hint-for="systemSettings.antiSpam.akismet.apiKey">可选。填写后会写入全局 anti-spam 设置，站点评论审核模式可在安装后后台中选择 Akismet 自动审核或辅助审核。</span></label>
+</fieldset>
 </section>
 <section class="step-panel" data-step="4" hidden>
 <fieldset>
 <legend>从 QingYan 站点导出 JSON 恢复</legend>
-<label>选择 QingYan JSON 文件<input data-restore-file type="file" accept="application/json,.json"><span class="hint">评论较多时建议选择 JSON 文件，由浏览器本地读取后生成安装计划；不建议手动粘贴大文件内容。</span></label>
-<label>导出文件名<input data-path="restore.fileName" autocomplete="off" placeholder="qingyan-export.json"><span class="hint" data-hint-for="restore.fileName">选择文件后会自动填入文件名。</span></label>
-<label>或粘贴 QingYan 导出 JSON<textarea data-path="restore.payload" spellcheck="false" placeholder="留空则只执行全新安装"></textarea><span class="hint" data-hint-for="restore.payload">这里仅接受 qingyan.export.v1 站点级 JSON，用于恢复评论、页面线程、访客和站点设置。整站 qyctl backup 包不能在这里恢复，请使用 qyctl restore。</span></label>
+<div class="restore-note">这是可选恢复入口。不选择文件则执行全新安装。选择文件时，浏览器会在本地读取文件内容并生成安装计划。</div>
+<label>选择 QingYan JSON 文件<input data-restore-file type="file" accept="application/json,.json"><span class="hint">这里仅接受 qingyan.export.v1 站点级 JSON，用于恢复评论、页面线程、访客和站点设置。整站 qyctl backup 包不能在这里恢复，请使用 qyctl restore。</span></label>
 </fieldset>
 <section id="install-review" class="message"></section>
 <div id="install-message" class="message"></div>
@@ -646,57 +646,29 @@ function setMessage(kind, text) {
 	message.dataset.kind = kind;
 	message.textContent = text;
 }
-function sleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-async function waitForAdmin(transition) {
-	const waitingText = transition.mode === "exit_for_supervisor"
-		? "正在等待守护进程重新拉起 QingYan 并进入管理后台。"
-		: "正在切换到正常服务并进入管理后台。";
-	setMessage("success", waitingText + "管理员入口: " + transition.adminUrl);
-	await sleep(transition.restartAfterMs);
-	const start = Date.now();
-	while (Date.now() - start < transition.timeoutMs) {
-		try {
-			await fetch(transition.pollUrl, {
-				method: "GET",
-				mode: "no-cors",
-				cache: "no-store",
-			});
-			window.location.href = transition.adminUrl;
-			return;
-		} catch (_) {
-			await sleep(transition.pollIntervalMs);
-		}
-	}
-	const timeoutText = transition.mode === "exit_for_supervisor"
-		? "等待守护进程重新拉起 QingYan 超时。请确认服务已恢复后访问 "
-		: "等待 QingYan 切换到正常服务超时。请确认服务状态后访问 ";
-	setMessage("error", timeoutText + transition.adminUrl + "。");
-}
 function optionalString(value) {
 	const text = String(value ?? "").trim();
 	return text || undefined;
 }
-function collectRestore(payloadText, fileName) {
-	const text = String(payloadText ?? "").trim();
-	if (!text) return undefined;
+async function collectRestore() {
+	const file = restoreFileField?.files?.[0];
+	if (!file) return undefined;
 	let payload;
 	try {
-		payload = JSON.parse(text);
+		payload = JSON.parse(await file.text());
 	} catch (_) {
-		throw new Error("QingYan 导出 JSON 格式无效。");
+		throw new Error("无法读取 QingYan JSON 文件，或文件内容不是有效 JSON。");
 	}
 	return {
 		enabled: true,
-		fileName: optionalString(fileName) ?? "qingyan-export.json",
+		fileName: file.name,
 		payload,
 		existingStrategy: "fail_on_existing",
 		importMode: "full_site",
 		settingsStrategy: "replace_settings",
 	};
 }
-function collectPayload() {
+async function collectPayload() {
 	const raw = {};
 	for (const field of fields) {
 		if (!isFieldRelevant(field)) {
@@ -722,7 +694,7 @@ function collectPayload() {
 		security: raw.security,
 		site: raw.site,
 		systemSettings: raw.systemSettings,
-		restore: collectRestore(raw.restore?.payload, raw.restore?.fileName),
+		restore: await collectRestore(),
 	};
 }
 function renderPlan(plan) {
@@ -790,7 +762,7 @@ form.addEventListener("submit", async (event) => {
 	review.textContent = "";
 	setMessage("", "");
 	try {
-		plannedPayload = collectPayload();
+		plannedPayload = await collectPayload();
 		const plan = await requestJson("${joinPublicPath(publicPath, INSTALL_PLAN_PATH)}", plannedPayload);
 		plannedPayload = renderPlan(plan);
 		applyButton.disabled = false;
@@ -814,9 +786,6 @@ applyButton.addEventListener("click", async () => {
 		setMessage("success", transition.message + " 管理员 " + result.username + "，初始密码 " + result.initialPassword + "。管理后台: " + transition.adminUrl + "。配置文件: " + result.configPath + "。数据库: " + result.databasePath + "。系统设置写入 " + result.systemSettings.length + " 项。" + restoreText + backupText);
 		form.reset();
 		plannedPayload = null;
-		if (transition.mode !== "manual") {
-			void waitForAdmin(transition);
-		}
 	} catch (error) {
 		setMessage("error", error instanceof Error ? error.message : "安装失败。");
 		applyButton.disabled = false;
@@ -850,23 +819,6 @@ allowedOriginsField?.addEventListener("input", () => {
 });
 secureCookieField?.addEventListener("change", () => {
 	secureTouched = true;
-});
-restoreFileField?.addEventListener("change", async () => {
-	const file = restoreFileField.files?.[0];
-	if (!file) return;
-	const fileNameField = document.querySelector('[data-path="restore.fileName"]');
-	const payloadField = document.querySelector('[data-path="restore.payload"]');
-	try {
-		const text = await file.text();
-		if (fileNameField) {
-			fileNameField.value = file.name;
-		}
-		if (payloadField) {
-			payloadField.value = text;
-		}
-	} catch (_) {
-		setMessage("error", "无法读取 QingYan JSON 文件。");
-	}
 });
 applyDefaults();
 applyBrowserDefaults();

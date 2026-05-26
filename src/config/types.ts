@@ -146,9 +146,7 @@ export function withTransitionalRuntimeDefaults(
 		...structuredClone(config),
 		admin: {
 			...structuredClone(config.admin),
-			console: {
-				path: "/admin",
-			},
+			console: {},
 			auth: {},
 		},
 		...structuredClone(transitionalRuntimeDefaults),
