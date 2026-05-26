@@ -37,7 +37,7 @@ import { flattenSystemSettings } from "../system-settings/codec";
 import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import { normalizeOriginList } from "../shared/url-policy";
 import {
-	defaultSystemSettings,
+	createSystemSettingsDefaults,
 	defaultAdminSessionTtlMinutes,
 	type SystemSettings,
 	systemSettingsSchema,
@@ -97,7 +97,7 @@ export const installApplySchema = z.object({
 		name: z.string().min(1).default("Default"),
 		allowedOrigins: z
 			.array(z.string().min(1))
-			.min(1)
+			.length(1, "每个站点只能配置一个前端 Origin。")
 			.transform((value) => normalizeOriginList(value)),
 	}),
 	systemSettings: z.unknown().optional(),
@@ -430,7 +430,7 @@ function mergePlainObject(base: unknown, override: unknown): unknown {
 
 function buildSystemSettingsInput(input: unknown): SystemSettings {
 	const settings = systemSettingsSchema.parse(
-		mergePlainObject(defaultSystemSettings, input),
+		mergePlainObject(createSystemSettingsDefaults(), input),
 	);
 	return {
 		...settings,

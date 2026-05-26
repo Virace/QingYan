@@ -203,6 +203,45 @@ export interface AdminSystemSettings {
 			ttlMinutes: number;
 		};
 	};
+	security: {
+		globalFloodGuard: {
+			enabled: boolean;
+			windowSec: number;
+			maxRequests: number;
+		};
+		publicOriginGuard: {
+			enabled: boolean;
+			allowMissingOrigin: boolean;
+		};
+		adminOriginGuard: {
+			enabled: boolean;
+			allowMissingOrigin: boolean;
+			allowedOrigins: string[];
+		};
+		rateLimit: {
+			adminLogin: {
+				windowSec: number;
+				maxFailures: number;
+				autoBlacklistSec: number;
+			};
+			commentCreate: {
+				windowSec: number;
+				maxRequests: number;
+			};
+			commentVote: {
+				windowSec: number;
+				maxRequests: number;
+			};
+			captchaVerify: {
+				windowSec: number;
+				maxFailures: number;
+			};
+			pageLike: {
+				windowSec: number;
+				maxRequests: number;
+			};
+		};
+	};
 	logging: {
 		level: "error" | "warn" | "info" | "debug";
 		retentionDays: number;

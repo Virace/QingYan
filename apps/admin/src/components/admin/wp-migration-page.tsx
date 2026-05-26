@@ -18,6 +18,7 @@ import {
 	type MigrationItemState,
 	type WordPressAnalyzeResult,
 } from "@/api/import-export";
+import type { AdminSiteSummary } from "@/api/session";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,12 +44,12 @@ import {
 type QueueName = "needsAction" | "confirm" | "ready" | "skipped";
 
 const stateLabels: Record<MigrationItemState, string> = {
-	ready: "ready",
-	needs_user_mapping: "needs_user_mapping",
-	ambiguous: "ambiguous",
-	unverified: "unverified",
-	conflict: "conflict",
-	skipped: "skipped",
+	ready: "可导入",
+	needs_user_mapping: "需要手动映射",
+	ambiguous: "候选不明确",
+	unverified: "待确认",
+	conflict: "冲突",
+	skipped: "已跳过",
 };
 
 function queueForItem(item: MigrationReportItem): QueueName {
@@ -101,7 +102,26 @@ function summaryEntries(result: WordPressAnalyzeResult) {
 	];
 }
 
-export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
+function TargetSiteSummary({ site }: { site: AdminSiteSummary }) {
+	const origin = site.allowedOrigins[0] ?? "未配置前端 Origin";
+	return (
+		<div className="sticky top-0 z-10 rounded-md border bg-background/95 p-3 shadow-sm backdrop-blur">
+			<div className="flex flex-wrap items-center gap-2">
+				<Badge variant="secondary">目标站点</Badge>
+				<span className="font-medium">{site.name}</span>
+				<span className="text-sm text-muted-foreground">{site.siteKey}</span>
+				<span className="text-sm text-muted-foreground">{origin}</span>
+			</div>
+			<p className="mt-2 text-xs text-muted-foreground">
+				WordPress
+				评论会导入到这里显示的站点。切换右上角站点后，当前页面的分析、计划和导入结果会被清空。
+			</p>
+		</div>
+	);
+}
+
+export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
+	const siteKey = site.siteKey;
 	const [file, setFile] = useState<File | null>(null);
 	const [sourceBasePath, setSourceBasePath] = useState("/");
 	const [targetDistRoot, setTargetDistRoot] = useState("");
@@ -194,18 +214,16 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 
 	return (
 		<div className="flex flex-col gap-4">
+			<TargetSiteSummary site={site} />
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-lg">WordPress 评论迁移分析</CardTitle>
+					<CardTitle className="text-lg">WordPress 评论迁移</CardTitle>
 					<CardDescription>
-						上传 WXR XML 生成迁移 report。当前步骤只分析，不写入数据库。
+						上传 WordPress WXR XML，先分析和确认映射，再 dry-run，最后导入评论。
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="flex flex-col gap-4">
 					<div className="grid gap-3 lg:grid-cols-3">
-						<Field label="siteKey">
-							<input className={inputClass} value={siteKey} readOnly />
-						</Field>
 						<Field label="WXR XML">
 							<input
 								className={inputClass}
@@ -216,14 +234,14 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 								}}
 							/>
 						</Field>
-						<Field label="sourceBasePath">
+						<Field label="WordPress 源路径前缀">
 							<input
 								className={inputClass}
 								value={sourceBasePath}
 								onChange={(event) => setSourceBasePath(event.target.value)}
 							/>
 						</Field>
-						<Field label="targetDistRoot">
+						<Field label="静态站点 dist 目录">
 							<input
 								className={inputClass}
 								value={targetDistRoot}
@@ -231,7 +249,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 								placeholder="可选，本机 dist 目录"
 							/>
 						</Field>
-						<Field label="pageKeyStrategy">
+						<Field label="页面 Key 策略">
 							<select
 								className={inputClass}
 								value={pageKeyStrategy}
@@ -248,7 +266,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 								<option value="explicit_only">explicit_only</option>
 							</select>
 						</Field>
-						<Field label="postPathTemplate">
+						<Field label="文章路径模板">
 							<input
 								className={inputClass}
 								value={postPathTemplate}
@@ -256,7 +274,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 								placeholder="%sourceRelativePath%"
 							/>
 						</Field>
-						<Field label="pagePathTemplate">
+						<Field label="页面路径模板">
 							<input
 								className={inputClass}
 								value={pagePathTemplate}
@@ -265,7 +283,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 							/>
 						</Field>
 						<div className="lg:col-span-2">
-							<Field label="mapping JSON">
+							<Field label="映射 JSON">
 								<textarea
 									className={textareaClass}
 									value={mappingJson}
@@ -434,7 +452,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 								</p>
 							</div>
 							<div className="rounded-md border p-3">
-								<p className="text-xs text-muted-foreground">生成 plan</p>
+								<p className="text-xs text-muted-foreground">生成导入计划</p>
 								<Button
 									type="button"
 									variant="outline"
@@ -449,7 +467,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 										? "生成中"
 										: hasBlockingItems
 											? "仍有阻塞项"
-											: "生成 plan"}
+											: "生成导入计划"}
 								</Button>
 							</div>
 						</CardContent>
@@ -457,9 +475,10 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 					{planMutation.data ? (
 						<Card>
 							<CardHeader>
-								<CardTitle className="text-lg">Import Plan</CardTitle>
+								<CardTitle className="text-lg">导入计划</CardTitle>
 								<CardDescription>
-									任务 {planMutation.data.job.id} 已生成导入计划。
+									目标站点 {site.name} / {site.siteKey}，任务{" "}
+									{planMutation.data.job.id} 已生成导入计划。
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="flex flex-col gap-3">
@@ -480,7 +499,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 									))}
 								</div>
 								<div className="flex flex-wrap items-end gap-2">
-									<Field label="existingStrategy">
+									<Field label="已有数据处理方式">
 										<select
 											className={inputClass}
 											value={existingStrategy}
@@ -492,8 +511,10 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 												)
 											}
 										>
-											<option value="fail_on_existing">fail_on_existing</option>
-											<option value="skip_existing">skip_existing</option>
+											<option value="fail_on_existing">
+												遇到已有评论时报错
+											</option>
+											<option value="skip_existing">跳过已有评论</option>
 										</select>
 									</Field>
 									<Button
@@ -508,7 +529,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 										}
 									>
 										<FileSearchIcon data-icon="inline-start" />
-										{dryRunMutation.isPending ? "检查中" : "Dry-run"}
+										{dryRunMutation.isPending ? "检查中" : "Dry-run 检查"}
 									</Button>
 									<Button
 										type="button"
@@ -521,7 +542,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 										}
 									>
 										<UploadIcon data-icon="inline-start" />
-										{applyMutation.isPending ? "导入中" : "Apply"}
+										{applyMutation.isPending ? "导入中" : `导入到 ${site.name}`}
 									</Button>
 								</div>
 								{applyMutation.error ? (
@@ -540,7 +561,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 					{dryRunMutation.data ? (
 						<Card>
 							<CardHeader>
-								<CardTitle className="text-lg">Dry-run 结果</CardTitle>
+								<CardTitle className="text-lg">Dry-run 检查结果</CardTitle>
 								<CardDescription>
 									状态 {dryRunMutation.data.job.status}
 								</CardDescription>
@@ -577,9 +598,9 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 					{applyMutation.data ? (
 						<Card>
 							<CardHeader>
-								<CardTitle className="text-lg">Apply 结果</CardTitle>
+								<CardTitle className="text-lg">导入结果</CardTitle>
 								<CardDescription>
-									任务 {applyMutation.data.job.id} 已写入。
+									任务 {applyMutation.data.job.id} 已写入 {site.name}。
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="grid gap-3 md:grid-cols-5">
@@ -615,7 +636,7 @@ export function WordPressMigrationPage({ siteKey }: { siteKey: string }) {
 					) : null}
 					<Card>
 						<CardHeader>
-							<CardTitle className="text-lg">Report Rows</CardTitle>
+							<CardTitle className="text-lg">报告行</CardTitle>
 						</CardHeader>
 						<CardContent className="overflow-x-auto">
 							<table className="w-full min-w-[1280px] text-left text-sm">

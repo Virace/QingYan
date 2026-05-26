@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import type { AdminSiteSummary } from "@/api/session";
 import {
 	Card,
 	CardContent,
@@ -23,8 +24,9 @@ const tabs: Array<{ id: DataTab; label: string }> = [
 	{ id: "jobs", label: "任务记录" },
 ];
 
-export function DataPage({ siteKey }: { siteKey: string }) {
+export function DataPage({ site }: { site: AdminSiteSummary }) {
 	const [tab, setTab] = useState<DataTab>("wordpress");
+	const siteKey = site.siteKey;
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -51,7 +53,7 @@ export function DataPage({ siteKey }: { siteKey: string }) {
 				</CardContent>
 			</Card>
 			{tab === "wordpress" ? (
-				<WordPressMigrationPage siteKey={siteKey} />
+				<WordPressMigrationPage key={siteKey} site={site} />
 			) : null}
 			{tab === "export" ? <QingYanExportPage siteKey={siteKey} /> : null}
 			{tab === "import" ? <QingYanImportPage siteKey={siteKey} /> : null}

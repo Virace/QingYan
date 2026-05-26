@@ -1033,6 +1033,439 @@ export function SystemSettingsPage() {
 						</div>
 					</div>
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">安全与来源控制</p>
+						<p className="text-sm text-muted-foreground">
+							这些设置保存后立即影响运行中的请求校验；修改后台来源限制前，请确认当前管理后台
+							Origin 已包含在允许列表内。
+						</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="启用后台 Origin Guard">
+								<select
+									className={inputClass}
+									value={String(draft.security.adminOriginGuard.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												adminOriginGuard: {
+													...draft.security.adminOriginGuard,
+													enabled: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="允许后台请求缺失 Origin">
+								<select
+									className={inputClass}
+									value={String(
+										draft.security.adminOriginGuard.allowMissingOrigin,
+									)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												adminOriginGuard: {
+													...draft.security.adminOriginGuard,
+													allowMissingOrigin: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="false">关闭</option>
+									<option value="true">允许</option>
+								</select>
+							</Field>
+							<Field label="后台允许 Origin">
+								<textarea
+									className={textareaClass}
+									placeholder="留空则使用 QingYan 公开访问地址"
+									value={draft.security.adminOriginGuard.allowedOrigins.join(
+										"\n",
+									)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												adminOriginGuard: {
+													...draft.security.adminOriginGuard,
+													allowedOrigins: event.target.value
+														.split(/\r?\n|,/)
+														.map((value) => value.trim())
+														.filter(Boolean),
+												},
+											},
+										})
+									}
+								/>
+								<span className="text-xs text-muted-foreground">
+									每行一个纯 Origin，例如
+									https://admin.example.com。留空时默认只允许 QingYan
+									publicBaseUrl 的 origin。
+								</span>
+							</Field>
+							<Field label="启用公开 Origin Guard">
+								<select
+									className={inputClass}
+									value={String(draft.security.publicOriginGuard.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												publicOriginGuard: {
+													...draft.security.publicOriginGuard,
+													enabled: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+								<span className="text-xs text-muted-foreground">
+									公开写接口会校验请求 Origin 是否匹配站点配置的前端 Origin。
+								</span>
+							</Field>
+							<Field label="允许公开写请求缺失 Origin">
+								<select
+									className={inputClass}
+									value={String(
+										draft.security.publicOriginGuard.allowMissingOrigin,
+									)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												publicOriginGuard: {
+													...draft.security.publicOriginGuard,
+													allowMissingOrigin: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="false">关闭</option>
+									<option value="true">允许</option>
+								</select>
+							</Field>
+							<Field label="启用全局 Flood Guard">
+								<select
+									className={inputClass}
+									value={String(draft.security.globalFloodGuard.enabled)}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												globalFloodGuard: {
+													...draft.security.globalFloodGuard,
+													enabled: event.target.value === "true",
+												},
+											},
+										})
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="Flood 窗口秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.globalFloodGuard.windowSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												globalFloodGuard: {
+													...draft.security.globalFloodGuard,
+													windowSec: Number(event.target.value),
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="Flood 最大请求">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.globalFloodGuard.maxRequests}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												globalFloodGuard: {
+													...draft.security.globalFloodGuard,
+													maxRequests: Number(event.target.value),
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
+						<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
+							<p className="text-sm font-medium md:col-span-2">频率限制</p>
+							<Field label="管理员登录窗口秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.adminLogin.windowSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													adminLogin: {
+														...draft.security.rateLimit.adminLogin,
+														windowSec: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="管理员登录最大失败">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.adminLogin.maxFailures}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													adminLogin: {
+														...draft.security.rateLimit.adminLogin,
+														maxFailures: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="管理员失败封禁秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.adminLogin.autoBlacklistSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													adminLogin: {
+														...draft.security.rateLimit.adminLogin,
+														autoBlacklistSec: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="评论创建窗口秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.commentCreate.windowSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													commentCreate: {
+														...draft.security.rateLimit.commentCreate,
+														windowSec: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="评论创建最大请求">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.commentCreate.maxRequests}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													commentCreate: {
+														...draft.security.rateLimit.commentCreate,
+														maxRequests: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="评论投票窗口秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.commentVote.windowSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													commentVote: {
+														...draft.security.rateLimit.commentVote,
+														windowSec: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="评论投票最大请求">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.commentVote.maxRequests}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													commentVote: {
+														...draft.security.rateLimit.commentVote,
+														maxRequests: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="验证码验证窗口秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.captchaVerify.windowSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													captchaVerify: {
+														...draft.security.rateLimit.captchaVerify,
+														windowSec: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="验证码验证最大失败">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.captchaVerify.maxFailures}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													captchaVerify: {
+														...draft.security.rateLimit.captchaVerify,
+														maxFailures: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="页面点赞窗口秒">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.pageLike.windowSec}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													pageLike: {
+														...draft.security.rateLimit.pageLike,
+														windowSec: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="页面点赞最大请求">
+								<Input
+									type="number"
+									min={1}
+									value={draft.security.rateLimit.pageLike.maxRequests}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											security: {
+												...draft.security,
+												rateLimit: {
+													...draft.security.rateLimit,
+													pageLike: {
+														...draft.security.rateLimit.pageLike,
+														maxRequests: Number(event.target.value),
+													},
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+						</div>
+					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
 						<p className="text-sm font-medium">头像 / Gravatar</p>
 						<p className="text-sm text-muted-foreground">
 							后端只返回 author.gravatarUrl，不托管、不代理、不缓存头像图片。

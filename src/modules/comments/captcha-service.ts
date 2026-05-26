@@ -542,7 +542,7 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 		consumeRateLimit: (key: string) => Promise<void>;
-		checkRateLimit: (key: string) => void;
+		checkRateLimit: (key: string) => void | Promise<void>;
 	}) {
 		const { site, visitor, thread } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
@@ -580,7 +580,7 @@ export class CaptchaService {
 		}
 
 		const identityKey = visitor.visitorKey || input.ip || "anonymous";
-		input.checkRateLimit(identityKey);
+		await input.checkRateLimit(identityKey);
 
 		const payload = this.parseSessionPayload(activeSession);
 		if (
@@ -764,7 +764,7 @@ export class CaptchaService {
 			};
 		}
 
-		const rule = this.config.security.rateLimit.captchaVerify;
+		const rule = await this.security.getRateLimitRule("captchaVerify");
 		const identityKey = visitor.visitorKey || input.ip || "anonymous";
 		const snapshot = this.security.peekRateLimit({
 			key: `public:${input.siteKey}:${identityKey}:captcha_verify`,
@@ -942,7 +942,7 @@ export class CaptchaService {
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const rule = this.config.security.rateLimit.captchaVerify;
+		const rule = await this.security.getRateLimitRule("captchaVerify");
 		return this.verify({
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,

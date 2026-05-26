@@ -30,7 +30,14 @@ export interface AnalyzeWordPressCommentsInput {
 	postPathTemplate?: string;
 	pagePathTemplate?: string;
 	mapping?: ExplicitMapping;
+	existingPages?: ExistingPageCandidate[];
 	now?: Date;
+}
+
+export interface ExistingPageCandidate {
+	pageKey: string;
+	pageTitle?: string | null;
+	pageUrl?: string | null;
 }
 
 interface CommentTreeResult {
@@ -137,12 +144,16 @@ function classifyItem(input: {
 	sourcePath: SourcePathResult;
 	pageKey: ReturnType<typeof resolvePageKey>;
 	evidence: ReturnType<typeof verifyDistTarget>;
+	matchedExistingPage?: ExistingPageCandidate;
 }): MigrationReportItem["state"] {
 	if (!input.sourcePath.valid) {
 		return "needs_user_mapping";
 	}
 	if (input.pageKey.decision === "skip") {
 		return "skipped";
+	}
+	if (input.matchedExistingPage) {
+		return "ready";
 	}
 	if (
 		input.pageKey.decision === "needs_user_mapping" ||
@@ -164,6 +175,64 @@ function classifyItem(input: {
 				? "ready"
 				: "unverified";
 	}
+}
+
+function normalizeComparablePath(value: string): string {
+	try {
+		const pathname = new URL(value, "https://qingyan.local").pathname;
+		return pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+	} catch {
+		return value.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+	}
+}
+
+function normalizeComparableTitle(value: string): string {
+	return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function findExistingPageCandidate(
+	item: WxrItem,
+	sourcePath: SourcePathResult,
+	pageKey: ReturnType<typeof resolvePageKey>,
+	existingPages: ExistingPageCandidate[] | undefined,
+): ExistingPageCandidate | undefined {
+	if (!existingPages?.length) {
+		return undefined;
+	}
+
+	const candidates = existingPages.map((page) => ({
+		page,
+		pageKey: normalizeComparablePath(page.pageKey),
+		pageUrl: page.pageUrl ? normalizeComparablePath(page.pageUrl) : "",
+		title: page.pageTitle ? normalizeComparableTitle(page.pageTitle) : "",
+	}));
+	const sourcePathKey = normalizeComparablePath(sourcePath.sourcePath);
+	const sourceRelativePathKey = normalizeComparablePath(
+		sourcePath.sourceRelativePath,
+	);
+	const targetPageKey = pageKey.pageKey
+		? normalizeComparablePath(pageKey.pageKey)
+		: "";
+	const targetPageUrl = pageKey.pageUrl
+		? normalizeComparablePath(pageKey.pageUrl)
+		: "";
+	const title = normalizeComparableTitle(item.title);
+
+	return (
+		candidates.find(
+			(candidate) =>
+				candidate.pageKey === sourceRelativePathKey ||
+				candidate.pageUrl === sourcePathKey,
+		)?.page ??
+		candidates.find(
+			(candidate) =>
+				(targetPageKey && candidate.pageKey === targetPageKey) ||
+				(targetPageUrl && candidate.pageUrl === targetPageUrl),
+		)?.page ??
+		candidates.find(
+			(candidate) => title && candidate.title && candidate.title === title,
+		)?.page
+	);
 }
 
 function buildReportItem(
@@ -190,7 +259,20 @@ function buildReportItem(
 		sourceRelativePath: sourcePath.sourceRelativePath,
 		wpPostId: item.wpPostId,
 	});
-	const state = classifyItem({ sourcePath, pageKey, evidence });
+	const matchedExistingPage = findExistingPageCandidate(
+		item,
+		sourcePath,
+		pageKey,
+		input.existingPages,
+	);
+	const state = classifyItem({
+		sourcePath,
+		pageKey,
+		evidence,
+		matchedExistingPage,
+	});
+	const resolvedPageKey = matchedExistingPage?.pageKey ?? pageKey.pageKey;
+	const resolvedPageUrl = matchedExistingPage?.pageUrl ?? pageKey.pageUrl;
 
 	return {
 		state,
@@ -200,12 +282,14 @@ function buildReportItem(
 		link: item.link,
 		sourcePath: sourcePath.sourcePath,
 		sourceRelativePath: sourcePath.sourceRelativePath,
-		target: pageKey.pageKey
+		target: resolvedPageKey
 			? {
-					pageKey: pageKey.pageKey,
-					pageUrl: pageKey.pageUrl,
-					confidence: Math.max(pageKey.confidence, evidence.confidence),
-					source: pageKey.source,
+					pageKey: resolvedPageKey,
+					pageUrl: resolvedPageUrl ?? undefined,
+					confidence: matchedExistingPage
+						? 95
+						: Math.max(pageKey.confidence, evidence.confidence),
+					source: matchedExistingPage ? "metadata" : pageKey.source,
 				}
 			: undefined,
 		evidence,

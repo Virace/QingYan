@@ -5,6 +5,7 @@ import { buildSuggestedMapping, type MigrationReport } from "../report";
 import {
 	analyzeWordPressComments,
 	type AnalyzeWordPressCommentsInput,
+	type ExistingPageCandidate,
 } from "./analyzer";
 import type { ExplicitMapping, PageKeyStrategy } from "./page-key";
 
@@ -18,6 +19,7 @@ export interface AnalyzeWordPressAdminInput {
 	postPathTemplate?: string;
 	pagePathTemplate?: string;
 	mapping?: ExplicitMapping;
+	existingPages?: ExistingPageCandidate[];
 }
 
 export interface WordPressAnalyzeResult {
@@ -46,6 +48,7 @@ function toAnalyzeInput(
 		postPathTemplate: input.postPathTemplate,
 		pagePathTemplate: input.pagePathTemplate,
 		mapping: input.mapping,
+		existingPages: input.existingPages,
 	};
 }
 

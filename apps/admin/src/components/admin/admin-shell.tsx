@@ -135,7 +135,17 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			case "sites":
 				return <SitesPage openSite={openSite} />;
 			case "data":
-				return <DataPage siteKey={activeSiteKey} />;
+				return (
+					<DataPage
+						site={
+							activeSite ?? {
+								siteKey: activeSiteKey,
+								name: activeSiteKey || "未选择站点",
+								allowedOrigins: [],
+							}
+						}
+					/>
+				);
 			case "ops":
 				return <OpsPage />;
 			case "settings":

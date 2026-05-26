@@ -428,8 +428,8 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
-			checkRateLimit: (identityKey) => {
-				const rule = fastify.config.security.rateLimit.captchaVerify;
+			checkRateLimit: async (identityKey) => {
+				const rule = await fastify.security.getRateLimitRule("captchaVerify");
 				const snapshot = fastify.security.peekRateLimit({
 					key: `public:${parsed.data.siteKey}:${identityKey}:captcha_verify`,
 					rule,
@@ -448,7 +448,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			consumeRateLimit: async (identityKey) => {
 				await fastify.security.consumeRateLimit({
 					key: `public:${parsed.data.siteKey}:${identityKey}:captcha_verify`,
-					rule: fastify.config.security.rateLimit.captchaVerify,
+					rule: await fastify.security.getRateLimitRule("captchaVerify"),
 					errorCode: "COMMENT_RATE_LIMITED",
 					errorMessage: "验证码尝试次数过多，请稍后再试。",
 				});

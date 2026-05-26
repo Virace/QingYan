@@ -150,7 +150,7 @@ export class CommentsWriteService {
 			});
 			await this.security.consumeRateLimit({
 				key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:comment_create`,
-				rule: this.config.security.rateLimit.commentCreate,
+				rule: await this.security.getRateLimitRule("commentCreate"),
 				errorCode: "COMMENT_RATE_LIMITED",
 				errorMessage: "提交过于频繁，请稍后再试。",
 			});
@@ -367,7 +367,7 @@ export class CommentsWriteService {
 		});
 		await this.security.consumeRateLimit({
 			key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:comment_vote`,
-			rule: this.config.security.rateLimit.commentVote,
+			rule: await this.security.getRateLimitRule("commentVote"),
 			errorCode: "VOTE_RATE_LIMITED",
 			errorMessage: "投票过于频繁，请稍后再试。",
 		});

@@ -3,7 +3,10 @@ import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { defaultSystemSettings } from "../system-settings/definitions";
-import { RuntimeSystemSettingsService } from "../system-settings/service";
+import {
+	createSystemSettingsDefaults,
+	RuntimeSystemSettingsService,
+} from "../system-settings/service";
 import { AppError } from "../shared/errors";
 import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminBootstrap } from "./bootstrap-service";
@@ -29,6 +32,12 @@ export class AdminSessionService {
 		private readonly siteRegistry?: SiteRegistry,
 		private readonly systemSettings = new RuntimeSystemSettingsService(
 			repository.database,
+			createSystemSettingsDefaults({
+				adminSession: {
+					ttlMinutes: config.admin.session.ttlMinutes,
+				},
+				security: config.security,
+			}),
 		),
 	) {
 		this.loginChallengeStore = new AdminLoginChallengeStore(
@@ -162,7 +171,8 @@ export class AdminSessionService {
 
 		const nextFailures = (this.failedLoginCounts.get(input.ip) ?? 0) + 1;
 		this.failedLoginCounts.set(input.ip, nextFailures);
-		const adminLoginRule = this.config.security.rateLimit.adminLogin;
+		const adminLoginRule = (await this.systemSettings.getSecuritySettings())
+			.rateLimit.adminLogin;
 		const maxFailures = adminLoginRule.maxFailures ?? 5;
 		const autoBlacklistSec = adminLoginRule.autoBlacklistSec ?? 1800;
 
@@ -383,6 +393,10 @@ export class AdminSessionService {
 			sites: sites.map((site) => ({
 				siteKey: site.siteKey,
 				name: site.name,
+				allowedOrigins:
+					"allowedOrigins" in site
+						? site.allowedOrigins
+						: (JSON.parse(site.allowedOriginsJson) as string[]),
 			})),
 		};
 	}

@@ -5,6 +5,7 @@ import {
 	siteModerationSettingsSchema,
 } from "../comments/moderation-types";
 import { isSafeHttpUrl, normalizeOrigin } from "../shared/url-policy";
+import { securitySettingsSchema } from "../system-settings/definitions";
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
 const commentMetadataSchema = z.object({
@@ -64,6 +65,19 @@ const adminCollectionQuerySchema = z.object({
 	offset: z.coerce.number().int().min(0).default(0),
 });
 
+const siteOriginSchema = z.string().refine((value) => {
+	try {
+		normalizeOrigin(value);
+		return true;
+	} catch {
+		return false;
+	}
+}, "allowedOrigins 必须是纯 origin");
+
+const singleSiteOriginListSchema = z
+	.array(siteOriginSchema)
+	.length(1, "每个站点只能配置一个前端 Origin。");
+
 export const adminPagesQuerySchema = adminCollectionQuerySchema;
 export const adminUsersQuerySchema = adminCollectionQuerySchema;
 export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
@@ -74,18 +88,7 @@ export const adminSiteCreateBodySchema = z.object({
 		.min(1)
 		.regex(/^[a-z0-9][a-z0-9_-]*$/i),
 	name: z.string().min(1),
-	allowedOrigins: z
-		.array(
-			z.string().refine((value) => {
-				try {
-					normalizeOrigin(value);
-					return true;
-				} catch {
-					return false;
-				}
-			}, "allowedOrigins 必须是纯 origin"),
-		)
-		.min(1),
+	allowedOrigins: singleSiteOriginListSchema,
 });
 
 export const adminSiteParamsSchema = z.object({
@@ -95,19 +98,7 @@ export const adminSiteParamsSchema = z.object({
 export const adminSitePatchBodySchema = z
 	.object({
 		name: z.string().min(1).optional(),
-		allowedOrigins: z
-			.array(
-				z.string().refine((value) => {
-					try {
-						normalizeOrigin(value);
-						return true;
-					} catch {
-						return false;
-					}
-				}, "allowedOrigins 必须是纯 origin"),
-			)
-			.min(1)
-			.optional(),
+		allowedOrigins: singleSiteOriginListSchema.optional(),
 	})
 	.refine((value) => Object.keys(value).length > 0, {
 		message: "至少需要一个更新字段",
@@ -226,6 +217,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			}),
 		})
 		.optional(),
+	security: securitySettingsSchema.optional(),
 	logging: z.object({
 		level: z.enum(["error", "warn", "info", "debug"]),
 		retentionDays: z.number().int().min(1).max(3650),

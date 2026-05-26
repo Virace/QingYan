@@ -431,6 +431,9 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("修改后必须同步修改反向代理");
 		expect(response.body).toContain("HTTPS 部署建议启用");
 		expect(response.body).toContain("填写加载评论组件的前端站点 origin");
+		expect(response.body).toContain("一个 QingYan 站点只对应一个前端 Origin");
+		expect(response.body).toContain('data-type="singleStringArray"');
+		expect(response.body).not.toContain("可填多个，每行一个");
 		expect(response.body).toContain("选择 QingYan JSON 文件");
 		expect(response.body).toContain("不选择文件则执行全新安装");
 		expect(response.body).toContain("浏览器会在本地读取文件内容");

@@ -1,6 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 
+import type { AppDatabase } from "../../db/client";
+import { pageThreads } from "../../db/schema";
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
 import { DatabaseBackupService } from "../database-backup/database-backup-service";
@@ -193,6 +196,20 @@ function serializeImportJob(
 	};
 }
 
+async function listExistingPageCandidates(input: {
+	db: AppDatabase;
+	siteId: number;
+}) {
+	return input.db
+		.select({
+			pageKey: pageThreads.pageKey,
+			pageTitle: pageThreads.pageTitle,
+			pageUrl: pageThreads.pageUrl,
+		})
+		.from(pageThreads)
+		.where(eq(pageThreads.siteId, input.siteId));
+}
+
 export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.addContentTypeParser(
 		["application/xml", "text/xml"],
@@ -333,7 +350,14 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 				throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 			}
 
-			const result = wordpressService.analyze(data);
+			const existingPages = await listExistingPageCandidates({
+				db: fastify.db,
+				siteId: site.id,
+			});
+			const result = wordpressService.analyze({
+				...data,
+				existingPages,
+			});
 			await jobService.createWordPressAnalyzeJob({
 				siteId: site.id,
 				xml: data.xml,
@@ -354,7 +378,14 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
 
-		const result = wordpressService.analyze(parsed.data);
+		const existingPages = await listExistingPageCandidates({
+			db: fastify.db,
+			siteId: site.id,
+		});
+		const result = wordpressService.analyze({
+			...parsed.data,
+			existingPages,
+		});
 		await jobService.createWordPressAnalyzeJob({
 			siteId: site.id,
 			xml: parsed.data.xml,

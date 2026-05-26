@@ -20,6 +20,13 @@ import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
 import { AppError } from "../modules/shared/errors";
 import { adminSessions, auditLogs, blacklistRules } from "../db/schema";
 import { joinPublicPath, stripPublicPath } from "../config/public-path";
+import {
+	createSystemSettingsDefaults,
+	RuntimeSystemSettingsService,
+} from "../modules/system-settings/service";
+import type { SystemSettings } from "../modules/system-settings/definitions";
+
+type SecuritySettings = SystemSettings["security"];
 
 const PUBLIC_WRITE_ROUTES = [
 	{ method: "POST", pattern: /^\/api\/comments$/ },
@@ -71,6 +78,9 @@ export interface AuditWriteInput {
 
 export interface SecurityToolkit {
 	assertGlobalFloodAllowed(input: { ip?: string }): Promise<void>;
+	getRateLimitRule<K extends keyof SecuritySettings["rateLimit"]>(
+		key: K,
+	): Promise<SecuritySettings["rateLimit"][K]>;
 	assertNotBlacklisted(input: BlacklistCheckInput): Promise<void>;
 	recordAbuseWriteAction(input: {
 		requestId?: string;
@@ -142,10 +152,20 @@ function setCorsHeaders(
 
 const securityPlugin: FastifyPluginAsync = async (fastify) => {
 	const rateLimitStore = new MemoryRateLimitStore();
+	const systemSettings = new RuntimeSystemSettingsService(
+		fastify.db,
+		createSystemSettingsDefaults({
+			adminSession: {
+				ttlMinutes: fastify.config.admin.session.ttlMinutes,
+			},
+			security: fastify.config.security,
+		}),
+	);
 
 	const security: SecurityToolkit = {
 		async assertGlobalFloodAllowed({ ip }) {
-			const guard = fastify.config.security.globalFloodGuard;
+			const guard = (await systemSettings.getSecuritySettings())
+				.globalFloodGuard;
 			if (!guard.enabled || !ip) {
 				return;
 			}
@@ -173,6 +193,9 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 				throw error;
 			}
+		},
+		async getRateLimitRule(key) {
+			return (await systemSettings.getSecuritySettings()).rateLimit[key];
 		},
 		async assertNotBlacklisted(input) {
 			const siteId = fastify.siteRegistry.getRegisteredSite(input.siteKey)?.id;
@@ -441,13 +464,14 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			setCorsHeaders(reply, origin);
 		}
 
+		const runtimeSecurity = await systemSettings.getSecuritySettings();
 		if (
-			fastify.config.security.publicOriginGuard.enabled &&
+			runtimeSecurity.publicOriginGuard.enabled &&
 			isPublicWriteRequest(request.method, internalPathname)
 		) {
 			if (!origin) {
 				if (
-					fastify.config.security.publicOriginGuard.allowMissingOrigin ||
+					runtimeSecurity.publicOriginGuard.allowMissingOrigin ||
 					fastify.runtimeOptions.devMode.enabled
 				) {
 					return;
@@ -470,7 +494,7 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		}
 
 		if (
-			!fastify.config.security.adminOriginGuard.enabled ||
+			!runtimeSecurity.adminOriginGuard.enabled ||
 			!isAdminWriteRequest(request.method, internalPathname)
 		) {
 			return;
@@ -483,16 +507,13 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		}
 
 		const allowedAdminOrigins =
-			fastify.config.security.adminOriginGuard.allowedOrigins.length > 0
-				? fastify.config.security.adminOriginGuard.allowedOrigins
+			runtimeSecurity.adminOriginGuard.allowedOrigins.length > 0
+				? runtimeSecurity.adminOriginGuard.allowedOrigins
 				: [new URL(fastify.config.server.publicBaseUrl).origin];
 		if (origin && !allowedAdminOrigins.includes(origin)) {
 			throw new AppError(403, "ADMIN_ORIGIN_FORBIDDEN", "后台请求来源不合法。");
 		}
-		if (
-			!origin &&
-			!fastify.config.security.adminOriginGuard.allowMissingOrigin
-		) {
+		if (!origin && !runtimeSecurity.adminOriginGuard.allowMissingOrigin) {
 			throw new AppError(403, "ADMIN_ORIGIN_FORBIDDEN", "后台请求来源不合法。");
 		}
 

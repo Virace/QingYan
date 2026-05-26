@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
+import { pageThreads, sites } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -125,6 +127,47 @@ describe("admin import/export WordPress routes", () => {
 			},
 		});
 		expect(response.json().job.id).toMatch(/^wp_/);
+	});
+
+	it("uses existing page threads from the target site as WordPress mapping candidates", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected fangyuan site");
+		}
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "posts/termux/",
+			pageTitle: "Imported Title",
+			pageUrl: "https://x-item.com/termux.html",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "wordpress.xml",
+				xml: wxrFixture(),
+				sourceBasePath: "/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().report.items[0]).toMatchObject({
+			state: "ready",
+			target: {
+				pageKey: "posts/termux/",
+				pageUrl: "https://x-item.com/termux.html",
+				confidence: 95,
+				source: "metadata",
+			},
+		});
 	});
 
 	it("accepts large WXR XML as the request body without the JSON body limit", async () => {

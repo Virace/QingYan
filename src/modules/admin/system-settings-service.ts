@@ -1,4 +1,5 @@
 import type { LoggerManager } from "../../logging/logger-manager";
+import type { AppConfig } from "../../config/types";
 import {
 	flattenSystemSettings,
 	maskSystemSettings,
@@ -6,11 +7,13 @@ import {
 	type SystemSettingRow,
 } from "../system-settings/codec";
 import type { SystemSettings } from "../system-settings/definitions";
+import { createSystemSettingsDefaults } from "../system-settings/definitions";
 import { normalizeGravatarBaseUrl } from "../comments/gravatar";
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
 
 type AdminSystemSettingsInput = {
 	admin?: SystemSettings["admin"];
+	security?: SystemSettings["security"];
 	logging: SystemSettings["logging"];
 	mail?: {
 		enabled: boolean;
@@ -55,11 +58,12 @@ export class AdminSystemSettingsService {
 	public constructor(
 		private readonly repository: AdminSystemSettingsRepository,
 		private readonly loggerManager: LoggerManager,
+		private readonly defaults?: SystemSettings,
 	) {}
 
 	public async getSettings() {
 		const rows = (await this.repository.listAll()) as SystemSettingRow[];
-		const settings = readSystemSettingsRows(rows);
+		const settings = readSystemSettingsRows(rows, this.defaults);
 
 		return {
 			...maskSystemSettings(settings),
@@ -72,10 +76,11 @@ export class AdminSystemSettingsService {
 
 	public async updateSettings(input: AdminSystemSettingsInput) {
 		const rows = (await this.repository.listAll()) as SystemSettingRow[];
-		const current = readSystemSettingsRows(rows);
+		const current = readSystemSettingsRows(rows, this.defaults);
 		const next: SystemSettings = {
 			...current,
 			admin: input.admin ?? current.admin,
+			security: input.security ?? current.security,
 			logging: input.logging,
 			mail: input.mail
 				? {
@@ -182,4 +187,15 @@ export class AdminSystemSettingsService {
 
 		return this.getSettings();
 	}
+}
+
+export function createAdminSystemSettingsDefaults(
+	config: AppConfig,
+): SystemSettings {
+	return createSystemSettingsDefaults({
+		adminSession: {
+			ttlMinutes: config.admin.session.ttlMinutes,
+		},
+		security: config.security,
+	});
 }

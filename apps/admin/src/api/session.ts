@@ -10,6 +10,7 @@ export interface CaptchaChallenge {
 export interface AdminSiteSummary {
 	siteKey: string;
 	name: string;
+	allowedOrigins: string[];
 }
 
 export interface AdminSessionPayload {

@@ -12,12 +12,14 @@ afterEach(async () => {
 
 describe("global flood guard", () => {
 	it("returns GLOBAL_RATE_LIMITED after hitting the global request ceiling", async () => {
-		const fixture = await createTestApp();
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.security.globalFloodGuard.enabled = true;
+				config.security.globalFloodGuard.windowSec = 10;
+				config.security.globalFloodGuard.maxRequests = 2;
+			},
+		});
 		cleanups.push(fixture.cleanup);
-
-		fixture.app.config.security.globalFloodGuard.enabled = true;
-		fixture.app.config.security.globalFloodGuard.windowSec = 10;
-		fixture.app.config.security.globalFloodGuard.maxRequests = 2;
 
 		const url =
 			"/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:flood";

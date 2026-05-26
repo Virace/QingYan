@@ -5,7 +5,10 @@ import { adminSystemSettingsBodySchema } from "./schemas";
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
 import { AdminSystemSettingsRepository } from "./system-settings-repository";
-import { AdminSystemSettingsService } from "./system-settings-service";
+import {
+	AdminSystemSettingsService,
+	createAdminSystemSettingsDefaults,
+} from "./system-settings-service";
 
 export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 	fastify,
@@ -19,6 +22,7 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 	const service = new AdminSystemSettingsService(
 		new AdminSystemSettingsRepository(fastify.db),
 		fastify.loggerManager,
+		createAdminSystemSettingsDefaults(fastify.config),
 	);
 
 	fastify.get("/", async (request) => {

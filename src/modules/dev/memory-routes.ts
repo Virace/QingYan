@@ -60,7 +60,13 @@ export function createDevMemoryRoutes(input: {
 			return {
 				authenticated: true,
 				session: { expiresAt: session.expiresAt },
-				sites: [{ siteKey: seedSite.siteKey, name: seedSite.name }],
+				sites: [
+					{
+						siteKey: seedSite.siteKey,
+						name: seedSite.name,
+						allowedOrigins: seedSite.allowedOrigins,
+					},
+				],
 			};
 		});
 

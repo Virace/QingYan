@@ -98,7 +98,13 @@ describe("dev session bootstrap", () => {
 		});
 
 		expect(me.statusCode).toBe(200);
-		expect(me.json().sites).toEqual([{ siteKey: "default", name: "Default" }]);
+		expect(me.json().sites).toEqual([
+			{
+				siteKey: "default",
+				name: "Default",
+				allowedOrigins: ["http://localhost:4321"],
+			},
+		]);
 	});
 
 	it("persists the dev default site and site settings into sqlite", async () => {

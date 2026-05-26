@@ -1,4 +1,3 @@
-import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { CommentsRepository } from "../comments/repository";
@@ -15,7 +14,6 @@ function resolveIdentity(
 
 export class PageFeedbackService {
 	public constructor(
-		private readonly config: AppConfig,
 		private readonly security: SecurityToolkit,
 		private readonly commentsRepository: CommentsRepository,
 		private readonly captchaService: CaptchaService,
@@ -68,9 +66,7 @@ export class PageFeedbackService {
 		});
 		await this.security.consumeRateLimit({
 			key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:page_like`,
-			rule:
-				this.config.security.rateLimit.pageLike ??
-				this.config.security.rateLimit.commentVote,
+			rule: await this.security.getRateLimitRule("pageLike"),
 			errorCode: "VOTE_RATE_LIMITED",
 			errorMessage: "提交过于频繁，请稍后再试。",
 		});

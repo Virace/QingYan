@@ -1,7 +1,11 @@
 import { z } from "zod";
 
+import type { AppConfig } from "../../config/types";
+import { normalizeOrigin } from "../shared/url-policy";
+
 export const systemSettingCategories = [
 	"admin",
+	"security",
 	"logging",
 	"mail",
 	"captcha",
@@ -22,12 +26,63 @@ export const captchaProviderSchema = z.enum([
 	"geetest",
 ]);
 
+const originSchema = z.string().transform((value, context) => {
+	try {
+		return normalizeOrigin(value);
+	} catch {
+		context.addIssue({
+			code: "custom",
+			message: "必须是纯 http/https origin。",
+		});
+		return z.NEVER;
+	}
+});
+
+const requestRateLimitRuleSchema = z.object({
+	windowSec: z.number().int().positive(),
+	maxRequests: z.number().int().positive(),
+});
+
+const failureRateLimitRuleSchema = z.object({
+	windowSec: z.number().int().positive(),
+	maxFailures: z.number().int().positive(),
+});
+
+const adminLoginRateLimitRuleSchema = failureRateLimitRuleSchema.extend({
+	autoBlacklistSec: z.number().int().positive(),
+});
+
+export const securitySettingsSchema = z.object({
+	globalFloodGuard: z.object({
+		enabled: z.boolean(),
+		windowSec: z.number().int().positive(),
+		maxRequests: z.number().int().positive(),
+	}),
+	publicOriginGuard: z.object({
+		enabled: z.boolean(),
+		allowMissingOrigin: z.boolean(),
+	}),
+	adminOriginGuard: z.object({
+		enabled: z.boolean(),
+		allowMissingOrigin: z.boolean(),
+		allowedOrigins: z.array(originSchema),
+	}),
+	rateLimit: z.object({
+		adminLogin: adminLoginRateLimitRuleSchema,
+		commentCreate: requestRateLimitRuleSchema,
+		commentVote: requestRateLimitRuleSchema,
+		captchaVerify: failureRateLimitRuleSchema,
+		pageLike: requestRateLimitRuleSchema,
+	}),
+});
+
 export const systemSettingsSchema = z.object({
 	admin: z.object({
 		session: z.object({
 			ttlMinutes: z.number().int().positive(),
 		}),
 	}),
+	security: securitySettingsSchema,
 	logging: z.object({
 		level: z.enum(["error", "warn", "info", "debug"]),
 		retentionDays: z.number().int().min(1).max(3650),
@@ -118,6 +173,45 @@ export const defaultSystemSettings: SystemSettings = {
 	admin: {
 		session: {
 			ttlMinutes: defaultAdminSessionTtlMinutes,
+		},
+	},
+	security: {
+		globalFloodGuard: {
+			enabled: true,
+			windowSec: 10,
+			maxRequests: 120,
+		},
+		publicOriginGuard: {
+			enabled: true,
+			allowMissingOrigin: false,
+		},
+		adminOriginGuard: {
+			enabled: true,
+			allowMissingOrigin: false,
+			allowedOrigins: [],
+		},
+		rateLimit: {
+			adminLogin: {
+				windowSec: 600,
+				maxFailures: 5,
+				autoBlacklistSec: 1800,
+			},
+			commentCreate: {
+				windowSec: 300,
+				maxRequests: 5,
+			},
+			commentVote: {
+				windowSec: 300,
+				maxRequests: 15,
+			},
+			captchaVerify: {
+				windowSec: 300,
+				maxFailures: 8,
+			},
+			pageLike: {
+				windowSec: 300,
+				maxRequests: 10,
+			},
 		},
 	},
 	logging: {
@@ -215,3 +309,30 @@ export const secretSystemSettingPaths = new Set([
 	"captcha.geetest.captchaKey",
 	"antiSpam.akismet.apiKey",
 ]);
+
+export function createSystemSettingsDefaults(input?: {
+	adminSession?: SystemSettings["admin"]["session"];
+	security?: AppConfig["security"];
+}): SystemSettings {
+	const defaults = structuredClone(defaultSystemSettings);
+	if (input?.adminSession) {
+		defaults.admin.session = structuredClone(input.adminSession);
+	}
+	if (input?.security) {
+		defaults.security = securitySettingsSchema.parse({
+			globalFloodGuard: input.security.globalFloodGuard,
+			publicOriginGuard: input.security.publicOriginGuard,
+			adminOriginGuard: input.security.adminOriginGuard,
+			rateLimit: {
+				adminLogin: input.security.rateLimit.adminLogin,
+				commentCreate: input.security.rateLimit.commentCreate,
+				commentVote: input.security.rateLimit.commentVote,
+				captchaVerify: input.security.rateLimit.captchaVerify,
+				pageLike:
+					input.security.rateLimit.pageLike ??
+					defaultSystemSettings.security.rateLimit.pageLike,
+			},
+		});
+	}
+	return defaults;
+}

@@ -40,6 +40,48 @@ describe("admin sites", () => {
 		expect(response.statusCode).toBe(400);
 	});
 
+	it("rejects creating a site with more than one allowed origin", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/sites",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				siteKey: "multi",
+				name: "Multi",
+				allowedOrigins: ["https://one.example.com", "https://two.example.com"],
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+	});
+
+	it("rejects updating a site with more than one allowed origin", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/sites/fangyuan",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				allowedOrigins: ["https://one.example.com", "https://two.example.com"],
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+	});
+
 	it("creates a site with default site settings", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

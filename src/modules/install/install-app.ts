@@ -314,7 +314,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>站点 Key<input data-path="site.siteKey" autocomplete="off" required><span class="hint" data-hint-for="site.siteKey"></span></label>
 <label>站点名称<input data-path="site.name" autocomplete="off" required><span class="hint" data-hint-for="site.name"></span></label>
 </div>
-<label>允许的前端 Origin<textarea data-path="site.allowedOrigins" data-type="stringArray" required></textarea><span class="hint" data-hint-for="site.allowedOrigins">填写加载评论组件的前端站点 origin。可填多个，每行一个。若 QingYan 与内容站不是同一域名，请添加 FangYuan / x-item 的真实访问 origin。</span></label>
+<label>前端站点 Origin<input data-path="site.allowedOrigins" data-type="singleStringArray" autocomplete="url" required><span class="hint" data-hint-for="site.allowedOrigins">填写加载评论组件的前端站点 origin。一个 QingYan 站点只对应一个前端 Origin；若 QingYan 与内容站不是同一域名，请填写 FangYuan / x-item 的真实访问 origin。</span></label>
 </fieldset>
 <fieldset>
 <legend>安全基础配置</legend>
@@ -509,6 +509,9 @@ function setPath(target, path, value) {
 	cursor[keys[keys.length - 1]] = value;
 }
 function formatInputValue(value, type) {
+	if (type === "singleStringArray") {
+		return Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+	}
 	if (type === "stringArray") {
 		return Array.isArray(value) ? value.join("\\n") : String(value ?? "");
 	}
@@ -532,6 +535,10 @@ function readFieldValue(field) {
 	}
 	if (type === "stringArray") {
 		return field.value.split(/\\s*,\\s*|\\n|\\s+/).map((item) => item.trim()).filter(Boolean);
+	}
+	if (type === "singleStringArray") {
+		const value = field.value.trim();
+		return value ? [value] : [];
 	}
 	return field.value;
 }

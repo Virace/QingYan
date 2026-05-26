@@ -27,7 +27,6 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		},
 	);
 	const service = new PageFeedbackService(
-		fastify.config,
 		fastify.security,
 		commentsRepository,
 		captchaService,

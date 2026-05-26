@@ -147,4 +147,84 @@ describe("analyzeWordPressComments", () => {
 		]);
 		expect(report.summary.conflict).toBe(2);
 	});
+
+	it("matches existing site pages by stored page URL and title", () => {
+		const report = analyzeWordPressComments({
+			xml: wxrWithItems(
+				`${wxrItem({
+					id: "1",
+					title: "Existing Termux",
+					link: "https://x-item.com/termux.html",
+				})}${wxrItem({
+					id: "2",
+					title: "Title Only",
+					link: "https://x-item.com/title-only.html",
+					commentId: "2",
+				})}`,
+			),
+			fileName: "fixture.xml",
+			siteKey: "fangyuan",
+			sourceBasePath: "/",
+			existingPages: [
+				{
+					pageKey: "posts/termux/",
+					pageTitle: "Different Title",
+					pageUrl: "https://x-item.com/termux.html",
+				},
+				{
+					pageKey: "posts/title-only/",
+					pageTitle: "Title Only",
+					pageUrl: "https://x-item.com/another-url/",
+				},
+			],
+		});
+
+		expect(report.items).toHaveLength(2);
+		expect(report.items.map((item) => item.state)).toEqual(["ready", "ready"]);
+		expect(report.items.map((item) => item.target)).toEqual([
+			expect.objectContaining({
+				pageKey: "posts/termux/",
+				pageUrl: "https://x-item.com/termux.html",
+				confidence: 95,
+				source: "metadata",
+			}),
+			expect.objectContaining({
+				pageKey: "posts/title-only/",
+				pageUrl: "https://x-item.com/another-url/",
+				confidence: 95,
+				source: "metadata",
+			}),
+		]);
+		expect(report.summary.ready).toBe(2);
+	});
+
+	it("uses an existing page match even when the page key strategy requires explicit mapping", () => {
+		const report = analyzeWordPressComments({
+			xml: wxrWithItems(
+				wxrItem({
+					id: "1",
+					title: "Explicit Only",
+					link: "https://x-item.com/explicit-only.html",
+				}),
+			),
+			fileName: "fixture.xml",
+			siteKey: "fangyuan",
+			pageKeyStrategy: "explicit_only",
+			existingPages: [
+				{
+					pageKey: "posts/explicit-only/",
+					pageTitle: "Explicit Only",
+					pageUrl: "https://x-item.com/explicit-only.html",
+				},
+			],
+		});
+
+		expect(report.items[0]).toMatchObject({
+			state: "ready",
+			target: {
+				pageKey: "posts/explicit-only/",
+				source: "metadata",
+			},
+		});
+	});
 });

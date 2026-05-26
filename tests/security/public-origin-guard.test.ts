@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../../src/config/types";
 import { siteSettings } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -197,6 +198,84 @@ describe("public origin guard", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
+	});
+
+	it("uses runtime public origin guard settings from system settings", async () => {
+		const fixture = await createTestApp({
+			mutateConfig: requireOrigin,
+		});
+		cleanups.push(fixture.cleanup);
+
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert("security", "publicOriginGuard.enabled", true);
+		await systemSettings.upsert(
+			"security",
+			"publicOriginGuard.allowMissingOrigin",
+			true,
+		);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:runtime-missing-origin",
+				pageTitle: "Runtime Missing Origin",
+				pageUrl: "https://fangyuan.example.com/posts/runtime-missing-origin/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+	});
+
+	it("uses runtime admin origin guard settings from system settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+
+		await systemSettings.upsert("security", "adminOriginGuard.enabled", true);
+		await systemSettings.upsert(
+			"security",
+			"adminOriginGuard.allowMissingOrigin",
+			false,
+		);
+		await systemSettings.upsert("security", "adminOriginGuard.allowedOrigins", [
+			"https://admin.example.test",
+		]);
+
+		const oldOrigin = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/sites/fangyuan",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+				origin: "http://localhost:4401",
+			}),
+			payload: {
+				name: "Blocked Origin",
+			},
+		});
+		expect(oldOrigin.statusCode).toBe(403);
+		expect(oldOrigin.json()).toMatchObject({
+			error: {
+				code: "ADMIN_ORIGIN_FORBIDDEN",
+			},
+		});
+
+		const runtimeOrigin = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/sites/fangyuan",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+				origin: "https://admin.example.test",
+			}),
+			payload: {
+				name: "Allowed Runtime Origin",
+			},
+		});
+		expect(runtimeOrigin.statusCode).toBe(200);
 	});
 
 	it("allows dev memory mode writes without Origin for local integration", async () => {

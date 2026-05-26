@@ -18,10 +18,6 @@ export interface SystemSettingUpsert {
 	secret: boolean;
 }
 
-function cloneDefaults(): SystemSettings {
-	return structuredClone(defaultSystemSettings);
-}
-
 function setPathValue(
 	target: Record<string, unknown>,
 	path: string,
@@ -67,8 +63,12 @@ function flattenObject(
 
 export function readSystemSettingsRows(
 	rows: SystemSettingRow[],
+	defaults: SystemSettings = defaultSystemSettings,
 ): SystemSettings {
-	const settings = cloneDefaults() as unknown as Record<string, unknown>;
+	const settings = structuredClone(defaults) as unknown as Record<
+		string,
+		unknown
+	>;
 	for (const row of rows) {
 		setPathValue(
 			settings,

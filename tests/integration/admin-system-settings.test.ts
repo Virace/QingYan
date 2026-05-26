@@ -63,6 +63,22 @@ describe("admin system settings", () => {
 					apiKeyConfigured: false,
 				},
 			},
+			security: {
+				adminOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: false,
+					allowedOrigins: [],
+				},
+				publicOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: true,
+				},
+				globalFloodGuard: {
+					enabled: false,
+					windowSec: 10,
+					maxRequests: 120,
+				},
+			},
 			admin: {
 				session: {
 					ttlMinutes: 4320,
@@ -96,6 +112,125 @@ describe("admin system settings", () => {
 		expect(fixture.app.loggerManager.getRuntimeSettings()).toEqual({
 			level: "debug",
 			retentionDays: 14,
+		});
+	});
+
+	it("updates runtime security settings without rewriting startup config", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				security: {
+					adminOriginGuard: {
+						enabled: true,
+						allowMissingOrigin: true,
+						allowedOrigins: ["https://admin.example.test"],
+					},
+					publicOriginGuard: {
+						enabled: true,
+						allowMissingOrigin: true,
+					},
+					globalFloodGuard: {
+						enabled: true,
+						windowSec: 20,
+						maxRequests: 240,
+					},
+					rateLimit: {
+						adminLogin: {
+							windowSec: 120,
+							maxFailures: 3,
+							autoBlacklistSec: 600,
+						},
+						commentCreate: {
+							windowSec: 60,
+							maxRequests: 2,
+						},
+						commentVote: {
+							windowSec: 60,
+							maxRequests: 4,
+						},
+						captchaVerify: {
+							windowSec: 60,
+							maxFailures: 3,
+						},
+						pageLike: {
+							windowSec: 60,
+							maxRequests: 5,
+						},
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json()).toMatchObject({
+			security: {
+				adminOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: true,
+					allowedOrigins: ["https://admin.example.test"],
+				},
+				publicOriginGuard: {
+					enabled: true,
+					allowMissingOrigin: true,
+				},
+				globalFloodGuard: {
+					enabled: true,
+					windowSec: 20,
+					maxRequests: 240,
+				},
+				rateLimit: {
+					adminLogin: {
+						windowSec: 120,
+						maxFailures: 3,
+						autoBlacklistSec: 600,
+					},
+					commentCreate: {
+						windowSec: 60,
+						maxRequests: 2,
+					},
+					pageLike: {
+						windowSec: 60,
+						maxRequests: 5,
+					},
+				},
+			},
+		});
+		expect(fixture.app.config.security.adminOriginGuard).toMatchObject({
+			enabled: true,
+			allowMissingOrigin: false,
+			allowedOrigins: [],
+		});
+
+		const getResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(getResponse.statusCode).toBe(200);
+		expect(getResponse.json()).toMatchObject({
+			security: {
+				adminOriginGuard: {
+					allowMissingOrigin: true,
+					allowedOrigins: ["https://admin.example.test"],
+				},
+			},
 		});
 	});
 

@@ -807,7 +807,7 @@ export function SitesPage({
 	const queryClient = useQueryClient();
 	const [siteKey, setSiteKey] = useState("");
 	const [name, setName] = useState("");
-	const [allowedOriginsText, setAllowedOriginsText] = useState("");
+	const [origin, setOrigin] = useState("");
 	const query = useQuery({
 		queryKey: ["admin", "sites"],
 		queryFn: listSites,
@@ -817,7 +817,7 @@ export function SitesPage({
 		onSuccess: () => {
 			setSiteKey("");
 			setName("");
-			setAllowedOriginsText("");
+			setOrigin("");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 	});
@@ -833,10 +833,7 @@ export function SitesPage({
 			}),
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
 	});
-	const allowedOrigins = allowedOriginsText
-		.split(/\r?\n|,/)
-		.map((value) => value.trim())
-		.filter(Boolean);
+	const allowedOrigin = origin.trim();
 
 	return (
 		<div className="grid gap-4 lg:grid-cols-[360px_1fr]">
@@ -850,17 +847,13 @@ export function SitesPage({
 						className="flex flex-col gap-3"
 						onSubmit={(event) => {
 							event.preventDefault();
-							if (
-								!siteKey.trim() ||
-								!name.trim() ||
-								allowedOrigins.length === 0
-							) {
+							if (!siteKey.trim() || !name.trim() || !allowedOrigin) {
 								return;
 							}
 							createMutation.mutate({
 								siteKey: siteKey.trim(),
 								name: name.trim(),
-								allowedOrigins,
+								allowedOrigins: [allowedOrigin],
 							});
 						}}
 					>
@@ -874,11 +867,10 @@ export function SitesPage({
 							value={name}
 							onChange={(event) => setName(event.target.value)}
 						/>
-						<textarea
-							className={`${inputClass} min-h-24`}
-							placeholder="允许来源，每行一个 URL"
-							value={allowedOriginsText}
-							onChange={(event) => setAllowedOriginsText(event.target.value)}
+						<Input
+							placeholder="前端站点 Origin，例如 https://example.com"
+							value={origin}
+							onChange={(event) => setOrigin(event.target.value)}
 						/>
 						<Button type="submit" disabled={createMutation.isPending}>
 							创建站点
@@ -893,7 +885,7 @@ export function SitesPage({
 				</CardHeader>
 				<CardContent className="grid gap-3 md:grid-cols-2">
 					{query.data?.items.map((site) => {
-						const draftOrigins = site.allowedOrigins.join("\n");
+						const draftOrigin = site.allowedOrigins[0] ?? "";
 						return (
 							<div key={site.siteKey} className="rounded-md border p-4">
 								<p className="font-medium">{site.name}</p>
@@ -904,26 +896,19 @@ export function SitesPage({
 										event.preventDefault();
 										const form = new FormData(event.currentTarget);
 										const nextName = String(form.get("name") ?? "").trim();
-										const nextOrigins = String(form.get("allowedOrigins") ?? "")
-											.split(/\r?\n|,/)
-											.map((value) => value.trim())
-											.filter(Boolean);
-										if (!nextName || nextOrigins.length === 0) {
+										const nextOrigin = String(form.get("origin") ?? "").trim();
+										if (!nextName || !nextOrigin) {
 											return;
 										}
 										updateMutation.mutate({
 											siteKey: site.siteKey,
 											name: nextName,
-											allowedOrigins: nextOrigins,
+											allowedOrigins: [nextOrigin],
 										});
 									}}
 								>
 									<Input name="name" defaultValue={site.name} />
-									<textarea
-										name="allowedOrigins"
-										className={`${inputClass} min-h-20`}
-										defaultValue={draftOrigins}
-									/>
+									<Input name="origin" defaultValue={draftOrigin} />
 									<Button
 										type="submit"
 										size="sm"
@@ -940,7 +925,7 @@ export function SitesPage({
 									<Badge variant="outline">访客 {site.visitorCount}</Badge>
 								</div>
 								<p className="mt-3 text-xs text-muted-foreground">
-									{site.allowedOrigins.join(", ")}
+									{draftOrigin || "-"}
 								</p>
 								<div className="mt-4 flex flex-wrap gap-2">
 									<Button
