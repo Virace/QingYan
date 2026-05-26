@@ -16,7 +16,7 @@ import {
 	qingyanCookiePath,
 } from "../../config/public-path";
 import type {
-	InstallRestartMode,
+	InstallTransitionMode,
 	MinimalInstallConfig,
 } from "./minimal-config";
 import { resolveInstallState } from "./state";
@@ -29,7 +29,7 @@ const INSTALL_POLL_INTERVAL_MS = 1000;
 const INSTALL_POLL_TIMEOUT_MS = 60000;
 
 export interface InstallTransition {
-	mode: InstallRestartMode;
+	mode: InstallTransitionMode;
 	adminUrl: string;
 	pollUrl: string;
 	restartRequired: true;
@@ -71,9 +71,15 @@ function resolveDefaultPublicBaseUrl(input: MinimalInstallConfig): string {
 }
 
 function buildInstallTransition(input: {
-	mode: InstallRestartMode;
+	mode: InstallTransitionMode;
 	adminUrl: string;
 }): InstallTransition {
+	const message =
+		input.mode === "reload_in_process"
+			? "安装完成。QingYan 将切换到正常服务，稍后会自动进入管理后台。"
+			: input.mode === "exit_for_supervisor"
+				? "安装完成。QingYan 将退出并由守护进程重新拉起，稍后会自动进入管理后台。"
+				: "安装完成。请重启 QingYan 服务后访问管理后台。";
 	return {
 		mode: input.mode,
 		adminUrl: input.adminUrl,
@@ -82,10 +88,7 @@ function buildInstallTransition(input: {
 		restartAfterMs: INSTALL_RESTART_AFTER_MS,
 		pollIntervalMs: INSTALL_POLL_INTERVAL_MS,
 		timeoutMs: INSTALL_POLL_TIMEOUT_MS,
-		message:
-			input.mode === "exit"
-				? "安装完成。QingYan 将重启服务，稍后会自动进入管理后台。"
-				: "安装完成。请重启 QingYan 服务后访问管理后台。",
+		message,
 	};
 }
 
@@ -277,8 +280,8 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>监听地址<input data-path="server.host" autocomplete="off" required><span class="hint" data-hint-for="server.host"></span></label>
 <label>监听端口<input data-path="server.port" type="number" min="1" step="1" data-type="number" required><span class="hint" data-hint-for="server.port"></span></label>
 </div>
-<label>公开访问地址<input data-path="server.publicBaseUrl" autocomplete="url" required><span class="hint" data-hint-for="server.publicBaseUrl"></span></label>
-<label>公开挂载路径<input data-path="server.publicPath" autocomplete="off" required><span class="hint" data-hint-for="server.publicPath"></span></label>
+<label>公开访问地址<input data-path="server.publicBaseUrl" autocomplete="url" required><span class="hint" data-hint-for="server.publicBaseUrl">填写用户实际访问 QingYan 的域名或 IP origin，不包含 /qingyan。Docker 内部 localhost:4401 通常不是反代后的公开地址。</span></label>
+<label>公开挂载路径<input data-path="server.publicPath" autocomplete="off" required><span class="hint" data-hint-for="server.publicPath">QingYan 对外路径前缀。修改后必须同步修改反向代理 location/path rewrite，否则 Admin、API 和 Cookie path 会不匹配。</span></label>
 <label class="check"><input data-path="server.trustProxy" data-type="boolean" type="checkbox">信任反向代理头<span class="hint" data-hint-for="server.trustProxy">来自环境变量时不可修改</span></label>
 </fieldset>
 <fieldset>
@@ -303,7 +306,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </div>
 <div class="grid">
 <label>SameSite<select data-path="admin.session.sameSite"><option value="strict">strict</option><option value="lax">lax</option><option value="none">none</option></select><span class="hint" data-hint-for="admin.session.sameSite">浏览器跨站请求是否携带后台登录 Cookie；不做跨站嵌入时通常保持 lax。</span></label>
-<label class="check"><input data-path="admin.session.secure" data-type="boolean" type="checkbox">仅 HTTPS Secure Cookie<span class="hint" data-hint-for="admin.session.secure">启用后浏览器只会在 HTTPS 下发送后台登录 Cookie。</span></label>
+<label class="check"><input data-path="admin.session.secure" data-type="boolean" type="checkbox">仅 HTTPS Secure Cookie<span class="hint" data-hint-for="admin.session.secure">HTTPS 部署建议启用；HTTP 本地测试不要启用，否则浏览器不会发送后台登录 Cookie。</span></label>
 </div>
 </fieldset>
 </section>
@@ -314,7 +317,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>站点 Key<input data-path="site.siteKey" autocomplete="off" required><span class="hint" data-hint-for="site.siteKey"></span></label>
 <label>站点名称<input data-path="site.name" autocomplete="off" required><span class="hint" data-hint-for="site.name"></span></label>
 </div>
-<label>允许的前端 Origin<textarea data-path="site.allowedOrigins" data-type="stringArray" required></textarea><span class="hint" data-hint-for="site.allowedOrigins">可用逗号、空格或换行分隔多个 Origin</span></label>
+<label>允许的前端 Origin<textarea data-path="site.allowedOrigins" data-type="stringArray" required></textarea><span class="hint" data-hint-for="site.allowedOrigins">填写加载评论组件的前端站点 origin。可填多个，每行一个。若 QingYan 与内容站不是同一域名，请添加 FangYuan / x-item 的真实访问 origin。</span></label>
 </fieldset>
 <fieldset>
 <legend>安全基础配置</legend>
@@ -439,15 +442,16 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>IPv4 xdb 路径<input data-path="systemSettings.ipRegion.ipv4.dbPath"><span class="hint" data-hint-for="systemSettings.ipRegion.ipv4.dbPath"></span></label>
 <label>IPv6 xdb 路径<input data-path="systemSettings.ipRegion.ipv6.dbPath"><span class="hint" data-hint-for="systemSettings.ipRegion.ipv6.dbPath"></span></label>
 </div>
-<label>IPv4 下载源<textarea data-path="systemSettings.ipRegion.ipv4.sources" data-type="stringArray"></textarea><span class="hint" data-hint-for="systemSettings.ipRegion.ipv4.sources">每行一个 URL</span></label>
-<label>IPv6 下载源<textarea data-path="systemSettings.ipRegion.ipv6.sources" data-type="stringArray"></textarea><span class="hint" data-hint-for="systemSettings.ipRegion.ipv6.sources">每行一个 URL</span></label>
+<label>IPv4 下载源<textarea data-path="systemSettings.ipRegion.ipv4.sources" data-type="stringArray"></textarea><span class="hint" data-hint-for="systemSettings.ipRegion.ipv4.sources">每行一个 URL，按顺序尝试下载；默认优先 Gitee，失败后回退 GitHub。</span></label>
+<label>IPv6 下载源<textarea data-path="systemSettings.ipRegion.ipv6.sources" data-type="stringArray"></textarea><span class="hint" data-hint-for="systemSettings.ipRegion.ipv6.sources">每行一个 URL，按顺序尝试下载；默认优先 Gitee，失败后回退 GitHub。</span></label>
 </fieldset>
 </section>
 <section class="step-panel" data-step="4" hidden>
 <fieldset>
-<legend>从导出包恢复</legend>
-<label>导出文件名<input data-path="restore.fileName" autocomplete="off" placeholder="qingyan-export.json"><span class="hint" data-hint-for="restore.fileName"></span></label>
-<label>QingYan 导出 JSON<textarea data-path="restore.payload" spellcheck="false" placeholder="留空则只执行全新安装"></textarea><span class="hint" data-hint-for="restore.payload"></span></label>
+<legend>从 QingYan 站点导出 JSON 恢复</legend>
+<label>选择 QingYan JSON 文件<input data-restore-file type="file" accept="application/json,.json"><span class="hint">评论较多时建议选择 JSON 文件，由浏览器本地读取后生成安装计划；不建议手动粘贴大文件内容。</span></label>
+<label>导出文件名<input data-path="restore.fileName" autocomplete="off" placeholder="qingyan-export.json"><span class="hint" data-hint-for="restore.fileName">选择文件后会自动填入文件名。</span></label>
+<label>或粘贴 QingYan 导出 JSON<textarea data-path="restore.payload" spellcheck="false" placeholder="留空则只执行全新安装"></textarea><span class="hint" data-hint-for="restore.payload">这里仅接受 qingyan.export.v1 站点级 JSON，用于恢复评论、页面线程、访客和站点设置。整站 qyctl backup 包不能在这里恢复，请使用 qyctl restore。</span></label>
 </fieldset>
 <section id="install-review" class="message"></section>
 <div id="install-message" class="message"></div>
@@ -478,10 +482,17 @@ const stepPanels = Array.from(document.querySelectorAll("[data-step]"));
 const fields = Array.from(document.querySelectorAll("[data-path]"));
 const captchaPanels = Array.from(document.querySelectorAll("[data-captcha-panel]"));
 const captchaProviderField = document.querySelector('[data-path="systemSettings.captcha.provider"]');
+const publicBaseUrlField = document.querySelector('[data-path="server.publicBaseUrl"]');
+const secureCookieField = document.querySelector('[data-path="admin.session.secure"]');
+const allowedOriginsField = document.querySelector('[data-path="site.allowedOrigins"]');
+const restoreFileField = document.querySelector("[data-restore-file]");
 const envLockByPath = new Map(envLocks.map((lock) => [lock.path, lock]));
 let currentStep = 0;
 let maxUnlockedStep = 0;
 let plannedPayload = null;
+let publicBaseUrlTouched = false;
+let allowedOriginsTouched = false;
+let secureTouched = false;
 
 function getPath(source, path) {
 	return path.split(".").reduce((cursor, key) => cursor == null ? undefined : cursor[key], source);
@@ -571,6 +582,30 @@ function applyDefaults() {
 		setHint(lock.path, "来自环境变量 " + lock.envName, true);
 	}
 }
+function parseProtocol(value) {
+	try {
+		return new URL(value).protocol;
+	} catch (_) {
+		return "";
+	}
+}
+function syncSecureCookieDefault() {
+	if (!secureCookieField || secureCookieField.disabled || secureTouched) {
+		return;
+	}
+	const protocol = parseProtocol(publicBaseUrlField?.value) || window.location.protocol;
+	secureCookieField.checked = protocol === "https:";
+}
+function applyBrowserDefaults() {
+	const browserOrigin = window.location.origin;
+	if (publicBaseUrlField && !publicBaseUrlField.disabled && !publicBaseUrlTouched) {
+		publicBaseUrlField.value = browserOrigin;
+	}
+	if (allowedOriginsField && !allowedOriginsField.disabled && !allowedOriginsTouched) {
+		allowedOriginsField.value = browserOrigin;
+	}
+	syncSecureCookieDefault();
+}
 function setStep(step) {
 	currentStep = Math.max(0, Math.min(stepPanels.length - 1, step));
 	for (const panel of stepPanels) {
@@ -615,7 +650,10 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 async function waitForAdmin(transition) {
-	setMessage("success", "正在重启服务并进入管理后台。管理员入口: " + transition.adminUrl);
+	const waitingText = transition.mode === "exit_for_supervisor"
+		? "正在等待守护进程重新拉起 QingYan 并进入管理后台。"
+		: "正在切换到正常服务并进入管理后台。";
+	setMessage("success", waitingText + "管理员入口: " + transition.adminUrl);
 	await sleep(transition.restartAfterMs);
 	const start = Date.now();
 	while (Date.now() - start < transition.timeoutMs) {
@@ -631,7 +669,10 @@ async function waitForAdmin(transition) {
 			await sleep(transition.pollIntervalMs);
 		}
 	}
-	setMessage("error", "服务重启等待超时。请确认守护进程已重新拉起 QingYan，然后访问 " + transition.adminUrl + "。");
+	const timeoutText = transition.mode === "exit_for_supervisor"
+		? "等待守护进程重新拉起 QingYan 超时。请确认服务已恢复后访问 "
+		: "等待 QingYan 切换到正常服务超时。请确认服务状态后访问 ";
+	setMessage("error", timeoutText + transition.adminUrl + "。");
 }
 function optionalString(value) {
 	const text = String(value ?? "").trim();
@@ -703,13 +744,14 @@ function renderPlan(plan) {
 	const envFields = plan.env.length
 		? plan.env.map((item) => item.envName + " -> " + item.path + (item.secret ? "（已隐藏）" : "")).join(", ")
 		: "无";
-	const restoreText = plan.restore
-		? "<br>恢复: " + plan.restore.fileName +
-			" / " + plan.restore.siteKey +
-			"（页面 " + plan.restore.dryRun.summary.willCreatePageThreads +
+const restoreText = plan.restore
+		? "<br>恢复来源: " + plan.restore.fileName +
+			"<br>恢复格式: QingYan 站点级 JSON" +
+			"<br>目标站点: " + plan.restore.siteKey +
+			"<br>将创建: 页面线程 " + plan.restore.dryRun.summary.willCreatePageThreads +
 			"，访客 " + plan.restore.dryRun.summary.willCreateVisitors +
 			"，评论 " + plan.restore.dryRun.summary.willCreateComments +
-			"，冲突 " + plan.restore.dryRun.summary.conflicts + "）"
+			"<br>冲突: " + plan.restore.dryRun.summary.conflicts
 		: "";
 	review.dataset.kind = "success";
 	review.innerHTML =
@@ -772,7 +814,7 @@ applyButton.addEventListener("click", async () => {
 		setMessage("success", transition.message + " 管理员 " + result.username + "，初始密码 " + result.initialPassword + "。管理后台: " + transition.adminUrl + "。配置文件: " + result.configPath + "。数据库: " + result.databasePath + "。系统设置写入 " + result.systemSettings.length + " 项。" + restoreText + backupText);
 		form.reset();
 		plannedPayload = null;
-		if (transition.mode === "exit") {
+		if (transition.mode !== "manual") {
 			void waitForAdmin(transition);
 		}
 	} catch (error) {
@@ -799,7 +841,35 @@ nextButton.addEventListener("click", () => {
 	setStep(currentStep + 1);
 });
 captchaProviderField?.addEventListener("change", updateCaptchaPanel);
+publicBaseUrlField?.addEventListener("input", () => {
+	publicBaseUrlTouched = true;
+	syncSecureCookieDefault();
+});
+allowedOriginsField?.addEventListener("input", () => {
+	allowedOriginsTouched = true;
+});
+secureCookieField?.addEventListener("change", () => {
+	secureTouched = true;
+});
+restoreFileField?.addEventListener("change", async () => {
+	const file = restoreFileField.files?.[0];
+	if (!file) return;
+	const fileNameField = document.querySelector('[data-path="restore.fileName"]');
+	const payloadField = document.querySelector('[data-path="restore.payload"]');
+	try {
+		const text = await file.text();
+		if (fileNameField) {
+			fileNameField.value = file.name;
+		}
+		if (payloadField) {
+			payloadField.value = text;
+		}
+	} catch (_) {
+		setMessage("error", "无法读取 QingYan JSON 文件。");
+	}
+});
 applyDefaults();
+applyBrowserDefaults();
 updateCaptchaPanel();
 setStep(0);
 </script>
@@ -841,6 +911,7 @@ function resolveInstallToken(input: {
 export function buildInstallApp(input: {
 	minimalConfig: MinimalInstallConfig;
 	environment?: NodeJS.ProcessEnv;
+	scheduleTransition?: (transition: InstallTransition) => void;
 	scheduleRestart?: (transition: InstallTransition) => void;
 }): FastifyInstance {
 	const publicPath = normalizePublicPath(input.minimalConfig.publicPath);
@@ -949,11 +1020,11 @@ export function buildInstallApp(input: {
 				environment: input.environment,
 			});
 			const transition = buildInstallTransition({
-				mode: input.minimalConfig.restartMode,
+				mode: input.minimalConfig.transitionMode,
 				adminUrl: result.adminUrl,
 			});
-			if (transition.mode === "exit") {
-				input.scheduleRestart?.(transition);
+			if (transition.mode !== "manual") {
+				(input.scheduleTransition ?? input.scheduleRestart)?.(transition);
 			}
 			return reply.status(201).send({
 				...result,

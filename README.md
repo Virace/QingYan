@@ -56,13 +56,15 @@ install.url=http://127.0.0.1:4401/qingyan/admin/install
 
 浏览器访问 `/qingyan/admin/` 或 `/qingyan/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中。
 
-安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后重启服务进入正常模式；安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/qingyan/admin` 会跳转到安装页，正常 `/qingyan/api/*` 接口不会注册；安装完成后的外部后台入口由 `server.publicPath + admin.consolePath` 决定。
+安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后按 `QINGYAN_INSTALL_TRANSITION_MODE` 切换到正常服务；默认 `reload_in_process` 会在同一进程内启动正常服务，Docker Compose 可使用 `exit_for_supervisor` 退出后由 restart policy 拉起，受限运行时可使用 `manual` 提示人工重启。安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/qingyan/admin` 会跳转到安装页，正常 `/qingyan/api/*` 接口不会注册；安装完成后的外部后台入口由 `server.publicPath + admin.consolePath` 决定。
 
 需要指定配置路径或安装 token 时可使用：
 
 ```bash
 QINGYAN_CONFIG_PATH=./config/qingyan.yml QINGYAN_INSTALL_TOKEN=change-me pnpm dev:api
 ```
+
+安装完成切换方式可用 `QINGYAN_INSTALL_TRANSITION_MODE=reload_in_process|exit_for_supervisor|manual` 调整。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令。
 
 startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应、Admin system settings 和普通 QingYan export 都不会返回明文。
 
@@ -126,6 +128,8 @@ admin.password=...
 qingyanctl
 qyctl
 ```
+
+Docker 镜像内同样提供 `qyctl` 和 `qingyanctl`。它们用于运维、备份、恢复、升级和重置后台信息；首次安装完成后的 Web 切换不依赖 CLI 存在。
 
 `qyctl info` 用于快速查看服务状态、控制台入口、管理员用户名、配置文件和数据库位置，不显示管理员密码。数据库只保存密码 hash；如需重置密码，使用：
 
@@ -217,6 +221,7 @@ docker compose up --build
 - 暴露 `4401:4401`
 - 挂载 `./config:/app/config`
 - 挂载 `./data:/app/data`
+- 设置 `QINGYAN_INSTALL_TRANSITION_MODE=exit_for_supervisor`，安装完成后交给 Compose restart policy 拉起正常服务
 - 使用 `/qingyan/healthz` 做健康检查
 
 ## 数据库与 `drizzle/`

@@ -24,7 +24,7 @@ install.url=http://127.0.0.1:4401/qingyan/admin/install
 
 浏览器访问 `/qingyan/admin/` 或 `/qingyan/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中；脚本化安装仍可显式提交 token。
 
-安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/qingyan/admin` 会跳转到安装页 `/qingyan/admin/install`，正常 `/qingyan/api/*` 接口不会注册；安装完成后重启服务进入正常模式，安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由 `server.publicPath + admin.consolePath` 组成，`admin.consolePath` 本身仍只表示 QingYan 内部后台路径，例如 `/admin` 或 `/hidden-admin`。
+安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/qingyan/admin` 会跳转到安装页 `/qingyan/admin/install`，正常 `/qingyan/api/*` 接口不会注册；安装完成后按 `QINGYAN_INSTALL_TRANSITION_MODE` 切换到正常服务，安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由 `server.publicPath + admin.consolePath` 组成，`admin.consolePath` 本身仍只表示 QingYan 内部后台路径，例如 `/admin` 或 `/hidden-admin`。
 
 startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应中不会返回明文。如果目标 startup config 已存在但无效，安装器会在替换前创建同目录 `.bak-YYYYMMDDHHmmss` 备份。
 
@@ -35,9 +35,12 @@ startup 环境变量会覆盖安装表单中对应字段，并在安装计划中
 | `QINGYAN_CONFIG_PATH` | startup config 路径，默认 `config/qingyan.yml` |
 | `QINGYAN_INSTALL_TOKEN` | 指定安装 token；不指定时启动时随机生成 |
 | `QINGYAN_INSTALL_DISABLED=true` | 缺配置或坏配置时直接失败，不开放 install app |
+| `QINGYAN_INSTALL_TRANSITION_MODE` | 安装完成后的切换方式：`reload_in_process`、`exit_for_supervisor` 或 `manual`，默认 `reload_in_process` |
 | `QINGYAN_SERVER_HOST` | install app 监听 host |
 | `QINGYAN_SERVER_PORT` | install app 监听 port |
 | `QINGYAN_PUBLIC_PATH` | QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径 |
+
+旧变量 `QINGYAN_INSTALL_RESTART_MODE=exit` 仍会兼容映射为 `exit_for_supervisor`，但新部署应使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
 
 ## Startup Config
 
@@ -94,8 +97,8 @@ security:
 
 - `host`: Fastify 监听地址。
 - `port`: Fastify 监听端口。
-- `publicBaseUrl`: 对外公开 origin，应与实际网关或反代入口一致，不包含 QingYan 挂载路径。
-- `publicPath`: QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径。`qingyan`、`/qingyan` 和 `/qingyan/` 会规范化为 `/qingyan`。公开 API、Admin、Install、Upgrade、OpenAPI、health check 和 QingYan cookie path 都会使用该前缀。
+- `publicBaseUrl`: 对外公开 origin，应与用户浏览器实际访问 QingYan 的网关或反代入口一致，不包含 QingYan 挂载路径。Docker 内部默认 `http://localhost:4401` 通常不是生产反代后的公开地址。
+- `publicPath`: QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径。`qingyan`、`/qingyan` 和 `/qingyan/` 会规范化为 `/qingyan`。公开 API、Admin、Install、Upgrade、OpenAPI、health check 和 QingYan cookie path 都会使用该前缀。修改后必须同步调整反向代理 location/path rewrite。
 - `trustProxy`: 部署在 CDN、Nginx、Caddy、Traefik 或 Docker 反向代理后时设为 `true`，否则真实 IP 解析可能拿到代理或网桥地址。
 
 ### `database`
@@ -140,6 +143,8 @@ security:
 | `captcha.turnstile.secretKey` | `QINGYAN_TURNSTILE_SECRET_KEY` | 首装时写入 `system_settings`，响应脱敏 |
 
 环境变量管理的字段在 install 或后续配置查看中应作为 env source 展示。secret 类型字段只显示“已配置”，不展示明文。
+
+安装页会尽量以当前浏览器访问地址填充 `server.publicBaseUrl` 和初始 `allowedOrigins`，并按当前协议默认设置 HTTPS Secure Cookie：`https:` 默认启用，`http:` 本地测试默认不启用。用户手动修改后，页面不再覆盖该字段。
 
 ## DB-Owned Site Settings
 
@@ -264,7 +269,7 @@ QingYan 不要求为普通访客建立用户模型。若内容站点希望避免
 
 普通 export 不包含 admin session、admin password、install token、进程环境变量、SQLite 文件路径或 server host/port。普通 QingYan export 默认也不包含 system settings secret rows，例如 SMTP password、Turnstile secret、hCaptcha secret、reCAPTCHA API key 和 GeeTest captcha key。需要迁移 secret 时，应使用部署环境变量、重新在 Admin Console 输入，或等待未来 full backup/restore 模式。
 
-普通 QingYan import 不接受 hand-crafted system settings secret rows；dry-run 阶段会直接拒绝。当前 install restore mode 仍未实现，不能把普通 export 当作完整实例备份。
+普通 QingYan import 不接受 hand-crafted system settings secret rows；dry-run 阶段会直接拒绝。install restore 只接受普通 QingYan 站点级 export JSON，用于首装时恢复站点、评论、页面线程、访客和站点设置；它不能恢复 admin session、admin password、install token、进程环境变量、SQLite 路径、server host/port 或 secret 明文，也不能把普通 export 当作完整实例备份。
 
 Admin 数据管理中的 WordPress WXR 导入和 QingYan JSON 导入在真实 apply 前会创建导入任务记录，并先生成一次数据库级备份。该备份用于保存合并前状态，和普通 QingYan export/import 的用途不同：
 
@@ -298,7 +303,7 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 
 ### QingYanctl 运维入口
 
-`qingyanctl` 与 `qyctl` 是等价入口。它们面向本机 Linux/Unix 运维，默认读取 QingYan 配置路径，也可通过 `--config` 或 `QINGYAN_CONFIG_PATH` 指定配置。
+`qingyanctl` 与 `qyctl` 是等价入口。它们面向本机 Linux/Unix 运维，默认读取 QingYan 配置路径，也可通过 `--config` 或 `QINGYAN_CONFIG_PATH` 指定配置。Docker 镜像内会提供这两个 wrapper；非容器部署也可以直接使用构建产物中的 CLI。首次安装的 Web 切换流程不依赖这些外部 CLI，也不会通过 API 执行 shell 重启。
 
 常用命令：
 

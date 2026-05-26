@@ -21,6 +21,7 @@ async function createInstalledDevWorkspace(adminConsolePath = "/admin") {
 		token: "install-token",
 		disabled: false,
 		restartMode: "manual",
+		transitionMode: "manual",
 	};
 	await applyInstall({
 		minimalConfig,

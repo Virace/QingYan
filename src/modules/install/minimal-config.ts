@@ -5,6 +5,10 @@ import { resolveConfigPath } from "../../config/load-config";
 import { buildPublicUrl, normalizePublicPath } from "../../config/public-path";
 
 export type InstallRestartMode = "manual" | "exit";
+export type InstallTransitionMode =
+	| "reload_in_process"
+	| "exit_for_supervisor"
+	| "manual";
 
 export interface MinimalInstallConfig {
 	configPath: string;
@@ -14,6 +18,7 @@ export interface MinimalInstallConfig {
 	token: string;
 	disabled: boolean;
 	restartMode: InstallRestartMode;
+	transitionMode: InstallTransitionMode;
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -37,9 +42,33 @@ function parseRestartMode(value: string | undefined): InstallRestartMode {
 	throw new Error("QINGYAN_INSTALL_RESTART_MODE must be manual or exit.");
 }
 
+function parseTransitionMode(input: {
+	value: string | undefined;
+	legacyRestartMode: InstallRestartMode;
+}): InstallTransitionMode {
+	if (!input.value) {
+		return input.legacyRestartMode === "exit"
+			? "exit_for_supervisor"
+			: "reload_in_process";
+	}
+	if (
+		input.value === "reload_in_process" ||
+		input.value === "exit_for_supervisor" ||
+		input.value === "manual"
+	) {
+		return input.value;
+	}
+	throw new Error(
+		"QINGYAN_INSTALL_TRANSITION_MODE must be reload_in_process, exit_for_supervisor, or manual.",
+	);
+}
+
 export function resolveMinimalInstallConfig(
 	environment: NodeJS.ProcessEnv = process.env,
 ): MinimalInstallConfig {
+	const restartMode = parseRestartMode(
+		environment.QINGYAN_INSTALL_RESTART_MODE,
+	);
 	return {
 		configPath: resolveConfigPath(environment.QINGYAN_CONFIG_PATH),
 		host: environment.QINGYAN_SERVER_HOST ?? "127.0.0.1",
@@ -47,7 +76,11 @@ export function resolveMinimalInstallConfig(
 		publicPath: normalizePublicPath(environment.QINGYAN_PUBLIC_PATH),
 		token: environment.QINGYAN_INSTALL_TOKEN ?? `qy_install_${randomUUID()}`,
 		disabled: environment.QINGYAN_INSTALL_DISABLED === "true",
-		restartMode: parseRestartMode(environment.QINGYAN_INSTALL_RESTART_MODE),
+		restartMode,
+		transitionMode: parseTransitionMode({
+			value: environment.QINGYAN_INSTALL_TRANSITION_MODE,
+			legacyRestartMode: restartMode,
+		}),
 	};
 }
 

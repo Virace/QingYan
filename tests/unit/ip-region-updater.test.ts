@@ -61,6 +61,21 @@ async function createDownloadedFile(directory: string, content: string) {
 }
 
 describe("IpRegionUpdater", () => {
+	it("defaults ip region download sources to Gitee before GitHub", () => {
+		expect(defaultSystemSettings.ipRegion.ipv4.sources[0]).toContain(
+			"gitee.com",
+		);
+		expect(defaultSystemSettings.ipRegion.ipv4.sources[1]).toContain(
+			"raw.githubusercontent.com",
+		);
+		expect(defaultSystemSettings.ipRegion.ipv6.sources[0]).toContain(
+			"gitee.com",
+		);
+		expect(defaultSystemSettings.ipRegion.ipv6.sources[1]).toContain(
+			"raw.githubusercontent.com",
+		);
+	});
+
 	it("records skipped runs when ip region is disabled", async () => {
 		const fixture = await createFixture();
 		if (!fixture.config) {

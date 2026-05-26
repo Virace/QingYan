@@ -60,6 +60,17 @@ function createMinimalConfig(configPath: string): MinimalInstallConfig {
 		token: "install-token",
 		disabled: false,
 		restartMode: "manual",
+		transitionMode: "manual",
+	};
+}
+
+function createMinimalConfigWithTransition(
+	configPath: string,
+	transitionMode: "reload_in_process" | "exit_for_supervisor" | "manual",
+): MinimalInstallConfig {
+	return {
+		...createMinimalConfig(configPath),
+		transitionMode,
 	};
 }
 
@@ -402,7 +413,8 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("QingYan Install");
 		expect(response.body).toContain("生成安装计划");
 		expect(response.body).toContain("确认安装");
-		expect(response.body).toContain("正在重启服务并进入管理后台");
+		expect(response.body).toContain("正在切换到正常服务并进入管理后台");
+		expect(response.body).toContain("正在等待守护进程重新拉起 QingYan");
 		expect(response.body).toContain("waitForAdmin");
 		expect(response.body).toContain('mode: "no-cors"');
 		expect(response.body).toContain("transition.adminUrl");
@@ -412,7 +424,19 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain("恢复与确认");
 		expect(response.body).toContain("后台入口");
 		expect(response.body).toContain("系统设置");
-		expect(response.body).toContain("从导出包恢复");
+		expect(response.body).toContain("从 QingYan 站点导出 JSON 恢复");
+		expect(response.body).toContain(
+			"填写用户实际访问 QingYan 的域名或 IP origin",
+		);
+		expect(response.body).toContain("修改后必须同步修改反向代理");
+		expect(response.body).toContain("HTTPS 部署建议启用");
+		expect(response.body).toContain("填写加载评论组件的前端站点 origin");
+		expect(response.body).toContain("选择 QingYan JSON 文件");
+		expect(response.body).toContain("data-restore-file");
+		expect(response.body).toContain("整站 qyctl backup 包不能在这里恢复");
+		expect(response.body).toContain("window.location.origin");
+		expect(response.body).toContain("secureTouched");
+		expect(response.body).toContain("file.text()");
 		expect(response.body).toContain("来自环境变量");
 		expect(response.body).toContain("data-step");
 		expect(response.body).toContain("target > maxUnlockedStep");
@@ -440,6 +464,7 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain('type="number" min="1" step="1"');
 		expect(response.body).toContain('min="0" max="1" step="0.01"');
 		expect(response.body).toContain('data-path="restore.payload"');
+		expect(response.body).not.toContain("从导出包恢复");
 		expect(response.body).not.toContain("Use <code>POST");
 		expect(response.body).not.toContain("install-token");
 	});
@@ -806,6 +831,90 @@ describe("install bootstrap", () => {
 		} finally {
 			sqlite.close();
 		}
+	});
+
+	it("returns manual transition without scheduling automatic work", async () => {
+		const workspace = createWorkspace();
+		const scheduled: unknown[] = [];
+		const app = buildInstallApp({
+			minimalConfig: createMinimalConfigWithTransition(
+				workspace.configPath,
+				"manual",
+			),
+			scheduleTransition: (transition) => scheduled.push(transition),
+		});
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installFormPayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json().transition).toMatchObject({
+			mode: "manual",
+			restartRequired: true,
+		});
+		expect(scheduled).toEqual([]);
+	});
+
+	it("schedules supervisor exit transition after install", async () => {
+		const workspace = createWorkspace();
+		const scheduled: unknown[] = [];
+		const app = buildInstallApp({
+			minimalConfig: createMinimalConfigWithTransition(
+				workspace.configPath,
+				"exit_for_supervisor",
+			),
+			scheduleTransition: (transition) => scheduled.push(transition),
+		});
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installFormPayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json().transition.mode).toBe("exit_for_supervisor");
+		expect(scheduled).toHaveLength(1);
+	});
+
+	it("schedules in-process reload transition after install", async () => {
+		const workspace = createWorkspace();
+		const scheduled: unknown[] = [];
+		const app = buildInstallApp({
+			minimalConfig: createMinimalConfigWithTransition(
+				workspace.configPath,
+				"reload_in_process",
+			),
+			scheduleTransition: (transition) => scheduled.push(transition),
+		});
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installFormPayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json().transition.mode).toBe("reload_in_process");
+		expect(scheduled).toHaveLength(1);
 	});
 
 	it("reports env-managed fields in the install plan without leaking secret values", async () => {
@@ -1544,12 +1653,12 @@ describe("install bootstrap", () => {
 		expect(scheduled).toEqual([]);
 	});
 
-	it("schedules restart after successful install apply when restart mode is exit", async () => {
+	it("schedules transition after successful install apply when transition mode is exit_for_supervisor", async () => {
 		const workspace = createWorkspace();
 		const scheduled: unknown[] = [];
 		const minimalConfig: MinimalInstallConfig = {
 			...createMinimalConfig(workspace.configPath),
-			restartMode: "exit",
+			transitionMode: "exit_for_supervisor",
 		};
 		const app = buildInstallApp({
 			minimalConfig,
@@ -1570,7 +1679,7 @@ describe("install bootstrap", () => {
 		expect(response.statusCode).toBe(201);
 		expect(response.json()).toMatchObject({
 			transition: {
-				mode: "exit",
+				mode: "exit_for_supervisor",
 				adminUrl: "http://localhost:4401/qingyan/admin",
 				restartRequired: true,
 			},
@@ -1583,7 +1692,7 @@ describe("install bootstrap", () => {
 		const scheduled: unknown[] = [];
 		const minimalConfig: MinimalInstallConfig = {
 			...createMinimalConfig(workspace.configPath),
-			restartMode: "exit",
+			transitionMode: "exit_for_supervisor",
 		};
 		const app = buildInstallApp({
 			minimalConfig,

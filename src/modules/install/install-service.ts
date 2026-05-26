@@ -857,7 +857,7 @@ export async function buildInstallPlan(input: {
 		values: resolved.values,
 		applyPayload: buildApplyPayload(resolved),
 		warnings: [
-			"安装完成后需要重启 QingYan 才会进入正常服务。",
+			"安装完成后会按安装切换模式进入正常服务；manual 模式需要人工重启 QingYan。",
 			"安装完成后的后台入口由本次写入的 admin bootstrap 决定。",
 		],
 	};

@@ -1,6 +1,6 @@
 # QingYan 测试部署指南
 
-本文档记录 QingYan 当前测试版的单机 Docker Compose 部署方式。它面向“先部署，后更新”的测试策略，不等同于正式 release 流程。
+本文档记录 QingYan 当前测试版的部署方式，重点覆盖单机 Docker Compose，同时说明直接部署或托管运行时需要调整的安装切换策略。它面向“先部署，后更新”的测试策略，不等同于正式 release 流程。
 
 ## 部署边界
 
@@ -8,6 +8,7 @@
 - `config/qingyan.yml`、`qingyan.installed.lock`、SQLite 数据库和日志不应打进镜像，也不应提交到仓库。
 - 当前推荐先手动部署并验证真实链路，等测试版稳定后再补 GitHub Actions 或 release 自动化。
 - 程序更新前必须先备份当前实例；`qyctl upgrade` 只做数据升级，不负责下载或替换程序文件。
+- Web 安装流程不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令重启服务；安装完成后的切换行为由 `QINGYAN_INSTALL_TRANSITION_MODE` 决定。
 
 ## 推荐目录
 
@@ -75,6 +76,15 @@ cd /opt/1panel/apps/qingyan
 
 可以直接使用仓库根目录的 `compose.yml` 作为起点。测试部署建议只在服务器环境里调整端口和环境变量，不把服务器专用配置提交回仓库。
 
+默认 Compose 会设置：
+
+```yaml
+environment:
+  QINGYAN_INSTALL_TRANSITION_MODE: exit_for_supervisor
+```
+
+这表示首次安装完成后 QingYan 进程主动退出，由 Compose 的 `restart: unless-stopped` 重新拉起正常服务。直接部署、PaaS 或 serverless-like 运行时不要照搬这个值，通常应使用默认的 `reload_in_process`，或在无法安全 reload 时显式使用 `manual`。
+
 如果需要让服务只被本机反代访问，可以把端口映射改成：
 
 ```yaml
@@ -109,18 +119,24 @@ https://qingyan.example.com/qingyan/admin/install
 
 - `server.host`: `0.0.0.0`
 - `server.port`: `4401`
-- `server.publicBaseUrl`: 真实 HTTPS origin，例如 `https://qingyan.example.com`
-- `server.publicPath`: `/qingyan`
+- `server.publicBaseUrl`: 用户实际访问 QingYan 的 HTTPS origin，例如 `https://qingyan.example.com`，不是容器内默认的 `http://localhost:4401`
+- `server.publicPath`: `/qingyan`；如果改成其他路径，必须同步调整反向代理 location/path rewrite，否则 Admin、API 和 Cookie path 会不匹配
 - `server.trustProxy`: `true`
 - `database.sqlite.file`: `./data/qingyan.db`
-- `admin.session.secure`: HTTPS 下设为 `true`
+- `admin.session.secure`: HTTPS 下设为 `true`；HTTP 本地测试不要启用
 - `admin.session.sameSite`: 同站后台可用 `lax`；如后续必须跨站携带后台 cookie，再评估 `none`
 - `security.publicOriginGuard.enabled`: `true`
 - `security.publicOriginGuard.allowMissingOrigin`: `false`
 - `security.adminOriginGuard.enabled`: `true`
 - 站点 `allowedOrigins`: 填 FangYuan / x-item 的实际访问 origin
 
-安装完成后服务会退出并由 Compose 自动拉起；如果没有自动恢复，手动执行：
+安装完成后的切换模式：
+
+- `reload_in_process`：默认模式，不依赖外部 CLI 或 supervisor，安装完成后关闭 install app 并在同一进程内启动正常服务，适合直接运行、PaaS 或 serverless-like 环境。
+- `exit_for_supervisor`：安装完成后进程退出，交给 Docker Compose、systemd 或其他守护进程拉起，适合当前 Compose 测试部署。
+- `manual`：安装完成后停留在完成页，提示人工重启，适合运行时不允许进程自切换或没有可靠 supervisor 的环境。
+
+如果 Compose 部署没有自动恢复，手动执行：
 
 ```bash
 docker compose restart qingyan
@@ -167,6 +183,8 @@ docker compose exec qingyan qyctl admin entrance
 docker compose exec qingyan qyctl admin repass
 ```
 
+Docker 镜像内同时提供 `qyctl` 和 `qingyanctl` 两个等价入口。它们用于服务器运维、备份、恢复、升级和重置后台信息；首次安装的 Web 生命周期不依赖这些 CLI 存在。
+
 ### 4. FangYuan / x-item 集成
 
 在 FangYuan / x-item 测试配置中把评论 API 指向 QingYan 测试域名后，至少验证。若与 x-item 同域部署，推荐配置 `qingyanConfig.apiBase: /qingyan/api`，一条 `/qingyan/` 反代即可接入 QingYan：
@@ -195,6 +213,8 @@ docker compose exec qingyan qyctl restore /app/data/backups/<backup-dir> --dry-r
 ```
 
 普通 QingYan JSON export/import 只用于站点业务数据迁移，不等同于整站备份。
+
+安装页中的“从 QingYan 站点导出 JSON 恢复”只接受 QingYan 站点级 JSON export，用于首装时恢复站点、评论、页面线程、访客和站点设置。它不是整站恢复入口，不接受 `qyctl backup` 生成的 `.qingyan-backup` 包；整站恢复继续使用 `qyctl restore <backup> --dry-run` 和停服务覆盖恢复流程。
 
 ## 更新流程
 

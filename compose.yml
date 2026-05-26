@@ -9,6 +9,7 @@ services:
     environment:
       NODE_ENV: production
       QINGYAN_CONFIG_PATH: /app/config/qingyan.yml
+      QINGYAN_INSTALL_TRANSITION_MODE: exit_for_supervisor
     volumes:
       - ./config:/app/config
       - ./data:/app/data

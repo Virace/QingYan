@@ -20,17 +20,28 @@ function createConfigPath() {
 }
 
 describe("resolveMinimalInstallConfig", () => {
-	it("defaults install restart mode to manual", () => {
+	it("defaults install transition mode to reload_in_process", () => {
 		const configPath = createConfigPath();
 
 		const config = resolveMinimalInstallConfig({
 			QINGYAN_CONFIG_PATH: configPath,
 		});
 
-		expect(config.restartMode).toBe("manual");
+		expect(config.transitionMode).toBe("reload_in_process");
 	});
 
-	it("resolves install restart mode from environment", () => {
+	it("resolves install transition mode from environment", () => {
+		const configPath = createConfigPath();
+
+		const config = resolveMinimalInstallConfig({
+			QINGYAN_CONFIG_PATH: configPath,
+			QINGYAN_INSTALL_TRANSITION_MODE: "exit_for_supervisor",
+		});
+
+		expect(config.transitionMode).toBe("exit_for_supervisor");
+	});
+
+	it("maps legacy restart mode exit to supervisor transition", () => {
 		const configPath = createConfigPath();
 
 		const config = resolveMinimalInstallConfig({
@@ -38,10 +49,33 @@ describe("resolveMinimalInstallConfig", () => {
 			QINGYAN_INSTALL_RESTART_MODE: "exit",
 		});
 
-		expect(config.restartMode).toBe("exit");
+		expect(config.transitionMode).toBe("exit_for_supervisor");
 	});
 
-	it("rejects invalid install restart mode", () => {
+	it("lets transition mode override legacy restart mode", () => {
+		const configPath = createConfigPath();
+
+		const config = resolveMinimalInstallConfig({
+			QINGYAN_CONFIG_PATH: configPath,
+			QINGYAN_INSTALL_TRANSITION_MODE: "manual",
+			QINGYAN_INSTALL_RESTART_MODE: "exit",
+		});
+
+		expect(config.transitionMode).toBe("manual");
+	});
+
+	it("rejects invalid install transition mode", () => {
+		const configPath = createConfigPath();
+
+		expect(() =>
+			resolveMinimalInstallConfig({
+				QINGYAN_CONFIG_PATH: configPath,
+				QINGYAN_INSTALL_TRANSITION_MODE: "restart_api",
+			}),
+		).toThrow("QINGYAN_INSTALL_TRANSITION_MODE");
+	});
+
+	it("rejects invalid legacy install restart mode", () => {
 		const configPath = createConfigPath();
 
 		expect(() =>
