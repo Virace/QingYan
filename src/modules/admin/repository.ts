@@ -17,17 +17,17 @@ import {
 	adminSessions,
 	blacklistRules,
 	comments,
-	pageThreads,
 	pageViewSessions,
+	pageThreads,
 	siteSettings,
 	sites,
 	visitors,
 } from "../../db/schema";
-import type { CommentStatus } from "../comments/moderation-types";
+import { resolvePublicPageUrl } from "../shared/page-url";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
-import { resolvePublicPageUrl } from "../shared/page-url";
 import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
+import type { CommentStatus } from "../comments/moderation-types";
 
 function parseStringArray(payload?: string | null): string[] {
 	if (!payload) {
@@ -252,7 +252,6 @@ export class AdminRepository {
 		await this.db
 			.update(adminSessions)
 			.set({
-				previousCsrfTokenHash: sql`${adminSessions.csrfTokenHash}`,
 				csrfTokenHash: input.csrfTokenHash,
 				csrfIssuedAt: input.csrfIssuedAt,
 				lastSeenAt: input.csrfIssuedAt,

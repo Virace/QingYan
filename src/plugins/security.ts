@@ -1,24 +1,25 @@
-import { and, eq, gte, isNull, or } from "drizzle-orm";
-import type { FastifyPluginAsync } from "fastify";
 import fp from "fastify-plugin";
-import { joinPublicPath, stripPublicPath } from "../config/public-path";
-import { adminSessions, auditLogs, blacklistRules } from "../db/schema";
+import type { FastifyPluginAsync } from "fastify";
+import { and, eq, gte, isNull, or } from "drizzle-orm";
+
 import { sanitizeLogData } from "../logging/redaction";
 import type { AppEventName, LogLevel } from "../logging/types";
+import {
+	matchBlacklistRule,
+	type BlacklistSubject,
+} from "../modules/shared/blacklist-match";
 import {
 	hashCsrfToken,
 	hashSessionToken,
 } from "../modules/admin/session-utils";
-import {
-	type BlacklistSubject,
-	matchBlacklistRule,
-} from "../modules/shared/blacklist-match";
-import { AppError } from "../modules/shared/errors";
 import type {
 	RateLimitRule,
 	RateLimitSnapshot,
 } from "../modules/shared/rate-limit";
 import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
+import { AppError } from "../modules/shared/errors";
+import { adminSessions, auditLogs, blacklistRules } from "../db/schema";
+import { joinPublicPath, stripPublicPath } from "../config/public-path";
 
 const PUBLIC_WRITE_ROUTES = [
 	{ method: "POST", pattern: /^\/api\/comments$/ },
@@ -497,22 +498,6 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 		const csrfToken = request.headers["x-qingyan-csrf-token"];
 		if (typeof csrfToken !== "string" || csrfToken.length === 0) {
-			await security.writeAudit({
-				requestId: request.context?.requestId,
-				actorType: "admin",
-				event: "admin.csrf.rejected",
-				level: "warn",
-				message: "后台写请求缺少 CSRF token",
-				targetType: "admin_request",
-				targetId: internalPathname,
-				payload: {
-					reason: "missing",
-					method: request.method,
-					path: internalPathname,
-					origin: origin ?? null,
-					authPresent: true,
-				},
-			});
 			throw new AppError(
 				403,
 				"ADMIN_CSRF_REQUIRED",
@@ -525,32 +510,10 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			.from(adminSessions)
 			.where(eq(adminSessions.tokenHash, hashSessionToken(sessionCookie)))
 			.limit(1);
-		const csrfTokenHash = hashCsrfToken(csrfToken);
 		if (
 			!session?.csrfTokenHash ||
-			(session.csrfTokenHash !== csrfTokenHash &&
-				session.previousCsrfTokenHash !== csrfTokenHash)
+			session.csrfTokenHash !== hashCsrfToken(csrfToken)
 		) {
-			await security.writeAudit({
-				requestId: request.context?.requestId,
-				actorType: "admin",
-				event: "admin.csrf.rejected",
-				level: "warn",
-				message: "后台写请求 CSRF token 无效",
-				targetType: "admin_request",
-				targetId: internalPathname,
-				payload: {
-					reason: "invalid",
-					method: request.method,
-					path: internalPathname,
-					origin: origin ?? null,
-					adminRecordFound: Boolean(session),
-					hasCurrentCsrfHash: Boolean(session?.csrfTokenHash),
-					hasPreviousCsrfHash: Boolean(session?.previousCsrfTokenHash),
-					matchesCurrent: session?.csrfTokenHash === csrfTokenHash,
-					matchesPrevious: session?.previousCsrfTokenHash === csrfTokenHash,
-				},
-			});
 			throw new AppError(
 				403,
 				"ADMIN_CSRF_INVALID",

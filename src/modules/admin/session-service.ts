@@ -2,14 +2,14 @@ import type { FastifyRequest } from "fastify";
 
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
-import { AppError } from "../shared/errors";
-import type { SiteRegistry } from "../shared/site-registry";
 import { defaultSystemSettings } from "../system-settings/definitions";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { AppError } from "../shared/errors";
+import type { SiteRegistry } from "../shared/site-registry";
 import type { AdminBootstrap } from "./bootstrap-service";
-import { AdminLoginChallengeStore } from "./login-challenge-store";
 import { verifyPasswordHash } from "./password-hash";
 import type { AdminRepository } from "./repository";
+import { AdminLoginChallengeStore } from "./login-challenge-store";
 import {
 	createCsrfToken,
 	createSessionToken,
@@ -367,21 +367,6 @@ export class AdminSessionService {
 	public async getMe(request: FastifyRequest) {
 		const session = await this.requireSession(request);
 		const csrf = await this.issueCsrfToken(session.id);
-		await this.security.writeAudit({
-			requestId: request.context?.requestId,
-			actorType: "admin",
-			event: "admin.csrf.rotated",
-			level: "info",
-			message: "后台 CSRF token 已轮换",
-			targetType: "admin_request",
-			targetId: request.url,
-			payload: {
-				path: request.url,
-				method: request.method,
-				issuedAt: csrf.issuedAt,
-				hadExistingCsrf: Boolean(session.csrfTokenHash),
-			},
-		});
 		const sites =
 			this.siteRegistry?.listRegisteredSites() ??
 			(await this.repository.listSites());
