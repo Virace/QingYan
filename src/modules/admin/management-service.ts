@@ -30,6 +30,7 @@ import {
 	sanitizeOptionalSafeHttpUrl,
 } from "../shared/url-policy";
 import type { SiteRegistry } from "../shared/site-registry";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 import type { AdminRepository } from "./repository";
 
 type CommentMetadataPatch = {
@@ -118,11 +119,15 @@ export class AdminManagementService {
 		offset: number;
 	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
+		const systemSettings = new RuntimeSystemSettingsService(
+			this.repository.database,
+		);
 		const result = await this.repository.listComments({
 			siteId,
 			pageKey: input.pageKey,
 			status: input.status,
 			statusGroup: input.statusGroup,
+			avatar: await systemSettings.getAvatarSettings(),
 			search: input.search,
 			limit: input.limit,
 			offset: input.offset,

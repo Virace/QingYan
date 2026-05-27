@@ -28,6 +28,8 @@ import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
 import type { CommentStatus } from "../comments/moderation-types";
+import { buildGravatarUrl } from "../comments/gravatar";
+import type { SystemSettings } from "../system-settings/definitions";
 
 function parseStringArray(payload?: string | null): string[] {
 	if (!payload) {
@@ -264,16 +266,21 @@ export class AdminRepository {
 		pageKey?: string;
 		status?: CommentStatus;
 		statusGroup?: "hidden";
+		avatar?: SystemSettings["avatar"];
 		search?: string;
 		limit: number;
 		offset: number;
 	}) {
+		const hasExplicitStatusFilter = Boolean(input.status || input.statusGroup);
 		const conditions = [
 			input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 			input.status ? eq(comments.status, input.status) : undefined,
 			input.statusGroup === "hidden"
 				? inArray(comments.status, ["spam", "trash"])
 				: undefined,
+			hasExplicitStatusFilter
+				? undefined
+				: inArray(comments.status, ["pending", "approved"]),
 			isNull(comments.deletedAt),
 		].filter((condition) => condition !== undefined);
 
@@ -307,6 +314,7 @@ export class AdminRepository {
 				status: comments.status,
 				authorName: comments.authorName,
 				authorEmail: comments.authorEmail,
+				authorEmailHash: comments.authorEmailHash,
 				authorIp: comments.authorIp,
 				authorUserAgent: comments.authorUserAgent,
 				contentRaw: comments.contentRaw,
@@ -372,6 +380,17 @@ export class AdminRepository {
 					status: row.status,
 					authorName: row.authorName,
 					authorEmail: row.authorEmail,
+					authorGravatarUrl:
+						buildGravatarUrl({
+							enabled: input.avatar?.gravatar.enabled ?? false,
+							emailHash: row.authorEmailHash,
+							baseUrl:
+								input.avatar?.gravatar.baseUrl ?? "https://gravatar.com/avatar",
+							size: input.avatar?.gravatar.size,
+							defaultImage: input.avatar?.gravatar.defaultImage,
+							rating: input.avatar?.gravatar.rating,
+							forceDefault: input.avatar?.gravatar.forceDefault,
+						}) ?? null,
 					authorIp: row.authorIp,
 					authorUserAgent: row.authorUserAgent,
 					blacklist: {

@@ -9,6 +9,7 @@ import {
 	sites,
 } from "../../src/db/schema";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -21,6 +22,209 @@ afterEach(async () => {
 });
 
 describe("admin comments", () => {
+	it("defaults admin comments to active statuses and keeps spam and trash in explicit views", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:admin-comment-views",
+			pageTitle: "Admin Comment Views",
+			pageUrl: "/posts/admin-comment-views/",
+			commentCount: 4,
+			rootCommentCount: 4,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:admin-comment-views"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_admin_view_pending",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "pending",
+				authorName: "Pending",
+				contentRaw: "pending",
+				contentHtml: "<p>pending</p>",
+				createdAt: "2026-05-28T10:00:00.000Z",
+				updatedAt: "2026-05-28T10:00:00.000Z",
+			},
+			{
+				id: "c_admin_view_approved",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "Approved",
+				contentRaw: "approved",
+				contentHtml: "<p>approved</p>",
+				createdAt: "2026-05-28T10:01:00.000Z",
+				updatedAt: "2026-05-28T10:01:00.000Z",
+			},
+			{
+				id: "c_admin_view_spam",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "spam",
+				authorName: "Spam",
+				contentRaw: "spam",
+				contentHtml: "<p>spam</p>",
+				createdAt: "2026-05-28T10:02:00.000Z",
+				updatedAt: "2026-05-28T10:02:00.000Z",
+			},
+			{
+				id: "c_admin_view_trash",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "trash",
+				authorName: "Trash",
+				contentRaw: "trash",
+				contentHtml: "<p>trash</p>",
+				createdAt: "2026-05-28T10:03:00.000Z",
+				updatedAt: "2026-05-28T10:03:00.000Z",
+			},
+		]);
+
+		const cookies = {
+			qingyan_admin: adminCookie?.value ?? "",
+		};
+		const defaultList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
+			cookies,
+		});
+		expect(defaultList.statusCode).toBe(200);
+		expect(
+			defaultList.json().items.map((comment: { id: string }) => comment.id),
+		).toEqual(["c_admin_view_approved", "c_admin_view_pending"]);
+		expect(defaultList.json().pagination.totalCount).toBe(2);
+
+		const spamList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&status=spam&limit=20&offset=0",
+			cookies,
+		});
+		expect(spamList.statusCode).toBe(200);
+		expect(
+			spamList.json().items.map((comment: { id: string }) => comment.id),
+		).toEqual(["c_admin_view_spam"]);
+		expect(spamList.json().pagination.totalCount).toBe(1);
+
+		const trashList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&status=trash&limit=20&offset=0",
+			cookies,
+		});
+		expect(trashList.statusCode).toBe(200);
+		expect(
+			trashList.json().items.map((comment: { id: string }) => comment.id),
+		).toEqual(["c_admin_view_trash"]);
+		expect(trashList.json().pagination.totalCount).toBe(1);
+	});
+
+	it("returns admin comment gravatar urls when global Gravatar is enabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert("avatar", "gravatar.enabled", true);
+		await systemSettings.upsert(
+			"avatar",
+			"gravatar.baseUrl",
+			"https://cravatar.cn/avatar",
+		);
+		await systemSettings.upsert("avatar", "gravatar.size", 160);
+		await systemSettings.upsert("avatar", "gravatar.defaultImage", "identicon");
+		await systemSettings.upsert("avatar", "gravatar.rating", "pg");
+		await systemSettings.upsert("avatar", "gravatar.forceDefault", true);
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:admin-gravatar",
+			pageTitle: "Admin Gravatar",
+			pageUrl: "/posts/admin-gravatar/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:admin-gravatar"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		const aliceHash =
+			"ff8d9819fc0e12bf0d24892e45987e249a28dce836a85cad60e28eaaa8c6d976";
+		await fixture.app.db.insert(comments).values({
+			id: "c_admin_gravatar",
+			siteId: site.id,
+			pageThreadId: thread.id,
+			parentId: null,
+			status: "approved",
+			authorName: "Alice",
+			authorEmail: "alice@example.com",
+			authorEmailHash: aliceHash,
+			contentRaw: "gravatar",
+			contentHtml: "<p>gravatar</p>",
+			createdAt: "2026-05-28T10:00:00.000Z",
+			updatedAt: "2026-05-28T10:00:00.000Z",
+		});
+
+		const enabledList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(enabledList.statusCode).toBe(200);
+		expect(enabledList.json().items[0]).toMatchObject({
+			id: "c_admin_gravatar",
+			authorGravatarUrl: `https://cravatar.cn/avatar/${aliceHash}?s=160&d=identicon&r=pg&f=y`,
+		});
+
+		await systemSettings.upsert("avatar", "gravatar.enabled", false);
+		const disabledList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(disabledList.statusCode).toBe(200);
+		expect(disabledList.json().items[0]).toMatchObject({
+			id: "c_admin_gravatar",
+			authorGravatarUrl: null,
+		});
+	});
+
 	it("lists, updates, moves comments to trash and permanently deletes only trashed comments", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

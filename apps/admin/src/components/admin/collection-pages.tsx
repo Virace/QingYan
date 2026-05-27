@@ -30,14 +30,30 @@ import {
 import { Input } from "@/components/ui/input";
 
 import type { AdminView } from "./admin-shell";
-import { EmptyState, inputClass, textareaClass } from "./admin-ui";
+import { EmptyState, textareaClass } from "./admin-ui";
 import { useAdminConfirmDialog } from "./confirm-dialog";
+
+type CommentView = "all" | "pending" | "approved" | "spam" | "trash";
+
+const commentViews: Array<{
+	id: CommentView;
+	label: string;
+	status?: CommentStatus;
+}> = [
+	{ id: "all", label: "全部" },
+	{ id: "pending", label: "待审", status: "pending" },
+	{ id: "approved", label: "已通过", status: "approved" },
+	{ id: "spam", label: "垃圾", status: "spam" },
+	{ id: "trash", label: "回收站", status: "trash" },
+];
+
+function authorInitial(name: string) {
+	return name.trim().slice(0, 1).toUpperCase() || "?";
+}
 
 function ResourceFilters({
 	search,
 	setSearch,
-	status,
-	setStatus,
 	pageKey,
 	setPageKey,
 	limit,
@@ -45,8 +61,6 @@ function ResourceFilters({
 }: {
 	search: string;
 	setSearch: (value: string) => void;
-	status?: string;
-	setStatus?: (value: string) => void;
 	pageKey?: string;
 	setPageKey?: (value: string) => void;
 	limit?: number;
@@ -65,18 +79,6 @@ function ResourceFilters({
 					value={pageKey ?? ""}
 					onChange={(event) => setPageKey(event.target.value)}
 				/>
-			) : null}
-			{setStatus ? (
-				<select
-					className={inputClass}
-					value={status ?? ""}
-					onChange={(event) => setStatus(event.target.value)}
-				>
-					<option value="">全部状态</option>
-					<option value="pending">待审</option>
-					<option value="approved">已通过</option>
-					<option value="hidden">垃圾与回收站</option>
-				</select>
 			) : null}
 			{setLimit ? (
 				<Input
@@ -106,35 +108,20 @@ export function CommentsPage({
 }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
-	const [status, setStatus] = useState("");
-	const [hiddenStatus, setHiddenStatus] = useState("");
+	const [view, setView] = useState<CommentView>("all");
 	const [limit, setLimit] = useState(20);
 	const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 	const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
+	const currentView =
+		commentViews.find((item) => item.id === view) ?? commentViews[0];
 	const commentsQuery = useQuery({
-		queryKey: [
-			"admin",
-			"comments",
-			siteKey,
-			search,
-			pageKey,
-			status,
-			hiddenStatus,
-			limit,
-		],
+		queryKey: ["admin", "comments", siteKey, search, pageKey, view, limit],
 		queryFn: () =>
 			listComments({
 				siteKey,
 				pageKey,
 				search,
-				status:
-					status === "hidden"
-						? ((hiddenStatus || undefined) as "spam" | "trash" | undefined)
-						: status === "pending" || status === "approved"
-							? status
-							: undefined,
-				statusGroup:
-					status === "hidden" && !hiddenStatus ? "hidden" : undefined,
+				status: currentView.status,
 				limit,
 				offset: 0,
 			}),
@@ -211,7 +198,7 @@ export function CommentsPage({
 	};
 	const blacklistMutationPending =
 		createBlacklistMutation.isPending || deleteBlacklistMutation.isPending;
-	const isTrashView = status === "hidden" && hiddenStatus === "trash";
+	const isTrashView = view === "trash";
 	const visibleCommentIds =
 		commentsQuery.data?.items.map((comment) => comment.id) ?? [];
 	const selectedVisibleIds = selectedCommentIds.filter((commentId) =>
@@ -289,41 +276,30 @@ export function CommentsPage({
 				<CardDescription>审核、置顶、折叠或删除评论。</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				<div className="flex flex-wrap gap-2 text-sm">
+					{commentViews.map((item) => (
+						<Button
+							key={item.id}
+							type="button"
+							size="sm"
+							variant={view === item.id ? "secondary" : "ghost"}
+							onClick={() => {
+								setView(item.id);
+								setSelectedCommentIds([]);
+							}}
+						>
+							{item.label}
+						</Button>
+					))}
+				</div>
 				<ResourceFilters
 					search={search}
 					setSearch={setSearch}
-					status={status}
-					setStatus={(value) => {
-						setStatus(value);
-						if (value !== "hidden") {
-							setHiddenStatus("");
-						}
-					}}
 					pageKey={pageKey}
 					setPageKey={setPageKey}
 					limit={limit}
 					setLimit={setLimit}
 				/>
-				{status === "hidden" ? (
-					<div className="flex max-w-xs flex-col gap-2">
-						<label
-							className="text-xs text-muted-foreground"
-							htmlFor="admin-comments-hidden-status"
-						>
-							垃圾与回收站状态
-						</label>
-						<select
-							id="admin-comments-hidden-status"
-							className={inputClass}
-							value={hiddenStatus}
-							onChange={(event) => setHiddenStatus(event.target.value)}
-						>
-							<option value="">全部</option>
-							<option value="spam">Akismet 垃圾</option>
-							<option value="trash">回收站</option>
-						</select>
-					</div>
-				) : null}
 				<p className="text-xs text-muted-foreground">
 					共 {commentsQuery.data?.pagination.totalCount ?? "-"} 条，当前显示{" "}
 					{commentsQuery.data?.items.length ?? 0} 条。
@@ -445,23 +421,44 @@ export function CommentsPage({
 											</Badge>
 										</td>
 										<td className="p-3">
-											<p className="font-medium">{comment.authorName}</p>
-											<p className="text-xs text-muted-foreground">
-												{comment.authorEmail ?? "-"}
-											</p>
-											<p className="text-xs text-muted-foreground">
-												IP {comment.authorIp ?? "-"}
-											</p>
-											<p className="max-w-48 truncate text-xs text-muted-foreground">
-												UA {comment.authorUserAgent ?? "-"}
-											</p>
-											<div className="mt-2 flex flex-wrap gap-1">
-												{comment.blacklist.email ? (
-													<Badge variant="destructive">邮箱黑名单</Badge>
-												) : null}
-												{comment.blacklist.ip ? (
-													<Badge variant="destructive">IP 黑名单</Badge>
-												) : null}
+											<div className="flex min-w-56 gap-3">
+												{comment.authorGravatarUrl ? (
+													<img
+														className="size-10 shrink-0 rounded-full border object-cover"
+														src={comment.authorGravatarUrl}
+														alt={`${comment.authorName} 头像`}
+														loading="lazy"
+													/>
+												) : (
+													<div
+														className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-muted text-sm font-medium text-muted-foreground"
+														aria-hidden="true"
+													>
+														{authorInitial(comment.authorName)}
+													</div>
+												)}
+												<div className="min-w-0">
+													<p className="truncate font-medium">
+														{comment.authorName}
+													</p>
+													<p className="truncate text-xs text-muted-foreground">
+														{comment.authorEmail ?? "-"}
+													</p>
+													<p className="text-xs text-muted-foreground">
+														IP {comment.authorIp ?? "-"}
+													</p>
+													<p className="max-w-48 truncate text-xs text-muted-foreground">
+														UA {comment.authorUserAgent ?? "-"}
+													</p>
+													<div className="mt-2 flex flex-wrap gap-1">
+														{comment.blacklist.email ? (
+															<Badge variant="destructive">邮箱黑名单</Badge>
+														) : null}
+														{comment.blacklist.ip ? (
+															<Badge variant="destructive">IP 黑名单</Badge>
+														) : null}
+													</div>
+												</div>
 											</div>
 										</td>
 										<td className="max-w-56 p-3">

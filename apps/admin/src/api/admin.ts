@@ -32,6 +32,7 @@ export interface AdminComment {
 	status: CommentStatus;
 	authorName: string;
 	authorEmail: string | null;
+	authorGravatarUrl: string | null;
 	authorIp: string | null;
 	authorUserAgent: string | null;
 	blacklist: {
