@@ -858,7 +858,43 @@ export class AdminRepository {
 		return this.getCommentById(commentId);
 	}
 
-	public async softDeleteComment(commentId: string) {
+	public async moveCommentsToTrash(commentIds: string[]) {
+		if (commentIds.length === 0) {
+			return [];
+		}
+
+		const existingComments = await this.db
+			.select()
+			.from(comments)
+			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
+		if (existingComments.length === 0) {
+			return [];
+		}
+
+		const existingIds = existingComments.map((comment) => comment.id);
+		await this.db
+			.update(comments)
+			.set({
+				status: "trash",
+				updatedAt: new Date().toISOString(),
+			})
+			.where(inArray(comments.id, existingIds));
+
+		const movedComments = await this.db
+			.select()
+			.from(comments)
+			.where(inArray(comments.id, existingIds));
+		const movedById = new Map(
+			movedComments.map((comment) => [comment.id, comment]),
+		);
+
+		return commentIds.flatMap((commentId) => {
+			const comment = movedById.get(commentId);
+			return comment ? [comment] : [];
+		});
+	}
+
+	public async permanentlyDeleteComment(commentId: string) {
 		const existingComment = await this.getCommentById(commentId);
 		if (!existingComment || existingComment.deletedAt) {
 			return existingComment;
@@ -894,6 +930,25 @@ export class AdminRepository {
 			.where(eq(pageThreads.id, existingComment.pageThreadId));
 
 		return this.getCommentById(commentId);
+	}
+
+	public async clearTrash(siteId?: number) {
+		const trashedComments = await this.db
+			.select()
+			.from(comments)
+			.where(
+				and(
+					eq(comments.status, "trash"),
+					isNull(comments.deletedAt),
+					siteId === undefined ? undefined : eq(comments.siteId, siteId),
+				),
+			);
+
+		for (const comment of trashedComments) {
+			await this.permanentlyDeleteComment(comment.id);
+		}
+
+		return trashedComments.length;
 	}
 
 	public async listBlacklist(siteId?: number) {

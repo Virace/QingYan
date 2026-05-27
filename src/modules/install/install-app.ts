@@ -206,6 +206,17 @@ function renderInstallHtml(
 			name: "Default",
 			allowedOrigins: resolveDefaultPublicBaseUrl(input),
 		},
+		siteSettings: {
+			comments: {
+				verifiedAuthor: {
+					enabled: true,
+					displayName: "管理员",
+					email: "",
+					website: "",
+					badgeLabel: "管理员",
+				},
+			},
+		},
 		security: defaultSecurityConfig,
 		systemSettings: defaultSystemSettings,
 		restore: {
@@ -328,6 +339,18 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>站点名称<input data-path="site.name" autocomplete="off" required><span class="hint" data-hint-for="site.name"></span></label>
 </div>
 <label>前端站点 Origin<input data-path="site.allowedOrigins" data-type="singleStringArray" autocomplete="url" required><span class="hint" data-hint-for="site.allowedOrigins">填写加载评论组件的前端站点 origin。一个 QingYan 站点只对应一个前端 Origin；若 QingYan 与内容站不是同一域名，请填写 FangYuan / x-item 的真实访问 origin。</span></label>
+</fieldset>
+<fieldset>
+<legend>可信评论作者</legend>
+<div class="grid">
+<label class="check"><input data-path="siteSettings.comments.verifiedAuthor.enabled" data-type="boolean" type="checkbox">启用可信作者<span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.enabled">后台已登录状态在前台评论区回复时，会使用这组作者资料。</span></label>
+<label>显示名称<input data-path="siteSettings.comments.verifiedAuthor.displayName" autocomplete="name" required><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.displayName">公开评论区展示的作者名称。</span></label>
+</div>
+<div class="grid">
+<label>邮箱<input data-path="siteSettings.comments.verifiedAuthor.email" type="email" autocomplete="email"><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.email">启用可信作者时必须填写；用于 Gravatar 头像和保留可信作者邮箱。</span></label>
+<label>作者主页 URL<input data-path="siteSettings.comments.verifiedAuthor.website" autocomplete="url"><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.website">可选，只作为评论作者链接，不参与后台登录或站点归属判断。</span></label>
+</div>
+<label>Badge 文案<input data-path="siteSettings.comments.verifiedAuthor.badgeLabel" required><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.badgeLabel">例如 管理员、楼主、作者。</span></label>
 </fieldset>
 <fieldset>
 <legend>安全基础配置</legend>
@@ -729,6 +752,7 @@ async function collectPayload() {
 		},
 		security: raw.security,
 		site: raw.site,
+		siteSettings: raw.siteSettings,
 		systemSettings: raw.systemSettings,
 		restore: await collectRestore(),
 	};
@@ -752,6 +776,13 @@ function renderPlan(plan) {
 	const envFields = plan.env.length
 		? plan.env.map((item) => item.envName + " -> " + formatPathLabel(item.path) + (item.secret ? "（已隐藏）" : "")).join(", ")
 		: "无";
+	const verifiedAuthor = plan.siteSettings?.comments?.verifiedAuthor;
+	const verifiedAuthorText = verifiedAuthor
+		? "<br>可信评论作者: " + (verifiedAuthor.enabled ? "启用" : "关闭") +
+			" / " + verifiedAuthor.displayName +
+			" / " + verifiedAuthor.email +
+			" / " + verifiedAuthor.badgeLabel
+		: "";
 const restoreText = plan.restore
 		? "<br>恢复来源: " + plan.restore.fileName +
 			"<br>恢复格式: QingYan 站点级 JSON" +
@@ -769,6 +800,7 @@ const restoreText = plan.restore
 		"后台入口: " + plan.admin.consolePath + "<br>" +
 		"管理员: " + plan.admin.username + (plan.admin.passwordGenerated ? "（将随机生成初始密码）" : "") + "<br>" +
 		"默认站点: " + plan.site.siteKey + " / " + plan.site.name + "<br>" +
+		verifiedAuthorText +
 		"安装值: " + renderList(valueItems) +
 		"系统设置写入: " + renderList(systemReview) +
 		"环境变量锁定: " + envFields +

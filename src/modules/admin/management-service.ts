@@ -381,7 +381,19 @@ export class AdminManagementService {
 	}
 
 	public async deleteComment(commentId: string, requestId?: string) {
-		const comment = await this.repository.softDeleteComment(commentId);
+		const existingComment = await this.repository.getCommentById(commentId);
+		if (!existingComment || existingComment.deletedAt) {
+			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+		if (existingComment.status !== "trash") {
+			throw new AppError(
+				400,
+				"COMMENT_NOT_IN_TRASH",
+				"评论需要先移入回收站，才能永久删除。",
+			);
+		}
+
+		const comment = await this.repository.permanentlyDeleteComment(commentId);
 		if (!comment) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
 		}
@@ -396,6 +408,55 @@ export class AdminManagementService {
 		});
 
 		return comment;
+	}
+
+	public async moveCommentsToTrash(input: {
+		commentIds: string[];
+		requestId?: string;
+	}) {
+		const movedComments = await this.repository.moveCommentsToTrash(
+			input.commentIds,
+		);
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			actorType: "admin",
+			event: "comments.status.changed",
+			message: "评论已移入回收站",
+			targetType: "comment",
+			targetId: movedComments.map((comment) => comment.id).join(","),
+			payload: {
+				commentIds: movedComments.map((comment) => comment.id),
+				status: "trash",
+			},
+		});
+
+		return {
+			comments: movedComments,
+			updatedCount: movedComments.length,
+		};
+	}
+
+	public async clearTrash(input: { siteKey?: string; requestId?: string }) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const deletedCount = await this.repository.clearTrash(siteId);
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			actorType: "admin",
+			event: "comments.deleted",
+			message: "回收站已清空",
+			targetType: "comment",
+			targetId: input.siteKey ?? "all",
+			payload: {
+				deletedCount,
+			},
+		});
+
+		return {
+			deletedCount,
+		};
 	}
 
 	public async replyToComment(

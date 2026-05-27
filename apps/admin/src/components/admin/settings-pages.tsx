@@ -545,7 +545,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									}
 								/>
 							</Field>
-							<Field label="站点 URL">
+							<Field label="作者主页 URL">
 								<Input
 									value={draft.comments.verifiedAuthor.website}
 									onChange={(event) =>

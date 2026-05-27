@@ -4,6 +4,8 @@ import { InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "../admin/management-service";
 import { AdminRepository } from "../admin/repository";
 import {
+	adminCommentBulkTrashBodySchema,
+	adminCommentClearTrashBodySchema,
 	adminCommentParamsSchema,
 	adminCommentPatchBodySchema,
 	adminCommentReplyBodySchema,
@@ -35,6 +37,36 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return service.listComments(parsed.data);
+	});
+
+	fastify.post("/bulk-trash", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedBody = adminCommentBulkTrashBodySchema.safeParse(request.body);
+		if (!parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: parsedBody.error.issues,
+			});
+		}
+
+		return service.moveCommentsToTrash({
+			commentIds: parsedBody.data.commentIds,
+			requestId: request.context?.requestId,
+		});
+	});
+
+	fastify.post("/trash/clear", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedBody = adminCommentClearTrashBodySchema.safeParse(request.body);
+		if (!parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: parsedBody.error.issues,
+			});
+		}
+
+		return service.clearTrash({
+			siteKey: parsedBody.data.siteKey,
+			requestId: request.context?.requestId,
+		});
 	});
 
 	fastify.patch("/:commentId", async (request) => {

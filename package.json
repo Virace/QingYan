@@ -11,13 +11,6 @@
 	"engines": {
 		"node": ">=24.0.0"
 	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"better-sqlite3",
-			"esbuild",
-			"ts-ip2region2"
-		]
-	},
 	"scripts": {
 		"clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
 		"dev": "tsx scripts/dev.ts",
@@ -27,9 +20,9 @@
 		"admin:typecheck": "tsc --noEmit -p apps/admin/tsconfig.json",
 		"build": "pnpm run clean && pnpm run admin:build && tsc -p tsconfig.build.json",
 		"start": "node dist/server.js",
-		"lint": "biome lint src tests scripts package.json tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts playwright.config.ts apps/admin/src/api apps/admin/src/components apps/admin/src/lib apps/admin/src/App.tsx apps/admin/src/main.tsx apps/admin/src/vite-env.d.ts apps/admin/index.html apps/admin/tsconfig.json apps/admin/vite.config.ts components.json",
-		"format": "biome format --write src tests scripts package.json tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts playwright.config.ts apps/admin/src/api apps/admin/src/components apps/admin/src/lib apps/admin/src/App.tsx apps/admin/src/main.tsx apps/admin/src/vite-env.d.ts apps/admin/index.html apps/admin/tsconfig.json apps/admin/vite.config.ts components.json",
-		"format:check": "biome format src tests scripts package.json tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts playwright.config.ts apps/admin/src/api apps/admin/src/components apps/admin/src/lib apps/admin/src/App.tsx apps/admin/src/main.tsx apps/admin/src/vite-env.d.ts apps/admin/index.html apps/admin/tsconfig.json apps/admin/vite.config.ts components.json",
+		"lint": "biome lint src tests scripts package.json pnpm-workspace.yaml tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts playwright.config.ts apps/admin/src/api apps/admin/src/components apps/admin/src/lib apps/admin/src/App.tsx apps/admin/src/main.tsx apps/admin/src/vite-env.d.ts apps/admin/index.html apps/admin/tsconfig.json apps/admin/vite.config.ts components.json",
+		"format": "biome format --write src tests scripts package.json pnpm-workspace.yaml tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts playwright.config.ts apps/admin/src/api apps/admin/src/components apps/admin/src/lib apps/admin/src/App.tsx apps/admin/src/main.tsx apps/admin/src/vite-env.d.ts apps/admin/index.html apps/admin/tsconfig.json apps/admin/vite.config.ts components.json",
+		"format:check": "biome format src tests scripts package.json pnpm-workspace.yaml tsconfig.json tsconfig.build.json drizzle.config.ts vitest.config.ts playwright.config.ts apps/admin/src/api apps/admin/src/components apps/admin/src/lib apps/admin/src/App.tsx apps/admin/src/main.tsx apps/admin/src/vite-env.d.ts apps/admin/index.html apps/admin/tsconfig.json apps/admin/vite.config.ts components.json",
 		"check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run config:check",
 		"test:e2e": "playwright test",
 		"dev:smoke": "tsx scripts/dev-smoke.ts",

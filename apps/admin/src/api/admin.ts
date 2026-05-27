@@ -392,6 +392,26 @@ export function deleteComment(commentId: string) {
 	);
 }
 
+export function bulkTrashComments(commentIds: string[]) {
+	return requestJson<{ comments: AdminComment[]; updatedCount: number }>(
+		"/api/admin/comments/bulk-trash",
+		{
+			method: "POST",
+			body: JSON.stringify({ commentIds }),
+		},
+	);
+}
+
+export function clearTrash(input: { siteKey?: string }) {
+	return requestJson<{ deletedCount: number }>(
+		"/api/admin/comments/trash/clear",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
 export function replyToComment(
 	commentId: string,
 	input: { content: { raw: string } },

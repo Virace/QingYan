@@ -3,6 +3,7 @@ import { copyFile, mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { stringify } from "yaml";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 
 import {
 	applyStartupEnvOverrides,
@@ -12,7 +13,7 @@ import { buildPublicUrl } from "../../config/public-path";
 import { configSchema, type StartupConfig } from "../../config/types";
 import { createDatabaseClients } from "../../db/client";
 import { applyDatabaseMigrations } from "../../db/migrations";
-import { adminBootstrapState } from "../../db/schema";
+import { adminBootstrapState, siteSettings } from "../../db/schema";
 import { createAdminConsolePath } from "../admin/bootstrap-utils";
 import {
 	createInitialAdminPassword,
@@ -44,7 +45,16 @@ import {
 	type IpVersion,
 } from "../comments/metadata/ip-region-updater";
 import { normalizeGravatarBaseUrl } from "../comments/gravatar";
-import { normalizeOriginList } from "../shared/url-policy";
+import {
+	isSafeHttpUrl,
+	normalizeOriginList,
+	sanitizeOptionalSafeHttpUrl,
+} from "../shared/url-policy";
+import {
+	normalizeVerifiedAuthorEmail,
+	serializeVerifiedAuthorSettings,
+	type VerifiedAuthorSettings,
+} from "../comments/verified-author";
 import {
 	createSystemSettingsDefaults,
 	defaultAdminSessionTtlMinutes,
@@ -70,6 +80,36 @@ const installRestoreOptionsSchema = z
 			.default("replace_settings"),
 	})
 	.optional();
+
+const installVerifiedAuthorSchema = z
+	.object({
+		enabled: z.boolean(),
+		displayName: z.string().trim().min(1),
+		email: z.string().trim().email().or(z.literal("")),
+		website: z
+			.string()
+			.trim()
+			.refine((value) => value === "" || isSafeHttpUrl(value), {
+				message: "website 仅允许 http 或 https。",
+			}),
+		badgeLabel: z.string().trim().min(1),
+	})
+	.superRefine((value, context) => {
+		if (value.enabled && !value.email.trim()) {
+			context.addIssue({
+				code: "custom",
+				path: ["email"],
+				message: "启用可信评论作者时必须填写邮箱。",
+			});
+		}
+	})
+	.transform((value) => ({
+		enabled: value.enabled,
+		displayName: value.displayName.trim(),
+		email: normalizeVerifiedAuthorEmail(value.email),
+		website: sanitizeOptionalSafeHttpUrl(value.website) ?? "",
+		badgeLabel: value.badgeLabel.trim(),
+	}));
 
 export const installApplySchema = z.object({
 	token: z.string().min(1).optional(),
@@ -109,6 +149,15 @@ export const installApplySchema = z.object({
 			.length(1, "每个站点只能配置一个前端 Origin。")
 			.transform((value) => normalizeOriginList(value)),
 	}),
+	siteSettings: z
+		.object({
+			comments: z
+				.object({
+					verifiedAuthor: installVerifiedAuthorSchema.optional(),
+				})
+				.optional(),
+		})
+		.optional(),
 	systemSettings: z.unknown().optional(),
 	restore: installRestoreOptionsSchema,
 });
@@ -124,12 +173,18 @@ type InstallRestoreOptions = {
 	settingsStrategy: QingYanSettingsStrategy;
 	site: InstallSiteInput;
 };
+type InstallSiteSettingsInput = {
+	comments: {
+		verifiedAuthor: VerifiedAuthorSettings;
+	};
+};
 type NormalizedInstallInput = Omit<
 	InstallApplyInput,
 	"admin" | "token" | "site" | "restore"
 > & {
 	token?: string;
 	site: InstallSiteInput;
+	siteSettings?: InstallSiteSettingsInput;
 	restore?: InstallRestoreOptions;
 	admin: {
 		consolePath: string;
@@ -238,6 +293,7 @@ export interface InstallPlan {
 		name: string;
 		allowedOrigins: string[];
 	};
+	siteSettings?: InstallSiteSettingsInput;
 	restore?: {
 		enabled: true;
 		fileName: string;
@@ -321,9 +377,17 @@ function normalizeInstallInput(
 	const defaultedUsername = !input.admin.username;
 	const generatedPassword = !input.admin.password;
 	const restore = parseRestoreOptions(input.restore);
+	const siteSettingsInput = input.siteSettings?.comments?.verifiedAuthor
+		? {
+				comments: {
+					verifiedAuthor: input.siteSettings.comments.verifiedAuthor,
+				},
+			}
+		: undefined;
 	return {
 		...input,
 		site: restore?.site ?? input.site,
+		siteSettings: siteSettingsInput,
 		restore,
 		admin: {
 			consolePath: input.admin.consolePath ?? createAdminConsolePath(),
@@ -675,6 +739,9 @@ function buildApplyPayload(
 		site: input.site,
 		systemSettings: input.systemSettings,
 	};
+	if (input.siteSettings) {
+		payload.siteSettings = input.siteSettings;
+	}
 	if (input.restore) {
 		payload.restore = {
 			enabled: true,
@@ -722,6 +789,7 @@ async function seedDatabase(input: {
 	databaseFile: string;
 	admin: NormalizedInstallInput["admin"];
 	site: InstallApplyInput["site"];
+	siteSettings?: InstallSiteSettingsInput;
 	systemSettings: InstallSystemSettingSeed[];
 	restore?: InstallRestoreOptions;
 	ipRegionUpdater?: InstallIpRegionUpdater;
@@ -740,7 +808,17 @@ async function seedDatabase(input: {
 			passwordHash: createPasswordHash(input.admin.password),
 			passwordRotatedAt: null,
 		});
-		await registry.seedSiteFromTemplate(db, input.site);
+		const registeredSite = await registry.seedSiteFromTemplate(db, input.site);
+		if (input.siteSettings) {
+			await db
+				.update(siteSettings)
+				.set({
+					verifiedAuthorJson: serializeVerifiedAuthorSettings(
+						input.siteSettings.comments.verifiedAuthor,
+					),
+				})
+				.where(eq(siteSettings.siteId, registeredSite.id));
+		}
 		const systemSettings = new AdminSystemSettingsRepository(db);
 		for (const seed of input.systemSettings) {
 			await systemSettings.upsert(seed.category, seed.key, seed.value);
@@ -886,6 +964,13 @@ export async function buildInstallPlan(input: {
 			name: resolved.site.name,
 			allowedOrigins: resolved.site.allowedOrigins,
 		},
+		siteSettings: resolved.siteSettings
+			? {
+					comments: {
+						verifiedAuthor: resolved.siteSettings.comments.verifiedAuthor,
+					},
+				}
+			: undefined,
 		restore:
 			resolved.restore && restoreDryRun
 				? {
@@ -947,6 +1032,7 @@ export async function applyInstall(input: {
 		databaseFile,
 		admin: resolved.admin,
 		site: resolved.site,
+		siteSettings: resolved.siteSettings,
 		systemSettings: resolved.systemSettingSeeds,
 		restore: resolved.restore,
 		ipRegionUpdater: input.ipRegionUpdater,

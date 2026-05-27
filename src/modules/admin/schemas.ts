@@ -31,18 +31,28 @@ const commentMetadataSchema = z.object({
 		})
 		.optional(),
 });
-const verifiedAuthorSchema = z.object({
-	enabled: z.boolean(),
-	displayName: z.string().trim().min(1),
-	email: z.string().trim().email().or(z.literal("")),
-	website: z
-		.string()
-		.trim()
-		.refine((value) => value === "" || isSafeHttpUrl(value), {
-			message: "website 仅允许 http 或 https。",
-		}),
-	badgeLabel: z.string().trim().min(1),
-});
+const verifiedAuthorSchema = z
+	.object({
+		enabled: z.boolean(),
+		displayName: z.string().trim().min(1),
+		email: z.string().trim().email().or(z.literal("")),
+		website: z
+			.string()
+			.trim()
+			.refine((value) => value === "" || isSafeHttpUrl(value), {
+				message: "website 仅允许 http 或 https。",
+			}),
+		badgeLabel: z.string().trim().min(1),
+	})
+	.superRefine((value, context) => {
+		if (value.enabled && !value.email.trim()) {
+			context.addIssue({
+				code: "custom",
+				path: ["email"],
+				message: "启用可信评论作者时必须填写邮箱。",
+			});
+		}
+	});
 
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
@@ -126,6 +136,14 @@ export const adminCommentReplyBodySchema = z.object({
 	content: z.object({
 		raw: z.string().min(1),
 	}),
+});
+
+export const adminCommentBulkTrashBodySchema = z.object({
+	commentIds: z.array(z.string().min(1)).min(1).max(100),
+});
+
+export const adminCommentClearTrashBodySchema = z.object({
+	siteKey: z.string().min(1).optional(),
 });
 
 export const adminBlacklistQuerySchema = z.object({

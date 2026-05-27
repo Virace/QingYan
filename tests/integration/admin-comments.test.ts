@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import {
 	blacklistRules,
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("admin comments", () => {
-	it("lists, updates and soft deletes comments", async () => {
+	it("lists, updates, moves comments to trash and permanently deletes only trashed comments", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -137,7 +137,7 @@ describe("admin comments", () => {
 			},
 		});
 
-		const deleteResponse = await fixture.app.inject({
+		const deleteBeforeTrashResponse = await fixture.app.inject({
 			method: "DELETE",
 			url: "/qingyan/api/admin/comments/c_admin_1",
 			...withAdminWriteAuth({
@@ -145,10 +145,72 @@ describe("admin comments", () => {
 				csrfToken,
 			}),
 		});
-		expect(deleteResponse.statusCode).toBe(200);
-		expect(deleteResponse.json()).toMatchObject({
+		expect(deleteBeforeTrashResponse.statusCode).toBe(400);
+		expect(deleteBeforeTrashResponse.json()).toMatchObject({
+			error: {
+				code: "COMMENT_NOT_IN_TRASH",
+			},
+		});
+
+		const moveToTrashResponse = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/comments/c_admin_1",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				status: "trash",
+			},
+		});
+		expect(moveToTrashResponse.statusCode).toBe(200);
+		expect(moveToTrashResponse.json()).toMatchObject({
 			comment: {
 				id: "c_admin_1",
+				status: "trash",
+			},
+		});
+
+		const [trashedComment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.id, "c_admin_1"));
+		expect(trashedComment?.status).toBe("trash");
+		expect(trashedComment?.deletedAt).toBeNull();
+
+		const trashList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&status=trash&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(trashList.statusCode).toBe(200);
+		expect(trashList.json()).toMatchObject({
+			items: [
+				{
+					id: "c_admin_1",
+					status: "trash",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+
+		const permanentDeleteResponse = await fixture.app.inject({
+			method: "DELETE",
+			url: "/qingyan/api/admin/comments/c_admin_1",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+		});
+		expect(permanentDeleteResponse.statusCode).toBe(200);
+		expect(permanentDeleteResponse.json()).toMatchObject({
+			comment: {
+				id: "c_admin_1",
+				status: "trash",
 			},
 		});
 
@@ -156,7 +218,186 @@ describe("admin comments", () => {
 			.select()
 			.from(comments)
 			.where(eq(comments.id, "c_admin_1"));
+		expect(deletedComment?.status).toBe("trash");
 		expect(deletedComment?.deletedAt).not.toBeNull();
+	});
+
+	it("bulk moves comments to trash and clears only trashed comments", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:bulk-trash",
+			pageTitle: "Bulk Trash",
+			pageUrl: "/posts/bulk-trash/",
+			commentCount: 4,
+			rootCommentCount: 4,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:bulk-trash"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_bulk_pending",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "pending",
+				authorName: "Pending",
+				contentRaw: "pending comment",
+				contentHtml: "<p>pending comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-28T10:00:00.000Z",
+				updatedAt: "2026-05-28T10:00:00.000Z",
+			},
+			{
+				id: "c_bulk_approved",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "Approved",
+				contentRaw: "approved comment",
+				contentHtml: "<p>approved comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-28T10:01:00.000Z",
+				updatedAt: "2026-05-28T10:01:00.000Z",
+			},
+			{
+				id: "c_bulk_trash",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "trash",
+				authorName: "Trash",
+				contentRaw: "trash comment",
+				contentHtml: "<p>trash comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-28T10:02:00.000Z",
+				updatedAt: "2026-05-28T10:02:00.000Z",
+			},
+			{
+				id: "c_bulk_spam",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "spam",
+				authorName: "Spam",
+				contentRaw: "spam comment",
+				contentHtml: "<p>spam comment</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-05-28T10:03:00.000Z",
+				updatedAt: "2026-05-28T10:03:00.000Z",
+			},
+		]);
+
+		const bulkTrashResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/bulk-trash",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				commentIds: ["c_bulk_pending", "c_bulk_approved"],
+			},
+		});
+		expect(bulkTrashResponse.statusCode).toBe(200);
+		expect(bulkTrashResponse.json()).toMatchObject({
+			updatedCount: 2,
+			comments: [
+				{ id: "c_bulk_pending", status: "trash" },
+				{ id: "c_bulk_approved", status: "trash" },
+			],
+		});
+
+		const afterBulkTrash = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(
+				inArray(comments.id, [
+					"c_bulk_pending",
+					"c_bulk_approved",
+					"c_bulk_trash",
+					"c_bulk_spam",
+				]),
+			);
+		expect(
+			Object.fromEntries(
+				afterBulkTrash.map((comment) => [
+					comment.id,
+					{ status: comment.status, deletedAt: comment.deletedAt },
+				]),
+			),
+		).toMatchObject({
+			c_bulk_pending: { status: "trash", deletedAt: null },
+			c_bulk_approved: { status: "trash", deletedAt: null },
+			c_bulk_trash: { status: "trash", deletedAt: null },
+			c_bulk_spam: { status: "spam", deletedAt: null },
+		});
+
+		const clearTrashResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/trash/clear",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				siteKey: "fangyuan",
+			},
+		});
+		expect(clearTrashResponse.statusCode).toBe(200);
+		expect(clearTrashResponse.json()).toMatchObject({
+			deletedCount: 3,
+		});
+
+		const afterClearTrash = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(
+				inArray(comments.id, [
+					"c_bulk_pending",
+					"c_bulk_approved",
+					"c_bulk_trash",
+					"c_bulk_spam",
+				]),
+			);
+		expect(
+			Object.fromEntries(
+				afterClearTrash.map((comment) => [comment.id, comment.deletedAt]),
+			),
+		).toMatchObject({
+			c_bulk_spam: null,
+		});
+		for (const comment of afterClearTrash.filter(
+			(comment) => comment.status === "trash",
+		)) {
+			expect(comment.deletedAt).not.toBeNull();
+		}
 	});
 
 	it("lists and updates spam and trash comments without exposing them publicly", async () => {

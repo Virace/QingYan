@@ -195,6 +195,39 @@ describe("admin sites", () => {
 		});
 	});
 
+	it("rejects enabled verified author settings without an email", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				comments: {
+					verifiedAuthor: {
+						enabled: true,
+						displayName: "Virace",
+						email: "",
+						website: "https://fangyuan.example.com/about",
+						badgeLabel: "楼主",
+					},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "INVALID_REQUEST",
+			},
+		});
+	});
+
 	it("updates site name and allowed origins", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

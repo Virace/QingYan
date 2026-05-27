@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+	bulkTrashComments,
+	clearTrash,
 	createBlacklist,
 	createSite,
 	deleteBlacklistTarget,
@@ -106,6 +108,7 @@ export function CommentsPage({
 	const [hiddenStatus, setHiddenStatus] = useState("");
 	const [limit, setLimit] = useState(20);
 	const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+	const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
 	const commentsQuery = useQuery({
 		queryKey: [
 			"admin",
@@ -146,6 +149,20 @@ export function CommentsPage({
 	const deleteMutation = useMutation({
 		mutationFn: deleteComment,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const bulkTrashMutation = useMutation({
+		mutationFn: bulkTrashComments,
+		onSuccess: () => {
+			setSelectedCommentIds([]);
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
+	});
+	const clearTrashMutation = useMutation({
+		mutationFn: clearTrash,
+		onSuccess: () => {
+			setSelectedCommentIds([]);
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
 	});
 	const replyMutation = useMutation({
 		mutationFn: (input: { commentId: string; raw: string }) =>
@@ -192,6 +209,63 @@ export function CommentsPage({
 	};
 	const blacklistMutationPending =
 		createBlacklistMutation.isPending || deleteBlacklistMutation.isPending;
+	const isTrashView = status === "hidden" && hiddenStatus === "trash";
+	const visibleCommentIds =
+		commentsQuery.data?.items.map((comment) => comment.id) ?? [];
+	const selectedVisibleIds = selectedCommentIds.filter((commentId) =>
+		visibleCommentIds.includes(commentId),
+	);
+	const selectedTrashIds = (commentsQuery.data?.items ?? [])
+		.filter(
+			(comment) =>
+				selectedCommentIds.includes(comment.id) && comment.status === "trash",
+		)
+		.map((comment) => comment.id);
+	const allVisibleSelected =
+		visibleCommentIds.length > 0 &&
+		visibleCommentIds.every((commentId) =>
+			selectedCommentIds.includes(commentId),
+		);
+
+	const toggleSelectedComment = (commentId: string, checked: boolean) => {
+		setSelectedCommentIds((current) =>
+			checked
+				? Array.from(new Set([...current, commentId]))
+				: current.filter((value) => value !== commentId),
+		);
+	};
+	const toggleAllVisibleComments = (checked: boolean) => {
+		setSelectedCommentIds((current) =>
+			checked
+				? Array.from(new Set([...current, ...visibleCommentIds]))
+				: current.filter((commentId) => !visibleCommentIds.includes(commentId)),
+		);
+	};
+	const moveCommentsToTrash = (commentIds: string[]) => {
+		if (commentIds.length === 0) {
+			return;
+		}
+		if (
+			!window.confirm(
+				`确认将 ${commentIds.length} 条评论移入回收站？可在回收站中恢复。`,
+			)
+		) {
+			return;
+		}
+		bulkTrashMutation.mutate(commentIds);
+	};
+	const permanentlyDeleteComment = (commentId: string) => {
+		if (!window.confirm("确认永久删除这条回收站评论？此操作不可恢复。")) {
+			return;
+		}
+		deleteMutation.mutate(commentId);
+	};
+	const clearCurrentTrash = () => {
+		if (!window.confirm("确认清空当前站点回收站？此操作不可恢复。")) {
+			return;
+		}
+		clearTrashMutation.mutate({ siteKey });
+	};
 
 	return (
 		<Card>
@@ -239,11 +313,76 @@ export function CommentsPage({
 					共 {commentsQuery.data?.pagination.totalCount ?? "-"} 条，当前显示{" "}
 					{commentsQuery.data?.items.length ?? 0} 条。
 				</p>
+				<div className="flex flex-wrap gap-2">
+					{isTrashView ? (
+						<Button
+							type="button"
+							size="sm"
+							variant="destructive"
+							disabled={
+								selectedTrashIds.length === 0 || deleteMutation.isPending
+							}
+							onClick={() => {
+								if (
+									selectedTrashIds.length === 0 ||
+									!window.confirm(
+										`确认永久删除 ${selectedTrashIds.length} 条回收站评论？此操作不可恢复。`,
+									)
+								) {
+									return;
+								}
+								for (const commentId of selectedTrashIds) {
+									deleteMutation.mutate(commentId);
+								}
+								setSelectedCommentIds([]);
+							}}
+						>
+							永久删除
+							{selectedTrashIds.length ? ` (${selectedTrashIds.length})` : ""}
+						</Button>
+					) : (
+						<Button
+							type="button"
+							size="sm"
+							variant="outline"
+							disabled={
+								selectedVisibleIds.length === 0 || bulkTrashMutation.isPending
+							}
+							onClick={() => moveCommentsToTrash(selectedVisibleIds)}
+						>
+							移入回收站
+							{selectedVisibleIds.length
+								? ` (${selectedVisibleIds.length})`
+								: ""}
+						</Button>
+					)}
+					{isTrashView ? (
+						<Button
+							type="button"
+							size="sm"
+							variant="destructive"
+							disabled={clearTrashMutation.isPending}
+							onClick={clearCurrentTrash}
+						>
+							清空回收站
+						</Button>
+					) : null}
+				</div>
 				{commentsQuery.data?.items.length ? (
 					<div className="overflow-x-auto rounded-md border">
 						<table className="w-full text-left text-sm">
 							<thead className="bg-muted/60">
 								<tr>
+									<th className="p-3">
+										<input
+											type="checkbox"
+											aria-label="选择当前页评论"
+											checked={allVisibleSelected}
+											onChange={(event) =>
+												toggleAllVisibleComments(event.target.checked)
+											}
+										/>
+									</th>
 									<th className="p-3">状态</th>
 									<th className="p-3">作者</th>
 									<th className="p-3">页面</th>
@@ -254,6 +393,19 @@ export function CommentsPage({
 							<tbody>
 								{commentsQuery.data.items.map((comment) => (
 									<tr key={comment.id} className="border-t">
+										<td className="p-3">
+											<input
+												type="checkbox"
+												aria-label={`选择评论 ${comment.id}`}
+												checked={selectedCommentIds.includes(comment.id)}
+												onChange={(event) =>
+													toggleSelectedComment(
+														comment.id,
+														event.target.checked,
+													)
+												}
+											/>
+										</td>
 										<td className="p-3">
 											<Badge
 												variant={
@@ -353,21 +505,6 @@ export function CommentsPage({
 														垃圾
 													</Button>
 												) : null}
-												{comment.status !== "trash" ? (
-													<Button
-														type="button"
-														size="sm"
-														variant="outline"
-														onClick={() =>
-															updateMutation.mutate({
-																id: comment.id,
-																status: "trash",
-															})
-														}
-													>
-														回收站
-													</Button>
-												) : null}
 												<Button
 													type="button"
 													size="sm"
@@ -394,6 +531,41 @@ export function CommentsPage({
 												>
 													{comment.isFolded ? "展开" : "折叠"}
 												</Button>
+												{comment.status === "trash" ? (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														onClick={() =>
+															updateMutation.mutate({
+																id: comment.id,
+																status: "pending",
+															})
+														}
+													>
+														恢复
+													</Button>
+												) : (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														disabled={bulkTrashMutation.isPending}
+														onClick={() => moveCommentsToTrash([comment.id])}
+													>
+														移入回收站
+													</Button>
+												)}
+												{isTrashView ? (
+													<Button
+														type="button"
+														size="sm"
+														variant="destructive"
+														onClick={() => permanentlyDeleteComment(comment.id)}
+													>
+														永久删除
+													</Button>
+												) : null}
 												{comment.authorEmail ? (
 													<Button
 														type="button"
@@ -434,14 +606,6 @@ export function CommentsPage({
 														{comment.blacklist.ip ? "解除 IP" : "拉黑 IP"}
 													</Button>
 												) : null}
-												<Button
-													type="button"
-													size="sm"
-													variant="destructive"
-													onClick={() => deleteMutation.mutate(comment.id)}
-												>
-													删除
-												</Button>
 											</div>
 											<form
 												className="mt-3 flex flex-col gap-2"
