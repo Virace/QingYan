@@ -53,6 +53,9 @@ const verifiedAuthorSchema = z
 			});
 		}
 	});
+const staffDisplaySchema = z.object({
+	nameMode: z.enum(["current_profile", "snapshot"]),
+});
 
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
@@ -212,6 +215,7 @@ export const adminSettingsBodySchema = z
 					.optional(),
 				metadata: commentMetadataSchema.optional(),
 				verifiedAuthor: verifiedAuthorSchema.optional(),
+				staffDisplay: staffDisplaySchema.optional(),
 				moderation: siteModerationSettingsSchema.optional(),
 			})
 			.optional(),

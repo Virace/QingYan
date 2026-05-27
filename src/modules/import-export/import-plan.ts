@@ -1,4 +1,5 @@
 import type { CommentStatus } from "../comments/moderation-types";
+import type { CommentAuthorIdentity } from "../comments/verified-author";
 
 export type MigrationItemState =
 	| "ready"
@@ -29,6 +30,7 @@ export interface ImportPlanComment {
 	authorUrl?: string;
 	authorIp?: string;
 	userAgent?: string;
+	authorIdentity: CommentAuthorIdentity;
 	content: string;
 	createdAt?: string;
 	parentOldCommentId: string | null;

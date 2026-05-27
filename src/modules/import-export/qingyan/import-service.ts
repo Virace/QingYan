@@ -124,6 +124,9 @@ const siteSettingsWritableColumns = [
 	"auto_blacklist_scope",
 	"auto_blacklist_ttl_sec",
 	"comment_metadata_json",
+	"verified_author_json",
+	"staff_display_json",
+	"moderation_json",
 	"email_notifications_enabled",
 ] as const;
 

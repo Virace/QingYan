@@ -10,8 +10,11 @@ import {
 	type CommentMetadataSettings,
 } from "../shared/site-settings-defaults";
 import {
+	mergeStaffDisplaySettings,
 	mergeVerifiedAuthorSettings,
+	serializeStaffDisplaySettings,
 	serializeVerifiedAuthorSettings,
+	type StaffDisplaySettings,
 	type VerifiedAuthorSettings,
 } from "../comments/verified-author";
 import {
@@ -529,8 +532,10 @@ export class AdminManagementService {
 			{
 				verifiedAuthor: {
 					enabled: verifiedAuthor.enabled,
+					displayName: verifiedAuthor.displayName,
 					badgeLabel: verifiedAuthor.badgeLabel,
 				},
+				staffDisplay: mergeStaffDisplaySettings(context.staffDisplayJson),
 			},
 		);
 		if (presentedComment) {
@@ -681,6 +686,7 @@ export class AdminManagementService {
 				verifiedAuthor: mergeVerifiedAuthorSettings(
 					settings.verifiedAuthorJson,
 				),
+				staffDisplay: mergeStaffDisplaySettings(settings.staffDisplayJson),
 				moderation: mergeSiteModerationSettings(
 					settings.moderationJson,
 					settings.defaultStatus as "pending" | "approved",
@@ -724,6 +730,7 @@ export class AdminManagementService {
 				};
 				metadata?: CommentMetadataPatch;
 				verifiedAuthor?: VerifiedAuthorSettings;
+				staffDisplay?: StaffDisplaySettings;
 				moderation?: SiteModerationSettings;
 			};
 			pageFeedback?: {
@@ -767,6 +774,9 @@ export class AdminManagementService {
 								input.comments.verifiedAuthor.website,
 							) ?? "",
 					})
+				: undefined,
+			staffDisplayJson: input.comments?.staffDisplay
+				? serializeStaffDisplaySettings(input.comments.staffDisplay)
 				: undefined,
 			moderationJson: input.comments?.moderation
 				? serializeSiteModerationSettings(input.comments.moderation)

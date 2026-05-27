@@ -156,6 +156,9 @@ describe("admin sites", () => {
 					website: "",
 					badgeLabel: "管理员",
 				},
+				staffDisplay: {
+					nameMode: "current_profile",
+				},
 			},
 		});
 	});
@@ -192,6 +195,33 @@ describe("admin sites", () => {
 			email: "owner@example.com",
 			website: "https://fangyuan.example.com/about",
 			badgeLabel: "楼主",
+		});
+	});
+
+	it("updates staff display settings per site", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				comments: {
+					staffDisplay: {
+						nameMode: "snapshot",
+					},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comments.staffDisplay).toEqual({
+			nameMode: "snapshot",
 		});
 	});
 

@@ -5,10 +5,14 @@ import {
 	acceptByConfidence,
 	acceptImportableItems,
 	acceptCandidate,
+	authorCandidateComments,
 	formatMappingOverlay,
+	hasBlockingAuthorCandidates,
 	hasBlockingUnresolvedItems,
 	lowConfidenceImportableItems,
 	mapToPage,
+	setAllAuthorCandidateDecisions,
+	setAuthorCandidateDecision,
 	skipItem,
 } from "../../apps/admin/src/components/admin/wp-migration-model";
 
@@ -46,6 +50,7 @@ function reportItem(input: {
 			skipped: 0,
 			maxDepth: 1,
 		},
+		comments: [],
 		warnings: [],
 	};
 }
@@ -186,6 +191,86 @@ describe("wp migration model", () => {
 					reason: "page_not_migrated",
 				},
 			],
+		});
+	});
+
+	it("surfaces unresolved WordPress author email candidates", () => {
+		const item = reportItem({
+			wpPostId: "1",
+			state: "ready",
+			pageKey: "termux.html",
+		});
+		item.comments = [
+			{
+				oldCommentId: "100",
+				oldParentCommentId: null,
+				status: "approved",
+				authorName: "Virace",
+				authorEmail: "Virace@aliyun.com",
+				content: "hello",
+				depth: 1,
+				warnings: [],
+				authorMatch: {
+					kind: "staff_email_candidate",
+					wpAuthorId: "1",
+					email: "virace@aliyun.com",
+				},
+			},
+		];
+
+		expect(authorCandidateComments([item])).toEqual([
+			{
+				oldCommentId: "100",
+				wpPostId: "1",
+				title: "Post 1",
+				authorName: "Virace",
+				authorEmail: "Virace@aliyun.com",
+				wpAuthorId: "1",
+				wpAuthorEmail: "virace@aliyun.com",
+			},
+		]);
+		expect(hasBlockingAuthorCandidates([item], {})).toBe(true);
+		expect(
+			hasBlockingAuthorCandidates(
+				[item],
+				setAuthorCandidateDecision({}, "100", "verified"),
+			),
+		).toBe(false);
+	});
+
+	it("bulk applies WordPress author candidate decisions", () => {
+		const first = reportItem({ wpPostId: "1", pageKey: "one.html" });
+		const second = reportItem({ wpPostId: "2", pageKey: "two.html" });
+		first.comments = [
+			{
+				oldCommentId: "100",
+				oldParentCommentId: null,
+				status: "approved",
+				authorName: "Virace",
+				content: "one",
+				depth: 1,
+				warnings: [],
+				authorMatch: { kind: "staff_email_candidate" },
+			},
+		];
+		second.comments = [
+			{
+				oldCommentId: "200",
+				oldParentCommentId: null,
+				status: "approved",
+				authorName: "Virace",
+				content: "two",
+				depth: 1,
+				warnings: [],
+				authorMatch: { kind: "staff_email_candidate" },
+			},
+		];
+
+		expect(
+			setAllAuthorCandidateDecisions([first, second], {}, "visitor"),
+		).toEqual({
+			"100": "visitor",
+			"200": "visitor",
 		});
 	});
 });

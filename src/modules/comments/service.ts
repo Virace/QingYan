@@ -9,8 +9,10 @@ import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import type { CommentsRepository } from "./repository";
 import {
+	mergeStaffDisplaySettings,
 	mergeVerifiedAuthorSettings,
 	toPublicVerifiedAuthorViewer,
+	type StaffDisplaySettings,
 	type VerifiedAuthorSettings,
 } from "./verified-author";
 
@@ -38,6 +40,7 @@ export function buildCommentDisplayOptions(input: {
 	metadata?: CommentMetadataSettings;
 	avatar: SystemSettings["avatar"];
 	verifiedAuthor: VerifiedAuthorSettings;
+	staffDisplay?: StaffDisplaySettings;
 }) {
 	const metadata = input.metadata ?? defaultCommentMetadata;
 	return {
@@ -51,8 +54,10 @@ export function buildCommentDisplayOptions(input: {
 		avatar: input.avatar,
 		verifiedAuthor: {
 			enabled: input.verifiedAuthor.enabled,
+			displayName: input.verifiedAuthor.displayName,
 			badgeLabel: input.verifiedAuthor.badgeLabel,
 		},
+		staffDisplay: input.staffDisplay ?? mergeStaffDisplaySettings(null),
 	};
 }
 
@@ -132,6 +137,7 @@ export class CommentsService {
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
 		);
+		const staffDisplay = mergeStaffDisplaySettings(settings?.staffDisplayJson);
 		const publicVerifiedAuthor = input.verifiedAuthorSession
 			? toPublicVerifiedAuthorViewer(verifiedAuthor)
 			: undefined;
@@ -219,6 +225,7 @@ export class CommentsService {
 			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
 			avatar: avatarSettings,
 			verifiedAuthor,
+			staffDisplay,
 		});
 
 		return {
@@ -306,6 +313,7 @@ export class CommentsService {
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
 		);
+		const staffDisplay = mergeStaffDisplaySettings(settings?.staffDisplayJson);
 		const avatarSettings: SystemSettings["avatar"] = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
@@ -327,6 +335,7 @@ export class CommentsService {
 			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
 			avatar: avatarSettings,
 			verifiedAuthor,
+			staffDisplay,
 		});
 
 		return {

@@ -314,6 +314,7 @@ Query：
 ```ts
 {
   email: string;
+  emailVariants: string[];
   names: string[];
   commentCount: number;
   pendingCount: number;
@@ -329,6 +330,8 @@ Query：
   isBlacklisted: boolean;
 }
 ```
+
+`email` 是 trim + lower-case 后的聚合键；`emailVariants` 保留该聚合组中出现过的原始邮箱写法。搜索邮箱时同样按归一化值匹配，因此 `Virace@aliyun.com` 和 `virace@aliyun.com` 会归到同一个用户视图。
 
 ### `GET /api/admin/visitors`
 
@@ -497,6 +500,9 @@ Query：
       website: string;
       badgeLabel: string;
     };
+    staffDisplay: {
+      nameMode: "current_profile" | "snapshot";
+    };
     captcha: {
       mode: "never" | "always" | "threshold";
     };
@@ -615,6 +621,9 @@ AdminSettings
       email: string;
       website: string;
       badgeLabel: string;
+    };
+    staffDisplay: {
+      nameMode: "current_profile" | "snapshot";
     };
     captcha: {
       mode: "never" | "always" | "threshold";
@@ -928,11 +937,31 @@ Query：
 }
 ```
 
-响应包含 `job`、`report` 和 `suggestedMapping`。
+响应包含 `job`、`report` 和 `suggestedMapping`。`report.authorSummary` 会汇总 WXR 作者匹配结果：
+
+```ts
+{
+  totalAuthors: number;
+  staffStrong: number;
+  staffEmailCandidate: number;
+  registeredUnknown: number;
+  visitor: number;
+}
+```
+
+每个 `report.items[].comments[]` 可包含 `authorMatch.kind`：`staff_strong` 表示 `comment_user_id` 匹配 `wp:author_id`；`staff_email_candidate` 表示未登录评论但邮箱匹配 WXR 作者，需要在生成计划前确认；`registered_unknown` 表示有非 0 用户 ID 但 WXR 作者列表没有对应项；`visitor` 表示普通访客评论。`report.htmlContentSummary` 会统计原始评论内容中疑似 HTML 标签的数量和少量示例；当前导入仍按纯文本转义。
 
 ### `POST /api/admin/import-export/wordpress/jobs/{jobId}/plan`
 
-把 WordPress analyze job 转换为导入 plan。
+把 WordPress analyze job 转换为导入 plan。若 analyze 报告中存在 `staff_email_candidate`，请求必须提供 `authorDecisions`；强匹配 `staff_strong` 会自动进入 `authorIdentity: "verified"`，显式拒绝的邮箱候选会按 `visitor` 导入。
+
+请求：
+
+```ts
+{
+  authorDecisions?: Record<string, "verified" | "visitor">; // key 为 oldCommentId
+}
+```
 
 响应包含 `job` 和 `plan.summary`。
 

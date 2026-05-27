@@ -51,6 +51,25 @@ export interface MigrationReportItem {
 		skipped: number;
 		maxDepth: number;
 	};
+	comments: Array<{
+		oldCommentId: string;
+		oldParentCommentId: string | null;
+		status: string;
+		authorName: string;
+		authorEmail?: string;
+		content: string;
+		depth: number;
+		warnings: string[];
+		authorMatch?: {
+			kind:
+				| "staff_strong"
+				| "staff_email_candidate"
+				| "registered_unknown"
+				| "visitor";
+			wpAuthorId?: string;
+			email?: string;
+		};
+	}>;
 	warnings: string[];
 }
 
@@ -68,6 +87,20 @@ export interface MigrationReport {
 		baseSiteUrl?: string;
 		baseBlogUrl?: string;
 		version?: string;
+	};
+	authorSummary?: {
+		totalAuthors: number;
+		staffStrong: number;
+		staffEmailCandidate: number;
+		registeredUnknown: number;
+		visitor: number;
+	};
+	htmlContentSummary?: {
+		htmlLikeComments: number;
+		examples: Array<{
+			oldCommentId: string;
+			snippet: string;
+		}>;
 	};
 	items: MigrationReportItem[];
 	summary: MigrationReportSummary;
@@ -299,11 +332,15 @@ export function analyzeWordPressMigration(input: WordPressAnalyzePayload) {
 	);
 }
 
-export function convertWordPressJobToPlan(jobId: string) {
+export function convertWordPressJobToPlan(
+	jobId: string,
+	input?: { authorDecisions?: Record<string, "verified" | "visitor"> },
+) {
 	return requestJson<WordPressPlanResult>(
 		`/api/admin/import-export/wordpress/jobs/${encodeURIComponent(jobId)}/plan`,
 		{
 			method: "POST",
+			body: input ? JSON.stringify(input) : undefined,
 		},
 	);
 }

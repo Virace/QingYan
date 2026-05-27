@@ -498,10 +498,14 @@ export class AdminRepository {
 		limit: number;
 		offset: number;
 	}) {
-		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const normalizedEmail = sql<string>`lower(trim(${comments.authorEmail}))`;
+		const searchValue = input.search
+			? `%${input.search.trim().toLowerCase()}%`
+			: undefined;
 		const rows = await this.db
 			.select({
-				email: comments.authorEmail,
+				email: normalizedEmail,
+				emailVariantsJson: sql<string>`json_group_array(DISTINCT ${comments.authorEmail})`,
 				namesJson: sql<string>`json_group_array(DISTINCT ${comments.authorName})`,
 				commentCount: count(),
 				pendingCount: sql<number>`SUM(CASE WHEN ${comments.status} = 'pending' THEN 1 ELSE 0 END)`,
@@ -520,13 +524,13 @@ export class AdminRepository {
 					input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 					searchValue
 						? or(
-								like(comments.authorEmail, searchValue),
+								like(normalizedEmail, searchValue),
 								like(comments.authorName, searchValue),
 							)
 						: undefined,
 				),
 			)
-			.groupBy(comments.authorEmail);
+			.groupBy(normalizedEmail);
 		const emailRules = await this.listActiveBlacklistRules(
 			"email",
 			input.siteId,
@@ -547,6 +551,7 @@ export class AdminRepository {
 
 				return {
 					email: row.email ?? "",
+					emailVariants: parseStringArray(row.emailVariantsJson),
 					names: parseStringArray(row.namesJson),
 					commentCount: Number(row.commentCount ?? 0),
 					pendingCount: Number(row.pendingCount ?? 0),
@@ -820,6 +825,7 @@ export class AdminRepository {
 				siteKey: sites.siteKey,
 				pageKey: pageThreads.pageKey,
 				verifiedAuthorJson: siteSettings.verifiedAuthorJson,
+				staffDisplayJson: siteSettings.staffDisplayJson,
 				moderationJson: siteSettings.moderationJson,
 			})
 			.from(comments)
@@ -1077,6 +1083,7 @@ export class AdminRepository {
 			autoBlacklistTtlSec?: number;
 			commentMetadataJson?: string;
 			verifiedAuthorJson?: string;
+			staffDisplayJson?: string;
 			moderationJson?: string;
 			emailNotificationsEnabled?: boolean;
 		},
@@ -1102,6 +1109,7 @@ export class AdminRepository {
 				autoBlacklistTtlSec: input.autoBlacklistTtlSec,
 				commentMetadataJson: input.commentMetadataJson,
 				verifiedAuthorJson: input.verifiedAuthorJson,
+				staffDisplayJson: input.staffDisplayJson,
 				moderationJson: input.moderationJson,
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),

@@ -19,6 +19,34 @@ export interface MigrationReportSummary {
 	warningCount: number;
 }
 
+export type MigrationReportAuthorMatchKind =
+	| "staff_strong"
+	| "staff_email_candidate"
+	| "registered_unknown"
+	| "visitor";
+
+export interface MigrationReportAuthorMatch {
+	kind: MigrationReportAuthorMatchKind;
+	wpAuthorId?: string;
+	email?: string;
+}
+
+export interface MigrationReportAuthorSummary {
+	totalAuthors: number;
+	staffStrong: number;
+	staffEmailCandidate: number;
+	registeredUnknown: number;
+	visitor: number;
+}
+
+export interface MigrationReportHtmlContentSummary {
+	htmlLikeComments: number;
+	examples: Array<{
+		oldCommentId: string;
+		snippet: string;
+	}>;
+}
+
 export interface MigrationReportComment {
 	oldCommentId: string;
 	oldParentCommentId: string | null;
@@ -30,6 +58,7 @@ export interface MigrationReportComment {
 	authorIp?: string;
 	userAgent?: string;
 	content: string;
+	authorMatch?: MigrationReportAuthorMatch;
 	createdAt?: string;
 	depth: number;
 	warnings: string[];
@@ -83,6 +112,8 @@ export interface MigrationReport {
 		baseBlogUrl?: string;
 		version?: string;
 	};
+	authorSummary?: MigrationReportAuthorSummary;
+	htmlContentSummary?: MigrationReportHtmlContentSummary;
 	sourcePathExamples: Array<{
 		link: string;
 		sourcePath: string;

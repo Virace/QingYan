@@ -1,5 +1,7 @@
 import {
+	defaultStaffDisplaySettings,
 	defaultVerifiedAuthor,
+	serializeStaffDisplaySettings,
 	serializeVerifiedAuthorSettings,
 } from "../comments/verified-author";
 import {
@@ -63,6 +65,9 @@ export function buildDefaultSiteSettings(siteId: number) {
 		autoBlacklistTtlSec: 1800,
 		commentMetadataJson: JSON.stringify(defaultCommentMetadata),
 		verifiedAuthorJson: serializeVerifiedAuthorSettings(defaultVerifiedAuthor),
+		staffDisplayJson: serializeStaffDisplaySettings(
+			defaultStaffDisplaySettings,
+		),
 		moderationJson: serializeSiteModerationSettings(
 			defaultSiteModerationSettings,
 		),

@@ -14,7 +14,10 @@ import {
 	sites,
 	systemSettings,
 } from "../../src/db/schema";
-import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import {
+	serializeStaffDisplaySettings,
+	serializeVerifiedAuthorSettings,
+} from "../../src/modules/comments/verified-author";
 import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
 import { loginAsAdmin } from "../support/admin-login";
@@ -522,6 +525,109 @@ describe("POST /qingyan/api/comments", () => {
 			authorEmail: "owner@example.com",
 			authorWebsite: "https://fangyuan.example.com/about",
 			status: "approved",
+		});
+	});
+
+	it("renders verified comment names from current profile unless snapshot mode is selected", async () => {
+		const fixture = await createCustomTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const createResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			headers: {
+				referer: "http://localhost:4321/post:verified-display-mode",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:verified-display-mode",
+				pageTitle: "Verified Display Mode",
+				pageUrl: "https://fangyuan.example.com/posts/verified-display-mode/",
+				parentCommentId: null,
+				author: {},
+				content: {
+					raw: "verified display mode",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+		expect(createResponse.statusCode).toBe(200);
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace 当前资料",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+				staffDisplayJson: serializeStaffDisplaySettings({
+					nameMode: "current_profile",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const currentProfileThread = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:verified-display-mode",
+			headers: {
+				referer: "http://localhost:4321/post:verified-display-mode",
+			},
+		});
+		expect(currentProfileThread.statusCode).toBe(200);
+		expect(currentProfileThread.json().comments[0].author).toMatchObject({
+			name: "Virace 当前资料",
+			badge: { label: "楼主" },
+		});
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				staffDisplayJson: serializeStaffDisplaySettings({
+					nameMode: "snapshot",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const snapshotThread = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:verified-display-mode",
+			headers: {
+				referer: "http://localhost:4321/post:verified-display-mode",
+			},
+		});
+		expect(snapshotThread.statusCode).toBe(200);
+		expect(snapshotThread.json().comments[0].author).toMatchObject({
+			name: "Virace",
+			badge: { label: "楼主" },
 		});
 	});
 

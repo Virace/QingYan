@@ -36,12 +36,17 @@ import {
 	acceptImportableItems,
 	acceptByConfidence,
 	acceptCandidate,
+	authorCandidateComments,
 	formatMappingOverlay,
+	hasBlockingAuthorCandidates,
 	hasBlockingUnresolvedItems,
 	lowConfidenceImportableItems,
 	type MappingOverlayItem,
 	mapToPage,
+	setAllAuthorCandidateDecisions,
+	setAuthorCandidateDecision,
 	skipItem,
+	type AuthorCandidateDecisionMap,
 } from "./wp-migration-model";
 
 type QueueName = "needsAction" | "confirm" | "ready" | "skipped";
@@ -159,6 +164,8 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 	const [pagePathTemplate, setPagePathTemplate] = useState("");
 	const [mappingJson, setMappingJson] = useState("");
 	const [mappingItems, setMappingItems] = useState<MappingOverlayItem[]>([]);
+	const [authorDecisions, setAuthorDecisions] =
+		useState<AuthorCandidateDecisionMap>({});
 	const [existingStrategy, setExistingStrategy] = useState<
 		"fail_on_existing" | "skip_existing"
 	>("fail_on_existing");
@@ -194,7 +201,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 	});
 	const planMutation = useMutation({
 		mutationFn(jobId: string) {
-			return convertWordPressJobToPlan(jobId);
+			return convertWordPressJobToPlan(jobId, { authorDecisions });
 		},
 	});
 	const dryRunMutation = useMutation({
@@ -233,6 +240,11 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 			if (hasBlockingUnresolvedItems(refreshed.report.items)) {
 				throw new Error("仍有未解决或低可信映射，不能导入数据库。");
 			}
+			if (
+				hasBlockingAuthorCandidates(refreshed.report.items, authorDecisions)
+			) {
+				throw new Error("仍有疑似站点人员评论未确认，不能导入数据库。");
+			}
 			const plan = await planMutation.mutateAsync(refreshed.job.id);
 			const dryRun = await dryRunMutation.mutateAsync({
 				jobId: plan.job.id,
@@ -251,8 +263,13 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 		},
 	});
 	const result = analyzeMutation.data;
+	const authorCandidates = useMemo(
+		() => authorCandidateComments(result?.report.items ?? []),
+		[result],
+	);
 	const hasBlockingItems = result
-		? hasBlockingUnresolvedItems(result.report.items)
+		? hasBlockingUnresolvedItems(result.report.items) ||
+			hasBlockingAuthorCandidates(result.report.items, authorDecisions)
 		: true;
 	const canApply =
 		dryRunMutation.data?.job.status === "dry_run_passed" &&
@@ -520,8 +537,133 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 									<p className="mt-1 text-xl font-semibold">{value}</p>
 								</div>
 							))}
+							<div className="rounded-md border p-3">
+								<p className="text-xs text-muted-foreground">站点人员强匹配</p>
+								<p className="mt-1 text-xl font-semibold">
+									{result.report.authorSummary?.staffStrong ?? 0}
+								</p>
+							</div>
+							<div className="rounded-md border p-3">
+								<p className="text-xs text-muted-foreground">人员邮箱候选</p>
+								<p className="mt-1 text-xl font-semibold">
+									{result.report.authorSummary?.staffEmailCandidate ?? 0}
+								</p>
+							</div>
+							<div className="rounded-md border p-3">
+								<p className="text-xs text-muted-foreground">疑似 HTML 评论</p>
+								<p className="mt-1 text-xl font-semibold">
+									{result.report.htmlContentSummary?.htmlLikeComments ?? 0}
+								</p>
+							</div>
 						</CardContent>
 					</Card>
+					{authorCandidates.length > 0 ? (
+						<Card>
+							<CardHeader>
+								<CardTitle className="text-lg">站点人员候选确认</CardTitle>
+								<CardDescription>
+									这些评论未登录 WordPress 用户，但邮箱匹配 WXR
+									作者。导入前需要确认身份。
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="flex flex-col gap-3">
+								<div className="flex flex-wrap gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										onClick={() =>
+											setAuthorDecisions(
+												setAllAuthorCandidateDecisions(
+													result.report.items,
+													authorDecisions,
+													"verified",
+												),
+											)
+										}
+									>
+										<CheckIcon data-icon="inline-start" />
+										全部作为站点人员
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										onClick={() =>
+											setAuthorDecisions(
+												setAllAuthorCandidateDecisions(
+													result.report.items,
+													authorDecisions,
+													"visitor",
+												),
+											)
+										}
+									>
+										<BanIcon data-icon="inline-start" />
+										全部保留访客
+									</Button>
+								</div>
+								<div className="overflow-x-auto">
+									<table className="w-full min-w-[880px] text-left text-sm">
+										<thead>
+											<tr className="border-b text-xs text-muted-foreground">
+												<th className="p-2 font-medium">评论 ID</th>
+												<th className="p-2 font-medium">文章</th>
+												<th className="p-2 font-medium">评论作者</th>
+												<th className="p-2 font-medium">评论邮箱</th>
+												<th className="p-2 font-medium">WXR 作者</th>
+												<th className="p-2 font-medium">处理</th>
+											</tr>
+										</thead>
+										<tbody>
+											{authorCandidates.map((candidate) => (
+												<tr
+													key={candidate.oldCommentId}
+													className="border-b align-top"
+												>
+													<td className="p-2">{candidate.oldCommentId}</td>
+													<td className="p-2">{candidate.title}</td>
+													<td className="p-2">{candidate.authorName}</td>
+													<td className="p-2">
+														{candidate.authorEmail ?? "-"}
+													</td>
+													<td className="p-2">
+														{candidate.wpAuthorId ?? "-"} /{" "}
+														{candidate.wpAuthorEmail ?? "-"}
+													</td>
+													<td className="p-2">
+														<select
+															className={inputClass}
+															value={
+																authorDecisions[candidate.oldCommentId] ?? ""
+															}
+															onChange={(event) => {
+																const value = event.target.value;
+																if (
+																	value === "verified" ||
+																	value === "visitor"
+																) {
+																	setAuthorDecisions(
+																		setAuthorCandidateDecision(
+																			authorDecisions,
+																			candidate.oldCommentId,
+																			value,
+																		),
+																	);
+																}
+															}}
+														>
+															<option value="">待确认</option>
+															<option value="verified">作为站点人员</option>
+															<option value="visitor">保留访客</option>
+														</select>
+													</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</div>
+							</CardContent>
+						</Card>
+					) : null}
 					<Card>
 						<CardHeader>
 							<CardTitle className="text-lg">处理队列</CardTitle>

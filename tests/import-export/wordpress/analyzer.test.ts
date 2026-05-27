@@ -40,6 +40,10 @@ function wxrItem(input: {
 	link: string;
 	commentId?: string;
 	parentId?: string;
+	commentUserId?: string;
+	author?: string;
+	authorEmail?: string;
+	content?: string;
 }): string {
 	return `<item>
   <title>${input.title}</title>
@@ -49,13 +53,24 @@ function wxrItem(input: {
   <wp:post_name>${input.id}</wp:post_name>
   <wp:comment>
     <wp:comment_id>${input.commentId ?? "1"}</wp:comment_id>
-    <wp:comment_author>Alice</wp:comment_author>
-    <wp:comment_content>hello</wp:comment_content>
+    <wp:comment_author>${input.author ?? "Alice"}</wp:comment_author>
+    <wp:comment_author_email>${input.authorEmail ?? ""}</wp:comment_author_email>
+    <wp:comment_content><![CDATA[${input.content ?? "hello"}]]></wp:comment_content>
     <wp:comment_approved>1</wp:comment_approved>
     <wp:comment_type></wp:comment_type>
     <wp:comment_parent>${input.parentId ?? "0"}</wp:comment_parent>
+    <wp:comment_user_id>${input.commentUserId ?? "0"}</wp:comment_user_id>
   </wp:comment>
 </item>`;
+}
+
+function wxrAuthor(): string {
+	return `<wp:author>
+  <wp:author_id>1</wp:author_id>
+  <wp:author_login>Virace</wp:author_login>
+  <wp:author_email>Virace@aliyun.com</wp:author_email>
+  <wp:author_display_name>管理员</wp:author_display_name>
+</wp:author>`;
 }
 
 describe("analyzeWordPressComments", () => {
@@ -287,5 +302,76 @@ describe("analyzeWordPressComments", () => {
 				source: "metadata",
 			},
 		});
+	});
+
+	it("summarizes WXR author matches and HTML-like comment content", () => {
+		const report = analyzeWordPressComments({
+			xml: wxrWithItems(
+				`${wxrAuthor()}${wxrItem({
+					id: "1",
+					title: "Strong",
+					link: "https://x-item.com/strong.html",
+					commentId: "1",
+					commentUserId: "1",
+					author: "Virace",
+					authorEmail: "Virace@aliyun.com",
+					content: '管理员 <a href="https://example.com">链接</a>',
+				})}${wxrItem({
+					id: "2",
+					title: "Candidate",
+					link: "https://x-item.com/candidate.html",
+					commentId: "2",
+					author: "Virace",
+					authorEmail: "virace@ALIYUN.com",
+				})}${wxrItem({
+					id: "3",
+					title: "Visitor",
+					link: "https://x-item.com/visitor.html",
+					commentId: "3",
+					author: "Alice",
+					authorEmail: "alice@example.com",
+				})}`,
+			),
+			fileName: "fixture.xml",
+			siteKey: "fangyuan",
+			mapping: {
+				items: [
+					{
+						wpPostId: "1",
+						decision: "map",
+						target: { pageKey: "strong.html", pageUrl: "/strong.html" },
+					},
+					{
+						wpPostId: "2",
+						decision: "map",
+						target: {
+							pageKey: "candidate.html",
+							pageUrl: "/candidate.html",
+						},
+					},
+					{
+						wpPostId: "3",
+						decision: "map",
+						target: { pageKey: "visitor.html", pageUrl: "/visitor.html" },
+					},
+				],
+			},
+		});
+
+		expect(report.authorSummary).toMatchObject({
+			totalAuthors: 1,
+			staffStrong: 1,
+			staffEmailCandidate: 1,
+			registeredUnknown: 0,
+			visitor: 1,
+		});
+		expect(report.htmlContentSummary).toMatchObject({
+			htmlLikeComments: 1,
+		});
+		expect(
+			report.items.flatMap((item) =>
+				item.comments.map((comment) => comment.authorMatch?.kind),
+			),
+		).toEqual(["staff_strong", "staff_email_candidate", "visitor"]);
 	});
 });

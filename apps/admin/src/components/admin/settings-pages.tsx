@@ -579,6 +579,27 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									}
 								/>
 							</Field>
+							<Field label="站点人员显示名">
+								<select
+									className={inputClass}
+									value={draft.comments.staffDisplay.nameMode}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												staffDisplay: {
+													nameMode: event.target
+														.value as AdminSettings["comments"]["staffDisplay"]["nameMode"],
+												},
+											},
+										})
+									}
+								>
+									<option value="current_profile">跟随当前资料</option>
+									<option value="snapshot">保留评论快照</option>
+								</select>
+							</Field>
 						</div>
 					</div>
 					<Field label="滥用防护">

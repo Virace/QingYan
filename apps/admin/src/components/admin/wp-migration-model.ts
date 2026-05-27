@@ -1,5 +1,21 @@
 import type { MigrationReportItem } from "../../api/import-export";
 
+export type AuthorCandidateDecision = "verified" | "visitor";
+export type AuthorCandidateDecisionMap = Record<
+	string,
+	AuthorCandidateDecision
+>;
+
+export interface AuthorCandidateComment {
+	oldCommentId: string;
+	wpPostId: string;
+	title: string;
+	authorName: string;
+	authorEmail?: string;
+	wpAuthorId?: string;
+	wpAuthorEmail?: string;
+}
+
 export interface MappingOverlayItem {
 	wpPostId: string;
 	decision: "map" | "skip";
@@ -118,6 +134,58 @@ export function hasBlockingUnresolvedItems(items: MigrationReportItem[]) {
 		}
 		return item.state === "unverified" && itemConfidence(item) < 85;
 	});
+}
+
+export function authorCandidateComments(
+	items: MigrationReportItem[],
+): AuthorCandidateComment[] {
+	return items.flatMap((item) =>
+		(item.comments ?? [])
+			.filter(
+				(comment) => comment.authorMatch?.kind === "staff_email_candidate",
+			)
+			.map((comment) => ({
+				oldCommentId: comment.oldCommentId,
+				wpPostId: item.wpPostId,
+				title: item.title,
+				authorName: comment.authorName,
+				authorEmail: comment.authorEmail,
+				wpAuthorId: comment.authorMatch?.wpAuthorId,
+				wpAuthorEmail: comment.authorMatch?.email,
+			})),
+	);
+}
+
+export function setAuthorCandidateDecision(
+	decisions: AuthorCandidateDecisionMap,
+	oldCommentId: string,
+	decision: AuthorCandidateDecision,
+): AuthorCandidateDecisionMap {
+	return {
+		...decisions,
+		[oldCommentId]: decision,
+	};
+}
+
+export function setAllAuthorCandidateDecisions(
+	items: MigrationReportItem[],
+	decisions: AuthorCandidateDecisionMap,
+	decision: AuthorCandidateDecision,
+): AuthorCandidateDecisionMap {
+	return authorCandidateComments(items).reduce<AuthorCandidateDecisionMap>(
+		(current, candidate) =>
+			setAuthorCandidateDecision(current, candidate.oldCommentId, decision),
+		decisions,
+	);
+}
+
+export function hasBlockingAuthorCandidates(
+	items: MigrationReportItem[],
+	decisions: AuthorCandidateDecisionMap,
+): boolean {
+	return authorCandidateComments(items).some(
+		(candidate) => !decisions[candidate.oldCommentId],
+	);
 }
 
 export function formatMappingOverlay(

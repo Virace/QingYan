@@ -1,6 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 
-import type { WxrComment, WxrDocument, WxrItem } from "./wxr-types";
+import type { WxrAuthor, WxrComment, WxrDocument, WxrItem } from "./wxr-types";
 
 type XmlNode = Record<string, unknown>;
 
@@ -13,7 +13,8 @@ const parser = new XMLParser({
 	parseAttributeValue: false,
 	trimValues: true,
 	isArray: (name) =>
-		["item", "category", "wp:comment"].includes(name) || name === "wp:postmeta",
+		["item", "category", "wp:author", "wp:comment"].includes(name) ||
+		name === "wp:postmeta",
 });
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -51,6 +52,20 @@ function parseCategories(item: XmlNode): string[] {
 		.filter(Boolean);
 }
 
+function parseAuthors(channel: XmlNode): WxrAuthor[] {
+	return asArray(channel["wp:author"]).map((authorValue) => {
+		const author = asNode(authorValue);
+		return {
+			id: text(author["wp:author_id"]),
+			login: text(author["wp:author_login"]),
+			email: text(author["wp:author_email"]),
+			displayName: text(author["wp:author_display_name"]),
+			firstName: text(author["wp:author_first_name"]),
+			lastName: text(author["wp:author_last_name"]),
+		};
+	});
+}
+
 function parseComments(item: XmlNode): WxrComment[] {
 	return asArray(item["wp:comment"]).map((commentValue) => {
 		const comment = asNode(commentValue);
@@ -62,6 +77,7 @@ function parseComments(item: XmlNode): WxrComment[] {
 			type: text(comment["wp:comment_type"]),
 			authorName: text(comment["wp:comment_author"]),
 			authorEmail: text(comment["wp:comment_author_email"]) || undefined,
+			commentUserId: text(comment["wp:comment_user_id"]) || undefined,
 			authorUrl: text(comment["wp:comment_author_url"]) || undefined,
 			authorIp: text(comment["wp:comment_author_IP"]) || undefined,
 			userAgent: text(comment["wp:comment_agent"]) || undefined,
@@ -106,6 +122,7 @@ export function parseWxr(xml: string): WxrDocument {
 			baseBlogUrl: text(channel["wp:base_blog_url"]) || undefined,
 			version: text(channel["wp:wxr_version"]) || undefined,
 		},
+		authors: parseAuthors(channel),
 		items,
 	};
 }

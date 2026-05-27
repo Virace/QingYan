@@ -14,6 +14,14 @@ const fixture = `<?xml version="1.0" encoding="UTF-8" ?>
     <wp:wxr_version>1.2</wp:wxr_version>
     <wp:base_site_url>https://x-item.com</wp:base_site_url>
     <wp:base_blog_url>https://x-item.com</wp:base_blog_url>
+    <wp:author>
+      <wp:author_id>1</wp:author_id>
+      <wp:author_login><![CDATA[Virace]]></wp:author_login>
+      <wp:author_email><![CDATA[Virace@aliyun.com]]></wp:author_email>
+      <wp:author_display_name><![CDATA[管理员]]></wp:author_display_name>
+      <wp:author_first_name><![CDATA[管理员]]></wp:author_first_name>
+      <wp:author_last_name><![CDATA[]]></wp:author_last_name>
+    </wp:author>
     <item>
       <title>Termux</title>
       <link>https://x-item.com/termux.html</link>
@@ -35,6 +43,7 @@ const fixture = `<?xml version="1.0" encoding="UTF-8" ?>
         <wp:comment_approved>1</wp:comment_approved>
         <wp:comment_type></wp:comment_type>
         <wp:comment_parent>0</wp:comment_parent>
+        <wp:comment_user_id>1</wp:comment_user_id>
       </wp:comment>
       <wp:comment>
         <wp:comment_id>2</wp:comment_id>
@@ -43,6 +52,7 @@ const fixture = `<?xml version="1.0" encoding="UTF-8" ?>
         <wp:comment_approved>0</wp:comment_approved>
         <wp:comment_type>comment</wp:comment_type>
         <wp:comment_parent>1</wp:comment_parent>
+        <wp:comment_user_id>0</wp:comment_user_id>
       </wp:comment>
     </item>
   </channel>
@@ -56,6 +66,16 @@ describe("parseWxr", () => {
 			baseBlogUrl: "https://x-item.com",
 			version: "1.2",
 		});
+		expect(parsed.authors).toEqual([
+			{
+				id: "1",
+				login: "Virace",
+				email: "Virace@aliyun.com",
+				displayName: "管理员",
+				firstName: "管理员",
+				lastName: "",
+			},
+		]);
 		expect(parsed.items).toHaveLength(1);
 		expect(parsed.items[0]).toMatchObject({
 			wpPostId: "123",
@@ -69,7 +89,12 @@ describe("parseWxr", () => {
 			parentId: "1",
 			approved: "0",
 			type: "comment",
+			commentUserId: "0",
 			content: "child",
+		});
+		expect(parsed.items[0].comments[0]).toMatchObject({
+			commentId: "1",
+			commentUserId: "1",
 		});
 	});
 

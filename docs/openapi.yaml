@@ -703,7 +703,7 @@ components:
           properties:
             label:
               type: string
-          description: Optional trusted author badge. The label is resolved from current site settings and is only emitted for verified comments.
+          description: Optional trusted author badge. The label is resolved from current site settings and is only emitted for verified comments. Verified comment names may follow current staff profile settings or the stored comment snapshot depending on site configuration; ordinary visitor comments always use the stored snapshot name.
     CommentContent:
       type: object
       required: [raw, html]

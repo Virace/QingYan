@@ -6,6 +6,15 @@ export interface WxrChannelMetadata {
 	version?: string;
 }
 
+export interface WxrAuthor {
+	id: string;
+	login: string;
+	email: string;
+	displayName: string;
+	firstName: string;
+	lastName: string;
+}
+
 export interface WxrComment {
 	commentId: string;
 	parentId: string | null;
@@ -13,6 +22,7 @@ export interface WxrComment {
 	type: string;
 	authorName: string;
 	authorEmail?: string;
+	commentUserId?: string;
 	authorUrl?: string;
 	authorIp?: string;
 	userAgent?: string;
@@ -35,5 +45,6 @@ export interface WxrItem {
 
 export interface WxrDocument {
 	metadata: WxrChannelMetadata;
+	authors: WxrAuthor[];
 	items: WxrItem[];
 }

@@ -1,6 +1,9 @@
 import { buildGravatarUrl } from "./gravatar";
 import { sanitizeOptionalSafeHttpUrl } from "../shared/url-policy";
-import type { CommentAuthorIdentity } from "./verified-author";
+import type {
+	CommentAuthorIdentity,
+	StaffDisplaySettings,
+} from "./verified-author";
 import type { SystemSettings } from "../system-settings/definitions";
 
 interface PresenterCommentInput {
@@ -43,8 +46,10 @@ interface PresenterOptions {
 	avatar?: SystemSettings["avatar"];
 	verifiedAuthor?: {
 		enabled: boolean;
+		displayName?: string;
 		badgeLabel: string;
 	};
+	staffDisplay?: StaffDisplaySettings;
 }
 
 function toPublicTimestamp(value: string | null): string | null {
@@ -138,6 +143,7 @@ export function presentComments(
 	const rootNodes: Array<Record<string, unknown>> = [];
 
 	for (const comment of comments) {
+		const verifiedAuthor = options?.verifiedAuthor;
 		const gravatarUrl = buildGravatarUrl({
 			enabled: options?.avatar?.gravatar.enabled ?? false,
 			emailHash: comment.authorEmailHash,
@@ -148,18 +154,23 @@ export function presentComments(
 			rating: options?.avatar?.gravatar.rating,
 			forceDefault: options?.avatar?.gravatar.forceDefault,
 		});
+		const isVerifiedAuthor =
+			comment.authorIdentity === "verified" && verifiedAuthor?.enabled === true;
+		const shouldUseCurrentStaffProfile =
+			isVerifiedAuthor &&
+			(options?.staffDisplay?.nameMode ?? "current_profile") ===
+				"current_profile" &&
+			Boolean(verifiedAuthor?.displayName);
 		const author: Record<string, unknown> = {
-			name: comment.authorName,
+			name: shouldUseCurrentStaffProfile
+				? verifiedAuthor?.displayName
+				: comment.authorName,
 			website: sanitizeOptionalSafeHttpUrl(comment.authorWebsite),
 			gravatarUrl,
 		};
-		if (
-			comment.authorIdentity === "verified" &&
-			options?.verifiedAuthor?.enabled &&
-			options.verifiedAuthor.badgeLabel
-		) {
+		if (isVerifiedAuthor && verifiedAuthor?.badgeLabel) {
 			author.badge = {
-				label: options.verifiedAuthor.badgeLabel,
+				label: verifiedAuthor.badgeLabel,
 			};
 		}
 		const node: Record<string, unknown> = {

@@ -68,6 +68,39 @@ function reportFixture(state: MigrationReport["items"][number]["state"]) {
 	return report;
 }
 
+function authorMatchReportFixture(
+	kind: NonNullable<
+		MigrationReport["items"][number]["comments"][number]["authorMatch"]
+	>["kind"],
+) {
+	const report = reportFixture("ready");
+	report.items[0].comments = [
+		{
+			oldCommentId: "1",
+			oldParentCommentId: null,
+			status: "approved",
+			authorName: "Virace",
+			authorEmail: "virace@aliyun.com",
+			content: "root",
+			depth: 1,
+			warnings: [],
+			authorMatch: {
+				kind,
+				wpAuthorId: kind === "visitor" ? undefined : "1",
+				email: kind === "visitor" ? undefined : "virace@aliyun.com",
+			},
+		},
+	];
+	report.items[0].commentSummary = {
+		total: 1,
+		migratable: 1,
+		skipped: 0,
+		maxDepth: 1,
+	};
+	report.summary = buildMigrationReportSummary(report.items);
+	return report;
+}
+
 describe("convertReportToImportPlan", () => {
 	it("rejects unresolved reports", () => {
 		expect(() =>
@@ -91,5 +124,39 @@ describe("convertReportToImportPlan", () => {
 		expect(
 			plan.items[0].comments.map((comment) => comment.source.oldCommentId),
 		).toEqual(["1", "2"]);
+	});
+
+	it("marks strong WordPress author matches as verified staff comments", () => {
+		const plan = convertReportToImportPlan({
+			report: authorMatchReportFixture("staff_strong"),
+		});
+
+		expect(plan.items[0].comments[0].authorIdentity).toBe("verified");
+	});
+
+	it("requires explicit decisions for WordPress author email candidates", () => {
+		expect(() =>
+			convertReportToImportPlan({
+				report: authorMatchReportFixture("staff_email_candidate"),
+			}),
+		).toThrow(/Unresolved WordPress author candidates/);
+	});
+
+	it("applies explicit WordPress author email candidate decisions", () => {
+		const verifiedPlan = convertReportToImportPlan({
+			report: authorMatchReportFixture("staff_email_candidate"),
+			authorDecisions: {
+				"1": "verified",
+			},
+		});
+		const visitorPlan = convertReportToImportPlan({
+			report: authorMatchReportFixture("staff_email_candidate"),
+			authorDecisions: {
+				"1": "visitor",
+			},
+		});
+
+		expect(verifiedPlan.items[0].comments[0].authorIdentity).toBe("verified");
+		expect(visitorPlan.items[0].comments[0].authorIdentity).toBe("visitor");
 	});
 });

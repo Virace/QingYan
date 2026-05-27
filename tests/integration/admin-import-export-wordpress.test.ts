@@ -39,6 +39,48 @@ function wxrFixture() {
 </rss>`;
 }
 
+function wxrStaffFixture() {
+	return `<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:wp="http://wordpress.org/export/1.2/">
+  <channel>
+    <title>x-item</title>
+    <link>https://x-item.com</link>
+    <wp:wxr_version>1.2</wp:wxr_version>
+    <wp:base_blog_url>https://x-item.com</wp:base_blog_url>
+    <wp:author>
+      <wp:author_id>1</wp:author_id>
+      <wp:author_login>Virace</wp:author_login>
+      <wp:author_email>Virace@aliyun.com</wp:author_email>
+      <wp:author_display_name>管理员</wp:author_display_name>
+    </wp:author>
+    <item>
+      <title>Admin Comment</title>
+      <link>https://x-item.com/admin-comment.html</link>
+      <wp:post_id>9</wp:post_id>
+      <wp:post_type>post</wp:post_type>
+      <wp:post_name>admin-comment</wp:post_name>
+      <wp:comment>
+        <wp:comment_id>900</wp:comment_id>
+        <wp:comment_author>管理员</wp:comment_author>
+        <wp:comment_author_email>Virace@aliyun.com</wp:comment_author_email>
+        <wp:comment_content>admin hello</wp:comment_content>
+        <wp:comment_approved>1</wp:comment_approved>
+        <wp:comment_type></wp:comment_type>
+        <wp:comment_parent>0</wp:comment_parent>
+        <wp:comment_user_id>1</wp:comment_user_id>
+      </wp:comment>
+    </item>
+  </channel>
+</rss>`;
+}
+
+function wxrStaffEmailCandidateFixture() {
+	return wxrStaffFixture().replace(
+		"<wp:comment_user_id>1</wp:comment_user_id>",
+		"<wp:comment_user_id>0</wp:comment_user_id>",
+	);
+}
+
 function largeWxrFixture() {
 	return wxrFixture().replace(
 		"hello",
@@ -584,6 +626,146 @@ describe("admin import/export WordPress routes", () => {
 					strategy: "sqlite_backup_api",
 				},
 			},
+		});
+	});
+
+	it("applies strong WordPress author matches as verified comments", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const analyzeResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "wordpress.xml",
+				xml: wxrStaffFixture(),
+				sourceBasePath: "/",
+				mapping: {
+					items: [
+						{
+							wpPostId: "9",
+							decision: "map",
+							target: {
+								pageKey: "admin-comment.html",
+								pageUrl: "/admin-comment.html",
+							},
+						},
+					],
+				},
+			},
+		});
+		expect(analyzeResponse.statusCode).toBe(200);
+		expect(analyzeResponse.json().report.authorSummary).toMatchObject({
+			staffStrong: 1,
+		});
+		const jobId = analyzeResponse.json().job.id as string;
+
+		const planResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+		});
+		expect(planResponse.statusCode).toBe(200);
+		expect(planResponse.json().plan.items[0].comments[0]).toMatchObject({
+			authorIdentity: "verified",
+		});
+
+		const dryRunResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/dry-run`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				existingStrategy: "fail_on_existing",
+			},
+		});
+		expect(dryRunResponse.statusCode).toBe(200);
+
+		const applyResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/apply`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				existingStrategy: "fail_on_existing",
+			},
+		});
+		expect(applyResponse.statusCode).toBe(200);
+
+		const comment = fixture.app.sqlite
+			.prepare(
+				"SELECT author_identity, author_name, author_email FROM comments WHERE content_raw = ?",
+			)
+			.get("admin hello") as {
+			author_identity: string;
+			author_name: string;
+			author_email: string;
+		};
+		expect(comment).toEqual({
+			author_identity: "verified",
+			author_name: "管理员",
+			author_email: "Virace@aliyun.com",
+		});
+	});
+
+	it("requires a plan-time decision for WordPress author email candidates", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const analyzeResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "wordpress.xml",
+				xml: wxrStaffEmailCandidateFixture(),
+				sourceBasePath: "/",
+				mapping: {
+					items: [
+						{
+							wpPostId: "9",
+							decision: "map",
+							target: {
+								pageKey: "admin-comment.html",
+								pageUrl: "/admin-comment.html",
+							},
+						},
+					],
+				},
+			},
+		});
+		expect(analyzeResponse.statusCode).toBe(200);
+		expect(analyzeResponse.json().report.authorSummary).toMatchObject({
+			staffEmailCandidate: 1,
+		});
+		const jobId = analyzeResponse.json().job.id as string;
+
+		const unresolvedPlan = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+		});
+		expect(unresolvedPlan.statusCode).toBe(400);
+		expect(unresolvedPlan.json()).toMatchObject({
+			error: {
+				code: "INVALID_REQUEST",
+			},
+		});
+
+		const resolvedPlan = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				authorDecisions: {
+					"900": "verified",
+				},
+			},
+		});
+		expect(resolvedPlan.statusCode).toBe(200);
+		expect(resolvedPlan.json().plan.items[0].comments[0]).toMatchObject({
+			authorIdentity: "verified",
 		});
 	});
 

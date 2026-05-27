@@ -9,6 +9,7 @@ import type { MigrationReport, MigrationReportItem } from "../report";
 
 export interface ConvertReportInput {
 	report: MigrationReport;
+	authorDecisions?: Record<string, "verified" | "visitor">;
 	maxDepth?: number;
 	now?: Date;
 }
@@ -36,10 +37,34 @@ function isImportableComment(
 	return comment.status !== "skipped";
 }
 
+function resolveAuthorIdentity(
+	comment: MigrationReportItem["comments"][number],
+	authorDecisions: Record<string, "verified" | "visitor"> | undefined,
+): "verified" | "visitor" {
+	switch (comment.authorMatch?.kind) {
+		case "staff_strong":
+			return "verified";
+		case "staff_email_candidate": {
+			const decision = authorDecisions?.[comment.oldCommentId];
+			if (!decision) {
+				throw new Error(
+					`Unresolved WordPress author candidates: ${comment.oldCommentId}`,
+				);
+			}
+			return decision;
+		}
+		case "registered_unknown":
+		case "visitor":
+		case undefined:
+			return "visitor";
+	}
+}
+
 function convertItem(
 	report: MigrationReport,
 	item: MigrationReportItem,
 	maxDepth: number,
+	authorDecisions: ConvertReportInput["authorDecisions"],
 ): ImportPlanItem | null {
 	if (item.state === "skipped") {
 		return null;
@@ -63,6 +88,7 @@ function convertItem(
 			authorUrl: comment.authorUrl,
 			authorIp: comment.authorIp,
 			userAgent: comment.userAgent,
+			authorIdentity: resolveAuthorIdentity(comment, authorDecisions),
 			content: comment.content,
 			createdAt: comment.createdAt,
 			parentOldCommentId: comment.oldParentCommentId,
@@ -103,7 +129,9 @@ export function convertReportToImportPlan(
 
 	const maxDepth = input.maxDepth ?? 3;
 	const items = input.report.items
-		.map((item) => convertItem(input.report, item, maxDepth))
+		.map((item) =>
+			convertItem(input.report, item, maxDepth, input.authorDecisions),
+		)
 		.filter((item): item is ImportPlanItem => item !== null);
 
 	return {

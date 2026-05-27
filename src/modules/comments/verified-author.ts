@@ -1,4 +1,5 @@
 export type CommentAuthorIdentity = "visitor" | "verified";
+export type StaffDisplayNameMode = "current_profile" | "snapshot";
 
 export interface VerifiedAuthorSettings {
 	enabled: boolean;
@@ -6,6 +7,10 @@ export interface VerifiedAuthorSettings {
 	email: string;
 	website: string;
 	badgeLabel: string;
+}
+
+export interface StaffDisplaySettings {
+	nameMode: StaffDisplayNameMode;
 }
 
 export interface PublicVerifiedAuthorViewer {
@@ -19,6 +24,10 @@ export const defaultVerifiedAuthor: VerifiedAuthorSettings = {
 	email: "",
 	website: "",
 	badgeLabel: "管理员",
+};
+
+export const defaultStaffDisplaySettings: StaffDisplaySettings = {
+	nameMode: "current_profile",
 };
 
 export function normalizeVerifiedAuthorEmail(email?: string | null): string {
@@ -69,6 +78,41 @@ export function serializeVerifiedAuthorSettings(
 		email: normalizeVerifiedAuthorEmail(settings.email),
 		website: settings.website.trim(),
 		badgeLabel: settings.badgeLabel.trim() || defaultVerifiedAuthor.badgeLabel,
+	});
+}
+
+function isStaffDisplayNameMode(value: unknown): value is StaffDisplayNameMode {
+	return value === "current_profile" || value === "snapshot";
+}
+
+export function mergeStaffDisplaySettings(
+	raw?: string | null,
+): StaffDisplaySettings {
+	if (!raw) {
+		return defaultStaffDisplaySettings;
+	}
+
+	let parsed: Record<string, unknown>;
+	try {
+		parsed = JSON.parse(raw) as Record<string, unknown>;
+	} catch {
+		return defaultStaffDisplaySettings;
+	}
+
+	return {
+		nameMode: isStaffDisplayNameMode(parsed.nameMode)
+			? parsed.nameMode
+			: defaultStaffDisplaySettings.nameMode,
+	};
+}
+
+export function serializeStaffDisplaySettings(
+	settings: StaffDisplaySettings,
+): string {
+	return JSON.stringify({
+		nameMode: isStaffDisplayNameMode(settings.nameMode)
+			? settings.nameMode
+			: defaultStaffDisplaySettings.nameMode,
 	});
 }
 

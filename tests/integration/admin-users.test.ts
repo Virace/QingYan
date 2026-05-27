@@ -86,6 +86,22 @@ describe("admin users", () => {
 				createdAt: "2026-04-17T10:01:00.000Z",
 				updatedAt: "2026-04-17T10:01:00.000Z",
 			},
+			{
+				id: "c_user_3",
+				siteId: site.id,
+				pageThreadId: secondThread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "ALICE",
+				authorEmail: "Alice@Example.com",
+				contentRaw: "hello 3",
+				contentHtml: "<p>hello 3</p>",
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
+				createdAt: "2026-04-17T10:02:00.000Z",
+				updatedAt: "2026-04-17T10:02:00.000Z",
+			},
 		]);
 		await fixture.app.db.insert(blacklistRules).values({
 			siteId: site.id,
@@ -109,10 +125,11 @@ describe("admin users", () => {
 			items: [
 				{
 					email: "alice@example.com",
-					names: ["Alice", "Alicia"],
-					commentCount: 2,
+					emailVariants: ["alice@example.com", "Alice@Example.com"],
+					names: ["Alice", "Alicia", "ALICE"],
+					commentCount: 3,
 					pendingCount: 1,
-					approvedCount: 1,
+					approvedCount: 2,
 					pageCount: 2,
 					siteCount: 1,
 					ips: ["203.0.113.20"],
@@ -121,6 +138,28 @@ describe("admin users", () => {
 						email: true,
 					},
 					isBlacklisted: true,
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+
+		const searchResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/users?siteKey=fangyuan&search=alice@example.com&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(searchResponse.statusCode).toBe(200);
+		expect(searchResponse.json()).toMatchObject({
+			items: [
+				{
+					email: "alice@example.com",
+					commentCount: 3,
+					emailVariants: ["alice@example.com", "Alice@Example.com"],
 				},
 			],
 			pagination: {

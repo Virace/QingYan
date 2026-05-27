@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
 	defaultVerifiedAuthor,
+	defaultStaffDisplaySettings,
 	isReservedVerifiedAuthorEmail,
+	mergeStaffDisplaySettings,
 	mergeVerifiedAuthorSettings,
 	normalizeVerifiedAuthorEmail,
+	serializeStaffDisplaySettings,
 	toPublicVerifiedAuthorViewer,
 } from "../../src/modules/comments/verified-author";
 
@@ -77,5 +80,31 @@ describe("verified comment author settings", () => {
 				badgeLabel: "楼主",
 			}),
 		).toEqual({ displayName: "Virace", badgeLabel: "楼主" });
+	});
+
+	it("merges staff display settings with current profile as the default", () => {
+		expect(mergeStaffDisplaySettings(null)).toEqual(
+			defaultStaffDisplaySettings,
+		);
+		expect(
+			mergeStaffDisplaySettings(JSON.stringify({ nameMode: "snapshot" })),
+		).toEqual({
+			nameMode: "snapshot",
+		});
+		expect(
+			mergeStaffDisplaySettings(JSON.stringify({ nameMode: "unexpected" })),
+		).toEqual(defaultStaffDisplaySettings);
+	});
+
+	it("serializes staff display settings", () => {
+		expect(
+			JSON.parse(
+				serializeStaffDisplaySettings({
+					nameMode: "snapshot",
+				}),
+			),
+		).toEqual({
+			nameMode: "snapshot",
+		});
 	});
 });

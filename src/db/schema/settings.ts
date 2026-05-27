@@ -57,6 +57,7 @@ export const siteSettings = sqliteTable(
 			.default(1800),
 		commentMetadataJson: text("comment_metadata_json"),
 		verifiedAuthorJson: text("verified_author_json"),
+		staffDisplayJson: text("staff_display_json"),
 		moderationJson: text("moderation_json"),
 		emailNotificationsEnabled: integer("email_notifications_enabled", {
 			mode: "boolean",

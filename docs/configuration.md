@@ -161,6 +161,7 @@ security:
 - 评论开关、默认审核状态、最大嵌套深度、分页上限。
 - 评论身份字段：`nickname | email | website` 的允许和必填状态。
 - 可信评论作者：`comments.verifiedAuthor.enabled`、`displayName`、`email`、`website`、`badgeLabel`，用于管理员或楼主这类已验证来源回复。
+- 站点人员显示名策略：`comments.staffDisplay.nameMode`，可选 `current_profile` 或 `snapshot`。默认 `current_profile`，即已验证评论公开展示时跟随当前可信作者资料；`snapshot` 会展示评论写入或导入时保存的作者名称。
 - 验证码模式：`never | always | threshold` 及阈值窗口。
 - 滥用保护和自动黑名单策略。
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
@@ -169,7 +170,9 @@ security:
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
 
-可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。
+可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台用户聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
+
+已验证评论会同时保留评论行上的作者快照和当前站点人员资料。`comments.staffDisplay.nameMode=current_profile` 时，公开评论树对已验证评论展示当前 `comments.verifiedAuthor.displayName`；`snapshot` 时展示评论行保存的 `authorName`。普通访客评论始终展示评论行保存的名称，不会跟随任何邮箱资料。
 
 IP 库路径、下载源、缓存策略和自动更新属于全局运维配置，由系统设置维护；站点设置不再重复提供这些字段。
 
@@ -291,6 +294,10 @@ Admin 数据管理中的 WordPress WXR 导入和 QingYan JSON 导入在真实 ap
 - 导入前数据库备份面向本实例回退，当前内置实现使用 SQLite backup API 生成主库备份，并在存在时记录 WAL/SHM 现场文件。
 - 任务记录会保存备份的 `engine`、`strategy`、备份目录和文件 metadata，便于之后按运维流程停服务覆盖恢复。
 - 当前内置数据库备份 provider 仅覆盖 SQLite。后续支持 PostgreSQL、MySQL 或 MariaDB 时，会通过独立 provider 或外部备份确认接入，不把普通业务 export 当作完整数据库备份。
+
+WordPress WXR 导入会读取 `wp:author` 和每条评论的 `wp:comment_user_id`。`comment_user_id` 非 0 且能匹配 WXR 作者 ID 时，会作为站点人员强匹配导入为 `author_identity=verified`；`comment_user_id=0` 但评论邮箱与 WXR 作者邮箱归一化后相同，只能作为邮箱候选，必须在 Admin Console 中确认“作为站点人员”或“保留访客”后才能生成导入计划。WXR 作者列表来自导出文件中的文章作者信息，不等同于完整 WordPress 用户表，因此多用户迁移后续仍需要单独设计。
+
+WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内容包含 `<a>` 等 HTML-like 片段，QingYan 也会按文本转义输出。导入分析报告会统计疑似 HTML 评论数量，方便管理员后续人工检查；有限 HTML 白名单或 sanitizer 不在当前迁移默认行为中。
 
 ## Future Upgrade Lifecycle
 

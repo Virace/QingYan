@@ -66,6 +66,7 @@ export interface AdminPage {
 
 export interface AdminUser {
 	email: string;
+	emailVariants: string[];
 	names: string[];
 	commentCount: number;
 	pendingCount: number;
@@ -187,6 +188,9 @@ export interface AdminSettings {
 			email: string;
 			website: string;
 			badgeLabel: string;
+		};
+		staffDisplay: {
+			nameMode: "current_profile" | "snapshot";
 		};
 	};
 	pageFeedback: {

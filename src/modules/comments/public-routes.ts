@@ -29,7 +29,10 @@ import { qingyanCookiePath } from "../../config/public-path";
 import { ModerationService } from "./moderation-service";
 import { AkismetClient } from "./akismet-client";
 import { resolvePublicPageContext } from "../shared/page-context";
-import { mergeVerifiedAuthorSettings } from "./verified-author";
+import {
+	mergeStaffDisplaySettings,
+	mergeVerifiedAuthorSettings,
+} from "./verified-author";
 
 function requireLegacyPageKey(pageKey?: string): string {
 	if (!pageKey) {
@@ -301,6 +304,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				verifiedAuthor: mergeVerifiedAuthorSettings(
 					settings?.verifiedAuthorJson,
 				),
+				staffDisplay: mergeStaffDisplaySettings(settings?.staffDisplayJson),
 			}),
 		);
 		if (!presentedComment) {

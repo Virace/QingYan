@@ -111,7 +111,10 @@ export class ImportJobService {
 		});
 	}
 
-	public async convertWordPressJobToPlan(jobId: string) {
+	public async convertWordPressJobToPlan(
+		jobId: string,
+		input?: { authorDecisions?: Record<string, "verified" | "visitor"> },
+	) {
 		const batch = await this.repository.getBatch(jobId);
 		if (!batch) {
 			throw new ResourceNotFoundError(
@@ -126,7 +129,23 @@ export class ImportJobService {
 			});
 		}
 
-		const plan = convertReportToImportPlan({ report: payload.report });
+		let plan: ImportPlan;
+		try {
+			plan = convertReportToImportPlan({
+				report: payload.report,
+				authorDecisions: input?.authorDecisions,
+			});
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message.startsWith("Unresolved WordPress author candidates")
+			) {
+				throw new InvalidRequestError({
+					message: error.message,
+				});
+			}
+			throw error;
+		}
 		const nextPayload: ImportJobPayload = {
 			...payload,
 			plan,
@@ -518,16 +537,17 @@ export class ImportJobService {
 		this.sqlite
 			.prepare(
 				`INSERT INTO comments (
-					id, site_id, page_thread_id, parent_id, status, author_name,
+					id, site_id, page_thread_id, parent_id, author_identity, status, author_name,
 					author_email, author_email_hash, author_website, author_ip,
 					author_user_agent, content_raw, content_html, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				commentId,
 				siteId,
 				threadId,
 				parentId,
+				comment.authorIdentity,
 				comment.status,
 				comment.authorName,
 				comment.authorEmail,

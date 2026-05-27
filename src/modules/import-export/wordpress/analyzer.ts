@@ -13,6 +13,10 @@ import {
 	resolvePageKey,
 } from "./page-key";
 import {
+	classifyWordPressAuthorMatch,
+	summarizeWordPressAuthorMatches,
+} from "./author-mapping";
+import {
 	normalizeSourceBasePath,
 	normalizeSourcePath,
 	type SourcePathResult,
@@ -47,6 +51,14 @@ interface CommentTreeResult {
 	skipped: number;
 	maxDepth: number;
 	warnings: string[];
+}
+
+interface HtmlContentSummary {
+	htmlLikeComments: number;
+	examples: Array<{
+		oldCommentId: string;
+		snippet: string;
+	}>;
 }
 
 function isOrdinaryComment(comment: WxrComment): boolean {
@@ -137,6 +149,33 @@ function analyzeComments(comments: WxrComment[]): CommentTreeResult {
 		skipped,
 		maxDepth,
 		warnings: [...warnings],
+	};
+}
+
+function looksLikeHtmlContent(value: string): boolean {
+	return /<\/?[a-z][\w:-]*(?:\s+[^<>]*)?>/i.test(value);
+}
+
+function summarizeHtmlContent(comments: WxrComment[]): HtmlContentSummary {
+	const examples: HtmlContentSummary["examples"] = [];
+	let htmlLikeComments = 0;
+
+	for (const comment of comments) {
+		if (!looksLikeHtmlContent(comment.content)) {
+			continue;
+		}
+		htmlLikeComments += 1;
+		if (examples.length < 5) {
+			examples.push({
+				oldCommentId: comment.commentId,
+				snippet: comment.content.slice(0, 120),
+			});
+		}
+	}
+
+	return {
+		htmlLikeComments,
+		examples,
 	};
 }
 
@@ -241,6 +280,7 @@ function buildReportItem(
 	sourcePath: SourcePathResult,
 	input: AnalyzeWordPressCommentsInput,
 	commentTree: CommentTreeResult,
+	authors: ReturnType<typeof parseWxr>["authors"],
 ): MigrationReportItem {
 	const pageKey = resolvePageKey({
 		wpPostId: item.wpPostId,
@@ -294,7 +334,17 @@ function buildReportItem(
 				}
 			: undefined,
 		evidence,
-		comments: commentTree.comments,
+		comments: commentTree.comments.map((comment) => {
+			const sourceComment = item.comments.find(
+				(candidate) => candidate.commentId === comment.oldCommentId,
+			);
+			return {
+				...comment,
+				authorMatch: sourceComment
+					? classifyWordPressAuthorMatch(sourceComment, authors)
+					: undefined,
+			};
+		}),
 		commentSummary: {
 			total: commentTree.total,
 			migratable: commentTree.migratable,
@@ -312,6 +362,7 @@ export function analyzeWordPressComments(
 	const sourceBasePath = normalizeSourceBasePath(input.sourceBasePath);
 	const sourcePathExamples: MigrationReport["sourcePathExamples"] = [];
 	const items: MigrationReportItem[] = [];
+	const allComments = wxr.items.flatMap((item) => item.comments);
 
 	for (const item of wxr.items) {
 		const sourcePath = normalizeSourcePath(item.link, sourceBasePath);
@@ -327,7 +378,9 @@ export function analyzeWordPressComments(
 		if (commentTree.migratable === 0) {
 			continue;
 		}
-		items.push(buildReportItem(item, sourcePath, input, commentTree));
+		items.push(
+			buildReportItem(item, sourcePath, input, commentTree, wxr.authors),
+		);
 	}
 
 	const targetCounts = new Map<string, number>();
@@ -359,6 +412,8 @@ export function analyzeWordPressComments(
 		sourceBasePath,
 		createdAt: (input.now ?? new Date()).toISOString(),
 		wxr: wxr.metadata,
+		authorSummary: summarizeWordPressAuthorMatches(allComments, wxr.authors),
+		htmlContentSummary: summarizeHtmlContent(allComments),
 		sourcePathExamples,
 		items,
 		summary: buildMigrationReportSummary(items),

@@ -75,6 +75,13 @@ const importJobsQuerySchema = z.object({
 const dryRunBodySchema = z.object({
 	existingStrategy: z.enum(["fail_on_existing", "skip_existing"]),
 });
+const wordpressPlanBodySchema = z
+	.object({
+		authorDecisions: z
+			.record(z.string(), z.enum(["verified", "visitor"]))
+			.optional(),
+	})
+	.optional();
 const qingyanImportModeSchema = z
 	.enum(["data_only", "settings_only", "full_site"])
 	.default("full_site");
@@ -445,13 +452,20 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.post("/wordpress/jobs/:jobId/plan", async (request) => {
 		await sessionService.requireSession(request);
 		const parsed = importJobParamsSchema.safeParse(request.params);
-		if (!parsed.success) {
+		const parsedBody = wordpressPlanBodySchema.safeParse(request.body);
+		if (!parsed.success || !parsedBody.success) {
 			throw new InvalidRequestError({
-				issues: parsed.error.issues,
+				issues: [
+					...(parsed.success ? [] : parsed.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
 			});
 		}
 
-		return jobService.convertWordPressJobToPlan(parsed.data.jobId);
+		return jobService.convertWordPressJobToPlan(
+			parsed.data.jobId,
+			parsedBody.data,
+		);
 	});
 
 	fastify.post("/jobs/:jobId/dry-run", async (request) => {
