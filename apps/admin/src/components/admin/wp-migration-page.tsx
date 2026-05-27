@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/card";
 
 import { Field, inputClass, textareaClass } from "./admin-ui";
+import { useAdminConfirmDialog } from "./confirm-dialog";
 import {
 	acceptImportableItems,
 	acceptByConfidence,
@@ -124,14 +125,26 @@ function summaryEntries(result: WordPressAnalyzeResult) {
 	];
 }
 
-function confirmLowConfidence(items: MigrationReportItem[]) {
+async function confirmLowConfidence(
+	items: MigrationReportItem[],
+	confirm: (options: {
+		title: string;
+		description: string;
+		confirmText?: string;
+		cancelText?: string;
+		destructive?: boolean;
+	}) => Promise<boolean>,
+) {
 	const lowConfidenceItems = lowConfidenceImportableItems(items, 90);
 	if (lowConfidenceItems.length === 0) {
 		return true;
 	}
-	return window.confirm(
-		`有 ${lowConfidenceItems.length} 个候选匹配分数低于 90 分。低分候选可能把评论导入到错误页面，继续前请确认报告行中的标题、路径和目标页面 Key。是否继续接受？`,
-	);
+	return confirm({
+		title: "确认低分候选",
+		description: `有 ${lowConfidenceItems.length} 个候选匹配分数低于 90 分。低分候选可能把评论导入到错误页面，继续前请确认报告行中的标题、路径和目标页面 Key。是否继续接受？`,
+		confirmText: "继续接受",
+		destructive: true,
+	});
 }
 
 function TargetSiteSummary({ site }: { site: AdminSiteSummary }) {
@@ -153,6 +166,7 @@ function TargetSiteSummary({ site }: { site: AdminSiteSummary }) {
 }
 
 export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
+	const confirm = useAdminConfirmDialog();
 	const siteKey = site.siteKey;
 	const [file, setFile] = useState<File | null>(null);
 	const [sourceBasePath, setSourceBasePath] = useState("/");
@@ -229,7 +243,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 			if (!result) {
 				throw new Error("请先分析 WXR。");
 			}
-			if (!confirmLowConfidence(result.report.items)) {
+			if (!(await confirmLowConfidence(result.report.items, confirm))) {
 				throw new Error("已取消接受和导入。");
 			}
 			const accepted = acceptImportableItems(mappingItems, result.report.items);
@@ -384,8 +398,11 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 							type="button"
 							variant="outline"
 							disabled={!result || analyzeMutation.isPending}
-							onClick={() => {
-								if (!result || !confirmLowConfidence(result.report.items)) {
+							onClick={async () => {
+								if (
+									!result ||
+									!(await confirmLowConfidence(result.report.items, confirm))
+								) {
 									return;
 								}
 								acceptAndReanalyze(

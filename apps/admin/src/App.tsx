@@ -11,6 +11,7 @@ import { Toaster } from "sonner";
 import { ApiError } from "@/api/client";
 import { fetchAdminMe } from "@/api/session";
 import { AdminShell } from "@/components/admin/admin-shell";
+import { AdminConfirmDialogProvider } from "@/components/admin/confirm-dialog";
 import { LoginPage } from "@/components/admin/login-page";
 import {
 	Card,
@@ -97,10 +98,12 @@ export default function App() {
 
 	return (
 		<QueryClientProvider client={queryClient}>
-			<AppContent
-				authenticated={authenticated}
-				setAuthenticated={setAuthenticated}
-			/>
+			<AdminConfirmDialogProvider>
+				<AppContent
+					authenticated={authenticated}
+					setAuthenticated={setAuthenticated}
+				/>
+			</AdminConfirmDialogProvider>
 			<Toaster richColors position="top-right" />
 		</QueryClientProvider>
 	);

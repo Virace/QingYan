@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 
 import type { AdminView } from "./admin-shell";
 import { EmptyState, inputClass, textareaClass } from "./admin-ui";
+import { useAdminConfirmDialog } from "./confirm-dialog";
 
 function ResourceFilters({
 	search,
@@ -104,6 +105,7 @@ export function CommentsPage({
 	setPageKey: (value: string) => void;
 }) {
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const [status, setStatus] = useState("");
 	const [hiddenStatus, setHiddenStatus] = useState("");
 	const [limit, setLimit] = useState(20);
@@ -241,27 +243,40 @@ export function CommentsPage({
 				: current.filter((commentId) => !visibleCommentIds.includes(commentId)),
 		);
 	};
-	const moveCommentsToTrash = (commentIds: string[]) => {
+	const moveCommentsToTrash = async (commentIds: string[]) => {
 		if (commentIds.length === 0) {
 			return;
 		}
-		if (
-			!window.confirm(
-				`确认将 ${commentIds.length} 条评论移入回收站？可在回收站中恢复。`,
-			)
-		) {
+		const confirmed = await confirm({
+			title: "移入回收站",
+			description: `确认将 ${commentIds.length} 条评论移入回收站？可在回收站中恢复。`,
+			confirmText: "移入回收站",
+		});
+		if (!confirmed) {
 			return;
 		}
 		bulkTrashMutation.mutate(commentIds);
 	};
-	const permanentlyDeleteComment = (commentId: string) => {
-		if (!window.confirm("确认永久删除这条回收站评论？此操作不可恢复。")) {
+	const permanentlyDeleteComment = async (commentId: string) => {
+		const confirmed = await confirm({
+			title: "永久删除评论",
+			description: "确认永久删除这条回收站评论？此操作不可恢复。",
+			confirmText: "永久删除",
+			destructive: true,
+		});
+		if (!confirmed) {
 			return;
 		}
 		deleteMutation.mutate(commentId);
 	};
-	const clearCurrentTrash = () => {
-		if (!window.confirm("确认清空当前站点回收站？此操作不可恢复。")) {
+	const clearCurrentTrash = async () => {
+		const confirmed = await confirm({
+			title: "清空回收站",
+			description: "确认清空当前站点回收站？此操作不可恢复。",
+			confirmText: "清空回收站",
+			destructive: true,
+		});
+		if (!confirmed) {
 			return;
 		}
 		clearTrashMutation.mutate({ siteKey });
@@ -322,13 +337,17 @@ export function CommentsPage({
 							disabled={
 								selectedTrashIds.length === 0 || deleteMutation.isPending
 							}
-							onClick={() => {
-								if (
-									selectedTrashIds.length === 0 ||
-									!window.confirm(
-										`确认永久删除 ${selectedTrashIds.length} 条回收站评论？此操作不可恢复。`,
-									)
-								) {
+							onClick={async () => {
+								if (selectedTrashIds.length === 0) {
+									return;
+								}
+								const confirmed = await confirm({
+									title: "永久删除评论",
+									description: `确认永久删除 ${selectedTrashIds.length} 条回收站评论？此操作不可恢复。`,
+									confirmText: "永久删除",
+									destructive: true,
+								});
+								if (!confirmed) {
 									return;
 								}
 								for (const commentId of selectedTrashIds) {
