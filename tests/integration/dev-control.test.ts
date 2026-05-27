@@ -136,6 +136,18 @@ describe("dev control routes", () => {
 				required: true,
 				verified: false,
 			},
+			commentDisplay: {
+				avatar: {
+					gravatar: {
+						enabled: false,
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
+					},
+				},
+			},
+			viewer: {},
 		});
 
 		expect(await fixture.app.db.select().from(sites)).toEqual([
@@ -268,6 +280,37 @@ describe("dev control routes", () => {
 			},
 			pageFeedback: {
 				likeCount: 1,
+			},
+			commentDisplay: {
+				avatar: {
+					gravatar: {
+						enabled: false,
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
+					},
+				},
+			},
+			viewer: {},
+		});
+
+		const thread = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/thread?siteKey=default&pageKey=post:seeded",
+		});
+		expect(thread.statusCode).toBe(200);
+		expect(thread.json()).toMatchObject({
+			commentDisplay: {
+				avatar: {
+					gravatar: {
+						enabled: false,
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
+					},
+				},
 			},
 		});
 

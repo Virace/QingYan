@@ -9,6 +9,7 @@ import {
 	buildDefaultSiteSettings,
 	defaultCommentRequire,
 } from "../shared/site-settings-defaults";
+import { defaultSystemSettings } from "../system-settings/definitions";
 
 type ScenarioName =
 	| "comments-captcha-always"
@@ -385,6 +386,17 @@ export class DevMockService {
 		};
 	}
 
+	private buildCommentDisplay() {
+		return {
+			avatar: {
+				gravatar: {
+					enabled: defaultSystemSettings.avatar.gravatar.enabled,
+				},
+				display: defaultSystemSettings.avatar.display,
+			},
+		};
+	}
+
 	private createSeededThread(pageState: RuntimePageState) {
 		pageState.comments.clear();
 		pageState.commentOrder = [];
@@ -669,6 +681,8 @@ export class DevMockService {
 					commentRequireJson: JSON.stringify(defaultCommentRequire),
 				}),
 				...threadBody,
+				commentDisplay: this.buildCommentDisplay(),
+				viewer: {},
 				pageMetrics: {
 					pageViewCount: pageState.pageViewCount,
 				},
@@ -701,13 +715,16 @@ export class DevMockService {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
 		return this.setVisitorCookieResult(
-			this.buildThreadBody({
-				pageState,
-				visitor: visitorResult.visitor,
-				sortBy: input.sortBy,
-				limit: input.limit,
-				offset: input.offset,
-			}),
+			{
+				...this.buildThreadBody({
+					pageState,
+					visitor: visitorResult.visitor,
+					sortBy: input.sortBy,
+					limit: input.limit,
+					offset: input.offset,
+				}),
+				commentDisplay: this.buildCommentDisplay(),
+			},
 			visitorResult.created,
 			visitorResult.visitorKey,
 		);
