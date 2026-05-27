@@ -2,7 +2,27 @@ export interface GravatarUrlInput {
 	enabled: boolean;
 	emailHash?: string | null;
 	baseUrl: string;
+	size?: number;
+	defaultImage?: GravatarDefaultImage;
+	rating?: GravatarRating;
+	forceDefault?: boolean;
 }
+
+export const gravatarDefaultImages = [
+	"404",
+	"mp",
+	"identicon",
+	"monsterid",
+	"wavatar",
+	"retro",
+	"robohash",
+	"blank",
+] as const;
+
+export const gravatarRatings = ["g", "pg", "r", "x"] as const;
+
+export type GravatarDefaultImage = (typeof gravatarDefaultImages)[number];
+export type GravatarRating = (typeof gravatarRatings)[number];
 
 export function normalizeGravatarBaseUrl(baseUrl: string): string {
 	let parsed: URL;
@@ -30,5 +50,13 @@ export function buildGravatarUrl(input: GravatarUrlInput): string | undefined {
 	}
 
 	const baseUrl = normalizeGravatarBaseUrl(input.baseUrl);
-	return `${baseUrl}/${input.emailHash}?s=80&d=404&r=g`;
+	const params = new URLSearchParams({
+		s: String(input.size ?? 80),
+		d: input.defaultImage ?? "404",
+		r: input.rating ?? "g",
+	});
+	if (input.forceDefault) {
+		params.set("f", "y");
+	}
+	return `${baseUrl}/${input.emailHash}?${params.toString()}`;
 }

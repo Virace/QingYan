@@ -317,6 +317,22 @@ export interface AdminSystemSettings {
 		gravatar: {
 			enabled: boolean;
 			baseUrl: string;
+			size: number;
+			defaultImage:
+				| "404"
+				| "mp"
+				| "identicon"
+				| "monsterid"
+				| "wavatar"
+				| "retro"
+				| "robohash"
+				| "blank";
+			rating: "g" | "pg" | "r" | "x";
+			forceDefault: boolean;
+		};
+		display: {
+			shape: "circle" | "rounded" | "square";
+			sizePx: number;
 		};
 	};
 	antiSpam: {

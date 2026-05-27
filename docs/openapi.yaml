@@ -745,6 +745,34 @@ components:
           $ref: '#/components/schemas/CommentDisplayLocation'
         device:
           $ref: '#/components/schemas/CommentDisplayDevice'
+    CommentAvatarDisplay:
+      type: object
+      required: [gravatar, display]
+      description: Avatar display hints for public comment frontends. QingYan still only emits third-party author.gravatarUrl and does not host avatar images.
+      properties:
+        gravatar:
+          type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+        display:
+          type: object
+          required: [shape, sizePx]
+          properties:
+            shape:
+              type: string
+              enum: [circle, rounded, square]
+            sizePx:
+              type: integer
+              minimum: 16
+              maximum: 256
+    CommentDisplay:
+      type: object
+      required: [avatar]
+      properties:
+        avatar:
+          $ref: '#/components/schemas/CommentAvatarDisplay'
     PublicComment:
       type: object
       required:
@@ -914,6 +942,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicComment'
+        commentDisplay:
+          $ref: '#/components/schemas/CommentDisplay'
         pageMetrics:
           $ref: '#/components/schemas/PageMetrics'
         pageFeedback:
@@ -934,6 +964,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicComment'
+        commentDisplay:
+          $ref: '#/components/schemas/CommentDisplay'
     CreateCommentRequest:
       type: object
       required:

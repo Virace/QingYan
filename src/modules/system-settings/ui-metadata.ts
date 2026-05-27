@@ -61,6 +61,39 @@ export const settingUiMetadata: Record<string, SettingUiMetadata> = {
 			city: "城市",
 		},
 	},
+	"systemSettings.avatar.gravatar.defaultImage": {
+		label: "Gravatar 默认图片",
+		description: "控制没有匹配头像时的 Gravatar default 参数。",
+		options: {
+			"404": "返回 404",
+			mp: "Mystery Person",
+			identicon: "Identicon",
+			monsterid: "MonsterID",
+			wavatar: "Wavatar",
+			retro: "Retro",
+			robohash: "Robohash",
+			blank: "Blank",
+		},
+	},
+	"systemSettings.avatar.gravatar.rating": {
+		label: "Gravatar 评级",
+		description: "控制允许返回的 Gravatar rating。",
+		options: {
+			g: "G",
+			pg: "PG",
+			r: "R",
+			x: "X",
+		},
+	},
+	"systemSettings.avatar.display.shape": {
+		label: "头像形状",
+		description: "给前端评论组件的头像展示形状建议。",
+		options: {
+			circle: "圆形",
+			rounded: "圆角",
+			square: "方形",
+		},
+	},
 	"systemSettings.admin.session.ttlMinutes": {
 		label: "后台登录有效期",
 	},

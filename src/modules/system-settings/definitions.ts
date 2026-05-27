@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { AppConfig } from "../../config/types";
+import { gravatarDefaultImages, gravatarRatings } from "../comments/gravatar";
 import { normalizeOrigin } from "../shared/url-policy";
 
 export const systemSettingCategories = [
@@ -50,6 +51,23 @@ const failureRateLimitRuleSchema = z.object({
 
 const adminLoginRateLimitRuleSchema = failureRateLimitRuleSchema.extend({
 	autoBlacklistSec: z.number().int().positive(),
+});
+
+export const avatarDisplayShapes = ["circle", "rounded", "square"] as const;
+
+export const avatarSettingsSchema = z.object({
+	gravatar: z.object({
+		enabled: z.boolean(),
+		baseUrl: z.string().url(),
+		size: z.number().int().min(1).max(2048),
+		defaultImage: z.enum(gravatarDefaultImages),
+		rating: z.enum(gravatarRatings),
+		forceDefault: z.boolean(),
+	}),
+	display: z.object({
+		shape: z.enum(avatarDisplayShapes),
+		sizePx: z.number().int().min(16).max(256),
+	}),
 });
 
 export const securitySettingsSchema = z.object({
@@ -153,12 +171,7 @@ export const systemSettingsSchema = z.object({
 			sources: z.array(z.string().url()),
 		}),
 	}),
-	avatar: z.object({
-		gravatar: z.object({
-			enabled: z.boolean(),
-			baseUrl: z.string().url(),
-		}),
-	}),
+	avatar: avatarSettingsSchema,
 	antiSpam: z.object({
 		akismet: z.object({
 			apiKey: z.string().optional(),
@@ -291,6 +304,14 @@ export const defaultSystemSettings: SystemSettings = {
 		gravatar: {
 			enabled: false,
 			baseUrl: "https://gravatar.com/avatar",
+			size: 80,
+			defaultImage: "404",
+			rating: "g",
+			forceDefault: false,
+		},
+		display: {
+			shape: "circle",
+			sizePx: 40,
 		},
 	},
 	antiSpam: {

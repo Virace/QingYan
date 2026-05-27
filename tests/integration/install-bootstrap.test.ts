@@ -390,6 +390,14 @@ function installCompleteConfigPayload(databaseFile: string) {
 				gravatar: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar/",
+					size: 160,
+					defaultImage: "identicon",
+					rating: "pg",
+					forceDefault: true,
+				},
+				display: {
+					shape: "rounded",
+					sizePx: 48,
 				},
 			},
 		},
@@ -471,6 +479,24 @@ describe("install bootstrap", () => {
 		);
 		expect(response.body).toContain(
 			'data-path="systemSettings.avatar.gravatar.baseUrl"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.gravatar.size"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.gravatar.defaultImage"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.gravatar.rating"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.gravatar.forceDefault"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.display.shape"',
+		);
+		expect(response.body).toContain(
+			'data-path="systemSettings.avatar.display.sizePx"',
 		);
 		expect(response.body).toContain("Gravatar Base URL");
 		expect(response.body).toContain("Akismet");

@@ -477,6 +477,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			"gravatar.baseUrl",
 			"https://cravatar.cn/avatar",
 		);
+		await systemSettings.upsert("avatar", "gravatar.size", 160);
+		await systemSettings.upsert("avatar", "gravatar.defaultImage", "identicon");
+		await systemSettings.upsert("avatar", "gravatar.rating", "pg");
+		await systemSettings.upsert("avatar", "gravatar.forceDefault", true);
+		await systemSettings.upsert("avatar", "display.shape", "rounded");
+		await systemSettings.upsert("avatar", "display.sizePx", 48);
 
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
@@ -537,7 +543,18 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json().comments[0].author).toMatchObject({
 			name: "Alice",
-			gravatarUrl: `https://cravatar.cn/avatar/${aliceHash}?s=80&d=404&r=g`,
+			gravatarUrl: `https://cravatar.cn/avatar/${aliceHash}?s=160&d=identicon&r=pg&f=y`,
+		});
+		expect(response.json().commentDisplay).toMatchObject({
+			avatar: {
+				gravatar: {
+					enabled: true,
+				},
+				display: {
+					shape: "rounded",
+					sizePx: 48,
+				},
+			},
 		});
 		expect(response.json().comments[0].author.avatarUrl).toBeUndefined();
 	});

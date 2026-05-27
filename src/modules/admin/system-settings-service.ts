@@ -152,6 +152,14 @@ export class AdminSystemSettingsService {
 						gravatar: {
 							enabled: input.avatar.gravatar.enabled,
 							baseUrl: normalizeGravatarBaseUrl(input.avatar.gravatar.baseUrl),
+							size: input.avatar.gravatar.size,
+							defaultImage: input.avatar.gravatar.defaultImage,
+							rating: input.avatar.gravatar.rating,
+							forceDefault: input.avatar.gravatar.forceDefault,
+						},
+						display: {
+							shape: input.avatar.display.shape,
+							sizePx: input.avatar.display.sizePx,
 						},
 					}
 				: current.avatar,

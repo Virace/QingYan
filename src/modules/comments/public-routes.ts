@@ -151,6 +151,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				result.commentBundle.viewerVoteMap,
 				result.commentDisplay,
 			),
+			commentDisplay: result.publicCommentDisplay,
 			viewer: result.viewer,
 			pageMetrics: result.pageMetrics,
 			pageFeedback: result.pageFeedback,
@@ -216,6 +217,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 				result.commentBundle.viewerVoteMap,
 				result.commentDisplay,
 			),
+			commentDisplay: result.publicCommentDisplay,
 		};
 	});
 

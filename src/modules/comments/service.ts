@@ -56,6 +56,19 @@ function buildCommentDisplayOptions(input: {
 	};
 }
 
+function buildPublicCommentDisplay(
+	options: ReturnType<typeof buildCommentDisplayOptions>,
+) {
+	return {
+		avatar: {
+			gravatar: {
+				enabled: options.avatar.gravatar.enabled,
+			},
+			display: options.avatar.display,
+		},
+	};
+}
+
 function buildEmptyThread(input: {
 	siteId: number;
 	pageKey: string;
@@ -122,12 +135,20 @@ export class CommentsService {
 		const publicVerifiedAuthor = input.verifiedAuthorSession
 			? toPublicVerifiedAuthorViewer(verifiedAuthor)
 			: undefined;
-		const avatarSettings = this.loadAvatarSettings
+		const avatarSettings: SystemSettings["avatar"] = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
 					gravatar: {
 						enabled: false,
 						baseUrl: "https://gravatar.com/avatar",
+						size: 80,
+						defaultImage: "404",
+						rating: "g",
+						forceDefault: false,
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
 					},
 				};
 		const visitor = existingThread
@@ -194,6 +215,12 @@ export class CommentsService {
 						challenge: null,
 					};
 
+		const commentDisplay = buildCommentDisplayOptions({
+			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
+			avatar: avatarSettings,
+			verifiedAuthor,
+		});
+
 		return {
 			capability: buildCapability(settings ?? undefined),
 			commentForm: buildCommentForm({
@@ -216,11 +243,8 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay: buildCommentDisplayOptions({
-				metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
-				avatar: avatarSettings,
-				verifiedAuthor,
-			}),
+			commentDisplay,
+			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay),
 			viewer: {
 				...(publicVerifiedAuthor
 					? { verifiedAuthor: publicVerifiedAuthor }
@@ -282,14 +306,28 @@ export class CommentsService {
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
 		);
-		const avatarSettings = this.loadAvatarSettings
+		const avatarSettings: SystemSettings["avatar"] = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
 					gravatar: {
 						enabled: false,
 						baseUrl: "https://gravatar.com/avatar",
+						size: 80,
+						defaultImage: "404",
+						rating: "g",
+						forceDefault: false,
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
 					},
 				};
+
+		const commentDisplay = buildCommentDisplayOptions({
+			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
+			avatar: avatarSettings,
+			verifiedAuthor,
+		});
 
 		return {
 			thread:
@@ -308,11 +346,8 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay: buildCommentDisplayOptions({
-				metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
-				avatar: avatarSettings,
-				verifiedAuthor,
-			}),
+			commentDisplay,
+			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay),
 			visitorKey: visitor?.created ? visitor.visitorKey : undefined,
 		};
 	}

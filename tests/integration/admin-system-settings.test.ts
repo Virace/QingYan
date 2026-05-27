@@ -56,6 +56,14 @@ describe("admin system settings", () => {
 				gravatar: {
 					enabled: false,
 					baseUrl: "https://gravatar.com/avatar",
+					size: 80,
+					defaultImage: "404",
+					rating: "g",
+					forceDefault: false,
+				},
+				display: {
+					shape: "circle",
+					sizePx: 40,
 				},
 			},
 			antiSpam: {
@@ -389,6 +397,14 @@ describe("admin system settings", () => {
 					gravatar: {
 						enabled: true,
 						baseUrl: "https://cravatar.cn/avatar/",
+						size: 160,
+						defaultImage: "identicon",
+						rating: "pg",
+						forceDefault: true,
+					},
+					display: {
+						shape: "rounded",
+						sizePx: 48,
 					},
 				},
 			},
@@ -400,6 +416,14 @@ describe("admin system settings", () => {
 				gravatar: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar",
+					size: 160,
+					defaultImage: "identicon",
+					rating: "pg",
+					forceDefault: true,
+				},
+				display: {
+					shape: "rounded",
+					sizePx: 48,
 				},
 			},
 		});
@@ -422,6 +446,14 @@ describe("admin system settings", () => {
 				gravatar: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar",
+					size: 160,
+					defaultImage: "identicon",
+					rating: "pg",
+					forceDefault: true,
+				},
+				display: {
+					shape: "rounded",
+					sizePx: 48,
 				},
 			},
 		});

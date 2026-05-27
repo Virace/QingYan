@@ -5,7 +5,10 @@ import {
 	siteModerationSettingsSchema,
 } from "../comments/moderation-types";
 import { isSafeHttpUrl, normalizeOrigin } from "../shared/url-policy";
-import { securitySettingsSchema } from "../system-settings/definitions";
+import {
+	avatarSettingsSchema,
+	securitySettingsSchema,
+} from "../system-settings/definitions";
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
 const commentMetadataSchema = z.object({
@@ -303,14 +306,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			}),
 		})
 		.optional(),
-	avatar: z
-		.object({
-			gravatar: z.object({
-				enabled: z.boolean(),
-				baseUrl: z.string().url(),
-			}),
-		})
-		.optional(),
+	avatar: avatarSettingsSchema.optional(),
 	antiSpam: z
 		.object({
 			akismet: z.object({

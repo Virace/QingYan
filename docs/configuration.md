@@ -203,6 +203,12 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 - `ipRegion.ipv6.sources`
 - `avatar.gravatar.enabled`
 - `avatar.gravatar.baseUrl`
+- `avatar.gravatar.size`
+- `avatar.gravatar.defaultImage`
+- `avatar.gravatar.rating`
+- `avatar.gravatar.forceDefault`
+- `avatar.display.shape`
+- `avatar.display.sizePx`
 
 首装会写入完整默认系统设置，其中后台会话有效期默认 `4320` 分钟（3 天）。若安装表单或 `QINGYAN_ADMIN_SESSION_TTL_MINUTES` 提供了会话有效期，会写入 `system_settings.admin.session.ttlMinutes`，正常运行后可继续在 Admin Console 修改。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
@@ -218,8 +224,16 @@ Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 t
 
 - `avatar.gravatar.enabled`：是否启用后端 Gravatar URL 生成，默认关闭。
 - `avatar.gravatar.baseUrl`：Gravatar 头像 endpoint base URL，默认 `https://gravatar.com/avatar`，可替换为镜像地址。
+- `avatar.gravatar.size`：Gravatar `s` 参数，范围 1 到 2048，默认 `80`。
+- `avatar.gravatar.defaultImage`：Gravatar `d` 参数，默认 `404`。可选值为 `404`、`mp`、`identicon`、`monsterid`、`wavatar`、`retro`、`robohash`、`blank`。
+- `avatar.gravatar.rating`：Gravatar `r` 参数，默认 `g`。可选值为 `g`、`pg`、`r`、`x`。
+- `avatar.gravatar.forceDefault`：是否追加 `f=y` 强制使用默认图，默认关闭。
+- `avatar.display.shape`：给前端评论组件的头像形状建议，可选 `circle`、`rounded`、`square`，默认 `circle`。
+- `avatar.display.sizePx`：给前端评论组件的头像显示尺寸建议，范围 16 到 256，默认 `40`。
 
 启用后，公开评论作者结构可能包含 `author.gravatarUrl`。该字段只表示第三方 Gravatar 图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件。字段名故意不使用 `avatarUrl`，避免误解为后端提供通用头像系统。没有该字段、Gravatar 图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。
+
+公开评论 bootstrap/thread 响应还会返回 `commentDisplay.avatar`，其中 `gravatar.enabled` 表示当前是否可能返回 `author.gravatarUrl`，`display.shape` 和 `display.sizePx` 是前端展示头像容器时的建议。`display.sizePx` 不必等于 Gravatar 请求的 `avatar.gravatar.size`；例如可以请求 160px 图像并以 40px 显示。
 
 ### 普通评论者资料记忆推荐集成
 

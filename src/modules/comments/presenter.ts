@@ -1,6 +1,7 @@
 import { buildGravatarUrl } from "./gravatar";
 import { sanitizeOptionalSafeHttpUrl } from "../shared/url-policy";
 import type { CommentAuthorIdentity } from "./verified-author";
+import type { SystemSettings } from "../system-settings/definitions";
 
 interface PresenterCommentInput {
 	id: string;
@@ -39,12 +40,7 @@ interface PresenterOptions {
 	device?: {
 		enabled: boolean;
 	};
-	avatar?: {
-		gravatar: {
-			enabled: boolean;
-			baseUrl: string;
-		};
-	};
+	avatar?: SystemSettings["avatar"];
 	verifiedAuthor?: {
 		enabled: boolean;
 		badgeLabel: string;
@@ -147,6 +143,10 @@ export function presentComments(
 			emailHash: comment.authorEmailHash,
 			baseUrl:
 				options?.avatar?.gravatar.baseUrl ?? "https://gravatar.com/avatar",
+			size: options?.avatar?.gravatar.size,
+			defaultImage: options?.avatar?.gravatar.defaultImage,
+			rating: options?.avatar?.gravatar.rating,
+			forceDefault: options?.avatar?.gravatar.forceDefault,
 		});
 		const author: Record<string, unknown> = {
 			name: comment.authorName,

@@ -35,8 +35,28 @@ describe("comment Gravatar URL", () => {
 				enabled: true,
 				emailHash: aliceHash,
 				baseUrl: "https://gravatar.com/avatar",
+				size: 80,
+				defaultImage: "404",
+				rating: "g",
+				forceDefault: false,
 			}),
 		).toBe(`https://gravatar.com/avatar/${aliceHash}?s=80&d=404&r=g`);
+	});
+
+	it("builds Gravatar URL with configured public parameters", () => {
+		expect(
+			buildGravatarUrl({
+				enabled: true,
+				emailHash: aliceHash,
+				baseUrl: "https://gravatar.com/avatar",
+				size: 160,
+				defaultImage: "identicon",
+				rating: "pg",
+				forceDefault: true,
+			}),
+		).toBe(
+			`https://gravatar.com/avatar/${aliceHash}?s=160&d=identicon&r=pg&f=y`,
+		);
 	});
 
 	it("normalizes a mirror base URL before building", () => {
@@ -48,6 +68,10 @@ describe("comment Gravatar URL", () => {
 				enabled: true,
 				emailHash: aliceHash,
 				baseUrl: "https://cravatar.cn/avatar/",
+				size: 80,
+				defaultImage: "404",
+				rating: "g",
+				forceDefault: false,
 			}),
 		).toBe(`https://cravatar.cn/avatar/${aliceHash}?s=80&d=404&r=g`);
 	});

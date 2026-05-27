@@ -960,6 +960,12 @@ export function SystemSettingsPage() {
 		return <EmptyState text="加载中" />;
 	}
 
+	const updateAvatar = (avatar: AdminSystemSettings["avatar"]) =>
+		setDraft({
+			...draft,
+			avatar,
+		});
+
 	return (
 		<Card>
 			<CardHeader>
@@ -1489,13 +1495,11 @@ export function SystemSettingsPage() {
 									className={inputClass}
 									value={String(draft.avatar.gravatar.enabled)}
 									onChange={(event) =>
-										setDraft({
-											...draft,
-											avatar: {
-												gravatar: {
-													...draft.avatar.gravatar,
-													enabled: event.target.value === "true",
-												},
+										updateAvatar({
+											...draft.avatar,
+											gravatar: {
+												...draft.avatar.gravatar,
+												enabled: event.target.value === "true",
 											},
 										})
 									}
@@ -1508,19 +1512,141 @@ export function SystemSettingsPage() {
 								<Input
 									value={draft.avatar.gravatar.baseUrl}
 									onChange={(event) =>
-										setDraft({
-											...draft,
-											avatar: {
-												gravatar: {
-													...draft.avatar.gravatar,
-													baseUrl: event.target.value,
-												},
+										updateAvatar({
+											...draft.avatar,
+											gravatar: {
+												...draft.avatar.gravatar,
+												baseUrl: event.target.value,
 											},
 										})
 									}
 								/>
 								<span className="text-xs text-muted-foreground">
 									国内部署可填写镜像地址，例如 https://cravatar.cn/avatar。
+								</span>
+							</Field>
+							<Field label="Gravatar 图片尺寸">
+								<Input
+									type="number"
+									min={1}
+									max={2048}
+									value={draft.avatar.gravatar.size}
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											gravatar: {
+												...draft.avatar.gravatar,
+												size: Number(event.target.value),
+											},
+										})
+									}
+								/>
+								<span className="text-xs text-muted-foreground">
+									对应 Gravatar s 参数，范围 1 到 2048。
+								</span>
+							</Field>
+							<Field label="默认图片">
+								<select
+									className={inputClass}
+									value={draft.avatar.gravatar.defaultImage}
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											gravatar: {
+												...draft.avatar.gravatar,
+												defaultImage: event.target
+													.value as AdminSystemSettings["avatar"]["gravatar"]["defaultImage"],
+											},
+										})
+									}
+								>
+									<option value="404">404</option>
+									<option value="mp">Mystery Person</option>
+									<option value="identicon">Identicon</option>
+									<option value="monsterid">MonsterID</option>
+									<option value="wavatar">Wavatar</option>
+									<option value="retro">Retro</option>
+									<option value="robohash">Robohash</option>
+									<option value="blank">Blank</option>
+								</select>
+							</Field>
+							<Field label="允许评级">
+								<select
+									className={inputClass}
+									value={draft.avatar.gravatar.rating}
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											gravatar: {
+												...draft.avatar.gravatar,
+												rating: event.target
+													.value as AdminSystemSettings["avatar"]["gravatar"]["rating"],
+											},
+										})
+									}
+								>
+									<option value="g">G</option>
+									<option value="pg">PG</option>
+									<option value="r">R</option>
+									<option value="x">X</option>
+								</select>
+							</Field>
+							<Field label="强制默认图">
+								<select
+									className={inputClass}
+									value={String(draft.avatar.gravatar.forceDefault)}
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											gravatar: {
+												...draft.avatar.gravatar,
+												forceDefault: event.target.value === "true",
+											},
+										})
+									}
+								>
+									<option value="false">关闭</option>
+									<option value="true">开启</option>
+								</select>
+							</Field>
+							<Field label="头像形状">
+								<select
+									className={inputClass}
+									value={draft.avatar.display.shape}
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											display: {
+												...draft.avatar.display,
+												shape: event.target
+													.value as AdminSystemSettings["avatar"]["display"]["shape"],
+											},
+										})
+									}
+								>
+									<option value="circle">圆形</option>
+									<option value="rounded">圆角</option>
+									<option value="square">方形</option>
+								</select>
+							</Field>
+							<Field label="显示尺寸">
+								<Input
+									type="number"
+									min={16}
+									max={256}
+									value={draft.avatar.display.sizePx}
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											display: {
+												...draft.avatar.display,
+												sizePx: Number(event.target.value),
+											},
+										})
+									}
+								/>
+								<span className="text-xs text-muted-foreground">
+									前端建议显示尺寸，范围 16 到 256。
 								</span>
 							</Field>
 						</div>

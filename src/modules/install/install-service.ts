@@ -459,6 +459,7 @@ function buildSystemSettingsInput(input: unknown): SystemSettings {
 				...settings.avatar.gravatar,
 				baseUrl: normalizeGravatarBaseUrl(settings.avatar.gravatar.baseUrl),
 			},
+			display: settings.avatar.display,
 		},
 	};
 }
