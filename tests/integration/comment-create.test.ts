@@ -195,7 +195,15 @@ describe("POST /qingyan/api/comments", () => {
 		expect(response.json()).toMatchObject({
 			comment: {
 				status: "pending",
-				message: "评论已提交，等待审核。",
+				content: {
+					raw: "hello qingyan",
+					html: "<p>hello qingyan</p>",
+				},
+				author: {
+					name: "Alice",
+				},
+				viewerVote: null,
+				children: [],
 			},
 			thread: {
 				commentCount: 1,

@@ -970,18 +970,16 @@ components:
       type: object
       required:
         - siteKey
-        - pageKey
         - pageTitle
-        - pageUrl
         - parentCommentId
         - author
         - content
-        - options
       properties:
         siteKey:
           type: string
         pageKey:
           type: string
+          description: Optional legacy/dev page identity. Normal public requests derive the page key from the allowed Referer header.
         pageTitle:
           type: string
         pageUrl:
@@ -990,7 +988,7 @@ components:
               format: uri
             - type: string
               pattern: ^/
-          description: 完整页面 URL，或去掉域名后的页面路径
+          description: Optional legacy/dev page URL. Normal public requests derive and store the page path from the allowed Referer header.
         parentCommentId:
           type:
             - string
@@ -1015,7 +1013,7 @@ components:
               type: string
         options:
           type: object
-          required: [notifyOnReply]
+          description: Optional reserved create options. `notifyOnReply` is accepted for forward compatibility but has no public behavior yet.
           properties:
             notifyOnReply:
               type: boolean
@@ -1028,16 +1026,7 @@ components:
       required: [comment, thread]
       properties:
         comment:
-          type: object
-          required: [id, status, message]
-          properties:
-            id:
-              type: string
-            status:
-              type: string
-              enum: [pending, approved]
-            message:
-              type: string
+          $ref: '#/components/schemas/PublicComment'
         thread:
           type: object
           required: [commentCount, rootCommentCount]

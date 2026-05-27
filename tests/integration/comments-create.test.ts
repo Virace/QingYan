@@ -99,6 +99,101 @@ async function createCustomTestApp(options?: {
 }
 
 describe("POST /qingyan/api/comments", () => {
+	it("returns a full public comment when an approved visitor comment is created", async () => {
+		const fixture = await createCustomTestApp({
+			require: ["nickname", "email"],
+			moderation: serializeSiteModerationSettings({
+				mode: "none",
+				provider: "none",
+				akismet: {
+					failPolicy: "pending",
+					discardBlatantSpam: false,
+				},
+			}),
+		});
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/posts/create-full-response/",
+				"user-agent": "create-full-response-test",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageTitle: "Create Full Response",
+				parentCommentId: null,
+				author: {
+					name: "Visitor",
+					email: "visitor@example.com",
+					website: "https://visitor.example.com",
+				},
+				content: {
+					raw: "hello <qingyan>",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			comment: {
+				parentId: null,
+				author: {
+					name: "Visitor",
+					website: "https://visitor.example.com/",
+				},
+				content: {
+					raw: "hello <qingyan>",
+					html: "<p>hello &lt;qingyan&gt;</p>",
+				},
+				status: "approved",
+				isPinned: false,
+				isFolded: false,
+				replyCount: 0,
+				voteUp: 0,
+				voteDown: 0,
+				viewerVote: null,
+				children: [],
+			},
+			thread: {
+				commentCount: 1,
+				rootCommentCount: 1,
+			},
+		});
+		expect(response.json().comment.id).toEqual(expect.any(String));
+		expect(response.json().comment.createdAt).toEqual(expect.any(String));
+		expect(response.json().comment.updatedAt).toEqual(expect.any(String));
+	});
+
+	it("accepts create payloads without unused options", async () => {
+		const fixture = await createCustomTestApp({ require: [] });
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/posts/no-options/",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageTitle: "No Options",
+				parentCommentId: null,
+				author: {},
+				content: { raw: "no options" },
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comment).toMatchObject({
+			content: { raw: "no options" },
+		});
+	});
+
 	it("creates page threads from Referer when legacy comment payload identity is stale", async () => {
 		const fixture = await createCustomTestApp({
 			require: [],
@@ -400,7 +495,19 @@ describe("POST /qingyan/api/comments", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			comment: {
+				parentId: null,
+				author: {
+					name: "Virace",
+					website: "https://fangyuan.example.com/about",
+					badge: { label: "楼主" },
+				},
+				content: {
+					raw: "verified comment",
+					html: "<p>verified comment</p>",
+				},
 				status: "approved",
+				viewerVote: null,
+				children: [],
 			},
 		});
 

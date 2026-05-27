@@ -38,9 +38,12 @@ export const createCommentBodySchema = z.object({
 	content: z.object({
 		raw: z.string().min(1),
 	}),
-	options: z.object({
-		notifyOnReply: z.boolean().default(false),
-	}),
+	options: z
+		.object({
+			notifyOnReply: z.boolean().default(false),
+		})
+		.optional()
+		.default({ notifyOnReply: false }),
 	captcha: inlineCaptchaPayloadSchema.optional().nullable(),
 });
 

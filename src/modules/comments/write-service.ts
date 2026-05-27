@@ -268,6 +268,12 @@ export class CommentsWriteService {
 			status,
 			moderation,
 		});
+		const createdComment = await this.writeRepository.getCommentById(
+			created.commentId,
+		);
+		if (!createdComment) {
+			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
@@ -305,6 +311,7 @@ export class CommentsWriteService {
 
 		return {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
+			createdComment,
 			comment: {
 				id: created.commentId,
 				status: resolvePublicCommentStatus(status),

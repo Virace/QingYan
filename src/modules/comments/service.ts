@@ -34,7 +34,7 @@ function buildCapability(settings?: {
 	};
 }
 
-function buildCommentDisplayOptions(input: {
+export function buildCommentDisplayOptions(input: {
 	metadata?: CommentMetadataSettings;
 	avatar: SystemSettings["avatar"];
 	verifiedAuthor: VerifiedAuthorSettings;

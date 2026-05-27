@@ -52,6 +52,13 @@ describe("openapi docs", () => {
 				title: "QingYan API",
 			},
 		});
+		const spec = json.json();
+		expect(
+			spec.components.schemas.CreateCommentResponse.properties.comment.$ref,
+		).toBe("#/components/schemas/PublicComment");
+		expect(spec.components.schemas.CreateCommentRequest.required).not.toContain(
+			"options",
+		);
 
 		expect(docs.statusCode).toBe(200);
 		expect(docs.headers["content-type"]).toContain("text/html");
