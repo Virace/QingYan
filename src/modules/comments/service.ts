@@ -1,8 +1,8 @@
 import { ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
 import {
-	defaultCommentMetadata,
 	type CommentMetadataSettings,
+	defaultCommentMetadata,
 } from "../shared/site-settings-defaults";
 import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
@@ -11,8 +11,8 @@ import type { CommentsRepository } from "./repository";
 import {
 	mergeStaffDisplaySettings,
 	mergeVerifiedAuthorSettings,
-	toPublicVerifiedAuthorViewer,
 	type StaffDisplaySettings,
+	toPublicVerifiedAuthorViewer,
 	type VerifiedAuthorSettings,
 } from "./verified-author";
 
@@ -181,6 +181,16 @@ export class CommentsService {
 				pageThreadId: existingThread.id,
 				visitorId: visitor.id,
 				pageKey: input.pageKey,
+				userAgent: input.userAgent,
+			});
+		}
+		if (!existingThread) {
+			await this.repository.recordPendingPageView({
+				siteKey: site.siteKey,
+				pageKey: input.pageKey,
+				pageUrl: input.pageUrl ?? input.pageKey,
+				visitorKey: input.visitorKey,
+				ip: input.ip,
 				userAgent: input.userAgent,
 			});
 		}

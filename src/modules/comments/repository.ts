@@ -7,20 +7,23 @@ import {
 	commentRequestMetadata,
 	comments,
 	pageFeedbackRecords,
-	pageViewSessions,
 	pageThreads,
+	pageViewSessions,
+	pendingPageCandidates,
+	pendingPageViewSessions,
+	sitePageRegistry,
 	siteSettings,
 	visitors,
 	voteRecords,
 } from "../../db/schema";
+import { normalizePagePath } from "../shared/page-url";
 import type {
 	RegisteredSiteRecord,
 	SiteRegistry,
 } from "../shared/site-registry";
-import { normalizePagePath } from "../shared/page-url";
 import {
-	defaultCommentMetadata,
 	type CommentMetadataSettings,
+	defaultCommentMetadata,
 } from "../shared/site-settings-defaults";
 
 export interface VisitorRecord {
@@ -208,6 +211,7 @@ export class CommentsRepository {
 
 	public async getOrCreatePageThread(input: ThreadRecordInput) {
 		const normalizedPageUrl = normalizePagePath(input.pageUrl);
+		const nowIso = new Date().toISOString();
 
 		await this.db
 			.insert(pageThreads)
@@ -222,7 +226,28 @@ export class CommentsRepository {
 				set: {
 					pageTitle: input.pageTitle,
 					pageUrl: normalizedPageUrl,
-					updatedAt: new Date().toISOString(),
+					updatedAt: nowIso,
+				},
+			});
+		await this.db
+			.insert(sitePageRegistry)
+			.values({
+				siteId: input.siteId,
+				pageKey: input.pageKey,
+				pageUrl: normalizedPageUrl ?? input.pageKey,
+				title: input.pageTitle,
+				status: "active",
+				lastSeenAt: nowIso,
+				updatedAt: nowIso,
+			})
+			.onConflictDoUpdate({
+				target: [sitePageRegistry.siteId, sitePageRegistry.pageKey],
+				set: {
+					pageUrl: normalizedPageUrl ?? input.pageKey,
+					title: input.pageTitle,
+					status: "active",
+					lastSeenAt: nowIso,
+					updatedAt: nowIso,
 				},
 			});
 
@@ -318,6 +343,80 @@ export class CommentsRepository {
 				updatedAt: nowIso,
 			})
 			.where(eq(pageThreads.id, input.pageThreadId));
+	}
+
+	public async recordPendingPageView(input: {
+		siteKey: string;
+		pageKey: string;
+		pageUrl: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+		windowMs?: number;
+	}) {
+		const nowIso = new Date().toISOString();
+		await this.db
+			.insert(pendingPageCandidates)
+			.values({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				pageUrl: input.pageUrl,
+				hitCount: 1,
+				lastSeenAt: nowIso,
+				updatedAt: nowIso,
+			})
+			.onConflictDoUpdate({
+				target: [pendingPageCandidates.siteKey, pendingPageCandidates.pageKey],
+				set: {
+					pageUrl: input.pageUrl,
+					hitCount: sql`${pendingPageCandidates.hitCount} + 1`,
+					lastSeenAt: nowIso,
+					updatedAt: nowIso,
+				},
+			});
+
+		const fingerprint = createHash("sha256")
+			.update(
+				`${input.visitorKey ?? input.ip ?? "anonymous"}:${input.pageKey}:${input.userAgent ?? ""}`,
+			)
+			.digest("hex");
+		const [existingSession] = await this.db
+			.select()
+			.from(pendingPageViewSessions)
+			.where(
+				and(
+					eq(pendingPageViewSessions.siteKey, input.siteKey),
+					eq(pendingPageViewSessions.pageKey, input.pageKey),
+					eq(pendingPageViewSessions.fingerprint, fingerprint),
+				),
+			)
+			.limit(1);
+
+		if (!existingSession) {
+			await this.db.insert(pendingPageViewSessions).values({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				fingerprint,
+				lastSeenAt: nowIso,
+				updatedAt: nowIso,
+			});
+			return;
+		}
+
+		const windowMs = input.windowMs ?? 60 * 60 * 1000;
+		const lastSeenAt = new Date(existingSession.lastSeenAt).getTime();
+		if (!Number.isNaN(lastSeenAt) && Date.now() - lastSeenAt < windowMs) {
+			return;
+		}
+
+		await this.db
+			.update(pendingPageViewSessions)
+			.set({
+				hitCount: sql`${pendingPageViewSessions.hitCount} + 1`,
+				lastSeenAt: nowIso,
+				updatedAt: nowIso,
+			})
+			.where(eq(pendingPageViewSessions.id, existingSession.id));
 	}
 
 	public async listPublicComments(input: PublicCommentsQueryInput) {

@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	comments,
 	pageThreads,
 	pageViewSessions,
+	sitePageRegistry,
 	sites,
 	visitors,
 } from "../../src/db/schema";
@@ -55,6 +56,22 @@ describe("admin pages", () => {
 			pageLikeCount: 2,
 			updatedAt: "2026-04-17T10:00:00.000Z",
 		});
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "post:welcome",
+			pageUrl: "/posts/welcome/",
+			title: "Welcome",
+			status: "active",
+			updatedAt: "2026-04-17T10:00:00.000Z",
+		});
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "post:registry-only",
+			pageUrl: "/posts/registry-only/",
+			title: "Registry Only",
+			status: "active",
+			updatedAt: "2026-04-18T10:00:00.000Z",
+		});
 		const [thread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
@@ -99,6 +116,16 @@ describe("admin pages", () => {
 		expect(response.json()).toMatchObject({
 			items: [
 				{
+					pageKey: "post:registry-only",
+					pageTitle: "Registry Only",
+					pageUrl: "http://localhost:4321/posts/registry-only/",
+					commentCount: 0,
+					rootCommentCount: 0,
+					pageLikeCount: 0,
+					visitorCount: 0,
+					userCount: 0,
+				},
+				{
 					pageKey: "post:welcome",
 					pageTitle: "Welcome",
 					pageUrl: "http://localhost:4321/posts/welcome/",
@@ -110,7 +137,7 @@ describe("admin pages", () => {
 				},
 			],
 			pagination: {
-				totalCount: 1,
+				totalCount: 2,
 			},
 		});
 	});

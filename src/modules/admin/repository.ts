@@ -18,18 +18,19 @@ import {
 	blacklistRules,
 	commentRequestMetadata,
 	comments,
-	pageViewSessions,
 	pageThreads,
+	pageViewSessions,
+	sitePageRegistry,
 	siteSettings,
 	sites,
 	visitors,
 } from "../../db/schema";
-import { resolvePublicPageUrl } from "../shared/page-url";
+import { buildExternalAvatarUrl } from "../comments/gravatar";
+import type { CommentStatus } from "../comments/moderation-types";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
+import { resolvePublicPageUrl } from "../shared/page-url";
 import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
-import type { CommentStatus } from "../comments/moderation-types";
-import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { SystemSettings } from "../system-settings/definitions";
 
 function parseStringArray(payload?: string | null): string[] {
@@ -449,39 +450,67 @@ export class AdminRepository {
 		const searchValue = input.search ? `%${input.search}%` : undefined;
 		const rows = await this.db
 			.select({
-				id: pageThreads.id,
-				siteId: pageThreads.siteId,
+				id: sitePageRegistry.id,
+				pageThreadId: pageThreads.id,
+				siteId: sitePageRegistry.siteId,
 				siteKey: sites.siteKey,
 				allowedOriginsJson: sites.allowedOriginsJson,
-				pageKey: pageThreads.pageKey,
-				pageTitle: pageThreads.pageTitle,
-				pageUrl: pageThreads.pageUrl,
+				pageKey: sitePageRegistry.pageKey,
+				pageTitle: sitePageRegistry.title,
+				pageUrl: sitePageRegistry.pageUrl,
+				threadPageTitle: pageThreads.pageTitle,
+				threadPageUrl: pageThreads.pageUrl,
 				commentCount: pageThreads.commentCount,
 				rootCommentCount: pageThreads.rootCommentCount,
 				pageLikeCount: pageThreads.pageLikeCount,
-				updatedAt: pageThreads.updatedAt,
+				updatedAt: sitePageRegistry.updatedAt,
 			})
-			.from(pageThreads)
-			.innerJoin(sites, eq(sites.id, pageThreads.siteId))
+			.from(sitePageRegistry)
+			.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
+			.leftJoin(
+				pageThreads,
+				and(
+					eq(pageThreads.siteId, sitePageRegistry.siteId),
+					eq(pageThreads.pageKey, sitePageRegistry.pageKey),
+				),
+			)
 			.where(
 				and(
-					input.siteId ? eq(pageThreads.siteId, input.siteId) : undefined,
+					input.siteId ? eq(sitePageRegistry.siteId, input.siteId) : undefined,
 					searchValue
 						? or(
-								like(pageThreads.pageKey, searchValue),
-								like(pageThreads.pageTitle, searchValue),
-								like(pageThreads.pageUrl, searchValue),
+								like(sitePageRegistry.pageKey, searchValue),
+								like(sitePageRegistry.title, searchValue),
+								like(sitePageRegistry.pageUrl, searchValue),
 							)
 						: undefined,
 				),
 			)
-			.orderBy(desc(pageThreads.updatedAt));
+			.orderBy(desc(sitePageRegistry.updatedAt));
 
-		const pageThreadIds = rows.map((row) => row.id);
+		const pageThreadIds = rows
+			.map((row) => row.pageThreadId)
+			.filter((id): id is number => id !== null);
 		if (pageThreadIds.length === 0) {
 			return {
-				items: [],
-				totalCount: 0,
+				items: rows
+					.slice(input.offset, input.offset + input.limit)
+					.map((row) => ({
+						siteKey: row.siteKey,
+						pageKey: row.pageKey,
+						pageTitle: row.pageTitle ?? row.threadPageTitle,
+						pageUrl: resolvePublicPageUrl(
+							row.pageUrl ?? row.threadPageUrl,
+							parseStringArray(row.allowedOriginsJson),
+						),
+						commentCount: 0,
+						rootCommentCount: 0,
+						pageLikeCount: 0,
+						updatedAt: row.updatedAt,
+						visitorCount: 0,
+						userCount: 0,
+					})),
+				totalCount: rows.length,
 			};
 		}
 
@@ -518,17 +547,23 @@ export class AdminRepository {
 				.map((row) => ({
 					siteKey: row.siteKey,
 					pageKey: row.pageKey,
-					pageTitle: row.pageTitle,
+					pageTitle: row.pageTitle ?? row.threadPageTitle,
 					pageUrl: resolvePublicPageUrl(
-						row.pageUrl,
+						row.pageUrl ?? row.threadPageUrl,
 						parseStringArray(row.allowedOriginsJson),
 					),
-					commentCount: row.commentCount,
-					rootCommentCount: row.rootCommentCount,
-					pageLikeCount: row.pageLikeCount,
+					commentCount: row.commentCount ?? 0,
+					rootCommentCount: row.rootCommentCount ?? 0,
+					pageLikeCount: row.pageLikeCount ?? 0,
 					updatedAt: row.updatedAt,
-					visitorCount: visitorCounts.get(row.id) ?? 0,
-					userCount: userCounts.get(row.id) ?? 0,
+					visitorCount:
+						row.pageThreadId === null
+							? 0
+							: (visitorCounts.get(row.pageThreadId) ?? 0),
+					userCount:
+						row.pageThreadId === null
+							? 0
+							: (userCounts.get(row.pageThreadId) ?? 0),
 				})),
 			totalCount: rows.length,
 		};

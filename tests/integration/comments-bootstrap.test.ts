@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	commentRequestMetadata,
 	comments,
 	pageFeedbackRecords,
 	pageThreads,
+	pendingPageCandidates,
+	pendingPageViewSessions,
 	siteSettings,
 	sites,
 	visitors,
@@ -263,7 +265,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		]);
 	});
 
-	it("does not create page threads for unknown bootstrap pages", async () => {
+	it("records pending PV without creating page threads for unknown bootstrap pages", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -292,6 +294,26 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(response.json().thread).toBeUndefined();
 		expect(response.json().comments).toEqual([]);
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		const candidates = await fixture.app.db
+			.select()
+			.from(pendingPageCandidates);
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0]).toMatchObject({
+			siteKey: "fangyuan",
+			pageKey: "posts/unknown-bootstrap/",
+			pageUrl: "/posts/unknown-bootstrap/",
+			hitCount: 1,
+			status: "pending",
+		});
+		const pendingSessions = await fixture.app.db
+			.select()
+			.from(pendingPageViewSessions);
+		expect(pendingSessions).toHaveLength(1);
+		expect(pendingSessions[0]).toMatchObject({
+			siteKey: "fangyuan",
+			pageKey: "posts/unknown-bootstrap/",
+			hitCount: 1,
+		});
 	});
 
 	it("rejects bootstrap requests without Referer", async () => {

@@ -140,6 +140,51 @@ CREATE TABLE `page_threads` (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `page_threads_site_page_key_idx` ON `page_threads` (`site_id`,`page_key`);--> statement-breakpoint
 CREATE INDEX `page_threads_site_id_idx` ON `page_threads` (`site_id`);--> statement-breakpoint
+CREATE TABLE `site_page_registry` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_id` integer NOT NULL,
+	`page_key` text NOT NULL,
+	`page_url` text NOT NULL,
+	`title` text,
+	`status` text DEFAULT 'active' NOT NULL,
+	`first_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`trashed_at` text,
+	`deleted_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `site_page_registry_site_page_key_idx` ON `site_page_registry` (`site_id`,`page_key`);--> statement-breakpoint
+CREATE INDEX `site_page_registry_site_status_idx` ON `site_page_registry` (`site_id`,`status`);--> statement-breakpoint
+CREATE TABLE `pending_page_candidates` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_key` text NOT NULL,
+	`page_key` text NOT NULL,
+	`page_url` text NOT NULL,
+	`first_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`hit_count` integer DEFAULT 0 NOT NULL,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`last_reject_reason` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `pending_page_candidates_site_page_key_idx` ON `pending_page_candidates` (`site_key`,`page_key`);--> statement-breakpoint
+CREATE INDEX `pending_page_candidates_site_status_idx` ON `pending_page_candidates` (`site_key`,`status`);--> statement-breakpoint
+CREATE TABLE `pending_page_view_sessions` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_key` text NOT NULL,
+	`page_key` text NOT NULL,
+	`fingerprint` text NOT NULL,
+	`first_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`hit_count` integer DEFAULT 1 NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `pending_page_view_sessions_page_fingerprint_idx` ON `pending_page_view_sessions` (`site_key`,`page_key`,`fingerprint`);--> statement-breakpoint
+CREATE INDEX `pending_page_view_sessions_site_page_idx` ON `pending_page_view_sessions` (`site_key`,`page_key`);--> statement-breakpoint
 CREATE TABLE `admin_sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`token_hash` text NOT NULL,

@@ -6,6 +6,7 @@ export * from "./comments";
 export * from "./engagement";
 export * from "./import-jobs";
 export * from "./maintenance-jobs";
+export * from "./page-registry";
 export * from "./page-threads";
 export * from "./security";
 export * from "./settings";

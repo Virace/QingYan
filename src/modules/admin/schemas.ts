@@ -98,6 +98,11 @@ export const adminPagesQuerySchema = adminCollectionQuerySchema;
 export const adminUsersQuerySchema = adminCollectionQuerySchema;
 export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
 
+export const adminPendingPageApproveBodySchema = z.object({
+	siteKey: z.string().min(1),
+	pageKey: z.string().min(1),
+});
+
 export const adminSiteCreateBodySchema = z.object({
 	siteKey: z
 		.string()

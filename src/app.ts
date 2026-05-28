@@ -1,17 +1,17 @@
 import Fastify, { type FastifyInstance } from "fastify";
-
-import type { AppRuntimeOptions } from "./config/runtime-options";
 import { joinPublicPath } from "./config/public-path";
+import type { AppRuntimeOptions } from "./config/runtime-options";
 import type { AppConfig } from "./config/types";
 import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
-import { createPasswordHash } from "./modules/admin/password-hash";
-import { adminOverviewRoutes } from "./modules/admin/overview-routes";
 import { adminOpsRoutes } from "./modules/admin/ops-routes";
+import { adminOverviewRoutes } from "./modules/admin/overview-routes";
+import { adminPageRegistryRoutes } from "./modules/admin/page-registry-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
+import { createPasswordHash } from "./modules/admin/password-hash";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
-import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
+import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminUsersRoutes } from "./modules/admin/users-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
@@ -263,6 +263,9 @@ export async function buildApp(
 	});
 	await app.register(adminPagesRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/pages"),
+	});
+	await app.register(adminPageRegistryRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/page-registry"),
 	});
 	await app.register(adminUsersRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/users"),

@@ -1,7 +1,7 @@
-import Database from "better-sqlite3";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { applyInitialMigration } from "../support/test-fixtures";
@@ -51,6 +51,9 @@ describe("initial migration", () => {
 					"audit_logs",
 					"import_batches",
 					"import_records",
+					"site_page_registry",
+					"pending_page_candidates",
+					"pending_page_view_sessions",
 				]),
 			);
 		} finally {
@@ -162,6 +165,15 @@ describe("initial migration", () => {
 			}>;
 			const maintenanceJobColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(maintenance_jobs)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const pageRegistryColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(site_page_registry)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const pendingCandidateColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(pending_page_candidates)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const pendingViewSessionColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(pending_page_view_sessions)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
 
 			expect(commentsColumns.map((column) => column.name)).not.toEqual(
@@ -289,6 +301,50 @@ describe("initial migration", () => {
 					"created_at",
 					"started_at",
 					"finished_at",
+					"updated_at",
+				]),
+			);
+			expect(pageRegistryColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"site_id",
+					"page_key",
+					"page_url",
+					"title",
+					"status",
+					"first_seen_at",
+					"last_seen_at",
+					"trashed_at",
+					"deleted_at",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(pendingCandidateColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"site_key",
+					"page_key",
+					"page_url",
+					"first_seen_at",
+					"last_seen_at",
+					"hit_count",
+					"status",
+					"last_reject_reason",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(pendingViewSessionColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"site_key",
+					"page_key",
+					"fingerprint",
+					"first_seen_at",
+					"last_seen_at",
+					"hit_count",
+					"created_at",
 					"updated_at",
 				]),
 			);
