@@ -160,6 +160,9 @@ describe("initial migration", () => {
 				pk: number;
 				type: string;
 			}>;
+			const maintenanceJobColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(maintenance_jobs)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
 
 			expect(commentsColumns.map((column) => column.name)).not.toEqual(
 				expect.arrayContaining([
@@ -272,6 +275,21 @@ describe("initial migration", () => {
 						notnull: 1,
 						type: "TEXT",
 					}),
+				]),
+			);
+			expect(maintenanceJobColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"type",
+					"status",
+					"scope_json",
+					"progress_json",
+					"result_json",
+					"error_json",
+					"created_at",
+					"started_at",
+					"finished_at",
+					"updated_at",
 				]),
 			);
 		} finally {

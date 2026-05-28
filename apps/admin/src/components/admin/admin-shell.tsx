@@ -147,7 +147,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 					/>
 				);
 			case "ops":
-				return <OpsPage />;
+				return <OpsPage siteKey={activeSiteKey} />;
 			case "settings":
 				return <SiteSettingsPage siteKey={activeSiteKey} />;
 			case "system":

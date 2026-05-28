@@ -265,6 +265,19 @@ CREATE TABLE `ip_region_update_runs` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );--> statement-breakpoint
+CREATE TABLE `maintenance_jobs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`type` text NOT NULL,
+	`status` text NOT NULL,
+	`scope_json` text NOT NULL,
+	`progress_json` text,
+	`result_json` text,
+	`error_json` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`started_at` text,
+	`finished_at` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);--> statement-breakpoint
 CREATE TABLE `admin_bootstrap_state` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`console_path` text NOT NULL,

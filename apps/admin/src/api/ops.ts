@@ -94,3 +94,85 @@ export function fetchUpdateCheck() {
 		method: "POST",
 	});
 }
+
+export type IpVersion = "v4" | "v6";
+export type MaintenanceJobStatus =
+	| "queued"
+	| "running"
+	| "succeeded"
+	| "failed"
+	| "cancelled";
+
+export interface MaintenanceJob {
+	id: string;
+	type: "ip_region_update" | "comment_ip_refresh";
+	status: MaintenanceJobStatus;
+	scope: unknown;
+	progress: unknown;
+	result: unknown;
+	error: unknown;
+	createdAt: string;
+	startedAt: string | null;
+	finishedAt: string | null;
+	updatedAt: string;
+}
+
+export interface IpRegionMaintenanceStatus {
+	databases: Array<{
+		ipVersion: IpVersion;
+		filePath: string;
+		fileHash: string;
+		sourceUrl: string | null;
+		cachePolicy: string;
+		activatedAt: string;
+		updatedAt: string;
+	}>;
+	recentRuns: Array<{
+		ipVersion: IpVersion;
+		status: string;
+		refreshedComments: number;
+		errorMessage: string | null;
+		createdAt: string;
+	}>;
+	commentMetadata: {
+		totalWithIp: number;
+		missingLocation: number;
+		failedLocation: number;
+	};
+	recentJobs: MaintenanceJob[];
+}
+
+export function fetchIpRegionMaintenanceStatus() {
+	return requestJson<IpRegionMaintenanceStatus>("/api/admin/ops/ip-region");
+}
+
+export function createIpRegionUpdateJob(input: { ipVersions: IpVersion[] }) {
+	return requestJson<{ job: MaintenanceJob }>(
+		"/api/admin/ops/ip-region/update",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function createCommentIpRefreshJob(input: {
+	scope: "missing" | "failed" | "stale" | "all";
+	ipVersions: IpVersion[];
+	siteKey?: string;
+	batchSize?: number;
+}) {
+	return requestJson<{ job: MaintenanceJob }>(
+		"/api/admin/ops/comment-ip/refresh",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function fetchMaintenanceJob(jobId: string) {
+	return requestJson<{ job: MaintenanceJob | null }>(
+		`/api/admin/ops/maintenance-jobs/${encodeURIComponent(jobId)}`,
+	);
+}

@@ -1,11 +1,17 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 
 import {
+	createCommentIpRefreshJob,
+	createIpRegionUpdateJob,
+	fetchIpRegionMaintenanceStatus,
+	fetchMaintenanceJob,
 	fetchOpsStatus,
 	fetchUpdateCheck,
 	fetchUpdatePlan,
 	fetchUpgradeDryRun,
+	type IpVersion,
 	type UpdateCheckState,
 	type UpdatePlan,
 } from "@/api/ops";
@@ -19,6 +25,23 @@ import {
 } from "@/components/ui/card";
 
 import { EmptyState } from "./admin-ui";
+import { inputClass } from "./admin-ui";
+
+type CommentIpRefreshScope = "missing" | "failed" | "stale" | "all";
+type IpVersionSelection = "all" | IpVersion;
+type SiteSelection = "current" | "all";
+
+function shortHash(hash?: string | null) {
+	return hash ? `${hash.slice(0, 10)}...` : "-";
+}
+
+function IpVersionLabel({ value }: { value: IpVersion }) {
+	return <span>{value === "v4" ? "IPv4" : "IPv6"}</span>;
+}
+
+function selectedIpVersions(selection: IpVersionSelection): IpVersion[] {
+	return selection === "all" ? ["v4", "v6"] : [selection];
+}
 
 function StateText({ state }: { state?: string }) {
 	if (state === "normal_current") {
@@ -98,10 +121,25 @@ function UpdatePlanPanel({ plan }: { plan?: UpdatePlan }) {
 	);
 }
 
-export function OpsPage() {
+export function OpsPage({ siteKey }: { siteKey: string }) {
+	const [refreshScope, setRefreshScope] =
+		useState<CommentIpRefreshScope>("missing");
+	const [refreshIpVersion, setRefreshIpVersion] =
+		useState<IpVersionSelection>("all");
+	const [refreshSite, setRefreshSite] = useState<SiteSelection>("current");
 	const statusQuery = useQuery({
 		queryKey: ["admin", "ops", "status"],
 		queryFn: fetchOpsStatus,
+	});
+	const ipRegionQuery = useQuery({
+		queryKey: ["admin", "ops", "ip-region"],
+		queryFn: fetchIpRegionMaintenanceStatus,
+		refetchInterval: (query) =>
+			query.state.data?.recentJobs.some(
+				(job) => job.status === "queued" || job.status === "running",
+			)
+				? 2000
+				: false,
 	});
 	const updatePlanMutation = useMutation({
 		mutationFn: fetchUpdatePlan,
@@ -112,9 +150,32 @@ export function OpsPage() {
 	const upgradeDryRunMutation = useMutation({
 		mutationFn: fetchUpgradeDryRun,
 	});
+	const ipRegionUpdateMutation = useMutation({
+		mutationFn: createIpRegionUpdateJob,
+		onSuccess: () => void ipRegionQuery.refetch(),
+	});
+	const commentIpRefreshMutation = useMutation({
+		mutationFn: createCommentIpRefreshJob,
+		onSuccess: () => void ipRegionQuery.refetch(),
+	});
 	const status = statusQuery.data;
 	const updatePlan = updatePlanMutation.data;
 	const updateCheck = updateCheckMutation.data ?? status?.update.check;
+	const activeJob = ipRegionQuery.data?.recentJobs.find(
+		(job) => job.status === "queued" || job.status === "running",
+	);
+	const activeJobQuery = useQuery({
+		queryKey: ["admin", "ops", "maintenance-job", activeJob?.id],
+		queryFn: () => fetchMaintenanceJob(activeJob?.id ?? ""),
+		enabled: Boolean(activeJob?.id),
+		refetchInterval: activeJob ? 2000 : false,
+	});
+	const currentJob = activeJobQuery.data?.job ?? activeJob;
+	const refreshDisabled =
+		commentIpRefreshMutation.isPending ||
+		Boolean(activeJob) ||
+		!ipRegionQuery.data?.databases.length ||
+		(refreshSite === "current" && !siteKey);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -242,6 +303,173 @@ export function OpsPage() {
 							</pre>
 						</div>
 					) : null}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-lg">IP 地域与评论地址维护</CardTitle>
+					<CardDescription>
+						检查 IP 库更新，并刷新评论 IP 派生信息；不会修改评论内容或审核状态。
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="grid gap-4">
+					<div className="grid gap-3 md:grid-cols-3">
+						{(["v4", "v6"] as const).map((version) => {
+							const state = ipRegionQuery.data?.databases.find(
+								(item) => item.ipVersion === version,
+							);
+							return (
+								<div key={version} className="rounded-md border p-3">
+									<p className="text-xs text-muted-foreground">
+										<IpVersionLabel value={version} />
+									</p>
+									<p className="mt-1 text-sm font-medium">
+										{state ? "已激活" : "未激活"}
+									</p>
+									<p className="mt-1 truncate text-xs text-muted-foreground">
+										Hash {shortHash(state?.fileHash)}
+									</p>
+									<p className="truncate text-xs text-muted-foreground">
+										{state?.filePath ?? "-"}
+									</p>
+								</div>
+							);
+						})}
+						<div className="rounded-md border p-3">
+							<p className="text-xs text-muted-foreground">评论地址</p>
+							<p className="mt-1 text-sm font-medium">
+								{ipRegionQuery.data?.commentMetadata.totalWithIp ?? "-"} 条有 IP
+							</p>
+							<p className="text-xs text-muted-foreground">
+								缺失{" "}
+								{ipRegionQuery.data?.commentMetadata.missingLocation ?? "-"} /
+								失败 {ipRegionQuery.data?.commentMetadata.failedLocation ?? "-"}
+							</p>
+						</div>
+					</div>
+					<div className="flex flex-wrap gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							disabled={ipRegionUpdateMutation.isPending || Boolean(activeJob)}
+							onClick={() =>
+								ipRegionUpdateMutation.mutate({ ipVersions: ["v4"] })
+							}
+						>
+							<RefreshCwIcon data-icon="inline-start" />
+							检查 IPv4
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={ipRegionUpdateMutation.isPending || Boolean(activeJob)}
+							onClick={() =>
+								ipRegionUpdateMutation.mutate({ ipVersions: ["v6"] })
+							}
+						>
+							<RefreshCwIcon data-icon="inline-start" />
+							检查 IPv6
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={ipRegionUpdateMutation.isPending || Boolean(activeJob)}
+							onClick={() =>
+								ipRegionUpdateMutation.mutate({ ipVersions: ["v4", "v6"] })
+							}
+						>
+							<RefreshCwIcon data-icon="inline-start" />
+							检查全部
+						</Button>
+					</div>
+					<div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">刷新范围</span>
+							<select
+								className={inputClass}
+								value={refreshScope}
+								onChange={(event) =>
+									setRefreshScope(event.target.value as CommentIpRefreshScope)
+								}
+							>
+								<option value="missing">缺失地址</option>
+								<option value="failed">失败地址</option>
+								<option value="stale">过期地址</option>
+								<option value="all">全部地址</option>
+							</select>
+						</label>
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">IP 版本</span>
+							<select
+								className={inputClass}
+								value={refreshIpVersion}
+								onChange={(event) =>
+									setRefreshIpVersion(event.target.value as IpVersionSelection)
+								}
+							>
+								<option value="all">全部</option>
+								<option value="v4">IPv4</option>
+								<option value="v6">IPv6</option>
+							</select>
+						</label>
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">站点范围</span>
+							<select
+								className={inputClass}
+								value={refreshSite}
+								onChange={(event) =>
+									setRefreshSite(event.target.value as SiteSelection)
+								}
+							>
+								<option value="current">当前站点</option>
+								<option value="all">全部站点</option>
+							</select>
+						</label>
+						<Button
+							type="button"
+							className="self-end"
+							disabled={refreshDisabled}
+							onClick={() =>
+								commentIpRefreshMutation.mutate({
+									scope: refreshScope,
+									ipVersions: selectedIpVersions(refreshIpVersion),
+									siteKey: refreshSite === "current" ? siteKey : undefined,
+									batchSize: 500,
+								})
+							}
+						>
+							刷新评论 IP 信息
+						</Button>
+					</div>
+					{currentJob ? (
+						<div className="rounded-md border p-3 text-sm">
+							<p className="font-medium">当前维护任务</p>
+							<p className="mt-1 text-xs text-muted-foreground">
+								{currentJob.type} / {currentJob.status} / {currentJob.updatedAt}
+							</p>
+							{currentJob.progress ? (
+								<pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-xs">
+									{JSON.stringify(currentJob.progress, null, 2)}
+								</pre>
+							) : null}
+						</div>
+					) : null}
+					{ipRegionQuery.data?.recentJobs.length ? (
+						<div className="rounded-md border p-3 text-sm">
+							<p className="font-medium">最近维护任务</p>
+							<ul className="mt-2 grid gap-1">
+								{ipRegionQuery.data.recentJobs.slice(0, 5).map((job) => (
+									<li key={job.id} className="text-xs text-muted-foreground">
+										{job.type} / {job.status} / {job.updatedAt}
+									</li>
+								))}
+							</ul>
+						</div>
+					) : null}
+					<p className="text-xs text-muted-foreground">
+						该操作只更新 IP/UA 派生信息，不修改评论内容或审核状态。
+					</p>
 				</CardContent>
 			</Card>
 
