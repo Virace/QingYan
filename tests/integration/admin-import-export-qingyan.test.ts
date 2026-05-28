@@ -83,6 +83,10 @@ function qingyanExportPayload() {
 					visitorKey: "visitor_exported",
 					ipHash: "ip_hash",
 					userAgentHash: "ua_hash",
+					lastIp: "203.0.113.80",
+					lastUserAgent: "QingYan Export Browser",
+					lastSeenPageKey: "post/imported",
+					lastSeenPageUrl: "/post/imported",
 					timestamps: {
 						createdAt: "2026-05-05T00:00:00.000Z",
 						lastSeenAt: "2026-05-05T00:00:00.000Z",
@@ -229,6 +233,23 @@ describe("admin import/export QingYan routes", () => {
 			);
 		fixture.app.sqlite
 			.prepare(
+				`INSERT INTO visitors (
+					site_id, visitor_key, ip_hash, user_agent_hash,
+					last_ip, last_user_agent, last_seen_page_key, last_seen_page_url
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				1,
+				"visitor_exported",
+				"ip_hash",
+				"ua_hash",
+				"203.0.113.80",
+				"QingYan Export Browser",
+				"post/exported",
+				"/post/exported",
+			);
+		fixture.app.sqlite
+			.prepare(
 				`INSERT INTO comment_request_metadata (
 					comment_id, author_ip, author_user_agent, ip_country, ip_region,
 					ip_city, ip_isp, ip_location_raw, ip_location_source
@@ -326,6 +347,15 @@ describe("admin import/export QingYan routes", () => {
 					{
 						pageKey: "post/exported",
 						pageUrl: "/post/exported",
+					},
+				],
+				visitors: [
+					{
+						visitorKey: "visitor_exported",
+						lastIp: "203.0.113.80",
+						lastUserAgent: "QingYan Export Browser",
+						lastSeenPageKey: "post/exported",
+						lastSeenPageUrl: "/post/exported",
 					},
 				],
 				comments: [
@@ -491,6 +521,24 @@ describe("admin import/export QingYan routes", () => {
 		expect(importedSpam).toMatchObject({
 			status: "spam",
 			content_raw: "imported spam",
+		});
+		const visitor = fixture.app.sqlite
+			.prepare(
+				`SELECT last_ip, last_user_agent, last_seen_page_key, last_seen_page_url
+				FROM visitors
+				WHERE visitor_key = ?`,
+			)
+			.get("visitor_exported") as {
+			last_ip: string | null;
+			last_user_agent: string | null;
+			last_seen_page_key: string | null;
+			last_seen_page_url: string | null;
+		};
+		expect(visitor).toMatchObject({
+			last_ip: "203.0.113.80",
+			last_user_agent: "QingYan Export Browser",
+			last_seen_page_key: "post/imported",
+			last_seen_page_url: "/post/imported",
 		});
 		const feedbackCount = fixture.app.sqlite
 			.prepare("SELECT COUNT(*) AS value FROM page_feedback_records")

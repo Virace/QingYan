@@ -154,6 +154,10 @@ export class QingYanExportService {
 			visitorKey: row.visitor_key,
 			ipHash: row.ip_hash ?? null,
 			userAgentHash: row.user_agent_hash ?? null,
+			lastIp: row.last_ip ?? null,
+			lastUserAgent: row.last_user_agent ?? null,
+			lastSeenPageKey: row.last_seen_page_key ?? null,
+			lastSeenPageUrl: row.last_seen_page_url ?? null,
 			timestamps: {
 				createdAt: row.created_at,
 				lastSeenAt: row.last_seen_at,

@@ -151,8 +151,11 @@ export class CommentsRepository {
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
+		pageKey?: string;
+		pageUrl?: string;
 	}): Promise<VisitorRecord> {
 		const visitorKey = input.visitorKey ?? createVisitorKey();
+		const nowIso = new Date().toISOString();
 		const [existingVisitor] = await this.db
 			.select()
 			.from(visitors)
@@ -170,7 +173,11 @@ export class CommentsRepository {
 				.set({
 					ipHash: hashOptionalValue(input.ip),
 					userAgentHash: hashOptionalValue(input.userAgent),
-					lastSeenAt: new Date().toISOString(),
+					lastIp: input.ip,
+					lastUserAgent: input.userAgent,
+					lastSeenPageKey: input.pageKey,
+					lastSeenPageUrl: input.pageUrl,
+					lastSeenAt: nowIso,
 				})
 				.where(eq(visitors.id, existingVisitor.id));
 
@@ -186,6 +193,11 @@ export class CommentsRepository {
 			visitorKey,
 			ipHash: hashOptionalValue(input.ip),
 			userAgentHash: hashOptionalValue(input.userAgent),
+			lastIp: input.ip,
+			lastUserAgent: input.userAgent,
+			lastSeenPageKey: input.pageKey,
+			lastSeenPageUrl: input.pageUrl,
+			lastSeenAt: nowIso,
 		});
 
 		const [createdVisitor] = await this.db

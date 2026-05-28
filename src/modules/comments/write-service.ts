@@ -86,6 +86,8 @@ export class CommentsWriteService {
 			visitorKey: input.visitorKey,
 			ip: input.ip,
 			userAgent: input.userAgent,
+			pageKey: input.pageKey,
+			pageUrl: input.pageUrl,
 		});
 		const thread = await this.readRepository.getOrCreatePageThread({
 			siteId: site.id,
@@ -361,6 +363,7 @@ export class CommentsWriteService {
 			visitorKey: input.visitorKey,
 			ip: input.ip,
 			userAgent: input.userAgent,
+			pageKey: input.pageKey,
 		});
 		const thread = await this.readRepository.getOrCreatePageThread({
 			siteId: site.id,

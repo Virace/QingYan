@@ -649,14 +649,20 @@ export class QingYanImportService {
 			const result = this.sqlite
 				.prepare(
 					`INSERT INTO visitors (
-						site_id, visitor_key, ip_hash, user_agent_hash, last_seen_at, created_at
-					) VALUES (?, ?, ?, ?, ?, ?)`,
+						site_id, visitor_key, ip_hash, user_agent_hash,
+						last_ip, last_user_agent, last_seen_page_key, last_seen_page_url,
+						last_seen_at, created_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				)
 				.run(
 					batch.site_id,
 					visitor.visitorKey,
 					visitor.ipHash,
 					visitor.userAgentHash,
+					visitor.lastIp ?? null,
+					visitor.lastUserAgent ?? null,
+					visitor.lastSeenPageKey ?? null,
+					visitor.lastSeenPageUrl ?? null,
 					visitor.timestamps?.lastSeenAt ?? new Date().toISOString(),
 					visitor.timestamps?.createdAt ?? new Date().toISOString(),
 				);

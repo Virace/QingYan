@@ -47,6 +47,8 @@ export class PageFeedbackService {
 			visitorKey: input.visitorKey,
 			ip: input.ip,
 			userAgent: input.userAgent,
+			pageKey: input.pageKey,
+			pageUrl: input.pageUrl,
 		});
 		const thread = await this.commentsRepository.getOrCreatePageThread({
 			siteId: site.id,

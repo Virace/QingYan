@@ -172,6 +172,10 @@ function qingyanRestorePayload() {
 					visitorKey: "visitor_exported",
 					ipHash: "ip_hash",
 					userAgentHash: "ua_hash",
+					lastIp: "203.0.113.80",
+					lastUserAgent: "QingYan Export Browser",
+					lastSeenPageKey: "post/imported",
+					lastSeenPageUrl: "/post/imported",
 					timestamps: {
 						createdAt: "2026-05-05T00:00:00.000Z",
 						lastSeenAt: "2026-05-05T00:00:00.000Z",

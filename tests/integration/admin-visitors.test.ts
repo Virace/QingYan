@@ -126,4 +126,49 @@ describe("admin visitors", () => {
 			},
 		});
 	});
+
+	it("lists request metadata for visitors without comments", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const bootstrap = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:visitor-metadata&pageTitle=Visitor%20Metadata",
+			headers: {
+				referer: "http://localhost:4321/posts/visitor-metadata/",
+				"x-forwarded-for": "203.0.113.90",
+				"user-agent": "QingYan Metadata Browser",
+			},
+		});
+		expect(bootstrap.statusCode).toBe(200);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/visitors?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			items: [
+				{
+					commentCount: 0,
+					pageCount: 0,
+					ips: [],
+					userAgents: [],
+					lastIp: "127.0.0.1",
+					lastUserAgent: "QingYan Metadata Browser",
+					lastSeenPageKey: "posts/visitor-metadata/",
+					lastSeenPageUrl: "/posts/visitor-metadata/",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+	});
 });

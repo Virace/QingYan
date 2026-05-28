@@ -301,6 +301,10 @@ CREATE TABLE `visitors` (
 	`visitor_key` text NOT NULL,
 	`ip_hash` text,
 	`user_agent_hash` text,
+	`last_ip` text,
+	`last_user_agent` text,
+	`last_seen_page_key` text,
+	`last_seen_page_url` text,
 	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action

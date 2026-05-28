@@ -704,6 +704,10 @@ export class AdminRepository {
 				siteId: visitors.siteId,
 				siteKey: sites.siteKey,
 				visitorKey: visitors.visitorKey,
+				lastIp: visitors.lastIp,
+				lastUserAgent: visitors.lastUserAgent,
+				lastSeenPageKey: visitors.lastSeenPageKey,
+				lastSeenPageUrl: visitors.lastSeenPageUrl,
 				lastSeenAt: visitors.lastSeenAt,
 				createdAt: visitors.createdAt,
 			})
@@ -797,6 +801,10 @@ export class AdminRepository {
 				return {
 					siteKey: row.siteKey,
 					visitorKey: row.visitorKey,
+					lastIp: row.lastIp,
+					lastUserAgent: row.lastUserAgent,
+					lastSeenPageKey: row.lastSeenPageKey,
+					lastSeenPageUrl: row.lastSeenPageUrl,
 					lastSeenAt: row.lastSeenAt,
 					createdAt: row.createdAt,
 					commentCount: commentStats?.commentCount ?? 0,

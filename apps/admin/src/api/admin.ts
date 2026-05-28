@@ -185,6 +185,10 @@ export interface AdminVisitor {
 	emails: string[];
 	ips: string[];
 	userAgents: string[];
+	lastIp: string | null;
+	lastUserAgent: string | null;
+	lastSeenPageKey: string | null;
+	lastSeenPageUrl: string | null;
 	blacklist: {
 		visitor: boolean;
 	};

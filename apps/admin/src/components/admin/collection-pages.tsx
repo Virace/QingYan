@@ -1532,11 +1532,20 @@ export function VisitorsPage({
 										{visitor.emails.join(", ") || "无邮箱"}
 									</p>
 									<p className="text-xs text-muted-foreground">
-										IP {visitor.ips.join(", ") || "-"}
+										IP {visitor.ips.join(", ") || visitor.lastIp || "-"}
 									</p>
 									<p className="max-w-xl truncate text-xs text-muted-foreground">
-										UA {visitor.userAgents.join(" | ") || "-"}
+										UA{" "}
+										{visitor.userAgents.join(" | ") ||
+											visitor.lastUserAgent ||
+											"-"}
 									</p>
+									{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
+										<p className="max-w-xl truncate text-xs text-muted-foreground">
+											最近页面{" "}
+											{visitor.lastSeenPageKey ?? visitor.lastSeenPageUrl}
+										</p>
+									) : null}
 								</div>
 								<div className="flex flex-wrap gap-2">
 									<Badge variant="secondary">评论 {visitor.commentCount}</Badge>

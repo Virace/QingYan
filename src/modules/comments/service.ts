@@ -176,15 +176,16 @@ export class CommentsService {
 		const publicApiSettings = this.loadPublicApiSettings
 			? await this.loadPublicApiSettings()
 			: { advisoryFields: { enabled: false } };
-		const visitor =
-			existingThread && pageInteractive
-				? await this.repository.getOrCreateVisitor({
-						siteId: site.id,
-						visitorKey: input.visitorKey,
-						ip: input.ip,
-						userAgent: input.userAgent,
-					})
-				: undefined;
+		const visitor = pageInteractive
+			? await this.repository.getOrCreateVisitor({
+					siteId: site.id,
+					visitorKey: input.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl,
+				})
+			: undefined;
 		if (existingThread && visitor && pageInteractive) {
 			await this.repository.recordPageView({
 				pageThreadId: existingThread.id,
@@ -198,7 +199,7 @@ export class CommentsService {
 				siteKey: site.siteKey,
 				pageKey: input.pageKey,
 				pageUrl: input.pageUrl ?? input.pageKey,
-				visitorKey: input.visitorKey,
+				visitorKey: visitor?.visitorKey ?? input.visitorKey,
 				ip: input.ip,
 				userAgent: input.userAgent,
 			});
@@ -325,6 +326,8 @@ export class CommentsService {
 					visitorKey: input.visitorKey,
 					ip: input.ip,
 					userAgent: input.userAgent,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl,
 				})
 			: undefined;
 		const commentBundle =

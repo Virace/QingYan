@@ -73,6 +73,10 @@ export const qingyanExportSchema = z.object({
 					visitorKey: z.string().min(1),
 					ipHash: z.string().nullable().optional(),
 					userAgentHash: z.string().nullable().optional(),
+					lastIp: z.string().nullable().optional(),
+					lastUserAgent: z.string().nullable().optional(),
+					lastSeenPageKey: z.string().nullable().optional(),
+					lastSeenPageUrl: z.string().nullable().optional(),
 					timestamps: timestampsSchema.optional(),
 				})
 				.passthrough(),
