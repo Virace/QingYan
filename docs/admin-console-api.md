@@ -484,7 +484,6 @@ Query：
       mode: "none" | "akismet_auto" | "manual_with_akismet" | "manual";
       provider: "none" | "akismet";
       akismet: {
-        blogUrl?: string;
         failPolicy: "pending";
         discardBlatantSpam: boolean;
       };
@@ -604,7 +603,6 @@ AdminSettings
       mode: "none" | "akismet_auto" | "manual_with_akismet" | "manual";
       provider: "none" | "akismet";
       akismet: {
-        blogUrl?: string;
         failPolicy: "pending";
         discardBlatantSpam: boolean;
       };

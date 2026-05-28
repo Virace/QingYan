@@ -711,20 +711,25 @@ components:
           enum: [country, province, city]
     CommentDisplayDevice:
       type: object
-      required: [browser, os, type, icon]
+      required: [browser, browserVersion, os, osVersion, type]
       properties:
         browser:
           type: string
           enum: [chrome, edge, firefox, safari, opera, samsung, wechat, unknown]
+        browserVersion:
+          type:
+            - string
+            - 'null'
         os:
           type: string
           enum: [windows, macos, ios, android, linux, unknown]
+        osVersion:
+          type:
+            - string
+            - 'null'
         type:
           type: string
           enum: [desktop, mobile, tablet, bot, unknown]
-        icon:
-          type: string
-          enum: [chrome, edge, firefox, safari, android, apple, windows, linux, bot, unknown]
     CommentDisplayMeta:
       type: object
       description: Public display metadata derived from stored author IP and authorUserAgent when the site enables metadata collection. Raw author IP and User-Agent values are not exposed by public comment responses.

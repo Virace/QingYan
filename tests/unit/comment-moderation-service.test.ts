@@ -29,6 +29,29 @@ function systemSettings(apiKey = "akismet-key"): SystemSettings {
 }
 
 describe("ModerationService", () => {
+	it("uses the caller supplied site origin as the Akismet blog URL", async () => {
+		let blog: string | undefined;
+		const service = new ModerationService({
+			akismetClient: {
+				commentCheck: async (input) => {
+					blog = input.blog;
+					return { verdict: "ham", checkedAt: "2026-05-26T10:00:00.000Z" };
+				},
+			},
+			loadSystemSettings: async () => systemSettings(),
+		});
+
+		await service.reviewComment({
+			siteModeration: settings("akismet_auto"),
+			blog: "http://localhost:4321",
+			userIp: "203.0.113.10",
+			commentType: "comment",
+			commentContent: "normal",
+		});
+
+		expect(blog).toBe("http://localhost:4321");
+	});
+
 	it("maps non-Akismet modes without calling Akismet", async () => {
 		let calls = 0;
 		const service = new ModerationService({

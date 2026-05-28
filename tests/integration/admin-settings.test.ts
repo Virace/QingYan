@@ -118,7 +118,6 @@ describe("admin settings", () => {
 						mode: "manual_with_akismet",
 						provider: "akismet",
 						akismet: {
-							blogUrl: "https://fangyuan.example.com",
 							failPolicy: "pending",
 							discardBlatantSpam: false,
 						},
@@ -173,7 +172,6 @@ describe("admin settings", () => {
 					mode: "manual_with_akismet",
 					provider: "akismet",
 					akismet: {
-						blogUrl: "https://fangyuan.example.com",
 						failPolicy: "pending",
 						discardBlatantSpam: false,
 					},
@@ -250,6 +248,34 @@ describe("admin settings", () => {
 				enabled: false,
 			},
 		});
+	});
+
+	it("rejects legacy per-site Akismet blog URL settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				comments: {
+					moderation: {
+						mode: "manual_with_akismet",
+						provider: "akismet",
+						akismet: {
+							blogUrl: "https://fangyuan.example.com",
+							failPolicy: "pending",
+							discardBlatantSpam: false,
+						},
+					},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
 	});
 
 	it("does not expose the legacy admin settings route", async () => {

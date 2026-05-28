@@ -401,7 +401,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			authorIpCity: "深圳市",
 			authorIpLocationRaw: "中国|广东省|深圳市|移动|CN",
 			authorDeviceBrowser: "chrome",
+			authorDeviceBrowserVersion: "120.0.0.0",
 			authorDeviceOs: "windows",
+			authorDeviceOsVersion: "10",
 			authorDeviceType: "desktop",
 			authorDeviceIcon: "chrome",
 			contentRaw: "metadata",
@@ -435,12 +437,14 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				},
 				device: {
 					browser: "chrome",
+					browserVersion: "120.0.0.0",
 					os: "windows",
+					osVersion: "10",
 					type: "desktop",
-					icon: "chrome",
 				},
 			},
 		});
+		expect(payload.comments[0].displayMeta.device).not.toHaveProperty("icon");
 		const publicBody = JSON.stringify(payload);
 		expect(publicBody).not.toContain("203.0.113.8");
 		expect(publicBody).not.toContain("Mozilla/5.0 metadata-test");

@@ -20,7 +20,6 @@ export interface SiteModerationSettings {
 	mode: ModerationMode;
 	provider: "none" | "akismet";
 	akismet: {
-		blogUrl?: string;
 		failPolicy: "pending";
 		discardBlatantSpam: boolean;
 	};

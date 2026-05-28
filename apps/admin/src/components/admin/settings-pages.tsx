@@ -23,7 +23,14 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-import { EmptyState, Field, inputClass, textareaClass } from "./admin-ui";
+import {
+	EmptyState,
+	Field,
+	SettingsSection,
+	SettingsSubsection,
+	inputClass,
+	textareaClass,
+} from "./admin-ui";
 import {
 	blacklistMatchModeLabels,
 	blacklistTargetTypeLabels,
@@ -287,10 +294,15 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							<option value="approved">直接通过</option>
 						</select>
 					</Field>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">评论审核</p>
+					<SettingsSection
+						title="评论审核"
+						description="审核模式属于当前站点；Akismet 会自动使用站点前端 Origin 作为 Blog URL。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="审核模式">
+							<Field
+								label="审核模式"
+								description="纯手动只进入待审；Akismet 自动审核可直接通过正常评论并拦截垃圾评论。"
+							>
 								<select
 									className={inputClass}
 									value={draft.comments.moderation.mode}
@@ -322,28 +334,8 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									</option>
 								</select>
 							</Field>
-							<Field label="Akismet Blog URL">
-								<Input
-									value={draft.comments.moderation.akismet.blogUrl ?? ""}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												moderation: {
-													...draft.comments.moderation,
-													akismet: {
-														...draft.comments.moderation.akismet,
-														blogUrl: event.target.value || undefined,
-													},
-												},
-											},
-										})
-									}
-								/>
-							</Field>
 						</div>
-					</div>
+					</SettingsSection>
 					<Field label="验证码模式">
 						<select
 							className={inputClass}
@@ -457,8 +449,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							<option value="false">关闭</option>
 						</select>
 					</Field>
-					<div className="flex flex-col gap-2 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">评论身份必填项</p>
+					<SettingsSection
+						title="评论身份必填项"
+						description="控制普通访客提交评论时必须提供哪些身份字段。"
+					>
 						<div className="grid gap-2 md:grid-cols-3">
 							{(["nickname", "email", "website"] as const).map((field) => (
 								<label
@@ -485,9 +479,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 								</label>
 							))}
 						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">可信评论作者</p>
+					</SettingsSection>
+					<SettingsSection
+						title="可信评论作者"
+						description="管理员登录后可作为站点人员回复；公开展示会按这里的 badge 和显示名策略处理。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="启用可信作者">
 								<select
@@ -601,7 +597,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 								</select>
 							</Field>
 						</div>
-					</div>
+					</SettingsSection>
 					<Field label="滥用防护">
 						<select
 							className={inputClass}
@@ -623,7 +619,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							<option value="false">关闭</option>
 						</select>
 					</Field>
-					<Field label="滥用窗口（秒）">
+					<Field
+						label="滥用检测窗口（秒）"
+						description="统计同一 IP 的公开写操作时长窗口。"
+					>
 						<Input
 							type="number"
 							min={1}
@@ -642,7 +641,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							}
 						/>
 					</Field>
-					<Field label="窗口内最大写入">
+					<Field
+						label="窗口内最大写操作次数"
+						description="单位是次数；评论提交、评论投票等公开写操作都会计入。"
+					>
 						<Input
 							type="number"
 							min={1}
@@ -731,10 +733,12 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							}
 						/>
 					</Field>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">请求元数据</p>
+					<SettingsSection
+						title="请求元数据"
+						description="原始 IP 和 User-Agent 只用于后台记录、反滥用和解析；公开接口只返回按开关整理后的地区和设备信息。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="记录 IP">
+							<Field label="记录 IP" description="关闭后不保存原始请求 IP。">
 								<select
 									className={inputClass}
 									value={String(draft.comments.metadata.collectIp)}
@@ -755,7 +759,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									<option value="false">关闭</option>
 								</select>
 							</Field>
-							<Field label="记录 User-Agent">
+							<Field
+								label="记录 User-Agent"
+								description="关闭后不保存原始浏览器 User-Agent，也不解析设备信息。"
+							>
 								<select
 									className={inputClass}
 									value={String(draft.comments.metadata.collectUserAgent)}
@@ -776,7 +783,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									<option value="false">关闭</option>
 								</select>
 							</Field>
-							<Field label="IP 地域解析">
+							<Field
+								label="IP 地域解析"
+								description="公开展示还需要系统设置中的 IP 数据库总开关开启。"
+							>
 								<select
 									className={inputClass}
 									value={String(draft.comments.metadata.ipRegion.enabled)}
@@ -800,7 +810,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									<option value="false">关闭</option>
 								</select>
 							</Field>
-							<Field label="地域精度">
+							<Field
+								label="地域精度"
+								description="控制公开 location.label 的粒度。"
+							>
 								<select
 									className={inputClass}
 									value={draft.comments.metadata.ipRegion.precision}
@@ -828,7 +841,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									<option value="city">城市</option>
 								</select>
 							</Field>
-							<Field label="设备解析">
+							<Field
+								label="设备解析"
+								description="解析为浏览器、系统、设备类型等结构化字段。"
+							>
 								<select
 									className={inputClass}
 									value={String(draft.comments.metadata.device.enabled)}
@@ -852,7 +868,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									<option value="false">关闭</option>
 								</select>
 							</Field>
-							<Field label="前台显示设备信息">
+							<Field
+								label="前台显示设备信息"
+								description="公开接口返回结构化设备字段，图标由前端自行适配。"
+							>
 								<select
 									className={inputClass}
 									value={String(draft.comments.metadata.device.display.enabled)}
@@ -880,7 +899,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 								</select>
 							</Field>
 						</div>
-					</div>
+					</SettingsSection>
 					<Field label="页面点赞">
 						<select
 							className={inputClass}
@@ -1047,13 +1066,15 @@ export function SystemSettingsPage() {
 					<Field label="日志目录">
 						<Input value={draft.logging.directory} readOnly />
 					</Field>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">后台会话</p>
-						<p className="text-sm text-muted-foreground">
-							新登录会话使用这里的有效期；已签发的会话保持原有过期时间。
-						</p>
+					<SettingsSection
+						title="后台会话"
+						description="新登录会话使用这里的有效期；已签发的会话保持原有过期时间。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="Cookie Session 有效期（分钟）">
+							<Field
+								label="Cookie Session 有效期（分钟）"
+								description="默认 4320 分钟，即 3 天。"
+							>
 								<Input
 									type="number"
 									min={1}
@@ -1070,18 +1091,13 @@ export function SystemSettingsPage() {
 										})
 									}
 								/>
-								<span className="text-xs text-muted-foreground">
-									默认 4320 分钟，即 3 天。
-								</span>
 							</Field>
 						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">安全与来源控制</p>
-						<p className="text-sm text-muted-foreground">
-							这些设置保存后立即影响运行中的请求校验；修改后台来源限制前，请确认当前管理后台
-							Origin 已包含在允许列表内。
-						</p>
+					</SettingsSection>
+					<SettingsSection
+						title="安全与来源控制"
+						description="保存后立即影响运行中的请求校验；修改后台来源限制前，请确认当前管理后台 Origin 已包含在允许列表内。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="启用后台 Origin Guard">
 								<select
@@ -1127,7 +1143,10 @@ export function SystemSettingsPage() {
 									<option value="true">允许</option>
 								</select>
 							</Field>
-							<Field label="后台允许 Origin">
+							<Field
+								label="后台允许 Origin"
+								description="每行一个纯 Origin，例如 https://admin.example.com。留空时默认只允许 QingYan publicBaseUrl 的 origin。"
+							>
 								<textarea
 									className={textareaClass}
 									placeholder="留空则使用 QingYan 公开访问地址"
@@ -1150,13 +1169,11 @@ export function SystemSettingsPage() {
 										})
 									}
 								/>
-								<span className="text-xs text-muted-foreground">
-									每行一个纯 Origin，例如
-									https://admin.example.com。留空时默认只允许 QingYan
-									publicBaseUrl 的 origin。
-								</span>
 							</Field>
-							<Field label="启用公开 Origin Guard">
+							<Field
+								label="启用公开 Origin Guard"
+								description="公开写接口会校验请求 Origin 是否匹配站点配置的前端 Origin。"
+							>
 								<select
 									className={inputClass}
 									value={String(draft.security.publicOriginGuard.enabled)}
@@ -1176,9 +1193,6 @@ export function SystemSettingsPage() {
 									<option value="true">启用</option>
 									<option value="false">关闭</option>
 								</select>
-								<span className="text-xs text-muted-foreground">
-									公开写接口会校验请求 Origin 是否匹配站点配置的前端 Origin。
-								</span>
 							</Field>
 							<Field label="允许公开写请求缺失 Origin">
 								<select
@@ -1263,9 +1277,11 @@ export function SystemSettingsPage() {
 								/>
 							</Field>
 						</div>
-						<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
-							<p className="text-sm font-medium md:col-span-2">频率限制</p>
-							<Field label="管理员登录窗口秒">
+						<SettingsSubsection
+							title="频率限制"
+							description="窗口字段单位均为秒；最大请求和最大失败字段单位均为次数。"
+						>
+							<Field label="管理员登录窗口（秒）">
 								<Input
 									type="number"
 									min={1}
@@ -1287,7 +1303,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="管理员登录最大失败">
+							<Field label="管理员登录最大失败次数">
 								<Input
 									type="number"
 									min={1}
@@ -1309,7 +1325,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="管理员失败封禁秒">
+							<Field label="管理员失败封禁时长（秒）">
 								<Input
 									type="number"
 									min={1}
@@ -1331,7 +1347,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="评论创建窗口秒">
+							<Field label="评论创建窗口（秒）">
 								<Input
 									type="number"
 									min={1}
@@ -1353,7 +1369,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="评论创建最大请求">
+							<Field label="评论创建最大请求次数">
 								<Input
 									type="number"
 									min={1}
@@ -1375,7 +1391,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="评论投票窗口秒">
+							<Field label="评论投票窗口（秒）">
 								<Input
 									type="number"
 									min={1}
@@ -1397,7 +1413,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="评论投票最大请求">
+							<Field label="评论投票最大请求次数">
 								<Input
 									type="number"
 									min={1}
@@ -1419,7 +1435,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="验证码验证窗口秒">
+							<Field label="验证码验证窗口（秒）">
 								<Input
 									type="number"
 									min={1}
@@ -1441,7 +1457,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="验证码验证最大失败">
+							<Field label="验证码验证最大失败次数">
 								<Input
 									type="number"
 									min={1}
@@ -1463,7 +1479,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="页面点赞窗口秒">
+							<Field label="页面点赞窗口（秒）">
 								<Input
 									type="number"
 									min={1}
@@ -1485,7 +1501,7 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field label="页面点赞最大请求">
+							<Field label="页面点赞最大请求次数">
 								<Input
 									type="number"
 									min={1}
@@ -1507,14 +1523,12 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">头像 / 外部头像 URL</p>
-						<p className="text-sm text-muted-foreground">
-							后端只返回 author.avatarUrl，不托管、不代理、不缓存头像图片。 图片
-							404 或加载失败时由前端继续显示名称首字母或文字 fallback。
-						</p>
+						</SettingsSubsection>
+					</SettingsSection>
+					<SettingsSection
+						title="头像 / 外部头像 URL"
+						description="后端只返回 author.avatarUrl，不托管、不代理、不缓存头像图片。图片 404 或加载失败时由前端继续显示名称首字母或文字 fallback。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="启用外部头像 URL">
 								<select
@@ -1534,7 +1548,10 @@ export function SystemSettingsPage() {
 									<option value="true">开启</option>
 								</select>
 							</Field>
-							<Field label="头像接口地址">
+							<Field
+								label="头像接口地址"
+								description="例如 https://gravatar.com/avatar 或 https://cravatar.cn/avatar。"
+							>
 								<Input
 									value={draft.avatar.external.baseUrl}
 									onChange={(event) =>
@@ -1547,10 +1564,6 @@ export function SystemSettingsPage() {
 										})
 									}
 								/>
-								<span className="text-xs text-muted-foreground">
-									例如 https://gravatar.com/avatar 或
-									https://cravatar.cn/avatar。
-								</span>
 							</Field>
 							<Field label="邮箱哈希算法">
 								<select
@@ -1571,7 +1584,10 @@ export function SystemSettingsPage() {
 									<option value="md5">MD5</option>
 								</select>
 							</Field>
-							<Field label="头像 URL 参数">
+							<Field
+								label="头像 URL 参数"
+								description="参数不包含开头的 ?，多个参数用 & 分隔。Gravatar 常用 SHA-256 和 s=80&d=404&r=g；Cravatar 当前文档使用 MD5。"
+							>
 								<Input
 									value={draft.avatar.external.query}
 									placeholder="s=80&d=404&r=g"
@@ -1585,11 +1601,6 @@ export function SystemSettingsPage() {
 										})
 									}
 								/>
-								<span className="text-xs text-muted-foreground">
-									参数不包含开头的 ?，多个参数用 & 分隔。常见参考：Gravatar 使用
-									SHA-256 和 s=80&d=404&r=g；Cravatar 当前文档使用 MD5；WeAvatar
-									可按官方文档填写 d=initials、d=color 等参数。
-								</span>
 							</Field>
 							<Field label="头像形状">
 								<select
@@ -1611,7 +1622,10 @@ export function SystemSettingsPage() {
 									<option value="square">方形</option>
 								</select>
 							</Field>
-							<Field label="显示尺寸">
+							<Field
+								label="显示尺寸"
+								description="前端建议显示尺寸，范围 16 到 256。"
+							>
 								<Input
 									type="number"
 									min={16}
@@ -1627,16 +1641,18 @@ export function SystemSettingsPage() {
 										})
 									}
 								/>
-								<span className="text-xs text-muted-foreground">
-									前端建议显示尺寸，范围 16 到 256。
-								</span>
 							</Field>
 						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">公开 API</p>
+					</SettingsSection>
+					<SettingsSection
+						title="公开 API"
+						description="控制公开评论接口是否返回非必要的展示建议字段。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="返回建议字段">
+							<Field
+								label="返回建议字段"
+								description="关闭时公开评论接口不返回头像形状、显示尺寸等前端展示建议。"
+							>
 								<select
 									className={inputClass}
 									value={String(draft.publicApi.advisoryFields.enabled)}
@@ -1653,14 +1669,13 @@ export function SystemSettingsPage() {
 									<option value="false">关闭</option>
 									<option value="true">开启</option>
 								</select>
-								<span className="text-xs text-muted-foreground">
-									关闭时公开评论接口不返回头像形状、显示尺寸等前端展示建议。
-								</span>
 							</Field>
 						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">邮件通知</p>
+					</SettingsSection>
+					<SettingsSection
+						title="邮件通知"
+						description="配置 SMTP 后可用于后续评论通知能力；密码留空时保留已有密钥。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="启用邮件通知">
 								<select
@@ -1794,9 +1809,11 @@ export function SystemSettingsPage() {
 								/>
 							</Field>
 						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">验证码服务</p>
+					</SettingsSection>
+					<SettingsSection
+						title="验证码服务"
+						description="选择公开评论写操作使用的验证码提供方；密钥字段留空时保留已有配置。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="验证码服务">
 								<select
@@ -1830,10 +1847,7 @@ export function SystemSettingsPage() {
 							</Field>
 						</div>
 						{draft.captcha.provider === "image" ? (
-							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
-								<p className="text-sm font-medium md:col-span-2">
-									内置图片验证码
-								</p>
+							<SettingsSubsection title="内置图片验证码">
 								<Field label="图片宽度">
 									<Input
 										type="number"
@@ -1891,13 +1905,10 @@ export function SystemSettingsPage() {
 										}
 									/>
 								</Field>
-							</div>
+							</SettingsSubsection>
 						) : null}
 						{draft.captcha.provider === "turnstile" ? (
-							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
-								<p className="text-sm font-medium md:col-span-2">
-									Cloudflare Turnstile
-								</p>
+							<SettingsSubsection title="Cloudflare Turnstile">
 								<Field label="Turnstile Site Key">
 									<Input
 										value={draft.captcha.turnstile.siteKey}
@@ -1970,11 +1981,10 @@ export function SystemSettingsPage() {
 										}
 									/>
 								</Field>
-							</div>
+							</SettingsSubsection>
 						) : null}
 						{draft.captcha.provider === "hcaptcha" ? (
-							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
-								<p className="text-sm font-medium md:col-span-2">hCaptcha</p>
+							<SettingsSubsection title="hCaptcha">
 								<Field label="hCaptcha Site Key">
 									<Input
 										value={draft.captcha.hcaptcha.siteKey}
@@ -2030,13 +2040,10 @@ export function SystemSettingsPage() {
 										}
 									/>
 								</Field>
-							</div>
+							</SettingsSubsection>
 						) : null}
 						{draft.captcha.provider === "recaptcha" ? (
-							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
-								<p className="text-sm font-medium md:col-span-2">
-									Google reCAPTCHA
-								</p>
+							<SettingsSubsection title="Google reCAPTCHA">
 								<Field label="reCAPTCHA 验证模式">
 									<select
 										className={inputClass}
@@ -2173,11 +2180,10 @@ export function SystemSettingsPage() {
 										}
 									/>
 								</Field>
-							</div>
+							</SettingsSubsection>
 						) : null}
 						{draft.captcha.provider === "geetest" ? (
-							<div className="grid gap-4 rounded-md border p-3 md:grid-cols-2">
-								<p className="text-sm font-medium md:col-span-2">GeeTest</p>
+							<SettingsSubsection title="GeeTest">
 								<Field label="GeeTest Captcha ID">
 									<Input
 										value={draft.captcha.geetest.captchaId}
@@ -2233,11 +2239,13 @@ export function SystemSettingsPage() {
 										}
 									/>
 								</Field>
-							</div>
+							</SettingsSubsection>
 						) : null}
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">反垃圾服务</p>
+					</SettingsSection>
+					<SettingsSection
+						title="反垃圾服务"
+						description="Akismet API Key 为全局密钥；具体站点是否使用 Akismet 在站点设置的评论审核中选择。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="Akismet API Key">
 								<Input
@@ -2261,9 +2269,11 @@ export function SystemSettingsPage() {
 								/>
 							</Field>
 						</div>
-					</div>
-					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">IP 数据库</p>
+					</SettingsSection>
+					<SettingsSection
+						title="IP 数据库"
+						description="系统总开关控制是否允许解析 IP 地域；站点设置仍决定具体站点是否公开展示整理后的地区。"
+					>
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="IP 地域解析">
 								<select
@@ -2429,7 +2439,7 @@ export function SystemSettingsPage() {
 								/>
 							</Field>
 						</div>
-					</div>
+					</SettingsSection>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
 							保存系统设置

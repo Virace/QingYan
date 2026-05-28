@@ -49,9 +49,10 @@ describe("comment metadata helpers", () => {
 	it("creates a stable unknown device snapshot when parser is unavailable", () => {
 		expect(createUnknownDeviceSnapshot("parser unavailable")).toEqual({
 			browser: "unknown",
+			browserVersion: null,
 			os: "unknown",
+			osVersion: null,
 			type: "unknown",
-			icon: "unknown",
 			source: "unavailable",
 			parserVersion: "none",
 			error: "parser unavailable",
@@ -65,15 +66,16 @@ describe("comment metadata helpers", () => {
 			),
 		).toMatchObject({
 			browser: "chrome",
+			browserVersion: "120.0.0.0",
 			os: "windows",
+			osVersion: "10",
 			type: "desktop",
-			icon: "chrome",
 			source: "ua-parser-js",
 			error: null,
 		});
 		expect(parseDeviceSnapshot("Googlebot/2.1")).toMatchObject({
 			type: "bot",
-			icon: "bot",
 		});
+		expect(parseDeviceSnapshot("Googlebot/2.1")).not.toHaveProperty("icon");
 	});
 });

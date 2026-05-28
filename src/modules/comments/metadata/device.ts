@@ -23,23 +23,12 @@ export type DeviceOs =
 	| "linux"
 	| "unknown";
 export type DeviceType = "desktop" | "mobile" | "tablet" | "bot" | "unknown";
-export type DeviceIcon =
-	| "chrome"
-	| "edge"
-	| "firefox"
-	| "safari"
-	| "android"
-	| "apple"
-	| "windows"
-	| "linux"
-	| "bot"
-	| "unknown";
-
 export interface DeviceSnapshot {
 	browser: DeviceBrowser;
+	browserVersion: string | null;
 	os: DeviceOs;
+	osVersion: string | null;
 	type: DeviceType;
-	icon: DeviceIcon;
 	source: string;
 	parserVersion: string;
 	error: string | null;
@@ -107,35 +96,6 @@ function normalizeType(type: string | undefined, bot: boolean): DeviceType {
 	return "unknown";
 }
 
-function chooseIcon(input: {
-	browser: DeviceBrowser;
-	os: DeviceOs;
-	type: DeviceType;
-}): DeviceIcon {
-	if (input.type === "bot") {
-		return "bot";
-	}
-	if (
-		input.browser === "chrome" ||
-		input.browser === "edge" ||
-		input.browser === "firefox" ||
-		input.browser === "safari"
-	) {
-		return input.browser;
-	}
-	if (input.os === "android") {
-		return "android";
-	}
-	if (input.os === "ios" || input.os === "macos") {
-		return "apple";
-	}
-	if (input.os === "windows" || input.os === "linux") {
-		return input.os;
-	}
-
-	return "unknown";
-}
-
 export function parseDeviceSnapshot(userAgent: string): DeviceSnapshot {
 	const result = parseUa(userAgent);
 	const bot = isBot(userAgent);
@@ -145,9 +105,10 @@ export function parseDeviceSnapshot(userAgent: string): DeviceSnapshot {
 
 	return {
 		browser,
+		browserVersion: result.browser.version ?? null,
 		os,
+		osVersion: result.os.version ?? null,
 		type,
-		icon: chooseIcon({ browser, os, type }),
 		source: "ua-parser-js",
 		parserVersion: parseUa.VERSION,
 		error: null,
@@ -157,9 +118,10 @@ export function parseDeviceSnapshot(userAgent: string): DeviceSnapshot {
 export function createUnknownDeviceSnapshot(error: string): DeviceSnapshot {
 	return {
 		browser: "unknown",
+		browserVersion: null,
 		os: "unknown",
+		osVersion: null,
 		type: "unknown",
-		icon: "unknown",
 		source: "unavailable",
 		parserVersion: "none",
 		error,

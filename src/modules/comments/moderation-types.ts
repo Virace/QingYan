@@ -30,11 +30,12 @@ export type ModerationFailPolicy = z.infer<typeof moderationFailPolicySchema>;
 export const siteModerationSettingsSchema = z.object({
 	mode: moderationModeSchema,
 	provider: z.enum(["none", "akismet"]),
-	akismet: z.object({
-		blogUrl: z.string().url().optional(),
-		failPolicy: moderationFailPolicySchema,
-		discardBlatantSpam: z.boolean(),
-	}),
+	akismet: z
+		.object({
+			failPolicy: moderationFailPolicySchema,
+			discardBlatantSpam: z.boolean(),
+		})
+		.strict(),
 });
 
 export type SiteModerationSettings = z.infer<

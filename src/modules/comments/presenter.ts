@@ -21,7 +21,9 @@ interface PresenterCommentInput {
 	authorIpCity?: string | null;
 	authorIpLocationRaw?: string | null;
 	authorDeviceBrowser?: string | null;
+	authorDeviceBrowserVersion?: string | null;
 	authorDeviceOs?: string | null;
+	authorDeviceOsVersion?: string | null;
 	authorDeviceType?: string | null;
 	authorDeviceIcon?: string | null;
 	contentRaw: string;
@@ -123,12 +125,18 @@ function buildDisplayMeta(
 			};
 		}
 	}
-	if (options?.device?.enabled && comment.authorDeviceIcon) {
+	if (
+		options?.device?.enabled &&
+		(comment.authorDeviceBrowser ||
+			comment.authorDeviceOs ||
+			comment.authorDeviceType)
+	) {
 		displayMeta.device = {
 			browser: comment.authorDeviceBrowser ?? "unknown",
+			browserVersion: comment.authorDeviceBrowserVersion ?? null,
 			os: comment.authorDeviceOs ?? "unknown",
+			osVersion: comment.authorDeviceOsVersion ?? null,
 			type: comment.authorDeviceType ?? "unknown",
-			icon: comment.authorDeviceIcon,
 		};
 	}
 

@@ -202,7 +202,9 @@ export class QingYanExportService {
 				},
 				device: {
 					browser: row.author_device_browser ?? null,
+					browserVersion: row.author_device_browser_version ?? null,
 					os: row.author_device_os ?? null,
+					osVersion: row.author_device_os_version ?? null,
 					type: row.author_device_type ?? null,
 					icon: row.author_device_icon ?? null,
 					source: row.author_device_source ?? null,

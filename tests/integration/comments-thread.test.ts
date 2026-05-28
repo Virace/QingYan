@@ -3,7 +3,13 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { comments, pageThreads, sites, visitors } from "../../src/db/schema";
+import {
+	comments,
+	pageThreads,
+	siteSettings,
+	sites,
+	visitors,
+} from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -195,5 +201,104 @@ describe("GET /qingyan/api/comments/thread", () => {
 			},
 		});
 		expect(response.json().commentDisplay.avatar.display).toBeUndefined();
+	});
+
+	it("returns normalized display metadata from thread API without raw request metadata or icon", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commentMetadataJson: JSON.stringify({
+					ipRegion: {
+						enabled: true,
+						precision: "province",
+					},
+					device: {
+						display: {
+							enabled: true,
+						},
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:thread-metadata",
+			pageTitle: "Thread Metadata",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:thread-metadata"));
+		if (!pageThread) {
+			throw new Error("Expected page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_thread_metadata",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			status: "approved",
+			authorName: "Metadata",
+			authorIp: "203.0.113.11",
+			authorUserAgent: "Mozilla/5.0 thread-metadata",
+			authorIpCountry: "中国",
+			authorIpRegion: "广东省",
+			authorIpCity: "深圳市",
+			authorIpLocationRaw: "中国|广东省|深圳市|移动|CN",
+			authorDeviceBrowser: "chrome",
+			authorDeviceBrowserVersion: "120.0.0.0",
+			authorDeviceOs: "windows",
+			authorDeviceOsVersion: "10",
+			authorDeviceType: "desktop",
+			authorDeviceIcon: "chrome",
+			contentRaw: "thread metadata",
+			contentHtml: "<p>thread metadata</p>",
+			createdAt: "2026-05-28T10:02:00.000Z",
+			updatedAt: "2026-05-28T10:02:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:thread-metadata",
+			headers: refererFor("post:thread-metadata"),
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comments[0]).toMatchObject({
+			displayMeta: {
+				location: {
+					label: "广东",
+					precision: "province",
+				},
+				device: {
+					browser: "chrome",
+					browserVersion: "120.0.0.0",
+					os: "windows",
+					osVersion: "10",
+					type: "desktop",
+				},
+			},
+		});
+		expect(response.json().comments[0].displayMeta.device).not.toHaveProperty(
+			"icon",
+		);
+		const publicBody = JSON.stringify(response.json());
+		expect(publicBody).not.toContain("203.0.113.11");
+		expect(publicBody).not.toContain("Mozilla/5.0 thread-metadata");
+		expect(publicBody).not.toContain("中国|广东省|深圳市|移动|CN");
 	});
 });

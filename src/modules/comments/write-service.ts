@@ -30,6 +30,12 @@ function resolveIdentity(
 	return `${siteKey}:${visitorKey || ip || "anonymous"}`;
 }
 
+function firstAllowedOrigin(site: {
+	allowedOrigins?: string[];
+}): string | undefined {
+	return site.allowedOrigins?.[0];
+}
+
 export class CommentsWriteService {
 	public constructor(
 		private readonly config: AppConfig,
@@ -208,7 +214,7 @@ export class CommentsWriteService {
 			? undefined
 			: await this.moderationService?.reviewComment({
 					siteModeration,
-					blog: this.config.server.publicBaseUrl,
+					blog: firstAllowedOrigin(site) ?? this.config.server.publicBaseUrl,
 					userIp: input.ip,
 					userAgent: input.userAgent,
 					permalink: input.pageUrl,

@@ -264,7 +264,7 @@ describe("POST /qingyan/api/comments", () => {
 		expect(thread?.pageUrl).toBe("/post:path-only-comment");
 	});
 
-	it("stores request ip and user agent without exposing them in the public response", async () => {
+	it("stores request ip and user agent and returns only normalized display metadata when enabled", async () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {
 				config.server.trustProxy = true;
@@ -273,6 +273,16 @@ describe("POST /qingyan/api/comments", () => {
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
+			commentMetadataJson: JSON.stringify({
+				ipRegion: {
+					enabled: false,
+				},
+				device: {
+					display: {
+						enabled: true,
+					},
+				},
+			}),
 		});
 
 		const response = await fixture.app.inject({
@@ -280,7 +290,8 @@ describe("POST /qingyan/api/comments", () => {
 			url: "/qingyan/api/comments",
 			headers: {
 				...refererFor("post:request-metadata"),
-				"user-agent": "Mozilla/5.0 metadata-test",
+				"user-agent":
+					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				"x-forwarded-for": "203.0.113.8",
 			},
 			payload: {
@@ -308,12 +319,28 @@ describe("POST /qingyan/api/comments", () => {
 			.from(comments)
 			.where(eq(comments.contentRaw, "request metadata"));
 		expect(comment?.authorIp).toBe("203.0.113.8");
-		expect(comment?.authorUserAgent).toBe("Mozilla/5.0 metadata-test");
+		expect(comment?.authorUserAgent).toBe(
+			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		);
 		expect(comment?.authorDeviceSource).toBe("ua-parser-js");
 		expect(comment?.authorDeviceError).toBeNull();
+		expect(response.json().comment).toMatchObject({
+			displayMeta: {
+				device: {
+					browser: "chrome",
+					browserVersion: "120.0.0.0",
+					os: "windows",
+					osVersion: "10",
+					type: "desktop",
+				},
+			},
+		});
+		expect(response.json().comment.displayMeta.device).not.toHaveProperty(
+			"icon",
+		);
 		const publicBody = JSON.stringify(response.json());
 		expect(publicBody).not.toContain("203.0.113.8");
-		expect(publicBody).not.toContain("Mozilla/5.0 metadata-test");
+		expect(publicBody).not.toContain("Mozilla/5.0 (Windows NT 10.0");
 	});
 
 	it("honors raw request metadata collection switches", async () => {

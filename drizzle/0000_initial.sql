@@ -36,7 +36,7 @@ CREATE TABLE `comments` (
 	`vote_down_count` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`deleted_at` text, `author_ip` text, `author_user_agent` text, `author_ip_country` text, `author_ip_region` text, `author_ip_city` text, `author_ip_isp` text, `author_ip_location_raw` text, `author_ip_location_source` text, `author_ip_location_db_hash` text, `author_ip_location_updated_at` text, `author_ip_location_error` text, `author_device_browser` text, `author_device_os` text, `author_device_type` text, `author_device_icon` text, `author_device_source` text, `author_device_parser_version` text, `author_device_updated_at` text, `author_device_error` text,
+	`deleted_at` text, `author_ip` text, `author_user_agent` text, `author_ip_country` text, `author_ip_region` text, `author_ip_city` text, `author_ip_isp` text, `author_ip_location_raw` text, `author_ip_location_source` text, `author_ip_location_db_hash` text, `author_ip_location_updated_at` text, `author_ip_location_error` text, `author_device_browser` text, `author_device_browser_version` text, `author_device_os` text, `author_device_os_version` text, `author_device_type` text, `author_device_icon` text, `author_device_source` text, `author_device_parser_version` text, `author_device_updated_at` text, `author_device_error` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`page_thread_id`) REFERENCES `page_threads`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`parent_id`) REFERENCES `comments`(`id`) ON UPDATE no action ON DELETE no action,

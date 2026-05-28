@@ -21,7 +21,9 @@ export interface CommentMetadataSnapshot {
 	authorIpLocationUpdatedAt?: string | null;
 	authorIpLocationError?: string | null;
 	authorDeviceBrowser?: string | null;
+	authorDeviceBrowserVersion?: string | null;
 	authorDeviceOs?: string | null;
+	authorDeviceOsVersion?: string | null;
 	authorDeviceType?: string | null;
 	authorDeviceIcon?: string | null;
 	authorDeviceSource?: string | null;
@@ -161,9 +163,10 @@ export class DefaultCommentMetadataResolver implements CommentMetadataResolver {
 			const device = parseDeviceSnapshot(input.userAgent);
 			Object.assign(snapshot, {
 				authorDeviceBrowser: device.browser,
+				authorDeviceBrowserVersion: device.browserVersion,
 				authorDeviceOs: device.os,
+				authorDeviceOsVersion: device.osVersion,
 				authorDeviceType: device.type,
-				authorDeviceIcon: device.icon,
 				authorDeviceSource: device.source,
 				authorDeviceParserVersion: device.parserVersion,
 				authorDeviceUpdatedAt: nowIso(),

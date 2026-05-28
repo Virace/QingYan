@@ -148,7 +148,7 @@ export class ModerationService {
 
 		const requestSnapshot: AkismetCommentCheckInput = {
 			apiKey,
-			blog: input.siteModeration.akismet.blogUrl ?? input.blog,
+			blog: input.blog,
 			userIp: input.userIp,
 			userAgent: input.userAgent,
 			referrer: input.referrer,
