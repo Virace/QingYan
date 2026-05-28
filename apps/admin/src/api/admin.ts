@@ -330,6 +330,11 @@ export interface AdminSystemSettings {
 			sizePx: number;
 		};
 	};
+	publicApi: {
+		advisoryFields: {
+			enabled: boolean;
+		};
+	};
 	antiSpam: {
 		akismet: {
 			apiKey?: string;

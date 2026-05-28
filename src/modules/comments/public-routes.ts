@@ -84,8 +84,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.addHook("onClose", async () => {
 		metadataResolver.close();
 	});
-	const readService = new CommentsService(readRepository, captchaService, () =>
-		systemSettingsService.getAvatarSettings(),
+	const readService = new CommentsService(
+		readRepository,
+		captchaService,
+		() => systemSettingsService.getAvatarSettings(),
+		() => systemSettingsService.getPublicApiSettings(),
 	);
 	const writeService = new CommentsWriteService(
 		fastify.config,
@@ -148,11 +151,6 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		return {
 			capability: result.capability,
 			commentForm: result.commentForm,
-			thread: {
-				siteKey: pageContext.siteKey,
-				pageKey: result.thread.pageKey,
-				pageTitle: result.thread.pageTitle,
-			},
 			pagination: result.pagination,
 			comments: presentComments(
 				result.commentBundle.comments,
@@ -214,11 +212,6 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return {
-			thread: {
-				siteKey: pageContext.siteKey,
-				pageKey: result.thread.pageKey,
-				pageTitle: result.thread.pageTitle,
-			},
 			pagination: result.pagination,
 			comments: presentComments(
 				result.commentBundle.comments,

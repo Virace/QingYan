@@ -141,14 +141,11 @@ describe("dev control routes", () => {
 					external: {
 						enabled: false,
 					},
-					display: {
-						shape: "circle",
-						sizePx: 40,
-					},
 				},
 			},
 			viewer: {},
 		});
+		expect(bootstrap.json().commentDisplay.avatar.display).toBeUndefined();
 
 		expect(await fixture.app.db.select().from(sites)).toEqual([
 			expect.objectContaining({
@@ -270,10 +267,6 @@ describe("dev control routes", () => {
 
 		expect(bootstrap.statusCode).toBe(200);
 		expect(bootstrap.json()).toMatchObject({
-			thread: {
-				siteKey: "default",
-				pageKey: "post:seeded",
-			},
 			pagination: {
 				totalCount: 2,
 				rootCount: 1,
@@ -286,14 +279,12 @@ describe("dev control routes", () => {
 					external: {
 						enabled: false,
 					},
-					display: {
-						shape: "circle",
-						sizePx: 40,
-					},
 				},
 			},
 			viewer: {},
 		});
+		expect(bootstrap.json().thread).toBeUndefined();
+		expect(bootstrap.json().commentDisplay.avatar.display).toBeUndefined();
 
 		const thread = await fixture.app.inject({
 			method: "GET",
@@ -306,13 +297,11 @@ describe("dev control routes", () => {
 					external: {
 						enabled: false,
 					},
-					display: {
-						shape: "circle",
-						sizePx: 40,
-					},
 				},
 			},
 		});
+		expect(thread.json().thread).toBeUndefined();
+		expect(thread.json().commentDisplay.avatar.display).toBeUndefined();
 
 		const commentRows = await fixture.app.db.select().from(comments);
 		expect(commentRows).toHaveLength(0);

@@ -679,7 +679,7 @@ AdminSystemSettings
 
 ### `PUT /api/admin/system-settings`
 
-更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`captcha`、`ipRegion`、`avatar` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
+更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
 
 响应：
 
@@ -777,6 +777,11 @@ AdminSystemSettings
     display: {
       shape: "circle" | "rounded" | "square";
       sizePx: number;
+    };
+  };
+  publicApi: {
+    advisoryFields: {
+      enabled: boolean;
     };
   };
   antiSpam: {

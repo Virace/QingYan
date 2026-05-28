@@ -12,6 +12,7 @@ export const systemSettingCategories = [
 	"captcha",
 	"ipRegion",
 	"avatar",
+	"publicApi",
 	"antiSpam",
 ] as const;
 
@@ -180,6 +181,11 @@ export const systemSettingsSchema = z.object({
 		}),
 	}),
 	avatar: avatarSettingsSchema,
+	publicApi: z.object({
+		advisoryFields: z.object({
+			enabled: z.boolean(),
+		}),
+	}),
 	antiSpam: z.object({
 		akismet: z.object({
 			apiKey: z.string().optional(),
@@ -318,6 +324,11 @@ export const defaultSystemSettings: SystemSettings = {
 		display: {
 			shape: "circle",
 			sizePx: 40,
+		},
+	},
+	publicApi: {
+		advisoryFields: {
+			enabled: false,
 		},
 	},
 	antiSpam: {

@@ -81,11 +81,6 @@ describe("GET /qingyan/api/comments/thread", () => {
 			response.cookies.some((cookie) => cookie.name === "qingyan_visitor"),
 		).toBe(true);
 		expect(response.json()).toMatchObject({
-			thread: {
-				siteKey: "fangyuan",
-				pageKey: "post:thread-only",
-				pageTitle: "Thread Only",
-			},
 			pagination: {
 				sortBy: "oldest",
 				limit: 20,
@@ -94,6 +89,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 				rootCount: 1,
 			},
 		});
+		expect(response.json().thread).toBeUndefined();
 		expect(response.json()).not.toHaveProperty("pageMetrics");
 		expect(response.json()).not.toHaveProperty("pageFeedback");
 		expect(response.json().comments).toHaveLength(1);
@@ -196,11 +192,8 @@ describe("GET /qingyan/api/comments/thread", () => {
 				external: {
 					enabled: true,
 				},
-				display: {
-					shape: "square",
-					sizePx: 36,
-				},
 			},
 		});
+		expect(response.json().commentDisplay.avatar.display).toBeUndefined();
 	});
 });

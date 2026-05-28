@@ -51,6 +51,7 @@ type AdminSystemSettingsInput = {
 	};
 	ipRegion?: SystemSettings["ipRegion"];
 	avatar?: SystemSettings["avatar"];
+	publicApi?: SystemSettings["publicApi"];
 	antiSpam?: {
 		akismet: Omit<SystemSettings["antiSpam"]["akismet"], "apiKeyConfigured">;
 	};
@@ -166,6 +167,7 @@ export class AdminSystemSettingsService {
 						},
 					}
 				: current.avatar,
+			publicApi: input.publicApi ?? current.publicApi,
 			antiSpam: input.antiSpam
 				? {
 						akismet: {

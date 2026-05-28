@@ -136,11 +136,6 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				allow: ["nickname", "email", "website"],
 				require: ["nickname", "email"],
 			},
-			thread: {
-				siteKey: "fangyuan",
-				pageKey: "post:welcome",
-				pageTitle: "Welcome",
-			},
 			pagination: {
 				sortBy: "newest",
 				limit: 20,
@@ -165,6 +160,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 		expect(response.json().capability.requiredAuthorFields).toBeUndefined();
 		expect(response.json().capability.optionalAuthorFields).toBeUndefined();
+		expect(response.json().thread).toBeUndefined();
 
 		const payload = response.json();
 		expect(payload.comments).toHaveLength(1);
@@ -249,16 +245,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			thread: {
-				siteKey: "fangyuan",
-				pageKey: "lol_voice_collation.html",
-				pageTitle: "英雄联盟音频文件整理计划——15.15",
-			},
 			pagination: {
 				totalCount: 1,
 				rootCount: 1,
 			},
 		});
+		expect(response.json().thread).toBeUndefined();
 		expect(response.json().comments).toHaveLength(1);
 		expect(response.json().comments[0]).toMatchObject({
 			id: "c_html_import",
@@ -284,11 +276,6 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			thread: {
-				siteKey: "fangyuan",
-				pageKey: "posts/unknown-bootstrap/",
-				pageTitle: "Unknown",
-			},
 			pagination: {
 				totalCount: 0,
 				rootCount: 0,
@@ -301,6 +288,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				liked: false,
 			},
 		});
+		expect(response.json().thread).toBeUndefined();
 		expect(response.json().comments).toEqual([]);
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
@@ -555,6 +543,42 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				external: {
 					enabled: true,
 				},
+			},
+		});
+		expect(response.json().commentDisplay.avatar.display).toBeUndefined();
+	});
+
+	it("returns configured avatar display hints only when advisory fields are enabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert("publicApi", "advisoryFields.enabled", true);
+		await systemSettings.upsert("avatar", "display.shape", "rounded");
+		await systemSettings.upsert("avatar", "display.sizePx", 48);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:avatar-hints&pageTitle=Avatar%20Hints&pageUrl=https://fangyuan.example.com/posts/avatar-hints/",
+			headers: {
+				referer: "http://localhost:4321/post:avatar-hints",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().commentDisplay).toMatchObject({
+			avatar: {
+				external: {
+					enabled: false,
+				},
 				display: {
 					shape: "rounded",
 					sizePx: 48,
@@ -785,7 +809,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().thread.pageKey).toBe("post:path-only-bootstrap");
+		expect(response.json().thread).toBeUndefined();
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
 });

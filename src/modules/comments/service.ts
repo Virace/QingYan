@@ -63,13 +63,20 @@ export function buildCommentDisplayOptions(input: {
 
 function buildPublicCommentDisplay(
 	options: ReturnType<typeof buildCommentDisplayOptions>,
+	input?: {
+		includeAdvisoryFields?: boolean;
+	},
 ) {
 	return {
 		avatar: {
 			external: {
 				enabled: options.avatar.external.enabled,
 			},
-			display: options.avatar.display,
+			...(input?.includeAdvisoryFields
+				? {
+						display: options.avatar.display,
+					}
+				: {}),
 		},
 	};
 }
@@ -116,6 +123,9 @@ export class CommentsService {
 		private readonly loadAvatarSettings?: () => Promise<
 			SystemSettings["avatar"]
 		>,
+		private readonly loadPublicApiSettings?: () => Promise<
+			SystemSettings["publicApi"]
+		>,
 	) {}
 
 	public getRepository(): CommentsRepository {
@@ -155,6 +165,9 @@ export class CommentsService {
 						sizePx: 40,
 					},
 				};
+		const publicApiSettings = this.loadPublicApiSettings
+			? await this.loadPublicApiSettings()
+			: { advisoryFields: { enabled: false } };
 		const visitor = existingThread
 			? await this.repository.getOrCreateVisitor({
 					siteId: site.id,
@@ -249,7 +262,9 @@ export class CommentsService {
 			},
 			commentBundle,
 			commentDisplay,
-			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay),
+			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay, {
+				includeAdvisoryFields: publicApiSettings.advisoryFields.enabled,
+			}),
 			viewer: {
 				...(publicVerifiedAuthor
 					? { verifiedAuthor: publicVerifiedAuthor }
@@ -326,6 +341,9 @@ export class CommentsService {
 						sizePx: 40,
 					},
 				};
+		const publicApiSettings = this.loadPublicApiSettings
+			? await this.loadPublicApiSettings()
+			: { advisoryFields: { enabled: false } };
 
 		const commentDisplay = buildCommentDisplayOptions({
 			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
@@ -352,7 +370,9 @@ export class CommentsService {
 			},
 			commentBundle,
 			commentDisplay,
-			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay),
+			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay, {
+				includeAdvisoryFields: publicApiSettings.advisoryFields.enabled,
+			}),
 			visitorKey: visitor?.created ? visitor.visitorKey : undefined,
 		};
 	}

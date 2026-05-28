@@ -655,18 +655,6 @@ components:
           items:
             type: string
             enum: [nickname, email, website]
-    ThreadSummary:
-      type: object
-      required: [siteKey, pageKey, pageTitle]
-      properties:
-        siteKey:
-          type: string
-        pageKey:
-          type: string
-        pageTitle:
-          type:
-            - string
-            - 'null'
     CommentPagination:
       type: object
       required: [sortBy, limit, offset, totalCount, rootCount]
@@ -747,8 +735,8 @@ components:
           $ref: '#/components/schemas/CommentDisplayDevice'
     CommentAvatarDisplay:
       type: object
-      required: [external, display]
-      description: Avatar display hints for public comment frontends. QingYan may emit third-party author.avatarUrl and does not host avatar images.
+      required: [external]
+      description: Avatar metadata for public comment frontends. QingYan may emit third-party author.avatarUrl and does not host avatar images. Optional display hints are returned only when publicApi.advisoryFields.enabled is true.
       properties:
         external:
           type: object
@@ -760,6 +748,7 @@ components:
         display:
           type: object
           required: [shape, sizePx]
+          description: Optional frontend display hints. These are advisory settings, not authoritative layout requirements.
           properties:
             shape:
               type: string
@@ -924,7 +913,6 @@ components:
       required:
         - capability
         - commentForm
-        - thread
         - pagination
         - comments
         - pageMetrics
@@ -935,8 +923,6 @@ components:
           $ref: '#/components/schemas/CommentCapability'
         commentForm:
           $ref: '#/components/schemas/CommentForm'
-        thread:
-          $ref: '#/components/schemas/ThreadSummary'
         pagination:
           $ref: '#/components/schemas/CommentPagination'
         comments:
@@ -955,10 +941,8 @@ components:
           $ref: '#/components/schemas/BootstrapViewer'
     ThreadResponse:
       type: object
-      required: [thread, pagination, comments]
+      required: [pagination, comments]
       properties:
-        thread:
-          $ref: '#/components/schemas/ThreadSummary'
         pagination:
           $ref: '#/components/schemas/CommentPagination'
         comments:

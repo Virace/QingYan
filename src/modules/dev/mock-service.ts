@@ -353,11 +353,6 @@ export class DevMockService {
 			);
 
 		return {
-			thread: {
-				siteKey: "default",
-				pageKey: input.pageState.pageKey,
-				pageTitle: input.pageState.pageTitle,
-			},
 			pagination: {
 				sortBy: input.sortBy,
 				limit: input.limit,
@@ -394,7 +389,6 @@ export class DevMockService {
 				external: {
 					enabled: defaultSystemSettings.avatar.external.enabled,
 				},
-				display: defaultSystemSettings.avatar.display,
 			},
 		};
 	}

@@ -329,6 +329,13 @@ export const adminSystemSettingsBodySchema = z.object({
 		})
 		.optional(),
 	avatar: avatarSettingsSchema.optional(),
+	publicApi: z
+		.object({
+			advisoryFields: z.object({
+				enabled: z.boolean(),
+			}),
+		})
+		.optional(),
 	antiSpam: z
 		.object({
 			akismet: z.object({

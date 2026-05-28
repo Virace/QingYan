@@ -64,6 +64,11 @@ describe("admin system settings", () => {
 					sizePx: 40,
 				},
 			},
+			publicApi: {
+				advisoryFields: {
+					enabled: false,
+				},
+			},
 			antiSpam: {
 				akismet: {
 					apiKeyConfigured: false,
@@ -118,6 +123,59 @@ describe("admin system settings", () => {
 		expect(fixture.app.loggerManager.getRuntimeSettings()).toEqual({
 			level: "debug",
 			retentionDays: 14,
+		});
+	});
+
+	it("updates public API advisory field settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				publicApi: {
+					advisoryFields: {
+						enabled: true,
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json()).toMatchObject({
+			publicApi: {
+				advisoryFields: {
+					enabled: true,
+				},
+			},
+		});
+
+		const getResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(getResponse.statusCode).toBe(200);
+		expect(getResponse.json()).toMatchObject({
+			publicApi: {
+				advisoryFields: {
+					enabled: true,
+				},
+			},
 		});
 	});
 

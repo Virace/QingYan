@@ -986,6 +986,11 @@ export function SystemSettingsPage() {
 			...draft,
 			avatar,
 		});
+	const updatePublicApi = (publicApi: AdminSystemSettings["publicApi"]) =>
+		setDraft({
+			...draft,
+			publicApi,
+		});
 
 	return (
 		<Card>
@@ -1624,6 +1629,32 @@ export function SystemSettingsPage() {
 								/>
 								<span className="text-xs text-muted-foreground">
 									前端建议显示尺寸，范围 16 到 256。
+								</span>
+							</Field>
+						</div>
+					</div>
+					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
+						<p className="text-sm font-medium">公开 API</p>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="返回建议字段">
+								<select
+									className={inputClass}
+									value={String(draft.publicApi.advisoryFields.enabled)}
+									onChange={(event) =>
+										updatePublicApi({
+											...draft.publicApi,
+											advisoryFields: {
+												...draft.publicApi.advisoryFields,
+												enabled: event.target.value === "true",
+											},
+										})
+									}
+								>
+									<option value="false">关闭</option>
+									<option value="true">开启</option>
+								</select>
+								<span className="text-xs text-muted-foreground">
+									关闭时公开评论接口不返回头像形状、显示尺寸等前端展示建议。
 								</span>
 							</Field>
 						</div>

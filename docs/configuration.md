@@ -210,10 +210,11 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 - `avatar.external.query`
 - `avatar.display.shape`
 - `avatar.display.sizePx`
+- `publicApi.advisoryFields.enabled`
 
 首装会写入完整默认系统设置，其中后台会话有效期默认 `4320` 分钟（3 天）。若安装表单或 `QINGYAN_ADMIN_SESSION_TTL_MINUTES` 提供了会话有效期，会写入 `system_settings.admin.session.ttlMinutes`，正常运行后可继续在 Admin Console 修改。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
-Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+Admin Console API 会返回 logging、mail、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
 
 `${server.publicPath}/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
 
@@ -229,10 +230,11 @@ Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 t
 - `avatar.external.query`：头像 URL 查询参数，不包含开头的 `?`，多个参数用 `&` 分隔，默认 `s=80&d=404&r=g`。
 - `avatar.display.shape`：给前端评论组件的头像形状建议，可选 `circle`、`rounded`、`square`，默认 `circle`。
 - `avatar.display.sizePx`：给前端评论组件的头像显示尺寸建议，范围 16 到 256，默认 `40`。
+- `publicApi.advisoryFields.enabled`：是否在公开 API 中返回展示建议字段，默认关闭。
 
 启用后，公开评论作者结构可能包含 `author.avatarUrl`。该字段只表示第三方头像图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件，也不保证远端头像文件一定存在。没有该字段、外部头像图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。使用 `d=404` 时，前端需要接受一次图片请求返回 404；QingYan 不会额外代理或探测头像是否存在。
 
-公开评论 bootstrap/thread 响应还会返回 `commentDisplay.avatar`，其中 `external.enabled` 表示当前是否可能返回 `author.avatarUrl`，`display.shape` 和 `display.sizePx` 是前端展示头像容器时的建议。头像请求尺寸由 `avatar.external.query` 自行决定，展示尺寸由 `avatar.display.sizePx` 决定，两者不要求一致。
+公开评论 bootstrap/thread 响应还会返回 `commentDisplay.avatar.external.enabled`，表示当前是否可能返回 `author.avatarUrl`。默认不返回头像形状、显示尺寸这类前端展示建议；只有 `publicApi.advisoryFields.enabled=true` 时才会额外返回 `commentDisplay.avatar.display.shape` 和 `commentDisplay.avatar.display.sizePx`。头像请求尺寸仍由 `avatar.external.query` 自行决定，前端展示尺寸由前端自己的布局决定；后端建议字段只用于需要后端集中下发展示建议的集成场景。
 
 常见配置示例：
 

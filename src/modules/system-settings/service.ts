@@ -38,6 +38,10 @@ export class RuntimeSystemSettingsService {
 	public async getAvatarSettings() {
 		return (await this.getSettings()).avatar;
 	}
+
+	public async getPublicApiSettings() {
+		return (await this.getSettings()).publicApi;
+	}
 }
 
 export { createSystemSettingsDefaults };
