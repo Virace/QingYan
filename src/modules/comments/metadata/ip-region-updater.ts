@@ -15,7 +15,7 @@ import Ip2Region from "ts-ip2region2";
 
 import type { AppDatabase } from "../../../db/client";
 import {
-	comments,
+	commentRequestMetadata,
 	ipRegionDatabaseState,
 	ipRegionUpdateRuns,
 } from "../../../db/schema";
@@ -280,7 +280,7 @@ export class IpRegionUpdater {
 
 			for (const row of rows) {
 				const snapshot = resolveIp(row.authorIp);
-				await this.updateCommentLocation(row.id, snapshot, dbHash);
+				await this.updateCommentLocation(row.commentId, snapshot, dbHash);
 				refreshed += 1;
 			}
 
@@ -291,18 +291,18 @@ export class IpRegionUpdater {
 	private async listRefreshBatch(dbHash: string) {
 		return this.db
 			.select({
-				id: comments.id,
-				authorIp: comments.authorIp,
+				commentId: commentRequestMetadata.commentId,
+				authorIp: commentRequestMetadata.authorIp,
 			})
-			.from(comments)
+			.from(commentRequestMetadata)
 			.where(
 				and(
-					isNotNull(comments.authorIp),
-					sql`(${comments.authorIpLocationDbHash} IS NULL OR ${comments.authorIpLocationDbHash} != ${dbHash})`,
+					isNotNull(commentRequestMetadata.authorIp),
+					sql`(${commentRequestMetadata.ipLocationDbHash} IS NULL OR ${commentRequestMetadata.ipLocationDbHash} != ${dbHash})`,
 				),
 			)
 			.limit(this.batchSize) as Promise<
-			Array<{ id: string; authorIp: string }>
+			Array<{ commentId: string; authorIp: string }>
 		>;
 	}
 
@@ -312,19 +312,20 @@ export class IpRegionUpdater {
 		dbHash: string,
 	) {
 		await this.db
-			.update(comments)
+			.update(commentRequestMetadata)
 			.set({
-				authorIpCountry: snapshot.country,
-				authorIpRegion: snapshot.region,
-				authorIpCity: snapshot.city,
-				authorIpIsp: snapshot.isp,
-				authorIpLocationRaw: snapshot.raw,
-				authorIpLocationSource: "ip2region",
-				authorIpLocationDbHash: dbHash,
-				authorIpLocationUpdatedAt: nowIso(),
-				authorIpLocationError: null,
+				ipCountry: snapshot.country,
+				ipRegion: snapshot.region,
+				ipCity: snapshot.city,
+				ipIsp: snapshot.isp,
+				ipLocationRaw: snapshot.raw,
+				ipLocationSource: "ip2region",
+				ipLocationDbHash: dbHash,
+				ipLocationUpdatedAt: nowIso(),
+				ipLocationError: null,
+				updatedAt: nowIso(),
 			})
-			.where(eq(comments.id, commentId));
+			.where(eq(commentRequestMetadata.commentId, commentId));
 	}
 
 	private async record(

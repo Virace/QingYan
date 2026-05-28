@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 
 import {
+	commentRequestMetadata,
 	comments,
 	pageFeedbackRecords,
 	pageThreads,
@@ -394,18 +395,6 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			visitorId: visitor.id,
 			status: "approved",
 			authorName: "Alice",
-			authorIp: "203.0.113.8",
-			authorUserAgent: "Mozilla/5.0 metadata-test",
-			authorIpCountry: "中国",
-			authorIpRegion: "广东省",
-			authorIpCity: "深圳市",
-			authorIpLocationRaw: "中国|广东省|深圳市|移动|CN",
-			authorDeviceBrowser: "chrome",
-			authorDeviceBrowserVersion: "120.0.0.0",
-			authorDeviceOs: "windows",
-			authorDeviceOsVersion: "10",
-			authorDeviceType: "desktop",
-			authorDeviceIcon: "chrome",
 			contentRaw: "metadata",
 			contentHtml: "<p>metadata</p>",
 			replyCount: 0,
@@ -413,6 +402,21 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			voteDownCount: 0,
 			createdAt: "2026-05-05T10:00:00.000Z",
 			updatedAt: "2026-05-05T10:00:00.000Z",
+		});
+		await fixture.app.db.insert(commentRequestMetadata).values({
+			commentId: "c_metadata",
+			authorIp: "203.0.113.8",
+			authorUserAgent: "Mozilla/5.0 metadata-test",
+			ipCountry: "中国",
+			ipRegion: "广东省",
+			ipCity: "深圳市",
+			ipLocationRaw: "中国|广东省|深圳市|移动|CN",
+			deviceBrowser: "chrome",
+			deviceBrowserVersion: "120.0.0.0",
+			deviceOs: "windows",
+			deviceOsVersion: "10",
+			deviceType: "desktop",
+			deviceIcon: "chrome",
 		});
 
 		const response = await fixture.app.inject({

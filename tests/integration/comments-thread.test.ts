@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import {
+	commentRequestMetadata,
 	comments,
 	pageThreads,
 	siteSettings,
@@ -253,22 +254,25 @@ describe("GET /qingyan/api/comments/thread", () => {
 			parentId: null,
 			status: "approved",
 			authorName: "Metadata",
-			authorIp: "203.0.113.11",
-			authorUserAgent: "Mozilla/5.0 thread-metadata",
-			authorIpCountry: "中国",
-			authorIpRegion: "广东省",
-			authorIpCity: "深圳市",
-			authorIpLocationRaw: "中国|广东省|深圳市|移动|CN",
-			authorDeviceBrowser: "chrome",
-			authorDeviceBrowserVersion: "120.0.0.0",
-			authorDeviceOs: "windows",
-			authorDeviceOsVersion: "10",
-			authorDeviceType: "desktop",
-			authorDeviceIcon: "chrome",
 			contentRaw: "thread metadata",
 			contentHtml: "<p>thread metadata</p>",
 			createdAt: "2026-05-28T10:02:00.000Z",
 			updatedAt: "2026-05-28T10:02:00.000Z",
+		});
+		await fixture.app.db.insert(commentRequestMetadata).values({
+			commentId: "c_thread_metadata",
+			authorIp: "203.0.113.11",
+			authorUserAgent: "Mozilla/5.0 thread-metadata",
+			ipCountry: "中国",
+			ipRegion: "广东省",
+			ipCity: "深圳市",
+			ipLocationRaw: "中国|广东省|深圳市|移动|CN",
+			deviceBrowser: "chrome",
+			deviceBrowserVersion: "120.0.0.0",
+			deviceOs: "windows",
+			deviceOsVersion: "10",
+			deviceType: "desktop",
+			deviceIcon: "chrome",
 		});
 
 		const response = await fixture.app.inject({

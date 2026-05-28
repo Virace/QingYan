@@ -27,9 +27,11 @@ function downloadJson(fileName: string, payload: unknown) {
 
 export function QingYanExportPage({ siteKey }: { siteKey: string }) {
 	const [include, setInclude] = useState({
-		runtimeSettings: true,
+		siteSettings: true,
+		systemSettings: true,
 		pageThreads: true,
 		comments: true,
+		rawUserAgent: true,
 		visitors: true,
 		voteRecords: true,
 		pageFeedbackRecords: true,

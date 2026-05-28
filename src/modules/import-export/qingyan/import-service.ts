@@ -690,9 +690,9 @@ export class QingYanImportService {
 				`INSERT INTO comments (
 					id, site_id, page_thread_id, parent_id, visitor_id, status,
 					author_name, author_email, author_email_hash, author_website,
-					author_ip, author_user_agent, content_raw, content_html,
+					content_raw, content_html,
 					created_at, updated_at, deleted_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				commentId,
@@ -705,14 +705,13 @@ export class QingYanImportService {
 				comment.author.email,
 				hashCommentEmail(comment.author.email ?? undefined),
 				sanitizeOptionalSafeHttpUrl(comment.author.website),
-				comment.request?.ip,
-				comment.request?.userAgent,
 				comment.content.raw,
 				renderCommentHtml(comment.content.raw),
 				comment.timestamps?.createdAt ?? nowIso,
 				comment.timestamps?.updatedAt ?? nowIso,
 				comment.timestamps?.deletedAt ?? null,
 			);
+		this.insertCommentRequestMetadata(commentId, comment, nowIso);
 		if (parentId) {
 			this.sqlite
 				.prepare(
@@ -730,6 +729,63 @@ export class QingYanImportService {
 			)
 			.run(parentId ? 0 : 1, nowIso, threadId);
 		return commentId;
+	}
+
+	private insertCommentRequestMetadata(
+		commentId: string,
+		comment: QingYanExportComment,
+		nowIso: string,
+	) {
+		const metadata = comment.metadata as
+			| {
+					ipRegion?: Record<string, unknown>;
+					device?: Record<string, unknown>;
+			  }
+			| undefined;
+		const ipRegion = metadata?.ipRegion;
+		const device = metadata?.device;
+		const value = (record: Record<string, unknown> | undefined, key: string) =>
+			typeof record?.[key] === "string" ? record[key] : null;
+		const hasMetadata =
+			comment.request?.ip ||
+			comment.request?.userAgent ||
+			ipRegion !== undefined ||
+			device !== undefined;
+		if (!hasMetadata) {
+			return;
+		}
+
+		this.sqlite
+			.prepare(
+				`INSERT INTO comment_request_metadata (
+					comment_id, author_ip, author_user_agent,
+					ip_country, ip_region, ip_city, ip_isp, ip_location_raw,
+					ip_location_source,
+					device_browser, device_browser_version, device_os,
+					device_os_version, device_type, device_icon, device_source,
+					created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				commentId,
+				comment.request?.ip,
+				comment.request?.userAgent,
+				value(ipRegion, "country"),
+				value(ipRegion, "region"),
+				value(ipRegion, "city"),
+				value(ipRegion, "isp"),
+				value(ipRegion, "raw"),
+				value(ipRegion, "source"),
+				value(device, "browser"),
+				value(device, "browserVersion"),
+				value(device, "os"),
+				value(device, "osVersion"),
+				value(device, "type"),
+				value(device, "icon"),
+				value(device, "source"),
+				nowIso,
+				nowIso,
+			);
 	}
 
 	private writePageFeedbackRecords(

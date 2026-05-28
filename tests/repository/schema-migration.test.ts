@@ -134,6 +134,9 @@ describe("initial migration", () => {
 			const commentsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(comments)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const commentRequestMetadataColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(comment_request_metadata)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const siteSettingsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(site_settings)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -158,29 +161,42 @@ describe("initial migration", () => {
 				type: string;
 			}>;
 
-			expect(commentsColumns.map((column) => column.name)).toEqual(
+			expect(commentsColumns.map((column) => column.name)).not.toEqual(
 				expect.arrayContaining([
 					"author_ip",
 					"author_user_agent",
 					"author_ip_country",
-					"author_ip_region",
-					"author_ip_city",
-					"author_ip_isp",
-					"author_ip_location_raw",
-					"author_ip_location_source",
-					"author_ip_location_db_hash",
-					"author_ip_location_updated_at",
-					"author_ip_location_error",
 					"author_device_browser",
-					"author_device_browser_version",
-					"author_device_os",
-					"author_device_os_version",
-					"author_device_type",
-					"author_device_icon",
-					"author_device_source",
-					"author_device_parser_version",
-					"author_device_updated_at",
-					"author_device_error",
+				]),
+			);
+			expect(
+				commentRequestMetadataColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"comment_id",
+					"author_ip",
+					"author_user_agent",
+					"ip_country",
+					"ip_region",
+					"ip_city",
+					"ip_isp",
+					"ip_location_raw",
+					"ip_location_source",
+					"ip_location_db_hash",
+					"ip_location_updated_at",
+					"ip_location_error",
+					"device_browser",
+					"device_browser_version",
+					"device_os",
+					"device_os_version",
+					"device_type",
+					"device_icon",
+					"device_source",
+					"device_parser_version",
+					"device_updated_at",
+					"device_error",
+					"created_at",
+					"updated_at",
 				]),
 			);
 			expect(siteSettingsColumns.map((column) => column.name)).toEqual(

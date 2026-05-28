@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCwIcon } from "lucide-react";
 
 import {
 	bulkTrashComments,
@@ -13,6 +14,7 @@ import {
 	listSites,
 	listUsers,
 	listVisitors,
+	refreshCommentMetadata,
 	replyToComment,
 	type CommentStatus,
 	updateComment,
@@ -49,6 +51,23 @@ const commentViews: Array<{
 
 function authorInitial(name: string) {
 	return name.trim().slice(0, 1).toUpperCase() || "?";
+}
+
+function formatIpLocation(location: {
+	country: string | null;
+	region: string | null;
+	city: string | null;
+	isp: string | null;
+	error: string | null;
+}) {
+	if (location.error) {
+		return `地址 ${location.error}`;
+	}
+	return (
+		[location.country, location.region, location.city, location.isp]
+			.filter(Boolean)
+			.join(" / ") || "地址 -"
+	);
 }
 
 function ResourceFilters({
@@ -137,6 +156,10 @@ export function CommentsPage({
 	});
 	const deleteMutation = useMutation({
 		mutationFn: deleteComment,
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
+	});
+	const refreshMetadataMutation = useMutation({
+		mutationFn: refreshCommentMetadata,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
 	});
 	const bulkTrashMutation = useMutation({
@@ -448,6 +471,9 @@ export function CommentsPage({
 														IP {comment.authorIp ?? "-"}
 													</p>
 													<p className="max-w-48 truncate text-xs text-muted-foreground">
+														{formatIpLocation(comment.authorIpLocation)}
+													</p>
+													<p className="max-w-48 truncate text-xs text-muted-foreground">
 														UA {comment.authorUserAgent ?? "-"}
 													</p>
 													<div className="mt-2 flex flex-wrap gap-1">
@@ -601,6 +627,20 @@ export function CommentsPage({
 														}
 													>
 														{comment.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
+													</Button>
+												) : null}
+												{comment.authorIp ? (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														disabled={refreshMetadataMutation.isPending}
+														onClick={() =>
+															refreshMetadataMutation.mutate(comment.id)
+														}
+													>
+														<RefreshCwIcon data-icon="inline-start" />
+														刷新地址
 													</Button>
 												) : null}
 												{comment.authorIp ? (

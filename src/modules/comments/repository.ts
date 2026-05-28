@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import {
+	commentRequestMetadata,
 	comments,
 	pageFeedbackRecords,
 	pageViewSessions,
@@ -53,6 +54,36 @@ function hashOptionalValue(value?: string): string | undefined {
 
 function createVisitorKey(): string {
 	return `visitor_${randomUUID()}`;
+}
+
+function mapCommentRequestMetadata(
+	comment: typeof comments.$inferSelect,
+	metadata: typeof commentRequestMetadata.$inferSelect | null,
+) {
+	return {
+		...comment,
+		authorIp: metadata?.authorIp ?? null,
+		authorUserAgent: metadata?.authorUserAgent ?? null,
+		authorIpCountry: metadata?.ipCountry ?? null,
+		authorIpRegion: metadata?.ipRegion ?? null,
+		authorIpCity: metadata?.ipCity ?? null,
+		authorIpIsp: metadata?.ipIsp ?? null,
+		authorIpLocationRaw: metadata?.ipLocationRaw ?? null,
+		authorIpLocationSource: metadata?.ipLocationSource ?? null,
+		authorIpLocationDbHash: metadata?.ipLocationDbHash ?? null,
+		authorIpLocationUpdatedAt: metadata?.ipLocationUpdatedAt ?? null,
+		authorIpLocationError: metadata?.ipLocationError ?? null,
+		authorDeviceBrowser: metadata?.deviceBrowser ?? null,
+		authorDeviceBrowserVersion: metadata?.deviceBrowserVersion ?? null,
+		authorDeviceOs: metadata?.deviceOs ?? null,
+		authorDeviceOsVersion: metadata?.deviceOsVersion ?? null,
+		authorDeviceType: metadata?.deviceType ?? null,
+		authorDeviceIcon: metadata?.deviceIcon ?? null,
+		authorDeviceSource: metadata?.deviceSource ?? null,
+		authorDeviceParserVersion: metadata?.deviceParserVersion ?? null,
+		authorDeviceUpdatedAt: metadata?.deviceUpdatedAt ?? null,
+		authorDeviceError: metadata?.deviceError ?? null,
+	};
 }
 
 export class CommentsRepository {
@@ -294,9 +325,16 @@ export class CommentsRepository {
 			input.sortBy === "oldest"
 				? asc(comments.createdAt)
 				: desc(comments.createdAt);
-		const allApprovedComments = await this.db
-			.select()
+		const rows = await this.db
+			.select({
+				comment: comments,
+				metadata: commentRequestMetadata,
+			})
 			.from(comments)
+			.leftJoin(
+				commentRequestMetadata,
+				eq(commentRequestMetadata.commentId, comments.id),
+			)
 			.where(
 				and(
 					eq(comments.pageThreadId, input.pageThreadId),
@@ -305,6 +343,9 @@ export class CommentsRepository {
 				),
 			)
 			.orderBy(orderBy);
+		const allApprovedComments = rows.map((row) =>
+			mapCommentRequestMetadata(row.comment, row.metadata),
+		);
 
 		const rootComments = allApprovedComments.filter(
 			(comment) => comment.parentId === null,

@@ -34,6 +34,17 @@ export interface AdminComment {
 	authorAvatarUrl: string | null;
 	authorIp: string | null;
 	authorUserAgent: string | null;
+	authorIpLocation: {
+		country: string | null;
+		region: string | null;
+		city: string | null;
+		isp: string | null;
+		raw: string | null;
+		source: string | null;
+		dbHash: string | null;
+		updatedAt: string | null;
+		error: string | null;
+	};
 	blacklist: {
 		email: boolean;
 		ip: boolean;
@@ -387,6 +398,15 @@ export function deleteComment(commentId: string) {
 		`/api/admin/comments/${encodeURIComponent(commentId)}`,
 		{
 			method: "DELETE",
+		},
+	);
+}
+
+export function refreshCommentMetadata(commentId: string) {
+	return requestJson<{ metadata: unknown }>(
+		`/api/admin/comments/${encodeURIComponent(commentId)}/metadata/refresh`,
+		{
+			method: "POST",
 		},
 	);
 }

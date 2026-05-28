@@ -109,6 +109,23 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 	});
 
+	fastify.post("/:commentId/metadata/refresh", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedParams = adminCommentParamsSchema.safeParse(request.params);
+		if (!parsedParams.success) {
+			throw new InvalidRequestError({
+				issues: parsedParams.error.issues,
+			});
+		}
+
+		return {
+			metadata: await service.refreshCommentMetadata(
+				parsedParams.data.commentId,
+				request.context?.requestId,
+			),
+		};
+	});
+
 	fastify.delete("/:commentId", async (request) => {
 		await sessionService.requireSession(request);
 		const parsed = adminCommentParamsSchema.safeParse(request.params);

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import {
 	captchaSessions,
+	commentRequestMetadata,
 	comments,
 	pageThreads,
 	siteSettings,
@@ -318,12 +319,16 @@ describe("POST /qingyan/api/comments", () => {
 			.select()
 			.from(comments)
 			.where(eq(comments.contentRaw, "request metadata"));
-		expect(comment?.authorIp).toBe("203.0.113.8");
-		expect(comment?.authorUserAgent).toBe(
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata?.authorIp).toBe("203.0.113.8");
+		expect(metadata?.authorUserAgent).toBe(
 			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 		);
-		expect(comment?.authorDeviceSource).toBe("ua-parser-js");
-		expect(comment?.authorDeviceError).toBeNull();
+		expect(metadata?.deviceSource).toBe("ua-parser-js");
+		expect(metadata?.deviceError).toBeNull();
 		expect(response.json().comment).toMatchObject({
 			displayMeta: {
 				device: {
@@ -391,9 +396,11 @@ describe("POST /qingyan/api/comments", () => {
 			.select()
 			.from(comments)
 			.where(eq(comments.contentRaw, "request metadata disabled"));
-		expect(comment?.authorIp).toBeNull();
-		expect(comment?.authorUserAgent).toBeNull();
-		expect(comment?.authorDeviceSource).toBeNull();
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata).toBeUndefined();
 	});
 
 	it("honors DB site settings request metadata switches", async () => {
@@ -444,9 +451,11 @@ describe("POST /qingyan/api/comments", () => {
 			.select()
 			.from(comments)
 			.where(eq(comments.contentRaw, "runtime metadata disabled"));
-		expect(comment?.authorIp).toBeNull();
-		expect(comment?.authorUserAgent).toBeNull();
-		expect(comment?.authorDeviceSource).toBeNull();
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata).toBeUndefined();
 	});
 
 	it("keeps comment creation available when ip region database is missing", async () => {
@@ -504,9 +513,76 @@ describe("POST /qingyan/api/comments", () => {
 			.select()
 			.from(comments)
 			.where(eq(comments.contentRaw, "missing region db"));
-		expect(comment?.authorIp).toBe("203.0.113.10");
-		expect(comment?.authorIpLocationError).toBe("xdb_not_found");
-		expect(comment?.authorIpCountry).toBeNull();
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata?.authorIp).toBe("203.0.113.10");
+		expect(metadata?.ipLocationError).toBe("xdb_not_found");
+		expect(metadata?.ipCountry).toBeNull();
+	});
+
+	it("derives ip location metadata even when location display is disabled", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			commentMetadataJson: JSON.stringify({
+				ipRegion: {
+					enabled: false,
+				},
+			}),
+		});
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert(
+			"ipRegion",
+			"ipv4.dbPath",
+			"./data/missing-ip2region-v4.xdb",
+		);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				...refererFor("post:display-disabled-location"),
+				"x-forwarded-for": "203.0.113.11",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:display-disabled-location",
+				pageTitle: "Display Disabled Location",
+				pageUrl:
+					"https://fangyuan.example.com/posts/display-disabled-location/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "display disabled location",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "display disabled location"));
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata?.authorIp).toBe("203.0.113.11");
+		expect(metadata?.ipLocationError).toBe("xdb_not_found");
+		expect(response.json().comment.displayMeta?.location).toBeUndefined();
 	});
 
 	it("requires captcha on the third write attempt in threshold mode", async () => {

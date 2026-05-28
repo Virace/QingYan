@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import {
 	blacklistRules,
+	commentRequestMetadata,
 	comments,
 	pageThreads,
 	sites,
@@ -60,8 +61,6 @@ describe("admin users", () => {
 				status: "approved",
 				authorName: "Alice",
 				authorEmail: "alice@example.com",
-				authorIp: "203.0.113.20",
-				authorUserAgent: "QingYan User Browser",
 				contentRaw: "hello 1",
 				contentHtml: "<p>hello 1</p>",
 				replyCount: 0,
@@ -103,6 +102,11 @@ describe("admin users", () => {
 				updatedAt: "2026-04-17T10:02:00.000Z",
 			},
 		]);
+		await fixture.app.db.insert(commentRequestMetadata).values({
+			commentId: "c_user_1",
+			authorIp: "203.0.113.20",
+			authorUserAgent: "QingYan User Browser",
+		});
 		await fixture.app.db.insert(blacklistRules).values({
 			siteId: site.id,
 			scope: "post",

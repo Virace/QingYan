@@ -10,6 +10,7 @@ export interface ExportInclude {
 	systemSettings?: boolean;
 	pageThreads?: boolean;
 	comments?: boolean;
+	rawUserAgent?: boolean;
 	visitors?: boolean;
 	voteRecords?: boolean;
 	pageFeedbackRecords?: boolean;
@@ -64,7 +65,7 @@ export class QingYanExportService {
 					: null,
 				pageThreads: include.pageThreads ? this.exportPageThreads(site.id) : [],
 				visitors: include.visitors ? this.exportVisitors(site.id) : [],
-				comments: include.comments ? this.exportComments(site.id) : [],
+				comments: include.comments ? this.exportComments(site.id, include) : [],
 				voteRecords: include.voteRecords ? this.exportVoteRecords(site.id) : [],
 				pageFeedbackRecords: include.pageFeedbackRecords
 					? this.exportPageFeedback(site.id)
@@ -160,13 +161,30 @@ export class QingYanExportService {
 		}));
 	}
 
-	private exportComments(siteId: number) {
+	private exportComments(siteId: number, include: ExportInclude) {
 		const rows = this.sqlite
 			.prepare(
-				`SELECT comments.*, page_threads.page_key, visitors.visitor_key
+				`SELECT comments.*, page_threads.page_key, visitors.visitor_key,
+					comment_request_metadata.author_ip,
+					comment_request_metadata.author_user_agent,
+					comment_request_metadata.ip_country,
+					comment_request_metadata.ip_region,
+					comment_request_metadata.ip_city,
+					comment_request_metadata.ip_isp,
+					comment_request_metadata.ip_location_raw,
+					comment_request_metadata.ip_location_source,
+					comment_request_metadata.device_browser,
+					comment_request_metadata.device_browser_version,
+					comment_request_metadata.device_os,
+					comment_request_metadata.device_os_version,
+					comment_request_metadata.device_type,
+					comment_request_metadata.device_icon,
+					comment_request_metadata.device_source
 				FROM comments
 				INNER JOIN page_threads ON page_threads.id = comments.page_thread_id
 				LEFT JOIN visitors ON visitors.id = comments.visitor_id
+				LEFT JOIN comment_request_metadata
+					ON comment_request_metadata.comment_id = comments.id
 				WHERE comments.site_id = ?
 				ORDER BY comments.created_at, comments.id`,
 			)
@@ -189,25 +207,28 @@ export class QingYanExportService {
 			},
 			request: {
 				ip: row.author_ip ?? null,
-				userAgent: row.author_user_agent ?? null,
+				userAgent:
+					include.rawUserAgent === false
+						? null
+						: (row.author_user_agent ?? null),
 			},
 			metadata: {
 				ipRegion: {
-					country: row.author_ip_country ?? null,
-					region: row.author_ip_region ?? null,
-					city: row.author_ip_city ?? null,
-					isp: row.author_ip_isp ?? null,
-					raw: row.author_ip_location_raw ?? null,
-					source: row.author_ip_location_source ?? null,
+					country: row.ip_country ?? null,
+					region: row.ip_region ?? null,
+					city: row.ip_city ?? null,
+					isp: row.ip_isp ?? null,
+					raw: row.ip_location_raw ?? null,
+					source: row.ip_location_source ?? null,
 				},
 				device: {
-					browser: row.author_device_browser ?? null,
-					browserVersion: row.author_device_browser_version ?? null,
-					os: row.author_device_os ?? null,
-					osVersion: row.author_device_os_version ?? null,
-					type: row.author_device_type ?? null,
-					icon: row.author_device_icon ?? null,
-					source: row.author_device_source ?? null,
+					browser: row.device_browser ?? null,
+					browserVersion: row.device_browser_version ?? null,
+					os: row.device_os ?? null,
+					osVersion: row.device_os_version ?? null,
+					type: row.device_type ?? null,
+					icon: row.device_icon ?? null,
+					source: row.device_source ?? null,
 				},
 			},
 			content: {

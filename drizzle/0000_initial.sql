@@ -36,7 +36,7 @@ CREATE TABLE `comments` (
 	`vote_down_count` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`deleted_at` text, `author_ip` text, `author_user_agent` text, `author_ip_country` text, `author_ip_region` text, `author_ip_city` text, `author_ip_isp` text, `author_ip_location_raw` text, `author_ip_location_source` text, `author_ip_location_db_hash` text, `author_ip_location_updated_at` text, `author_ip_location_error` text, `author_device_browser` text, `author_device_browser_version` text, `author_device_os` text, `author_device_os_version` text, `author_device_type` text, `author_device_icon` text, `author_device_source` text, `author_device_parser_version` text, `author_device_updated_at` text, `author_device_error` text,
+	`deleted_at` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`page_thread_id`) REFERENCES `page_threads`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`parent_id`) REFERENCES `comments`(`id`) ON UPDATE no action ON DELETE no action,
@@ -45,6 +45,33 @@ CREATE TABLE `comments` (
 CREATE INDEX `comments_thread_idx` ON `comments` (`page_thread_id`);--> statement-breakpoint
 CREATE INDEX `comments_parent_idx` ON `comments` (`parent_id`);--> statement-breakpoint
 CREATE INDEX `comments_visitor_idx` ON `comments` (`visitor_id`);--> statement-breakpoint
+CREATE TABLE `comment_request_metadata` (
+	`comment_id` text PRIMARY KEY NOT NULL,
+	`author_ip` text,
+	`author_user_agent` text,
+	`ip_country` text,
+	`ip_region` text,
+	`ip_city` text,
+	`ip_isp` text,
+	`ip_location_raw` text,
+	`ip_location_source` text,
+	`ip_location_db_hash` text,
+	`ip_location_updated_at` text,
+	`ip_location_error` text,
+	`device_browser` text,
+	`device_browser_version` text,
+	`device_os` text,
+	`device_os_version` text,
+	`device_type` text,
+	`device_icon` text,
+	`device_source` text,
+	`device_parser_version` text,
+	`device_updated_at` text,
+	`device_error` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`comment_id`) REFERENCES `comments`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
 CREATE TABLE `comment_moderation` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`comment_id` text NOT NULL,

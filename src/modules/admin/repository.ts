@@ -16,6 +16,7 @@ import type { AppDatabase } from "../../db/client";
 import {
 	adminSessions,
 	blacklistRules,
+	commentRequestMetadata,
 	comments,
 	pageViewSessions,
 	pageThreads,
@@ -315,8 +316,17 @@ export class AdminRepository {
 				authorName: comments.authorName,
 				authorEmail: comments.authorEmail,
 				authorEmailHash: comments.authorEmailHash,
-				authorIp: comments.authorIp,
-				authorUserAgent: comments.authorUserAgent,
+				authorIp: commentRequestMetadata.authorIp,
+				authorUserAgent: commentRequestMetadata.authorUserAgent,
+				ipCountry: commentRequestMetadata.ipCountry,
+				ipRegion: commentRequestMetadata.ipRegion,
+				ipCity: commentRequestMetadata.ipCity,
+				ipIsp: commentRequestMetadata.ipIsp,
+				ipLocationRaw: commentRequestMetadata.ipLocationRaw,
+				ipLocationSource: commentRequestMetadata.ipLocationSource,
+				ipLocationDbHash: commentRequestMetadata.ipLocationDbHash,
+				ipLocationUpdatedAt: commentRequestMetadata.ipLocationUpdatedAt,
+				ipLocationError: commentRequestMetadata.ipLocationError,
 				contentRaw: comments.contentRaw,
 				isPinned: comments.isPinned,
 				isFolded: comments.isFolded,
@@ -333,6 +343,10 @@ export class AdminRepository {
 			.from(comments)
 			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 			.innerJoin(sites, eq(sites.id, comments.siteId))
+			.leftJoin(
+				commentRequestMetadata,
+				eq(commentRequestMetadata.commentId, comments.id),
+			)
 			.where(whereCondition)
 			.orderBy(desc(comments.createdAt))
 			.limit(input.limit)
@@ -391,6 +405,17 @@ export class AdminRepository {
 						}) ?? null,
 					authorIp: row.authorIp,
 					authorUserAgent: row.authorUserAgent,
+					authorIpLocation: {
+						country: row.ipCountry,
+						region: row.ipRegion,
+						city: row.ipCity,
+						isp: row.ipIsp,
+						raw: row.ipLocationRaw,
+						source: row.ipLocationSource,
+						dbHash: row.ipLocationDbHash,
+						updatedAt: row.ipLocationUpdatedAt,
+						error: row.ipLocationError,
+					},
 					blacklist: {
 						email: emailBlacklisted,
 						ip: ipBlacklisted,
@@ -530,10 +555,14 @@ export class AdminRepository {
 				lastCommentAt: sql<string>`MAX(${comments.createdAt})`,
 				pageCount: sql<number>`COUNT(DISTINCT ${comments.pageThreadId})`,
 				siteCount: sql<number>`COUNT(DISTINCT ${comments.siteId})`,
-				ipsJson: sql<string>`json_group_array(DISTINCT ${comments.authorIp})`,
-				userAgentsJson: sql<string>`json_group_array(DISTINCT ${comments.authorUserAgent})`,
+				ipsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorIp})`,
+				userAgentsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorUserAgent})`,
 			})
 			.from(comments)
+			.leftJoin(
+				commentRequestMetadata,
+				eq(commentRequestMetadata.commentId, comments.id),
+			)
 			.where(
 				and(
 					isNull(comments.deletedAt),
@@ -634,10 +663,14 @@ export class AdminRepository {
 				commentCount: count(),
 				emailCount: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
 				emailsJson: sql<string>`json_group_array(DISTINCT ${comments.authorEmail})`,
-				ipsJson: sql<string>`json_group_array(DISTINCT ${comments.authorIp})`,
-				userAgentsJson: sql<string>`json_group_array(DISTINCT ${comments.authorUserAgent})`,
+				ipsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorIp})`,
+				userAgentsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorUserAgent})`,
 			})
 			.from(comments)
+			.leftJoin(
+				commentRequestMetadata,
+				eq(commentRequestMetadata.commentId, comments.id),
+			)
 			.where(
 				and(
 					isNull(comments.deletedAt),
@@ -831,6 +864,49 @@ export class AdminRepository {
 			.limit(1);
 
 		return comment;
+	}
+
+	public async getCommentRequestMetadata(commentId: string) {
+		const [metadata] = await this.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, commentId))
+			.limit(1);
+
+		return metadata;
+	}
+
+	public async updateCommentIpLocation(
+		commentId: string,
+		input: {
+			country?: string | null;
+			region?: string | null;
+			city?: string | null;
+			isp?: string | null;
+			raw?: string | null;
+			source?: string | null;
+			dbHash?: string | null;
+			error?: string | null;
+		},
+	) {
+		const nowIso = new Date().toISOString();
+		await this.db
+			.update(commentRequestMetadata)
+			.set({
+				ipCountry: input.country,
+				ipRegion: input.region,
+				ipCity: input.city,
+				ipIsp: input.isp,
+				ipLocationRaw: input.raw,
+				ipLocationSource: input.source,
+				ipLocationDbHash: input.dbHash,
+				ipLocationUpdatedAt: nowIso,
+				ipLocationError: input.error,
+				updatedAt: nowIso,
+			})
+			.where(eq(commentRequestMetadata.commentId, commentId));
+
+		return this.getCommentRequestMetadata(commentId);
 	}
 
 	public async getCommentReplyContext(commentId: string) {

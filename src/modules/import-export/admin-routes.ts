@@ -15,6 +15,8 @@ import { QingYanExportService } from "./qingyan/export-service";
 import { QingYanImportService } from "./qingyan/import-service";
 import { WordPressAdminImportService } from "./wordpress/admin-service";
 import { parseSitemapIndexUrls } from "./wordpress/dist-verifier";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
 
 const explicitMappingSchema = z.object({
 	siteKey: z.string().optional(),
@@ -102,6 +104,7 @@ const qingyanExportBodySchema = z.object({
 			systemSettings: z.boolean().optional(),
 			pageThreads: z.boolean().optional(),
 			comments: z.boolean().optional(),
+			rawUserAgent: z.boolean().optional(),
 			visitors: z.boolean().optional(),
 			voteRecords: z.boolean().optional(),
 			pageFeedbackRecords: z.boolean().optional(),
@@ -280,6 +283,11 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.siteRegistry,
 	);
 	const wordpressService = new WordPressAdminImportService();
+	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
+	const metadataResolver = new DefaultCommentMetadataResolver();
+	fastify.addHook("onClose", async () => {
+		metadataResolver.close();
+	});
 	const importJobRepository = new ImportJobRepository(fastify.db);
 	const backupService = new DatabaseBackupService({
 		engine: fastify.config.database.client,
@@ -290,6 +298,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 		importJobRepository,
 		fastify.sqlite,
 		backupService,
+		metadataResolver,
+		() => systemSettingsService.getIpRegionSettings(),
 	);
 	const qingyanExportService = new QingYanExportService(fastify.sqlite);
 	const qingyanImportService = new QingYanImportService(

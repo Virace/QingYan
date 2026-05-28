@@ -6,6 +6,7 @@ import type { AppDatabase } from "../../db/client";
 import {
 	captchaSessions,
 	commentModeration,
+	commentRequestMetadata,
 	comments,
 	pageThreads,
 	voteRecords,
@@ -22,6 +23,50 @@ function createEntityId(prefix: "c" | "cap"): string {
 	return `${prefix}_${randomUUID().replaceAll("-", "")}`;
 }
 
+function hasRequestMetadata(input: {
+	authorIp?: string;
+	authorUserAgent?: string;
+	metadata?: CommentMetadataSnapshot;
+}) {
+	return Boolean(
+		input.authorIp ||
+			input.authorUserAgent ||
+			Object.values(input.metadata ?? {}).some(
+				(value) => value !== undefined && value !== null,
+			),
+	);
+}
+
+function mapCommentRequestMetadata(
+	comment: typeof comments.$inferSelect,
+	metadata: typeof commentRequestMetadata.$inferSelect | null,
+) {
+	return {
+		...comment,
+		authorIp: metadata?.authorIp ?? null,
+		authorUserAgent: metadata?.authorUserAgent ?? null,
+		authorIpCountry: metadata?.ipCountry ?? null,
+		authorIpRegion: metadata?.ipRegion ?? null,
+		authorIpCity: metadata?.ipCity ?? null,
+		authorIpIsp: metadata?.ipIsp ?? null,
+		authorIpLocationRaw: metadata?.ipLocationRaw ?? null,
+		authorIpLocationSource: metadata?.ipLocationSource ?? null,
+		authorIpLocationDbHash: metadata?.ipLocationDbHash ?? null,
+		authorIpLocationUpdatedAt: metadata?.ipLocationUpdatedAt ?? null,
+		authorIpLocationError: metadata?.ipLocationError ?? null,
+		authorDeviceBrowser: metadata?.deviceBrowser ?? null,
+		authorDeviceBrowserVersion: metadata?.deviceBrowserVersion ?? null,
+		authorDeviceOs: metadata?.deviceOs ?? null,
+		authorDeviceOsVersion: metadata?.deviceOsVersion ?? null,
+		authorDeviceType: metadata?.deviceType ?? null,
+		authorDeviceIcon: metadata?.deviceIcon ?? null,
+		authorDeviceSource: metadata?.deviceSource ?? null,
+		authorDeviceParserVersion: metadata?.deviceParserVersion ?? null,
+		authorDeviceUpdatedAt: metadata?.deviceUpdatedAt ?? null,
+		authorDeviceError: metadata?.deviceError ?? null,
+	};
+}
+
 export class CommentsWriteRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
@@ -30,13 +75,22 @@ export class CommentsWriteRepository {
 	}
 
 	public async getCommentById(commentId: string) {
-		const [comment] = await this.db
-			.select()
+		const [row] = await this.db
+			.select({
+				comment: comments,
+				metadata: commentRequestMetadata,
+			})
 			.from(comments)
+			.leftJoin(
+				commentRequestMetadata,
+				eq(commentRequestMetadata.commentId, comments.id),
+			)
 			.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
 			.limit(1);
 
-		return comment;
+		return row
+			? mapCommentRequestMetadata(row.comment, row.metadata)
+			: undefined;
 	}
 
 	public async getActiveCaptchaSession(input: {
@@ -145,27 +199,6 @@ export class CommentsWriteRepository {
 			authorEmail: input.authorEmail,
 			authorEmailHash: hashCommentEmail(input.authorEmail),
 			authorWebsite: input.authorWebsite,
-			authorIp: input.authorIp,
-			authorUserAgent: input.authorUserAgent,
-			authorIpCountry: input.metadata?.authorIpCountry,
-			authorIpRegion: input.metadata?.authorIpRegion,
-			authorIpCity: input.metadata?.authorIpCity,
-			authorIpIsp: input.metadata?.authorIpIsp,
-			authorIpLocationRaw: input.metadata?.authorIpLocationRaw,
-			authorIpLocationSource: input.metadata?.authorIpLocationSource,
-			authorIpLocationDbHash: input.metadata?.authorIpLocationDbHash,
-			authorIpLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
-			authorIpLocationError: input.metadata?.authorIpLocationError,
-			authorDeviceBrowser: input.metadata?.authorDeviceBrowser,
-			authorDeviceBrowserVersion: input.metadata?.authorDeviceBrowserVersion,
-			authorDeviceOs: input.metadata?.authorDeviceOs,
-			authorDeviceOsVersion: input.metadata?.authorDeviceOsVersion,
-			authorDeviceType: input.metadata?.authorDeviceType,
-			authorDeviceIcon: input.metadata?.authorDeviceIcon,
-			authorDeviceSource: input.metadata?.authorDeviceSource,
-			authorDeviceParserVersion: input.metadata?.authorDeviceParserVersion,
-			authorDeviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
-			authorDeviceError: input.metadata?.authorDeviceError,
 			contentRaw: input.contentRaw,
 			contentHtml: renderCommentHtml(input.contentRaw),
 			replyCount: 0,
@@ -174,6 +207,34 @@ export class CommentsWriteRepository {
 			createdAt: nowIso,
 			updatedAt: nowIso,
 		});
+		if (hasRequestMetadata(input)) {
+			await this.db.insert(commentRequestMetadata).values({
+				commentId,
+				authorIp: input.authorIp,
+				authorUserAgent: input.authorUserAgent,
+				ipCountry: input.metadata?.authorIpCountry,
+				ipRegion: input.metadata?.authorIpRegion,
+				ipCity: input.metadata?.authorIpCity,
+				ipIsp: input.metadata?.authorIpIsp,
+				ipLocationRaw: input.metadata?.authorIpLocationRaw,
+				ipLocationSource: input.metadata?.authorIpLocationSource,
+				ipLocationDbHash: input.metadata?.authorIpLocationDbHash,
+				ipLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
+				ipLocationError: input.metadata?.authorIpLocationError,
+				deviceBrowser: input.metadata?.authorDeviceBrowser,
+				deviceBrowserVersion: input.metadata?.authorDeviceBrowserVersion,
+				deviceOs: input.metadata?.authorDeviceOs,
+				deviceOsVersion: input.metadata?.authorDeviceOsVersion,
+				deviceType: input.metadata?.authorDeviceType,
+				deviceIcon: input.metadata?.authorDeviceIcon,
+				deviceSource: input.metadata?.authorDeviceSource,
+				deviceParserVersion: input.metadata?.authorDeviceParserVersion,
+				deviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
+				deviceError: input.metadata?.authorDeviceError,
+				createdAt: nowIso,
+				updatedAt: nowIso,
+			});
+		}
 		if (input.moderation) {
 			await this.db.insert(commentModeration).values({
 				commentId,

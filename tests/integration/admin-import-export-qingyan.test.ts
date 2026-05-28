@@ -229,6 +229,24 @@ describe("admin import/export QingYan routes", () => {
 			);
 		fixture.app.sqlite
 			.prepare(
+				`INSERT INTO comment_request_metadata (
+					comment_id, author_ip, author_user_agent, ip_country, ip_region,
+					ip_city, ip_isp, ip_location_raw, ip_location_source
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"c_exported",
+				"127.0.0.1",
+				"Mozilla/5.0 (QingYan export test)",
+				"本地",
+				"回环",
+				"测试",
+				"loopback",
+				"本地|回环|测试|loopback",
+				"ip2region",
+			);
+		fixture.app.sqlite
+			.prepare(
 				`INSERT INTO comments (
 					id, site_id, page_thread_id, status, author_name, author_email, content_raw
 				) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -273,6 +291,7 @@ describe("admin import/export QingYan routes", () => {
 					systemSettings: true,
 					pageThreads: true,
 					comments: true,
+					rawUserAgent: false,
 					visitors: true,
 					voteRecords: true,
 					pageFeedbackRecords: true,
@@ -313,6 +332,16 @@ describe("admin import/export QingYan routes", () => {
 					{
 						id: "c_exported",
 						pageKey: "post/exported",
+						request: {
+							ip: "127.0.0.1",
+							userAgent: null,
+						},
+						metadata: {
+							ipRegion: {
+								raw: "本地|回环|测试|loopback",
+								source: "ip2region",
+							},
+						},
 						author: {
 							name: "Alice",
 							email: "alice@example.com",

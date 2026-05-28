@@ -197,14 +197,15 @@ export interface ImportApplyResult {
 
 export interface QingYanExportPayload {
 	format: "qingyan.export.v1";
-	formatVersion: 1;
+	formatVersion: 2;
 	scope: {
 		type: "site";
 		siteKey: string;
 	};
 	data: {
 		site: unknown;
-		runtimeSettings?: unknown;
+		siteSettings?: unknown;
+		systemSettings?: unknown;
 		pageThreads: unknown[];
 		visitors: unknown[];
 		comments: unknown[];
@@ -374,9 +375,11 @@ export function applyImportJob(
 export function exportQingYanData(input: {
 	siteKey: string;
 	include: {
-		runtimeSettings: boolean;
+		siteSettings?: boolean;
+		systemSettings?: boolean;
 		pageThreads: boolean;
 		comments: boolean;
+		rawUserAgent?: boolean;
 		visitors: boolean;
 		voteRecords: boolean;
 		pageFeedbackRecords: boolean;

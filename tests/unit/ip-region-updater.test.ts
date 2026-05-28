@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabaseClients } from "../../src/db/client";
 import {
+	commentRequestMetadata,
 	comments,
 	ipRegionDatabaseState,
 	ipRegionUpdateRuns,
@@ -165,7 +166,6 @@ describe("IpRegionUpdater", () => {
 				pageThreadId: 1,
 				status: "approved",
 				authorName: "Alice",
-				authorIp: "203.0.113.8",
 				contentRaw: "refresh me",
 			},
 			{
@@ -177,6 +177,10 @@ describe("IpRegionUpdater", () => {
 				contentRaw: "skip me",
 			},
 		]);
+		await fixture.db.insert(commentRequestMetadata).values({
+			commentId: "c_refresh",
+			authorIp: "203.0.113.8",
+		});
 
 		const result = await new IpRegionUpdater(fixture.db, {
 			batchSize: 1,
@@ -207,20 +211,20 @@ describe("IpRegionUpdater", () => {
 		});
 		const [comment] = await fixture.db
 			.select()
-			.from(comments)
-			.where(eq(comments.id, "c_refresh"));
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, "c_refresh"));
 		expect(comment).toMatchObject({
-			authorIpCountry: "中国",
-			authorIpRegion: "广东省",
-			authorIpCity: "深圳市",
-			authorIpLocationDbHash: downloaded.fileHash,
-			authorIpLocationSource: "ip2region",
+			ipCountry: "中国",
+			ipRegion: "广东省",
+			ipCity: "深圳市",
+			ipLocationDbHash: downloaded.fileHash,
+			ipLocationSource: "ip2region",
 		});
 		const [withoutIp] = await fixture.db
 			.select()
-			.from(comments)
-			.where(eq(comments.id, "c_without_ip"));
-		expect(withoutIp?.authorIpLocationDbHash).toBeNull();
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, "c_without_ip"));
+		expect(withoutIp).toBeUndefined();
 	});
 
 	it("loads scheduler update config from database-owned system settings", async () => {

@@ -153,7 +153,7 @@ export class DefaultCommentMetadataResolver implements CommentMetadataResolver {
 		ipRegion: SystemSettings["ipRegion"];
 	}): CommentMetadataSnapshot {
 		const snapshot: CommentMetadataSnapshot = {};
-		if (input.ip && input.metadata.ipRegion.enabled && input.ipRegion.enabled) {
+		if (input.ip) {
 			Object.assign(
 				snapshot,
 				this.ipRegionPool.search(input.ip, input.ipRegion),

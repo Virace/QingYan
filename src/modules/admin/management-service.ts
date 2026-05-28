@@ -25,6 +25,7 @@ import {
 } from "../comments/moderation-types";
 import { presentComments } from "../comments/presenter";
 import { CommentsWriteRepository } from "../comments/write-repository";
+import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
 import {
 	normalizeOriginList,
 	sanitizeOptionalSafeHttpUrl,
@@ -386,6 +387,62 @@ export class AdminManagementService {
 		});
 
 		return comment;
+	}
+
+	public async refreshCommentMetadata(commentId: string, requestId?: string) {
+		const comment = await this.repository.getCommentById(commentId);
+		if (!comment || comment.deletedAt) {
+			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+		const metadata = await this.repository.getCommentRequestMetadata(commentId);
+		if (!metadata?.authorIp) {
+			throw new AppError(
+				400,
+				"COMMENT_IP_METADATA_NOT_FOUND",
+				"评论没有可刷新的 IP 数据。",
+			);
+		}
+
+		const systemSettings = new RuntimeSystemSettingsService(
+			this.repository.database,
+		);
+		const resolver = new DefaultCommentMetadataResolver();
+		try {
+			const snapshot = await resolver.resolve({
+				ip: metadata.authorIp,
+				metadata: defaultCommentMetadata,
+				ipRegion: await systemSettings.getIpRegionSettings(),
+			});
+			const refreshed = await this.repository.updateCommentIpLocation(
+				commentId,
+				{
+					country: snapshot.authorIpCountry,
+					region: snapshot.authorIpRegion,
+					city: snapshot.authorIpCity,
+					isp: snapshot.authorIpIsp,
+					raw: snapshot.authorIpLocationRaw,
+					source: snapshot.authorIpLocationSource,
+					dbHash: snapshot.authorIpLocationDbHash,
+					error: snapshot.authorIpLocationError,
+				},
+			);
+			if (!refreshed) {
+				throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+			}
+
+			await this.security.writeAudit({
+				requestId,
+				actorType: "admin",
+				event: "comments.updated",
+				message: "评论地址信息已刷新",
+				targetType: "comment",
+				targetId: commentId,
+			});
+
+			return refreshed;
+		} finally {
+			resolver.close();
+		}
 	}
 
 	public async deleteComment(commentId: string, requestId?: string) {

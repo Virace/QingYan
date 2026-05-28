@@ -1,7 +1,12 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { pageThreads, sites } from "../../src/db/schema";
+import {
+	commentRequestMetadata,
+	pageThreads,
+	sites,
+} from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -29,6 +34,8 @@ function wxrFixture() {
         <wp:comment_id>100</wp:comment_id>
         <wp:comment_author>Alice</wp:comment_author>
         <wp:comment_author_email>alice@example.com</wp:comment_author_email>
+        <wp:comment_author_IP>203.0.113.88</wp:comment_author_IP>
+        <wp:comment_agent>Mozilla/5.0 WordPress Import</wp:comment_agent>
         <wp:comment_content>hello</wp:comment_content>
         <wp:comment_approved>1</wp:comment_approved>
         <wp:comment_type></wp:comment_type>
@@ -475,6 +482,12 @@ describe("admin import/export WordPress routes", () => {
 	it("applies a dry-run-passed WordPress import plan in one transaction", async () => {
 		const fixture = await createTestApp();
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert(
+			"ipRegion",
+			"ipv4.dbPath",
+			"./data/missing-ip2region-v4.xdb",
+		);
 		const jobId = await analyzeResolvedWordPressJob(
 			fixture,
 			adminCookie,
@@ -586,6 +599,15 @@ describe("admin import/export WordPress routes", () => {
 			source_key: "wordpress:post:1:comment:100",
 			target_type: "comment",
 			target_id: comment.id,
+		});
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment.id));
+		expect(metadata).toMatchObject({
+			authorIp: "203.0.113.88",
+			authorUserAgent: "Mozilla/5.0 WordPress Import",
+			ipLocationError: "xdb_not_found",
 		});
 
 		const jobsResponse = await fixture.app.inject({

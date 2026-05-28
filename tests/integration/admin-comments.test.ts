@@ -5,6 +5,7 @@ import { eq, inArray } from "drizzle-orm";
 
 import {
 	blacklistRules,
+	commentRequestMetadata,
 	comments,
 	pageThreads,
 	siteSettings,
@@ -268,8 +269,6 @@ describe("admin comments", () => {
 			status: "pending",
 			authorName: "Admin Test",
 			authorEmail: "admin@example.com",
-			authorIp: "203.0.113.10",
-			authorUserAgent: "QingYan Test Browser",
 			contentRaw: "pending comment",
 			contentHtml: "<p>pending comment</p>",
 			replyCount: 0,
@@ -277,6 +276,11 @@ describe("admin comments", () => {
 			voteDownCount: 0,
 			createdAt: "2026-04-17T10:00:00.000Z",
 			updatedAt: "2026-04-17T10:00:00.000Z",
+		});
+		await fixture.app.db.insert(commentRequestMetadata).values({
+			commentId: "c_admin_1",
+			authorIp: "203.0.113.10",
+			authorUserAgent: "QingYan Test Browser",
 		});
 		await fixture.app.db.insert(blacklistRules).values([
 			{
@@ -429,6 +433,95 @@ describe("admin comments", () => {
 			.where(eq(comments.id, "c_admin_1"));
 		expect(deletedComment?.status).toBe("trash");
 		expect(deletedComment?.deletedAt).not.toBeNull();
+	});
+
+	it("refreshes one comment ip location metadata from raw stored ip", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert(
+			"ipRegion",
+			"ipv4.dbPath",
+			"./data/missing-ip2region-v4.xdb",
+		);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:metadata-refresh",
+			pageTitle: "Metadata Refresh",
+			pageUrl: "/posts/metadata-refresh/",
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:metadata-refresh"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+		await fixture.app.db.insert(comments).values({
+			id: "c_refresh_location",
+			siteId: site.id,
+			pageThreadId: thread.id,
+			status: "approved",
+			authorName: "Refresh",
+			contentRaw: "refresh location",
+			contentHtml: "<p>refresh location</p>",
+		});
+		await fixture.app.db.insert(commentRequestMetadata).values({
+			commentId: "c_refresh_location",
+			authorIp: "203.0.113.44",
+			ipLocationError: "old_error",
+		});
+
+		const refreshResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/c_refresh_location/metadata/refresh",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+		});
+
+		expect(refreshResponse.statusCode).toBe(200);
+		expect(refreshResponse.json()).toMatchObject({
+			metadata: {
+				commentId: "c_refresh_location",
+				authorIp: "203.0.113.44",
+				ipLocationError: "xdb_not_found",
+			},
+		});
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, "c_refresh_location"));
+		expect(metadata).toMatchObject({
+			authorIp: "203.0.113.44",
+			ipLocationError: "xdb_not_found",
+		});
+
+		const listResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(listResponse.statusCode).toBe(200);
+		expect(listResponse.json().items[0]).toMatchObject({
+			id: "c_refresh_location",
+			authorIpLocation: {
+				error: "xdb_not_found",
+			},
+		});
 	});
 
 	it("bulk moves comments to trash and clears only trashed comments", async () => {

@@ -18,6 +18,15 @@ import type {
 import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import type { ImportJobRepository } from "./job-repository";
+import type {
+	CommentMetadataResolver,
+	CommentMetadataSnapshot,
+} from "../comments/metadata/resolver";
+import { defaultCommentMetadata } from "../shared/site-settings-defaults";
+import {
+	defaultSystemSettings,
+	type SystemSettings,
+} from "../system-settings/definitions";
 
 interface ImportJobPayload {
 	report?: MigrationReport;
@@ -85,6 +94,10 @@ export class ImportJobService {
 		private readonly repository: ImportJobRepository,
 		private readonly sqlite: SqliteClient,
 		private readonly backupService?: DatabaseBackupService,
+		private readonly metadataResolver?: CommentMetadataResolver,
+		private readonly loadIpRegionSettings?: () => Promise<
+			SystemSettings["ipRegion"]
+		>,
 	) {}
 
 	public async createWordPressAnalyzeJob(input: {
@@ -239,8 +252,9 @@ export class ImportJobService {
 			this.updateBackup(jobId, backup);
 		}
 		try {
+			const ipRegionSettings = await this.resolveImportIpRegionSettings();
 			const result = this.sqlite.transaction(() =>
-				this.applyInTransaction(jobId, input),
+				this.applyInTransaction(jobId, input, ipRegionSettings),
 			)();
 			return {
 				...result,
@@ -290,6 +304,7 @@ export class ImportJobService {
 	private applyInTransaction(
 		jobId: string,
 		input: { existingStrategy: ExistingImportStrategy },
+		ipRegionSettings: SystemSettings["ipRegion"],
 	) {
 		const batch = this.getBatchRow(jobId);
 		const payload = parsePayload(batch.summary_json);
@@ -326,6 +341,7 @@ export class ImportJobService {
 			payload.plan,
 			dryRun,
 			existingSourceRecords,
+			ipRegionSettings,
 		);
 		this.markApplied(
 			batch.id,
@@ -408,6 +424,7 @@ export class ImportJobService {
 		plan: ImportPlan,
 		dryRun: WordPressDryRunResult,
 		existingSourceRecords: Map<string, string>,
+		ipRegionSettings: SystemSettings["ipRegion"],
 	): WordPressApplyResult {
 		const summary = {
 			createdPageThreads: 0,
@@ -428,6 +445,7 @@ export class ImportJobService {
 				threadId,
 				existingSourceRecords,
 				summary,
+				ipRegionSettings,
 			);
 		}
 		return { summary, dryRun };
@@ -485,6 +503,7 @@ export class ImportJobService {
 		threadId: number,
 		existingSourceRecords: Map<string, string>,
 		summary: WordPressApplyResult["summary"],
+		ipRegionSettings: SystemSettings["ipRegion"],
 	) {
 		const oldToNew = new Map<string, string>();
 		for (const comment of item.comments) {
@@ -501,6 +520,7 @@ export class ImportJobService {
 				threadId,
 				parentId,
 				comment,
+				ipRegionSettings,
 			);
 			this.insertImportRecord(batch, sourceKey, parentId, commentId, comment);
 			oldToNew.set(comment.source.oldCommentId, commentId);
@@ -530,6 +550,7 @@ export class ImportJobService {
 		threadId: number,
 		parentId: string | null,
 		comment: ImportPlan["items"][number]["comments"][number],
+		ipRegionSettings: SystemSettings["ipRegion"],
 	) {
 		const nowIso = new Date().toISOString();
 		const createdAt = comment.createdAt ?? nowIso;
@@ -538,9 +559,9 @@ export class ImportJobService {
 			.prepare(
 				`INSERT INTO comments (
 					id, site_id, page_thread_id, parent_id, author_identity, status, author_name,
-					author_email, author_email_hash, author_website, author_ip,
-					author_user_agent, content_raw, content_html, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					author_email, author_email_hash, author_website,
+					content_raw, content_html, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				commentId,
@@ -553,15 +574,86 @@ export class ImportJobService {
 				comment.authorEmail,
 				hashCommentEmail(comment.authorEmail),
 				comment.authorUrl,
-				comment.authorIp,
-				comment.userAgent,
 				comment.content,
 				renderCommentHtml(comment.content),
 				createdAt,
 				nowIso,
 			);
+		const metadata = this.resolveCommentRequestMetadata(
+			comment,
+			ipRegionSettings,
+		);
+		if (comment.authorIp || comment.userAgent || metadata) {
+			this.sqlite
+				.prepare(
+					`INSERT INTO comment_request_metadata (
+						comment_id, author_ip, author_user_agent,
+						ip_country, ip_region, ip_city, ip_isp, ip_location_raw,
+						ip_location_source, ip_location_db_hash, ip_location_updated_at,
+						ip_location_error, device_browser, device_browser_version,
+						device_os, device_os_version, device_type, device_icon,
+						device_source, device_parser_version, device_updated_at,
+						device_error, created_at, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				)
+				.run(
+					commentId,
+					comment.authorIp,
+					comment.userAgent,
+					metadata?.authorIpCountry,
+					metadata?.authorIpRegion,
+					metadata?.authorIpCity,
+					metadata?.authorIpIsp,
+					metadata?.authorIpLocationRaw,
+					metadata?.authorIpLocationSource,
+					metadata?.authorIpLocationDbHash,
+					metadata?.authorIpLocationUpdatedAt,
+					metadata?.authorIpLocationError,
+					metadata?.authorDeviceBrowser,
+					metadata?.authorDeviceBrowserVersion,
+					metadata?.authorDeviceOs,
+					metadata?.authorDeviceOsVersion,
+					metadata?.authorDeviceType,
+					metadata?.authorDeviceIcon,
+					metadata?.authorDeviceSource,
+					metadata?.authorDeviceParserVersion,
+					metadata?.authorDeviceUpdatedAt,
+					metadata?.authorDeviceError,
+					nowIso,
+					nowIso,
+				);
+		}
 		this.updateCommentCounts(threadId, parentId, nowIso);
 		return commentId;
+	}
+
+	private async resolveImportIpRegionSettings() {
+		if (!this.loadIpRegionSettings) {
+			return defaultSystemSettings.ipRegion;
+		}
+
+		return this.loadIpRegionSettings();
+	}
+
+	private resolveCommentRequestMetadata(
+		comment: ImportPlan["items"][number]["comments"][number],
+		ipRegionSettings: SystemSettings["ipRegion"],
+	) {
+		if (!this.metadataResolver || (!comment.authorIp && !comment.userAgent)) {
+			return undefined;
+		}
+
+		const snapshot = this.metadataResolver.resolve({
+			ip: comment.authorIp,
+			userAgent: comment.userAgent,
+			metadata: defaultCommentMetadata,
+			ipRegion: ipRegionSettings,
+		});
+		if (snapshot instanceof Promise) {
+			return undefined;
+		}
+
+		return snapshot satisfies CommentMetadataSnapshot;
 	}
 
 	private updateCommentCounts(
