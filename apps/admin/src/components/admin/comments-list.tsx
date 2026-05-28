@@ -71,6 +71,7 @@ export interface CommentsListProps {
 	onRefreshMetadata: (commentId: string) => void;
 	onToggleEmailBlacklist: (comment: AdminComment) => void;
 	onToggleIpBlacklist: (comment: AdminComment) => void;
+	onFilterPage: (pageKey: string) => void;
 }
 
 export function CommentsList(props: CommentsListProps) {
@@ -259,14 +260,33 @@ export function CommentsList(props: CommentsListProps) {
 								) : null}
 							</div>
 							<div className="min-w-0 text-sm">
-								<p className="truncate">{comment.pageTitle ?? "-"}</p>
-								<p className="truncate text-xs text-muted-foreground">
+								{comment.pageTitle ? (
+									<button
+										type="button"
+										className="block max-w-full truncate text-left underline-offset-2 hover:underline"
+										onClick={() => props.onFilterPage(comment.pageKey)}
+									>
+										{comment.pageTitle}
+									</button>
+								) : (
+									<p className="truncate">-</p>
+								)}
+								<button
+									type="button"
+									className="block max-w-full truncate text-left text-xs text-muted-foreground underline-offset-2 hover:underline"
+									onClick={() => props.onFilterPage(comment.pageKey)}
+								>
 									{comment.pageKey}
-								</p>
+								</button>
 								{comment.pageUrl ? (
-									<p className="truncate text-xs text-muted-foreground">
+									<a
+										className="block truncate text-xs text-muted-foreground underline-offset-2 hover:underline"
+										href={comment.pageUrl}
+										target="_blank"
+										rel="noreferrer"
+									>
 										{comment.pageUrl}
-									</p>
+									</a>
 								) : null}
 							</div>
 						</div>

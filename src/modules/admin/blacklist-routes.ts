@@ -34,9 +34,7 @@ export const adminBlacklistRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
-		return {
-			items: await service.listBlacklist(parsed.data.siteKey),
-		};
+		return service.listBlacklist(parsed.data);
 	});
 
 	fastify.post("/", async (request) => {

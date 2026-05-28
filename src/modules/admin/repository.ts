@@ -1159,12 +1159,42 @@ export class AdminRepository {
 		return trashedComments.length;
 	}
 
-	public async listBlacklist(siteId?: number) {
-		return this.db
+	public async listBlacklist(input: {
+		siteId?: number;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const whereCondition = and(
+			input.siteId ? eq(blacklistRules.siteId, input.siteId) : undefined,
+			searchValue
+				? or(
+						like(blacklistRules.targetValue, searchValue),
+						like(blacklistRules.reason, searchValue),
+						like(blacklistRules.targetType, searchValue),
+						like(blacklistRules.matchMode, searchValue),
+					)
+				: undefined,
+		);
+		const rows = await this.db
 			.select()
 			.from(blacklistRules)
-			.where(siteId ? eq(blacklistRules.siteId, siteId) : undefined)
-			.orderBy(desc(blacklistRules.createdAt));
+			.where(whereCondition)
+			.orderBy(desc(blacklistRules.createdAt), desc(blacklistRules.id))
+			.limit(input.limit)
+			.offset(input.offset);
+		const [total] = await this.db
+			.select({
+				value: count(),
+			})
+			.from(blacklistRules)
+			.where(whereCondition);
+
+		return {
+			items: rows,
+			totalCount: total?.value ?? 0,
+		};
 	}
 
 	public async createBlacklistRule(input: {

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import {
 	type AdminComment,
@@ -111,6 +111,98 @@ type BulkCommentAction =
 	| "unfold"
 	| "refreshMetadata";
 
+type PaginationState = {
+	limit: number;
+	offset: number;
+	pageIndex: number;
+	setLimit: (limit: number) => void;
+	setPageIndex: (pageIndex: number) => void;
+	resetPage: () => void;
+};
+
+function usePaginationState(defaultLimit = 20): PaginationState {
+	const [limit, setLimitState] = useState(defaultLimit);
+	const [pageIndex, setPageIndexState] = useState(0);
+	const setLimit = (nextLimit: number) => {
+		setLimitState(nextLimit);
+		setPageIndexState(0);
+	};
+	const setPageIndex = (nextPageIndex: number) => {
+		setPageIndexState(Math.max(0, nextPageIndex));
+	};
+
+	return {
+		limit,
+		offset: pageIndex * limit,
+		pageIndex,
+		setLimit,
+		setPageIndex,
+		resetPage: () => setPageIndexState(0),
+	};
+}
+
+export function PaginationControls({
+	limit,
+	pageIndex,
+	totalCount,
+	itemCount,
+	setLimit,
+	setPageIndex,
+}: {
+	limit: number;
+	pageIndex: number;
+	totalCount: number;
+	itemCount: number;
+	setLimit: (value: number) => void;
+	setPageIndex: (value: number) => void;
+}) {
+	const limitInputId = useId();
+	const pageCount = Math.max(1, Math.ceil(totalCount / limit));
+	const canPrevious = pageIndex > 0;
+	const canNext = pageIndex + 1 < pageCount;
+
+	return (
+		<div className="flex flex-col gap-2 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
+			<p>
+				共 {totalCount} 条，当前显示 {itemCount} 条，第 {pageIndex + 1} /{" "}
+				{pageCount} 页。
+			</p>
+			<div className="flex flex-wrap items-center gap-2">
+				<label className="flex items-center gap-2" htmlFor={limitInputId}>
+					<span>每页</span>
+					<Input
+						id={limitInputId}
+						type="number"
+						min={1}
+						max={100}
+						className="h-8 w-20"
+						value={limit}
+						onChange={(event) => setLimit(Number(event.target.value) || 20)}
+					/>
+				</label>
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					disabled={!canPrevious}
+					onClick={() => setPageIndex(pageIndex - 1)}
+				>
+					上一页
+				</Button>
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					disabled={!canNext}
+					onClick={() => setPageIndex(pageIndex + 1)}
+				>
+					下一页
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 const commentViews: Array<{
 	id: CommentView;
 	label: string;
@@ -181,7 +273,7 @@ export function CommentsPage({
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
 	const [view, setView] = useState<CommentView>("all");
-	const [limit, setLimit] = useState(20);
+	const pagination = usePaginationState(20);
 	const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 	const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
 	const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
@@ -189,15 +281,24 @@ export function CommentsPage({
 	const currentView =
 		commentViews.find((item) => item.id === view) ?? commentViews[0];
 	const commentsQuery = useQuery({
-		queryKey: ["admin", "comments", siteKey, search, pageKey, view, limit],
+		queryKey: [
+			"admin",
+			"comments",
+			siteKey,
+			search,
+			pageKey,
+			view,
+			pagination.limit,
+			pagination.offset,
+		],
 		queryFn: () =>
 			listComments({
 				siteKey,
 				pageKey,
 				search,
 				status: currentView.status,
-				limit,
-				offset: 0,
+				limit: pagination.limit,
+				offset: pagination.offset,
 			}),
 	});
 	const updateMutation = useMutation({
@@ -448,6 +549,7 @@ export function CommentsPage({
 							onClick={() => {
 								setView(item.id);
 								setSelectedCommentIds([]);
+								pagination.resetPage();
 							}}
 						>
 							{item.label}
@@ -456,16 +558,27 @@ export function CommentsPage({
 				</div>
 				<ResourceFilters
 					search={search}
-					setSearch={setSearch}
+					setSearch={(value) => {
+						setSearch(value);
+						pagination.resetPage();
+					}}
 					pageKey={pageKey}
-					setPageKey={setPageKey}
-					limit={limit}
-					setLimit={setLimit}
+					setPageKey={(value) => {
+						setPageKey(value);
+						pagination.resetPage();
+					}}
 				/>
-				<p className="text-xs text-muted-foreground">
-					共 {commentsQuery.data?.pagination.totalCount ?? "-"} 条，当前显示{" "}
-					{commentsQuery.data?.items.length ?? 0} 条。
-				</p>
+				<PaginationControls
+					limit={pagination.limit}
+					pageIndex={pagination.pageIndex}
+					totalCount={commentsQuery.data?.pagination.totalCount ?? 0}
+					itemCount={commentsQuery.data?.items.length ?? 0}
+					setLimit={pagination.setLimit}
+					setPageIndex={(value) => {
+						setSelectedCommentIds([]);
+						pagination.setPageIndex(value);
+					}}
+				/>
 				<div className="flex flex-wrap items-center gap-2">
 					<span className="text-sm text-muted-foreground">
 						已选择 {selectedVisibleIds.length} 条
@@ -563,6 +676,10 @@ export function CommentsPage({
 							replyMutation.mutate({ commentId, raw });
 							setActiveReplyId(null);
 						}}
+						onFilterPage={(nextPageKey) => {
+							setPageKey(nextPageKey);
+							pagination.resetPage();
+						}}
 						onRefreshMetadata={(commentId) =>
 							refreshMetadataMutation.mutate(commentId)
 						}
@@ -601,31 +718,49 @@ export function PagesPage({
 	const [sourceType, setSourceType] = useState<PageSourceType>("sitemap");
 	const [sourceUrl, setSourceUrl] = useState("");
 	const [sourceMode, setSourceMode] = useState<PageSourceMode>("append");
+	const pagePagination = usePaginationState(20);
+	const pendingPagePagination = usePaginationState(20);
 	const [latestSourceJob, setLatestSourceJob] = useState<MaintenanceJob | null>(
 		null,
 	);
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
-		queryKey: ["admin", "pages", siteKey, search, status],
+		queryKey: [
+			"admin",
+			"pages",
+			siteKey,
+			search,
+			status,
+			pagePagination.limit,
+			pagePagination.offset,
+		],
 		queryFn: () =>
 			listPages({
 				siteKey,
 				search,
 				status: status === "all" ? undefined : status,
-				limit: 50,
-				offset: 0,
+				limit: pagePagination.limit,
+				offset: pagePagination.offset,
 			}),
 	});
 	const pendingQuery = useQuery({
-		queryKey: ["admin", "page-registry", "pending", siteKey, search],
+		queryKey: [
+			"admin",
+			"page-registry",
+			"pending",
+			siteKey,
+			search,
+			pendingPagePagination.limit,
+			pendingPagePagination.offset,
+		],
 		queryFn: () =>
 			listPendingPages({
 				siteKey,
 				search,
 				status: "pending",
-				limit: 50,
-				offset: 0,
+				limit: pendingPagePagination.limit,
+				offset: pendingPagePagination.offset,
 			}),
 	});
 	const sourcesQuery = useQuery({
@@ -764,15 +899,23 @@ export function PagesPage({
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
-				<ResourceFilters search={search} setSearch={setSearch} />
+				<ResourceFilters
+					search={search}
+					setSearch={(value) => {
+						setSearch(value);
+						pagePagination.resetPage();
+						pendingPagePagination.resetPage();
+					}}
+				/>
 				<label className="grid gap-1 text-sm md:max-w-xs">
 					<span className="text-muted-foreground">页面状态</span>
 					<select
 						className={inputClass}
 						value={status}
-						onChange={(event) =>
-							setStatus(event.target.value as PageStatusFilter)
-						}
+						onChange={(event) => {
+							setStatus(event.target.value as PageStatusFilter);
+							pagePagination.resetPage();
+						}}
 					>
 						{pageStatusOptions.map((option) => (
 							<option key={option.value} value={option.value}>
@@ -950,6 +1093,14 @@ export function PagesPage({
 							{pendingQuery.data?.pagination.totalCount ?? 0}
 						</Badge>
 					</div>
+					<PaginationControls
+						limit={pendingPagePagination.limit}
+						pageIndex={pendingPagePagination.pageIndex}
+						totalCount={pendingQuery.data?.pagination.totalCount ?? 0}
+						itemCount={pendingQuery.data?.items.length ?? 0}
+						setLimit={pendingPagePagination.setLimit}
+						setPageIndex={pendingPagePagination.setPageIndex}
+					/>
 					{pendingQuery.data?.items.map((candidate) => (
 						<div
 							key={candidate.pageKey}
@@ -1017,6 +1168,14 @@ export function PagesPage({
 					) : null}
 				</div>
 				<div className="grid gap-3">
+					<PaginationControls
+						limit={pagePagination.limit}
+						pageIndex={pagePagination.pageIndex}
+						totalCount={query.data?.pagination.totalCount ?? 0}
+						itemCount={query.data?.items.length ?? 0}
+						setLimit={pagePagination.setLimit}
+						setPageIndex={pagePagination.setPageIndex}
+					/>
 					{query.data?.items.map((page) => (
 						<div
 							key={page.pageKey}
@@ -1132,10 +1291,24 @@ export function UsersPage({
 	openComments: (input: { pageKey?: string; search?: string }) => void;
 }) {
 	const [search, setSearch] = useState("");
+	const pagination = usePaginationState(20);
 	const queryClient = useQueryClient();
 	const query = useQuery({
-		queryKey: ["admin", "users", siteKey, search],
-		queryFn: () => listUsers({ siteKey, search, limit: 50, offset: 0 }),
+		queryKey: [
+			"admin",
+			"users",
+			siteKey,
+			search,
+			pagination.limit,
+			pagination.offset,
+		],
+		queryFn: () =>
+			listUsers({
+				siteKey,
+				search,
+				limit: pagination.limit,
+				offset: pagination.offset,
+			}),
 	});
 	const createBlacklistMutation = useMutation({
 		mutationFn: createBlacklist,
@@ -1176,7 +1349,21 @@ export function UsersPage({
 				<CardDescription>按邮箱聚合评论用户。</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
-				<ResourceFilters search={search} setSearch={setSearch} />
+				<ResourceFilters
+					search={search}
+					setSearch={(value) => {
+						setSearch(value);
+						pagination.resetPage();
+					}}
+				/>
+				<PaginationControls
+					limit={pagination.limit}
+					pageIndex={pagination.pageIndex}
+					totalCount={query.data?.pagination.totalCount ?? 0}
+					itemCount={query.data?.items.length ?? 0}
+					setLimit={pagination.setLimit}
+					setPageIndex={pagination.setPageIndex}
+				/>
 				<div className="overflow-x-auto rounded-md border">
 					<table className="w-full text-left text-sm">
 						<thead className="bg-muted/60">
@@ -1262,10 +1449,24 @@ export function VisitorsPage({
 	openComments: (input: { pageKey?: string; search?: string }) => void;
 }) {
 	const [search, setSearch] = useState("");
+	const pagination = usePaginationState(20);
 	const queryClient = useQueryClient();
 	const query = useQuery({
-		queryKey: ["admin", "visitors", siteKey, search],
-		queryFn: () => listVisitors({ siteKey, search, limit: 50, offset: 0 }),
+		queryKey: [
+			"admin",
+			"visitors",
+			siteKey,
+			search,
+			pagination.limit,
+			pagination.offset,
+		],
+		queryFn: () =>
+			listVisitors({
+				siteKey,
+				search,
+				limit: pagination.limit,
+				offset: pagination.offset,
+			}),
 	});
 	const createBlacklistMutation = useMutation({
 		mutationFn: createBlacklist,
@@ -1306,7 +1507,21 @@ export function VisitorsPage({
 				<CardDescription>按 visitorKey 聚合访问与评论行为。</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
-				<ResourceFilters search={search} setSearch={setSearch} />
+				<ResourceFilters
+					search={search}
+					setSearch={(value) => {
+						setSearch(value);
+						pagination.resetPage();
+					}}
+				/>
+				<PaginationControls
+					limit={pagination.limit}
+					pageIndex={pagination.pageIndex}
+					totalCount={query.data?.pagination.totalCount ?? 0}
+					itemCount={query.data?.items.length ?? 0}
+					setLimit={pagination.setLimit}
+					setPageIndex={pagination.setPageIndex}
+				/>
 				<div className="grid gap-3">
 					{query.data?.items.map((visitor) => (
 						<div key={visitor.visitorKey} className="rounded-md border p-4">

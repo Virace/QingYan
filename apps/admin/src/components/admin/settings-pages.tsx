@@ -41,11 +41,20 @@ import {
 	recaptchaVariantLabels,
 	scopeLabels,
 } from "./display-labels";
+import { PaginationControls } from "./collection-pages";
 
 export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
 	const [targetValue, setTargetValue] = useState("");
 	const [reason, setReason] = useState("");
+	const [search, setSearch] = useState("");
+	const [limit, setLimitState] = useState(20);
+	const [pageIndex, setPageIndex] = useState(0);
+	const offset = pageIndex * limit;
+	const setLimit = (nextLimit: number) => {
+		setLimitState(nextLimit);
+		setPageIndex(0);
+	};
 	const [targetType, setTargetType] = useState<"ip" | "email" | "visitor">(
 		"email",
 	);
@@ -54,8 +63,8 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	);
 	const [scope, setScope] = useState<"post" | "all">("post");
 	const query = useQuery({
-		queryKey: ["admin", "blacklist", siteKey],
-		queryFn: () => listBlacklist(siteKey),
+		queryKey: ["admin", "blacklist", siteKey, search, limit, offset],
+		queryFn: () => listBlacklist({ siteKey, search, limit, offset }),
 	});
 	const createMutation = useMutation({
 		mutationFn: createBlacklist,
@@ -155,6 +164,22 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 					<CardTitle className="text-lg">黑名单规则</CardTitle>
 				</CardHeader>
 				<CardContent className="grid gap-3">
+					<Input
+						placeholder="搜索黑名单"
+						value={search}
+						onChange={(event) => {
+							setSearch(event.target.value);
+							setPageIndex(0);
+						}}
+					/>
+					<PaginationControls
+						limit={limit}
+						pageIndex={pageIndex}
+						totalCount={query.data?.pagination.totalCount ?? 0}
+						itemCount={query.data?.items.length ?? 0}
+						setLimit={setLimit}
+						setPageIndex={setPageIndex}
+					/>
 					{query.data?.items.map((rule) => (
 						<div key={rule.id} className="rounded-md border p-3">
 							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

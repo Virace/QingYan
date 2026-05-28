@@ -734,10 +734,14 @@ export function listVisitors(input: {
 	);
 }
 
-export function listBlacklist(siteKey?: string) {
-	const suffix = siteKey ? `?${queryString({ siteKey })}` : "";
-	return requestJson<{ items: AdminBlacklistRule[] }>(
-		`/api/admin/blacklist${suffix}`,
+export function listBlacklist(input: {
+	siteKey?: string;
+	search?: string;
+	limit?: number;
+	offset?: number;
+}) {
+	return requestJson<Page<AdminBlacklistRule>>(
+		`/api/admin/blacklist?${queryString(input)}`,
 	);
 }
 

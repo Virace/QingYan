@@ -73,4 +73,85 @@ describe("admin blacklist", () => {
 			},
 		});
 	});
+
+	it("paginates and searches blacklist rules", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		for (const [index, payload] of [
+			{
+				targetType: "email",
+				matchMode: "exact",
+				targetValue: "first@spam.test",
+				reason: "first rule",
+			},
+			{
+				targetType: "ip",
+				matchMode: "exact",
+				targetValue: "203.0.113.20",
+				reason: "needle network",
+			},
+			{
+				targetType: "visitor",
+				matchMode: "exact",
+				targetValue: "visitor_blacklist_3",
+				reason: "third rule",
+			},
+		].entries()) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/admin/blacklist",
+				...withAdminWriteAuth({ adminCookie, csrfToken }),
+				payload: {
+					siteKey: "fangyuan",
+					scope: index === 0 ? "all" : "post",
+					...payload,
+				},
+			});
+			expect(response.statusCode).toBe(200);
+		}
+
+		const pageResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/blacklist?siteKey=fangyuan&limit=1&offset=1",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(pageResponse.statusCode).toBe(200);
+		expect(pageResponse.json()).toMatchObject({
+			items: [
+				{
+					targetValue: "203.0.113.20",
+				},
+			],
+			pagination: {
+				limit: 1,
+				offset: 1,
+				totalCount: 3,
+			},
+		});
+
+		const searchResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/blacklist?siteKey=fangyuan&search=needle",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(searchResponse.statusCode).toBe(200);
+		expect(searchResponse.json()).toMatchObject({
+			items: [
+				{
+					targetType: "ip",
+					targetValue: "203.0.113.20",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+	});
 });

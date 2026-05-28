@@ -677,9 +677,28 @@ export class AdminManagementService {
 		};
 	}
 
-	public async listBlacklist(siteKey?: string) {
-		const siteId = await this.resolveSiteId(siteKey);
-		return this.repository.listBlacklist(siteId);
+	public async listBlacklist(input: {
+		siteKey?: string;
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const result = await this.repository.listBlacklist({
+			siteId,
+			search: input.search,
+			limit: input.limit,
+			offset: input.offset,
+		});
+
+		return {
+			items: result.items,
+			pagination: {
+				limit: input.limit,
+				offset: input.offset,
+				totalCount: result.totalCount,
+			},
+		};
 	}
 
 	public async createBlacklist(input: {
