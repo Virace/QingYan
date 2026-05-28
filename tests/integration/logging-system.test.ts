@@ -82,4 +82,41 @@ describe("logging system", () => {
 		expect(accessJsonl).toContain('"pageKey":"post:logging-access"');
 		expect(accessJsonl).not.toContain("/qingyan/healthz");
 	});
+
+	it("writes unhandled request errors into the app jsonl channel", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const today = new Date().toISOString().slice(0, 10);
+		await fixture.app.get("/qingyan/api/__boom", async () => {
+			throw new Error("logging probe failure");
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/__boom",
+			headers: {
+				"x-request-id": "req_logging_probe",
+			},
+		});
+
+		expect(response.statusCode).toBe(500);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "INTERNAL_ERROR",
+				requestId: "req_logging_probe",
+			},
+		});
+
+		const appJsonl = readFileSync(
+			path.join(fixture.logsDirectory, "app", `${today}.jsonl`),
+			"utf-8",
+		);
+		expect(appJsonl).toContain('"channel":"app"');
+		expect(appJsonl).toContain('"event":"service.crashed"');
+		expect(appJsonl).toContain('"requestId":"req_logging_probe"');
+		expect(appJsonl).toContain('"message":"Unhandled request error"');
+		expect(appJsonl).toContain('"name":"Error"');
+		expect(appJsonl).toContain('"errorMessage":"logging probe failure"');
+		expect(appJsonl).toContain('"path":"/qingyan/api/__boom"');
+	});
 });

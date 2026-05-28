@@ -70,6 +70,22 @@ function isDevMemoryMode(runtimeOptions: AppRuntimeOptions): boolean {
 	);
 }
 
+function describeError(error: unknown) {
+	if (error instanceof Error) {
+		return {
+			name: error.name,
+			errorMessage: error.message,
+			stack: error.stack,
+		};
+	}
+
+	return {
+		name: typeof error,
+		errorMessage: String(error),
+		stack: undefined,
+	};
+}
+
 export async function buildApp(
 	config: AppConfig,
 	runtimeOptions: AppRuntimeOptions = {
@@ -98,7 +114,7 @@ export async function buildApp(
 		app.decorate("akismetClient", options.akismetClient);
 	}
 
-	app.setErrorHandler((error, request, reply) => {
+	app.setErrorHandler(async (error, request, reply) => {
 		const requestId = request.context?.requestId ?? request.id;
 		const accessEvent =
 			error instanceof AppError
@@ -130,7 +146,7 @@ export async function buildApp(
 		}
 
 		if (error instanceof AppError) {
-			reply.status(error.statusCode).send({
+			return reply.status(error.statusCode).send({
 				error: {
 					code: error.code,
 					message: error.message,
@@ -138,11 +154,29 @@ export async function buildApp(
 					details: error.details ?? null,
 				},
 			});
-			return;
 		}
 
+		const errorDetails = describeError(error);
 		app.log.error({ err: error }, "Unhandled request error");
-		reply.status(500).send({
+		await app.loggerManager
+			.logApp({
+				level: "error",
+				channel: "app",
+				event: "service.crashed",
+				message: "Unhandled request error",
+				requestId,
+				siteKey: request.context?.siteKey,
+				pageKey: request.context?.pageKey,
+				data: {
+					...errorDetails,
+					method: request.method,
+					path: request.url.split("?")[0] ?? request.url,
+				},
+			})
+			.catch((logError: unknown) => {
+				app.log.error({ err: logError }, "Failed to write request error log");
+			});
+		return reply.status(500).send({
 			error: {
 				code: "INTERNAL_ERROR",
 				message: "服务器内部错误。",
