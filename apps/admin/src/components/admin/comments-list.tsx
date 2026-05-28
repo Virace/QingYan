@@ -5,10 +5,11 @@ import { cn } from "@/lib/utils";
 
 import { textareaClass } from "./admin-ui";
 import {
-	commentActionsForStatus,
 	type CommentActionId,
+	commentActionsForStatus,
 } from "./comment-actions";
 import { CommentActionButton } from "./comment-row-actions";
+import { formatAdminCommentTime } from "./time-format";
 
 function rowTone(status: CommentStatus) {
 	if (status === "pending") {
@@ -168,6 +169,9 @@ export function CommentsList(props: CommentsListProps) {
 								</p>
 								<p className="mt-1 text-xs text-muted-foreground">
 									赞 {comment.voteUpCount} / 回复 {comment.replyCount}
+								</p>
+								<p className="mt-1 text-xs text-muted-foreground">
+									时间 {formatAdminCommentTime(comment.createdAt)}
 								</p>
 								<div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
 									{commentActionsForStatus(comment.status).map((action) => (

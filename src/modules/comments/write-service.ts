@@ -1,26 +1,26 @@
 import type { AppConfig } from "../../config/types";
-import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { SecurityToolkit } from "../../plugins/security";
+import { AppError, ResourceNotFoundError } from "../shared/errors";
+import { normalizeSafeHttpUrl } from "../shared/url-policy";
 import {
 	defaultSystemSettings,
 	type SystemSettings,
 } from "../system-settings/definitions";
-import { normalizeSafeHttpUrl } from "../shared/url-policy";
-import type { CommentsRepository } from "./repository";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import type { CommentMetadataResolver } from "./metadata/resolver";
+import type { ModerationService } from "./moderation-service";
+import {
+	type CommentStatus,
+	mergeSiteModerationSettings,
+	resolvePublicCommentStatus,
+} from "./moderation-types";
+import type { CommentsRepository } from "./repository";
 import {
 	isReservedVerifiedAuthorEmail,
 	mergeVerifiedAuthorSettings,
 } from "./verified-author";
 import type { CommentsWriteRepository } from "./write-repository";
-import {
-	mergeSiteModerationSettings,
-	resolvePublicCommentStatus,
-	type CommentStatus,
-} from "./moderation-types";
-import type { ModerationService } from "./moderation-service";
 
 function resolveIdentity(
 	siteKey: string,
@@ -76,6 +76,10 @@ export class CommentsWriteService {
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
+		await this.readRepository.assertPageInteractive({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
 
 		const visitor = await this.readRepository.getOrCreateVisitor({
 			siteId: site.id,

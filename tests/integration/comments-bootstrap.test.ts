@@ -9,6 +9,7 @@ import {
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
+	sitePageRegistry,
 	siteSettings,
 	sites,
 	visitors,
@@ -314,6 +315,52 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			pageKey: "posts/unknown-bootstrap/",
 			hitCount: 1,
 		});
+	});
+
+	it("does not record official or pending page views for trashed registry pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/trashed-bootstrap/",
+			pageUrl: "/posts/trashed-bootstrap/",
+			status: "trash",
+			trashedAt: "2026-05-29T00:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Trashed",
+			headers: {
+				referer: "http://localhost:4321/posts/trashed-bootstrap/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			pagination: {
+				totalCount: 0,
+				rootCount: 0,
+			},
+			pageMetrics: {
+				pageViewCount: 0,
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
 	});
 
 	it("rejects bootstrap requests without Referer", async () => {

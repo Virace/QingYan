@@ -1,44 +1,44 @@
-import type { AppConfig } from "../../config/types";
 import { joinPublicPath } from "../../config/public-path";
+import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
-import type { SystemSettings } from "../system-settings/definitions";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
-import type { CommentsRepository } from "./repository";
-import type {
-	CaptchaAction,
-	CommentsWriteRepository,
-} from "./write-repository";
+import type { SystemSettings } from "../system-settings/definitions";
 import {
-	isInlineCaptchaSessionPayload,
-	resolveCaptchaHostMode,
 	type CaptchaSessionPayload,
+	isInlineCaptchaSessionPayload,
 	type PublicCaptchaProviderKind,
+	resolveCaptchaHostMode,
 } from "./captcha-provider-types";
 import { requiresCaptchaForAttempt } from "./captcha-threshold";
 import {
-	createImageCaptchaChallenge,
-	verifyImageCaptchaValue,
-} from "./providers/image-provider";
-import {
-	createTurnstileChallenge,
-	renderTurnstileWidgetHtml,
-	verifyTurnstileToken,
-} from "./providers/turnstile-provider";
+	createGeeTestChallenge,
+	renderGeeTestWidgetHtml,
+	verifyGeeTestToken,
+} from "./providers/geetest-provider";
 import {
 	createHCaptchaChallenge,
 	renderHCaptchaWidgetHtml,
 	verifyHCaptchaToken,
 } from "./providers/hcaptcha-provider";
 import {
+	createImageCaptchaChallenge,
+	verifyImageCaptchaValue,
+} from "./providers/image-provider";
+import {
 	createRecaptchaChallenge,
 	renderRecaptchaWidgetHtml,
 	verifyRecaptchaToken,
 } from "./providers/recaptcha-provider";
 import {
-	createGeeTestChallenge,
-	renderGeeTestWidgetHtml,
-	verifyGeeTestToken,
-} from "./providers/geetest-provider";
+	createTurnstileChallenge,
+	renderTurnstileWidgetHtml,
+	verifyTurnstileToken,
+} from "./providers/turnstile-provider";
+import type { CommentsRepository } from "./repository";
+import type {
+	CaptchaAction,
+	CommentsWriteRepository,
+} from "./write-repository";
 
 function resolveCaptchaPolicy(settings: {
 	captchaMode: "never" | "always" | "threshold";
@@ -304,6 +304,10 @@ export class CaptchaService {
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
+		await this.commentsRepository.assertPageInteractive({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
 
 		const visitor = await this.commentsRepository.getOrCreateVisitor({
 			siteId: site.id,

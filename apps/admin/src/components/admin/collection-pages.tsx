@@ -1,24 +1,33 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
-	bulkUpdateComments,
+	type AdminComment,
+	type AdminPage,
+	approvePendingPage,
 	bulkTrashComments,
+	bulkUpdateComments,
+	type CommentStatus,
 	clearTrash,
 	createBlacklist,
 	createSite,
 	deleteBlacklistTarget,
 	deleteComment,
+	deletePage,
+	ignorePendingPage,
 	listComments,
 	listPages,
+	listPendingPages,
 	listSites,
 	listUsers,
 	listVisitors,
+	type PageRegistryStatus,
 	refreshCommentMetadata,
 	refreshSelectedCommentMetadata,
+	rejectPendingPage,
 	replyToComment,
-	type AdminComment,
-	type CommentStatus,
+	restorePage,
+	trashPage,
 	updateComment,
 	updateSite,
 } from "@/api/admin";
@@ -38,6 +47,28 @@ import { EmptyState, inputClass } from "./admin-ui";
 import type { CommentActionId } from "./comment-actions";
 import { CommentsList } from "./comments-list";
 import { useAdminConfirmDialog } from "./confirm-dialog";
+
+type PageStatusFilter = "all" | PageRegistryStatus;
+
+const pageStatusOptions: Array<{ value: PageStatusFilter; label: string }> = [
+	{ value: "all", label: "全部" },
+	{ value: "active", label: "正常" },
+	{ value: "trash", label: "回收站" },
+	{ value: "deleted", label: "已删除" },
+	{ value: "ignored", label: "已忽略" },
+	{ value: "stale", label: "待同步" },
+];
+
+function pageStatusLabel(status: PageRegistryStatus) {
+	const labels: Record<PageRegistryStatus, string> = {
+		active: "正常",
+		stale: "待同步",
+		trash: "回收站",
+		deleted: "已删除",
+		ignored: "已忽略",
+	};
+	return labels[status];
+}
 
 type CommentView = "all" | "pending" | "approved" | "spam" | "trash";
 type BulkCommentAction =
@@ -539,19 +570,187 @@ export function PagesPage({
 	openComments: (input: { pageKey?: string; search?: string }) => void;
 }) {
 	const [search, setSearch] = useState("");
+	const [status, setStatus] = useState<PageStatusFilter>("all");
+	const queryClient = useQueryClient();
 	const query = useQuery({
-		queryKey: ["admin", "pages", siteKey, search],
-		queryFn: () => listPages({ siteKey, search, limit: 50, offset: 0 }),
+		queryKey: ["admin", "pages", siteKey, search, status],
+		queryFn: () =>
+			listPages({
+				siteKey,
+				search,
+				status: status === "all" ? undefined : status,
+				limit: 50,
+				offset: 0,
+			}),
 	});
+	const pendingQuery = useQuery({
+		queryKey: ["admin", "page-registry", "pending", siteKey, search],
+		queryFn: () =>
+			listPendingPages({
+				siteKey,
+				search,
+				status: "pending",
+				limit: 50,
+				offset: 0,
+			}),
+	});
+	const invalidatePages = () => {
+		void queryClient.invalidateQueries({ queryKey: ["admin", "pages"] });
+		void queryClient.invalidateQueries({
+			queryKey: ["admin", "page-registry", "pending"],
+		});
+	};
+	const trashMutation = useMutation({
+		mutationFn: trashPage,
+		onSuccess: invalidatePages,
+	});
+	const restoreMutation = useMutation({
+		mutationFn: restorePage,
+		onSuccess: invalidatePages,
+	});
+	const deleteMutation = useMutation({
+		mutationFn: deletePage,
+		onSuccess: invalidatePages,
+	});
+	const approveMutation = useMutation({
+		mutationFn: approvePendingPage,
+		onSuccess: invalidatePages,
+	});
+	const rejectMutation = useMutation({
+		mutationFn: rejectPendingPage,
+		onSuccess: invalidatePages,
+	});
+	const ignoreMutation = useMutation({
+		mutationFn: ignorePendingPage,
+		onSuccess: invalidatePages,
+	});
+	const lifecyclePending =
+		trashMutation.isPending ||
+		restoreMutation.isPending ||
+		deleteMutation.isPending ||
+		approveMutation.isPending ||
+		rejectMutation.isPending ||
+		ignoreMutation.isPending;
+	const mutatePage = (
+		page: AdminPage,
+		action: "trash" | "restore" | "delete",
+	) => {
+		const input = { siteKey: page.siteKey, pageKey: page.pageKey };
+		if (action === "trash") {
+			trashMutation.mutate(input);
+			return;
+		}
+		if (action === "restore") {
+			restoreMutation.mutate(input);
+			return;
+		}
+		deleteMutation.mutate(input);
+	};
 
 	return (
 		<Card>
 			<CardHeader>
 				<CardTitle className="text-lg">页面</CardTitle>
-				<CardDescription>页面级评论、访客和点赞聚合。</CardDescription>
+				<CardDescription>
+					页面级评论、访客、点赞聚合与页面状态治理。
+				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<ResourceFilters search={search} setSearch={setSearch} />
+				<label className="grid gap-1 text-sm md:max-w-xs">
+					<span className="text-muted-foreground">页面状态</span>
+					<select
+						className={inputClass}
+						value={status}
+						onChange={(event) =>
+							setStatus(event.target.value as PageStatusFilter)
+						}
+					>
+						{pageStatusOptions.map((option) => (
+							<option key={option.value} value={option.value}>
+								{option.label}
+							</option>
+						))}
+					</select>
+				</label>
+				<div className="grid gap-3 rounded-md border p-4">
+					<div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+						<div>
+							<h3 className="font-medium">待处理未知页面</h3>
+							<p className="text-xs text-muted-foreground">
+								来自公开访问但尚未登记的页面。
+							</p>
+						</div>
+						<Badge variant="outline">
+							{pendingQuery.data?.pagination.totalCount ?? 0}
+						</Badge>
+					</div>
+					{pendingQuery.data?.items.map((candidate) => (
+						<div
+							key={candidate.pageKey}
+							className="flex flex-col gap-2 rounded-md border p-3 md:flex-row md:items-start md:justify-between"
+						>
+							<div className="min-w-0">
+								<p className="truncate font-medium">{candidate.pageKey}</p>
+								<p className="truncate text-xs text-muted-foreground">
+									{candidate.pageUrl}
+								</p>
+								<p className="text-xs text-muted-foreground">
+									访问 {candidate.hitCount} / 最近 {candidate.lastSeenAt}
+								</p>
+							</div>
+							<div className="flex flex-wrap gap-2">
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									disabled={lifecyclePending}
+									onClick={() =>
+										approveMutation.mutate({
+											siteKey: candidate.siteKey,
+											pageKey: candidate.pageKey,
+										})
+									}
+								>
+									放行
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									disabled={lifecyclePending}
+									onClick={() =>
+										rejectMutation.mutate({
+											siteKey: candidate.siteKey,
+											pageKey: candidate.pageKey,
+											reason: "admin_rejected",
+										})
+									}
+								>
+									拒绝
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									disabled={lifecyclePending}
+									onClick={() =>
+										ignoreMutation.mutate({
+											siteKey: candidate.siteKey,
+											pageKey: candidate.pageKey,
+											reason: "admin_ignored",
+										})
+									}
+								>
+									忽略
+								</Button>
+							</div>
+						</div>
+					))}
+					{pendingQuery.data?.items.length === 0 ? (
+						<EmptyState text="暂无待处理页面" />
+					) : null}
+				</div>
 				<div className="grid gap-3">
 					{query.data?.items.map((page) => (
 						<div key={page.pageKey} className="rounded-md border p-4">
@@ -565,6 +764,9 @@ export function PagesPage({
 									</p>
 								</div>
 								<div className="flex flex-wrap gap-2">
+									<Badge variant="secondary">
+										{pageStatusLabel(page.status)}
+									</Badge>
 									<Badge variant="secondary">评论 {page.commentCount}</Badge>
 									<Badge variant="outline">访客 {page.visitorCount}</Badge>
 									<Badge variant="outline">用户 {page.userCount}</Badge>
@@ -577,6 +779,39 @@ export function PagesPage({
 									>
 										查看评论
 									</Button>
+									{page.status === "active" || page.status === "stale" ? (
+										<Button
+											type="button"
+											size="sm"
+											variant="outline"
+											disabled={lifecyclePending}
+											onClick={() => mutatePage(page, "trash")}
+										>
+											移入回收站
+										</Button>
+									) : null}
+									{page.status === "trash" ? (
+										<>
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												disabled={lifecyclePending}
+												onClick={() => mutatePage(page, "restore")}
+											>
+												恢复
+											</Button>
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												disabled={lifecyclePending}
+												onClick={() => mutatePage(page, "delete")}
+											>
+												标记删除
+											</Button>
+										</>
+									) : null}
 								</div>
 							</div>
 						</div>

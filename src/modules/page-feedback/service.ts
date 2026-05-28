@@ -1,7 +1,7 @@
 import type { SecurityToolkit } from "../../plugins/security";
-import { AppError, ResourceNotFoundError } from "../shared/errors";
-import type { CommentsRepository } from "../comments/repository";
 import type { CaptchaService } from "../comments/captcha-service";
+import type { CommentsRepository } from "../comments/repository";
+import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { PageFeedbackRepository } from "./repository";
 
 function resolveIdentity(
@@ -37,6 +37,10 @@ export class PageFeedbackService {
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
+		await this.commentsRepository.assertPageInteractive({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
 
 		const visitor = await this.commentsRepository.getOrCreateVisitor({
 			siteId: site.id,

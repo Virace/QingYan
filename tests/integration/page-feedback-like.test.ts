@@ -1,12 +1,13 @@
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
+	captchaSessions,
 	pageFeedbackRecords,
 	pageThreads,
+	sitePageRegistry,
 	siteSettings,
-	captchaSessions,
+	sites,
 } from "../../src/db/schema";
-import { eq } from "drizzle-orm";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -18,6 +19,47 @@ afterEach(async () => {
 });
 
 describe("POST /qingyan/api/page-feedback/like", () => {
+	it("rejects likes for deleted registry pages without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/deleted-like/",
+			pageUrl: "/posts/deleted-like/",
+			status: "deleted",
+			deletedAt: "2026-05-29T00:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/posts/deleted-like/",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/deleted-like/",
+				pageTitle: "Deleted Like",
+				pageUrl: "https://fangyuan.example.com/posts/deleted-like/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_INTERACTIVE",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("likes a page once and blocks repeated likes from the same visitor", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
-import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	captchaSessions,
 	commentRequestMetadata,
 	comments,
 	pageThreads,
+	sitePageRegistry,
 	siteSettings,
+	sites,
 } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -26,6 +27,53 @@ afterEach(async () => {
 });
 
 describe("POST /qingyan/api/comments", () => {
+	it("rejects comments for trashed registry pages without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/trashed-comment/",
+			pageUrl: "/posts/trashed-comment/",
+			status: "trash",
+			trashedAt: "2026-05-29T00:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: refererFor("posts/trashed-comment/"),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/trashed-comment/",
+				pageTitle: "Trashed",
+				pageUrl: "https://fangyuan.example.com/posts/trashed-comment/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "blocked",
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_INTERACTIVE",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("rejects a dangerous author website scheme", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

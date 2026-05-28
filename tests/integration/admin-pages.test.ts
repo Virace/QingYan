@@ -9,7 +9,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
-import { loginAsAdmin } from "../support/admin-login";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -117,6 +117,7 @@ describe("admin pages", () => {
 			items: [
 				{
 					pageKey: "post:registry-only",
+					status: "active",
 					pageTitle: "Registry Only",
 					pageUrl: "http://localhost:4321/posts/registry-only/",
 					commentCount: 0,
@@ -127,6 +128,7 @@ describe("admin pages", () => {
 				},
 				{
 					pageKey: "post:welcome",
+					status: "active",
 					pageTitle: "Welcome",
 					pageUrl: "http://localhost:4321/posts/welcome/",
 					commentCount: 1,
@@ -138,6 +140,91 @@ describe("admin pages", () => {
 			],
 			pagination: {
 				totalCount: 2,
+			},
+		});
+	});
+
+	it("filters page status and moves pages through trash restore and deleted lifecycle", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "post:lifecycle",
+			pageUrl: "/posts/lifecycle/",
+			title: "Lifecycle",
+			status: "active",
+			updatedAt: "2026-05-29T00:00:00.000Z",
+		});
+
+		const trashResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/post%3Alifecycle/trash",
+			...withAdminWriteAuth(admin),
+		});
+		expect(trashResponse.statusCode).toBe(200);
+		expect(trashResponse.json()).toMatchObject({
+			page: {
+				siteKey: "fangyuan",
+				pageKey: "post:lifecycle",
+				status: "trash",
+			},
+		});
+
+		const trashList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/pages?siteKey=fangyuan&status=trash&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+		expect(trashList.statusCode).toBe(200);
+		expect(trashList.json()).toMatchObject({
+			items: [
+				{
+					pageKey: "post:lifecycle",
+					status: "trash",
+					trashedAt: expect.any(String),
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+
+		const restoreResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/post%3Alifecycle/restore",
+			...withAdminWriteAuth(admin),
+		});
+		expect(restoreResponse.statusCode).toBe(200);
+		expect(restoreResponse.json()).toMatchObject({
+			page: {
+				pageKey: "post:lifecycle",
+				status: "active",
+				trashedAt: null,
+			},
+		});
+
+		const deleteResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/post%3Alifecycle/delete",
+			...withAdminWriteAuth(admin),
+		});
+		expect(deleteResponse.statusCode).toBe(200);
+		expect(deleteResponse.json()).toMatchObject({
+			page: {
+				pageKey: "post:lifecycle",
+				status: "deleted",
+				deletedAt: expect.any(String),
 			},
 		});
 	});

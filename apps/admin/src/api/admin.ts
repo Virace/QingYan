@@ -10,6 +10,13 @@ export interface Page<T> {
 }
 
 export type CommentStatus = "pending" | "approved" | "spam" | "trash";
+export type PageRegistryStatus =
+	| "active"
+	| "stale"
+	| "trash"
+	| "deleted"
+	| "ignored";
+export type PendingPageStatus = "pending" | "approved" | "rejected" | "ignored";
 export type ModerationMode =
 	| "none"
 	| "akismet_auto"
@@ -65,14 +72,32 @@ export interface AdminComment {
 export interface AdminPage {
 	siteKey: string;
 	pageKey: string;
+	status: PageRegistryStatus;
 	pageTitle: string | null;
 	pageUrl: string | null;
 	commentCount: number;
 	rootCommentCount: number;
 	pageLikeCount: number;
 	updatedAt: string;
+	createdAt: string;
+	trashedAt: string | null;
+	deletedAt: string | null;
 	visitorCount: number;
 	userCount: number;
+}
+
+export interface PendingPageCandidate {
+	id: number;
+	siteKey: string;
+	pageKey: string;
+	pageUrl: string;
+	firstSeenAt: string;
+	lastSeenAt: string;
+	hitCount: number;
+	status: PendingPageStatus;
+	lastRejectReason: string | null;
+	createdAt: string;
+	updatedAt: string;
 }
 
 export interface AdminUser {
@@ -473,10 +498,94 @@ export function replyToComment(
 export function listPages(input: {
 	siteKey?: string;
 	search?: string;
+	status?: PageRegistryStatus;
 	limit?: number;
 	offset?: number;
 }) {
 	return requestJson<Page<AdminPage>>(`/api/admin/pages?${queryString(input)}`);
+}
+
+export function trashPage(input: { pageKey: string; siteKey?: string }) {
+	return requestJson<{ page: AdminPage }>(
+		`/api/admin/pages/${encodeURIComponent(input.pageKey)}/trash`,
+		{
+			method: "POST",
+			body: JSON.stringify({ siteKey: input.siteKey }),
+		},
+	);
+}
+
+export function restorePage(input: { pageKey: string; siteKey?: string }) {
+	return requestJson<{ page: AdminPage }>(
+		`/api/admin/pages/${encodeURIComponent(input.pageKey)}/restore`,
+		{
+			method: "POST",
+			body: JSON.stringify({ siteKey: input.siteKey }),
+		},
+	);
+}
+
+export function deletePage(input: { pageKey: string; siteKey?: string }) {
+	return requestJson<{ page: AdminPage }>(
+		`/api/admin/pages/${encodeURIComponent(input.pageKey)}/delete`,
+		{
+			method: "POST",
+			body: JSON.stringify({ siteKey: input.siteKey }),
+		},
+	);
+}
+
+export function listPendingPages(input: {
+	siteKey?: string;
+	search?: string;
+	status?: PendingPageStatus;
+	limit?: number;
+	offset?: number;
+}) {
+	return requestJson<Page<PendingPageCandidate>>(
+		`/api/admin/page-registry/pending?${queryString(input)}`,
+	);
+}
+
+export function approvePendingPage(input: {
+	siteKey: string;
+	pageKey: string;
+}) {
+	return requestJson<{ page: AdminPage }>(
+		"/api/admin/page-registry/pending/approve",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function rejectPendingPage(input: {
+	siteKey: string;
+	pageKey: string;
+	reason?: string;
+}) {
+	return requestJson<{ candidate: PendingPageCandidate }>(
+		"/api/admin/page-registry/pending/reject",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function ignorePendingPage(input: {
+	siteKey: string;
+	pageKey: string;
+	reason?: string;
+}) {
+	return requestJson<{
+		candidate: PendingPageCandidate;
+		page: AdminPage;
+	}>("/api/admin/page-registry/pending/ignore", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
 }
 
 export function listUsers(input: {

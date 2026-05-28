@@ -1,8 +1,13 @@
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { eq } from "drizzle-orm";
-
-import { captchaSessions, siteSettings } from "../../src/db/schema";
+import {
+	captchaSessions,
+	pageThreads,
+	sitePageRegistry,
+	siteSettings,
+	sites,
+} from "../../src/db/schema";
 import { decodeSvgDataUrl } from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -21,6 +26,38 @@ afterEach(async () => {
 });
 
 describe("comment captcha", () => {
+	it("rejects captcha state for ignored registry pages without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/ignored-captcha/",
+			pageUrl: "/posts/ignored-captcha/",
+			status: "ignored",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=posts%2Fignored-captcha%2F",
+			headers: refererFor("posts/ignored-captcha/"),
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_INTERACTIVE",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("returns an idle state in threshold mode before the page threshold is hit", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

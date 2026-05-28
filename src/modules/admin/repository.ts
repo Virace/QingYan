@@ -444,6 +444,7 @@ export class AdminRepository {
 	public async listPages(input: {
 		siteId?: number;
 		search?: string;
+		status?: "active" | "stale" | "trash" | "deleted" | "ignored";
 		limit: number;
 		offset: number;
 	}) {
@@ -458,6 +459,10 @@ export class AdminRepository {
 				pageKey: sitePageRegistry.pageKey,
 				pageTitle: sitePageRegistry.title,
 				pageUrl: sitePageRegistry.pageUrl,
+				status: sitePageRegistry.status,
+				trashedAt: sitePageRegistry.trashedAt,
+				deletedAt: sitePageRegistry.deletedAt,
+				createdAt: sitePageRegistry.createdAt,
 				threadPageTitle: pageThreads.pageTitle,
 				threadPageUrl: pageThreads.pageUrl,
 				commentCount: pageThreads.commentCount,
@@ -477,6 +482,7 @@ export class AdminRepository {
 			.where(
 				and(
 					input.siteId ? eq(sitePageRegistry.siteId, input.siteId) : undefined,
+					input.status ? eq(sitePageRegistry.status, input.status) : undefined,
 					searchValue
 						? or(
 								like(sitePageRegistry.pageKey, searchValue),
@@ -498,6 +504,7 @@ export class AdminRepository {
 					.map((row) => ({
 						siteKey: row.siteKey,
 						pageKey: row.pageKey,
+						status: row.status,
 						pageTitle: row.pageTitle ?? row.threadPageTitle,
 						pageUrl: resolvePublicPageUrl(
 							row.pageUrl ?? row.threadPageUrl,
@@ -507,6 +514,9 @@ export class AdminRepository {
 						rootCommentCount: 0,
 						pageLikeCount: 0,
 						updatedAt: row.updatedAt,
+						createdAt: row.createdAt,
+						trashedAt: row.trashedAt,
+						deletedAt: row.deletedAt,
 						visitorCount: 0,
 						userCount: 0,
 					})),
@@ -547,6 +557,7 @@ export class AdminRepository {
 				.map((row) => ({
 					siteKey: row.siteKey,
 					pageKey: row.pageKey,
+					status: row.status,
 					pageTitle: row.pageTitle ?? row.threadPageTitle,
 					pageUrl: resolvePublicPageUrl(
 						row.pageUrl ?? row.threadPageUrl,
@@ -556,6 +567,9 @@ export class AdminRepository {
 					rootCommentCount: row.rootCommentCount ?? 0,
 					pageLikeCount: row.pageLikeCount ?? 0,
 					updatedAt: row.updatedAt,
+					createdAt: row.createdAt,
+					trashedAt: row.trashedAt,
+					deletedAt: row.deletedAt,
 					visitorCount:
 						row.pageThreadId === null
 							? 0

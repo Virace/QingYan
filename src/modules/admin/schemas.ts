@@ -98,10 +98,49 @@ export const adminPagesQuerySchema = adminCollectionQuerySchema;
 export const adminUsersQuerySchema = adminCollectionQuerySchema;
 export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
 
+export const pageRegistryStatusSchema = z.enum([
+	"active",
+	"stale",
+	"trash",
+	"deleted",
+	"ignored",
+]);
+
+export const pendingPageStatusSchema = z.enum([
+	"pending",
+	"approved",
+	"rejected",
+	"ignored",
+]);
+
+export const adminPagesWithStatusQuerySchema =
+	adminCollectionQuerySchema.extend({
+		status: pageRegistryStatusSchema.optional(),
+	});
+
 export const adminPendingPageApproveBodySchema = z.object({
 	siteKey: z.string().min(1),
 	pageKey: z.string().min(1),
 });
+
+export const adminPendingPagesQuerySchema = adminCollectionQuerySchema.extend({
+	status: pendingPageStatusSchema.optional(),
+});
+
+export const adminPendingPageDecisionBodySchema =
+	adminPendingPageApproveBodySchema.extend({
+		reason: z.string().max(500).optional(),
+	});
+
+export const adminPageKeyParamsSchema = z.object({
+	pageKey: z.string().min(1),
+});
+
+export const adminPageLifecycleBodySchema = z
+	.object({
+		siteKey: z.string().min(1).optional(),
+	})
+	.default({});
 
 export const adminSiteCreateBodySchema = z.object({
 	siteKey: z

@@ -16,6 +16,7 @@ import {
 	visitors,
 	voteRecords,
 } from "../../db/schema";
+import { AppError } from "../shared/errors";
 import { normalizePagePath } from "../shared/page-url";
 import type {
 	RegisteredSiteRecord,
@@ -282,6 +283,38 @@ export class CommentsRepository {
 			.limit(1);
 
 		return thread;
+	}
+
+	public async getPageRegistryEntry(input: {
+		siteId: number;
+		pageKey: string;
+	}) {
+		const [page] = await this.db
+			.select()
+			.from(sitePageRegistry)
+			.where(
+				and(
+					eq(sitePageRegistry.siteId, input.siteId),
+					eq(sitePageRegistry.pageKey, input.pageKey),
+				),
+			)
+			.limit(1);
+
+		return page;
+	}
+
+	public async assertPageInteractive(input: {
+		siteId: number;
+		pageKey: string;
+	}) {
+		const page = await this.getPageRegistryEntry(input);
+		if (
+			page?.status === "trash" ||
+			page?.status === "deleted" ||
+			page?.status === "ignored"
+		) {
+			throw new AppError(403, "PAGE_NOT_INTERACTIVE", "页面当前不可交互。");
+		}
 	}
 
 	public async recordPageView(input: {

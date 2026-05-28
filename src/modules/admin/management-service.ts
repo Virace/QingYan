@@ -1,36 +1,36 @@
 import type { SecurityToolkit } from "../../plugins/security";
+import { buildCommentForm } from "../comments/comment-form";
+import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
+import {
+	type CommentStatus,
+	mergeSiteModerationSettings,
+	type SiteModerationSettings,
+	serializeSiteModerationSettings,
+} from "../comments/moderation-types";
+import { presentComments } from "../comments/presenter";
+import {
+	mergeStaffDisplaySettings,
+	mergeVerifiedAuthorSettings,
+	type StaffDisplaySettings,
+	serializeStaffDisplaySettings,
+	serializeVerifiedAuthorSettings,
+	type VerifiedAuthorSettings,
+} from "../comments/verified-author";
+import { CommentsWriteRepository } from "../comments/write-repository";
 import {
 	AppError,
 	InvalidRequestError,
 	ResourceNotFoundError,
 } from "../shared/errors";
-import { buildCommentForm } from "../comments/comment-form";
+import type { SiteRegistry } from "../shared/site-registry";
 import {
-	defaultCommentMetadata,
 	type CommentMetadataSettings,
+	defaultCommentMetadata,
 } from "../shared/site-settings-defaults";
-import {
-	mergeStaffDisplaySettings,
-	mergeVerifiedAuthorSettings,
-	serializeStaffDisplaySettings,
-	serializeVerifiedAuthorSettings,
-	type StaffDisplaySettings,
-	type VerifiedAuthorSettings,
-} from "../comments/verified-author";
-import {
-	mergeSiteModerationSettings,
-	serializeSiteModerationSettings,
-	type CommentStatus,
-	type SiteModerationSettings,
-} from "../comments/moderation-types";
-import { presentComments } from "../comments/presenter";
-import { CommentsWriteRepository } from "../comments/write-repository";
-import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
 import {
 	normalizeOriginList,
 	sanitizeOptionalSafeHttpUrl,
 } from "../shared/url-policy";
-import type { SiteRegistry } from "../shared/site-registry";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import type { AdminRepository } from "./repository";
 
@@ -147,6 +147,7 @@ export class AdminManagementService {
 	public async listPages(input: {
 		siteKey?: string;
 		search?: string;
+		status?: "active" | "stale" | "trash" | "deleted" | "ignored";
 		limit: number;
 		offset: number;
 	}) {
@@ -154,6 +155,7 @@ export class AdminManagementService {
 		const result = await this.repository.listPages({
 			siteId,
 			search: input.search,
+			status: input.status,
 			limit: input.limit,
 			offset: input.offset,
 		});

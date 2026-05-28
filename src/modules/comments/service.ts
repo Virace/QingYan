@@ -143,6 +143,14 @@ export class CommentsService {
 			siteId: site.id,
 			pageKey: input.pageKey,
 		});
+		const registryPage = await this.repository.getPageRegistryEntry({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
+		const pageInteractive =
+			registryPage?.status !== "trash" &&
+			registryPage?.status !== "deleted" &&
+			registryPage?.status !== "ignored";
 		const settings = await this.repository.getSiteSettings(site.id);
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
@@ -168,15 +176,16 @@ export class CommentsService {
 		const publicApiSettings = this.loadPublicApiSettings
 			? await this.loadPublicApiSettings()
 			: { advisoryFields: { enabled: false } };
-		const visitor = existingThread
-			? await this.repository.getOrCreateVisitor({
-					siteId: site.id,
-					visitorKey: input.visitorKey,
-					ip: input.ip,
-					userAgent: input.userAgent,
-				})
-			: undefined;
-		if (existingThread && visitor) {
+		const visitor =
+			existingThread && pageInteractive
+				? await this.repository.getOrCreateVisitor({
+						siteId: site.id,
+						visitorKey: input.visitorKey,
+						ip: input.ip,
+						userAgent: input.userAgent,
+					})
+				: undefined;
+		if (existingThread && visitor && pageInteractive) {
 			await this.repository.recordPageView({
 				pageThreadId: existingThread.id,
 				visitorId: visitor.id,
@@ -184,7 +193,7 @@ export class CommentsService {
 				userAgent: input.userAgent,
 			});
 		}
-		if (!existingThread) {
+		if (!existingThread && pageInteractive) {
 			await this.repository.recordPendingPageView({
 				siteKey: site.siteKey,
 				pageKey: input.pageKey,
@@ -194,14 +203,15 @@ export class CommentsService {
 				userAgent: input.userAgent,
 			});
 		}
-		const refreshedThread = existingThread
-			? await this.repository.getPageThread({
-					siteId: site.id,
-					pageKey: input.pageKey,
-				})
-			: undefined;
+		const refreshedThread =
+			existingThread && pageInteractive
+				? await this.repository.getPageThread({
+						siteId: site.id,
+						pageKey: input.pageKey,
+					})
+				: undefined;
 		const commentBundle =
-			existingThread && visitor
+			existingThread && visitor && pageInteractive
 				? await this.repository.listPublicComments({
 						pageThreadId: existingThread.id,
 						sortBy: pagination.sortBy,
@@ -216,7 +226,7 @@ export class CommentsService {
 						viewerVoteMap: new Map<string, "up" | "down">(),
 					};
 		const pageFeedback =
-			existingThread && visitor
+			existingThread && visitor && pageInteractive
 				? await this.repository.getViewerPageFeedback(
 						existingThread.id,
 						visitor.id,
@@ -225,7 +235,7 @@ export class CommentsService {
 						liked: false,
 					};
 		const captcha =
-			this.captchaService && existingThread && visitor
+			this.captchaService && existingThread && visitor && pageInteractive
 				? await this.captchaService.getState({
 						siteKey: input.siteKey,
 						pageKey: input.pageKey,

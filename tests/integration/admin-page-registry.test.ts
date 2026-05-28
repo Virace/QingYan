@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	pageThreads,
 	pendingPageCandidates,
+	pendingPageViewSessions,
 	sitePageRegistry,
 } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -18,6 +19,124 @@ afterEach(async () => {
 });
 
 describe("admin page registry", () => {
+	it("lists, rejects and ignores pending page candidates", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+
+		await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Pending",
+			headers: {
+				referer: "http://localhost:4321/posts/pending-review/",
+				"user-agent": "pending-review-test",
+			},
+		});
+
+		const listResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/page-registry/pending?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+
+		expect(listResponse.statusCode).toBe(200);
+		expect(listResponse.json()).toMatchObject({
+			items: [
+				{
+					siteKey: "fangyuan",
+					pageKey: "posts/pending-review/",
+					pageUrl: "/posts/pending-review/",
+					hitCount: 1,
+					status: "pending",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+
+		const rejectResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/pending/reject",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/pending-review/",
+				reason: "not a content page",
+			},
+		});
+
+		expect(rejectResponse.statusCode).toBe(200);
+		expect(rejectResponse.json()).toMatchObject({
+			candidate: {
+				siteKey: "fangyuan",
+				pageKey: "posts/pending-review/",
+				status: "rejected",
+				lastRejectReason: "not a content page",
+			},
+		});
+
+		await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Ignored",
+			headers: {
+				referer: "http://localhost:4321/posts/ignored-page/",
+				"user-agent": "ignored-page-test",
+			},
+		});
+
+		const ignoreResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/pending/ignore",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/ignored-page/",
+				reason: "utility route",
+			},
+		});
+
+		expect(ignoreResponse.statusCode).toBe(200);
+		expect(ignoreResponse.json()).toMatchObject({
+			candidate: {
+				siteKey: "fangyuan",
+				pageKey: "posts/ignored-page/",
+				status: "ignored",
+				lastRejectReason: "utility route",
+			},
+			page: {
+				siteKey: "fangyuan",
+				pageKey: "posts/ignored-page/",
+				status: "ignored",
+			},
+		});
+		const [registryPage] = await fixture.app.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.pageKey, "posts/ignored-page/"));
+		expect(registryPage).toMatchObject({
+			status: "ignored",
+			pageUrl: "/posts/ignored-page/",
+		});
+
+		const beforePendingSessionCount = (
+			await fixture.app.db.select().from(pendingPageViewSessions)
+		).length;
+		await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Ignored",
+			headers: {
+				referer: "http://localhost:4321/posts/ignored-page/",
+				"user-agent": "ignored-page-test-2",
+			},
+		});
+		expect(
+			(await fixture.app.db.select().from(pendingPageViewSessions)).length,
+		).toBe(beforePendingSessionCount);
+	});
+
 	it("approves pending candidates and merges pending PV into a page thread", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
