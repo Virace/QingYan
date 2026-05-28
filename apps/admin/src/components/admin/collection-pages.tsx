@@ -10,19 +10,27 @@ import {
 	type CommentStatus,
 	clearTrash,
 	createBlacklist,
+	createPageRegistrySource,
 	createSite,
 	deleteBlacklistTarget,
 	deleteComment,
 	deletePage,
+	fetchPageRegistryMaintenanceJob,
 	ignorePendingPage,
 	listComments,
 	listPages,
+	listPageRegistrySources,
 	listPendingPages,
 	listSites,
 	listUsers,
 	listVisitors,
+	type MaintenanceJob,
+	type PageSourceMode,
+	type PageSourceType,
 	type PageRegistryStatus,
 	refreshCommentMetadata,
+	refreshPageRegistrySource,
+	refreshPageRegistrySources,
 	refreshSelectedCommentMetadata,
 	rejectPendingPage,
 	replyToComment,
@@ -68,6 +76,19 @@ function pageStatusLabel(status: PageRegistryStatus) {
 		ignored: "已忽略",
 	};
 	return labels[status];
+}
+
+function sourceTypeLabel(value: PageSourceType) {
+	const labels: Record<PageSourceType, string> = {
+		sitemap: "Sitemap",
+		rss: "RSS",
+		atom: "Atom",
+	};
+	return labels[value];
+}
+
+function sourceModeLabel(value: PageSourceMode) {
+	return value === "append" ? "追加" : "替换";
 }
 
 type CommentView = "all" | "pending" | "approved" | "spam" | "trash";
@@ -571,6 +592,12 @@ export function PagesPage({
 }) {
 	const [search, setSearch] = useState("");
 	const [status, setStatus] = useState<PageStatusFilter>("all");
+	const [sourceType, setSourceType] = useState<PageSourceType>("sitemap");
+	const [sourceUrl, setSourceUrl] = useState("");
+	const [sourceMode, setSourceMode] = useState<PageSourceMode>("append");
+	const [latestSourceJob, setLatestSourceJob] = useState<MaintenanceJob | null>(
+		null,
+	);
 	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: ["admin", "pages", siteKey, search, status],
@@ -594,10 +621,33 @@ export function PagesPage({
 				offset: 0,
 			}),
 	});
+	const sourcesQuery = useQuery({
+		queryKey: ["admin", "page-registry", "sources", siteKey],
+		queryFn: () => listPageRegistrySources({ siteKey: siteKey ?? "" }),
+		enabled: Boolean(siteKey),
+	});
+	const sourceJobQuery = useQuery({
+		queryKey: [
+			"admin",
+			"page-registry",
+			"maintenance-job",
+			latestSourceJob?.id,
+		],
+		queryFn: () => fetchPageRegistryMaintenanceJob(latestSourceJob?.id ?? ""),
+		enabled: Boolean(latestSourceJob?.id),
+		refetchInterval:
+			latestSourceJob?.status === "queued" ||
+			latestSourceJob?.status === "running"
+				? 2000
+				: false,
+	});
 	const invalidatePages = () => {
 		void queryClient.invalidateQueries({ queryKey: ["admin", "pages"] });
 		void queryClient.invalidateQueries({
 			queryKey: ["admin", "page-registry", "pending"],
+		});
+		void queryClient.invalidateQueries({
+			queryKey: ["admin", "page-registry", "sources"],
 		});
 	};
 	const trashMutation = useMutation({
@@ -624,6 +674,27 @@ export function PagesPage({
 		mutationFn: ignorePendingPage,
 		onSuccess: invalidatePages,
 	});
+	const createSourceMutation = useMutation({
+		mutationFn: createPageRegistrySource,
+		onSuccess: () => {
+			setSourceUrl("");
+			invalidatePages();
+		},
+	});
+	const refreshSourceMutation = useMutation({
+		mutationFn: refreshPageRegistrySource,
+		onSuccess: (response) => {
+			setLatestSourceJob(response.job);
+			invalidatePages();
+		},
+	});
+	const refreshAllSourcesMutation = useMutation({
+		mutationFn: refreshPageRegistrySources,
+		onSuccess: (response) => {
+			setLatestSourceJob(response.job);
+			invalidatePages();
+		},
+	});
 	const lifecyclePending =
 		trashMutation.isPending ||
 		restoreMutation.isPending ||
@@ -631,6 +702,11 @@ export function PagesPage({
 		approveMutation.isPending ||
 		rejectMutation.isPending ||
 		ignoreMutation.isPending;
+	const sourceMutationPending =
+		createSourceMutation.isPending ||
+		refreshSourceMutation.isPending ||
+		refreshAllSourcesMutation.isPending;
+	const currentSourceJob = sourceJobQuery.data?.job ?? latestSourceJob;
 	const mutatePage = (
 		page: AdminPage,
 		action: "trash" | "restore" | "delete",
@@ -673,6 +749,152 @@ export function PagesPage({
 						))}
 					</select>
 				</label>
+				<div className="grid gap-3 rounded-md border p-4">
+					<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+						<div>
+							<h3 className="font-medium">页面来源</h3>
+							<p className="text-xs text-muted-foreground">
+								从 sitemap、RSS 或 Atom 刷新页面登记；不会创建评论或写入 PV。
+							</p>
+						</div>
+						<Button
+							type="button"
+							size="sm"
+							variant="outline"
+							disabled={!siteKey || sourceMutationPending}
+							onClick={() => {
+								if (!siteKey) {
+									return;
+								}
+								refreshAllSourcesMutation.mutate({ siteKey });
+							}}
+						>
+							刷新全部来源
+						</Button>
+					</div>
+					<form
+						className="grid gap-3 md:grid-cols-[140px_1fr_120px_auto]"
+						onSubmit={(event) => {
+							event.preventDefault();
+							if (!siteKey || !sourceUrl.trim()) {
+								return;
+							}
+							createSourceMutation.mutate({
+								siteKey,
+								sourceType,
+								sourceUrl: sourceUrl.trim(),
+								enabled: true,
+								mode: sourceMode,
+							});
+						}}
+					>
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">类型</span>
+							<select
+								className={inputClass}
+								value={sourceType}
+								onChange={(event) =>
+									setSourceType(event.target.value as PageSourceType)
+								}
+							>
+								<option value="sitemap">Sitemap</option>
+								<option value="rss">RSS</option>
+								<option value="atom">Atom</option>
+							</select>
+						</label>
+						<label className="grid gap-1 text-sm" htmlFor="page-source-url">
+							<span className="text-muted-foreground">URL</span>
+							<Input
+								id="page-source-url"
+								placeholder="https://example.com/sitemap.xml"
+								value={sourceUrl}
+								onChange={(event) => setSourceUrl(event.target.value)}
+							/>
+						</label>
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">模式</span>
+							<select
+								className={inputClass}
+								value={sourceMode}
+								onChange={(event) =>
+									setSourceMode(event.target.value as PageSourceMode)
+								}
+							>
+								<option value="append">追加</option>
+								<option value="replace">替换</option>
+							</select>
+						</label>
+						<Button
+							type="submit"
+							className="self-end"
+							disabled={!siteKey || sourceMutationPending}
+						>
+							添加来源
+						</Button>
+					</form>
+					<div className="grid gap-2">
+						{sourcesQuery.data?.items.map((source) => (
+							<div
+								key={source.id}
+								className="flex flex-col gap-2 rounded-md border p-3 md:flex-row md:items-start md:justify-between"
+							>
+								<div className="min-w-0">
+									<div className="flex flex-wrap gap-2">
+										<Badge variant="secondary">
+											{sourceTypeLabel(source.sourceType)}
+										</Badge>
+										<Badge variant="outline">
+											{sourceModeLabel(source.mode)}
+										</Badge>
+										{source.enabled ? (
+											<Badge variant="outline">启用</Badge>
+										) : (
+											<Badge variant="secondary">停用</Badge>
+										)}
+									</div>
+									<p className="mt-2 truncate text-sm font-medium">
+										{source.sourceUrl}
+									</p>
+									<p className="text-xs text-muted-foreground">
+										最近成功 {source.lastSuccessAt ?? "-"} / 最近错误{" "}
+										{source.lastError ?? "-"}
+									</p>
+								</div>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									disabled={sourceMutationPending}
+									onClick={() => refreshSourceMutation.mutate(source.id)}
+								>
+									刷新
+								</Button>
+							</div>
+						))}
+						{sourcesQuery.data?.items.length === 0 ? (
+							<EmptyState text="暂无页面来源" />
+						) : null}
+					</div>
+					{currentSourceJob ? (
+						<div className="rounded-md border p-3 text-sm">
+							<p className="font-medium">页面来源刷新任务</p>
+							<p className="mt-1 text-xs text-muted-foreground">
+								{currentSourceJob.type} / {currentSourceJob.status} /{" "}
+								{currentSourceJob.updatedAt}
+							</p>
+							{currentSourceJob.progress ? (
+								<pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-xs">
+									{JSON.stringify(currentSourceJob.progress, null, 2)}
+								</pre>
+							) : null}
+							{currentSourceJob.result ? (
+								<pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-xs">
+									{JSON.stringify(currentSourceJob.result, null, 2)}
+								</pre>
+							) : null}
+						</div>
+					) : null}
+				</div>
 				<div className="grid gap-3 rounded-md border p-4">
 					<div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
 						<div>

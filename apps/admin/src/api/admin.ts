@@ -17,6 +17,14 @@ export type PageRegistryStatus =
 	| "deleted"
 	| "ignored";
 export type PendingPageStatus = "pending" | "approved" | "rejected" | "ignored";
+export type PageSourceType = "sitemap" | "rss" | "atom";
+export type PageSourceMode = "append" | "replace";
+export type MaintenanceJobStatus =
+	| "queued"
+	| "running"
+	| "succeeded"
+	| "failed"
+	| "cancelled";
 export type ModerationMode =
 	| "none"
 	| "akismet_auto"
@@ -97,6 +105,41 @@ export interface PendingPageCandidate {
 	status: PendingPageStatus;
 	lastRejectReason: string | null;
 	createdAt: string;
+	updatedAt: string;
+}
+
+export interface PageRegistrySource {
+	id: number;
+	siteKey: string;
+	sourceType: PageSourceType;
+	sourceUrl: string;
+	enabled: boolean;
+	mode: PageSourceMode;
+	refreshIntervalSec: number | null;
+	lastAttemptAt: string | null;
+	lastSuccessAt: string | null;
+	lastSuccessHash: string | null;
+	lastError: string | null;
+	nextRefreshAt: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface MaintenanceJob {
+	id: string;
+	type:
+		| "ip_region_update"
+		| "comment_ip_refresh"
+		| "page_source_refresh"
+		| "page_metadata_refresh";
+	status: MaintenanceJobStatus;
+	scope: unknown;
+	progress: unknown;
+	result: unknown;
+	error: unknown;
+	createdAt: string;
+	startedAt: string | null;
+	finishedAt: string | null;
 	updatedAt: string;
 }
 
@@ -586,6 +629,57 @@ export function ignorePendingPage(input: {
 		method: "POST",
 		body: JSON.stringify(input),
 	});
+}
+
+export function listPageRegistrySources(input: { siteKey: string }) {
+	return requestJson<{ items: PageRegistrySource[] }>(
+		`/api/admin/page-registry/sources?${queryString(input)}`,
+	);
+}
+
+export function createPageRegistrySource(input: {
+	siteKey: string;
+	sourceType: PageSourceType;
+	sourceUrl: string;
+	enabled: boolean;
+	mode: PageSourceMode;
+	refreshIntervalSec?: number | null;
+}) {
+	return requestJson<{ source: PageRegistrySource }>(
+		"/api/admin/page-registry/sources",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function refreshPageRegistrySource(sourceId: number) {
+	return requestJson<{ job: MaintenanceJob }>(
+		`/api/admin/page-registry/sources/${sourceId}/refresh`,
+		{
+			method: "POST",
+		},
+	);
+}
+
+export function refreshPageRegistrySources(input: {
+	siteKey: string;
+	mode?: PageSourceMode;
+}) {
+	return requestJson<{ job: MaintenanceJob }>(
+		"/api/admin/page-registry/refresh",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function fetchPageRegistryMaintenanceJob(jobId: string) {
+	return requestJson<{ job: MaintenanceJob | null }>(
+		`/api/admin/page-registry/maintenance-jobs/${encodeURIComponent(jobId)}`,
+	);
 }
 
 export function listUsers(input: {

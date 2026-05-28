@@ -147,6 +147,7 @@ export async function createTestApp(options?: {
 	adminDistDirectory?: string;
 	seedSite?: SiteSeed | false;
 	mutateConfig?: (config: AppConfig) => void;
+	pageSourceFetchText?: (url: string) => Promise<string>;
 }) {
 	const workspace = createTempWorkspace();
 	applyInitialMigration(workspace.databaseFile);
@@ -173,6 +174,7 @@ export async function createTestApp(options?: {
 	});
 	const app = await buildApp(resolved.config, resolved.runtimeOptions, {
 		adminDistDirectory: options?.adminDistDirectory,
+		pageSourceFetchText: options?.pageSourceFetchText,
 	});
 
 	return {

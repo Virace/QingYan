@@ -39,6 +39,7 @@ declare module "fastify" {
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
 		akismetClient?: Pick<AkismetClient, "commentCheck">;
+		pageSourceFetchText?: (url: string) => Promise<string>;
 		devMockService?: DevMockService;
 	}
 

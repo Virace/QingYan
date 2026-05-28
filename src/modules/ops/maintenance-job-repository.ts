@@ -5,7 +5,11 @@ import { desc, eq, inArray } from "drizzle-orm";
 import type { AppDatabase } from "../../db/client";
 import { maintenanceJobs } from "../../db/schema";
 
-export type MaintenanceJobType = "ip_region_update" | "comment_ip_refresh";
+export type MaintenanceJobType =
+	| "ip_region_update"
+	| "comment_ip_refresh"
+	| "page_source_refresh"
+	| "page_metadata_refresh";
 export type MaintenanceJobStatus =
 	| "queued"
 	| "running"

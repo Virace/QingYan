@@ -157,6 +157,39 @@ CREATE TABLE `site_page_registry` (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_page_registry_site_page_key_idx` ON `site_page_registry` (`site_id`,`page_key`);--> statement-breakpoint
 CREATE INDEX `site_page_registry_site_status_idx` ON `site_page_registry` (`site_id`,`status`);--> statement-breakpoint
+CREATE TABLE `site_page_registry_sources` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_id` integer NOT NULL,
+	`source_type` text NOT NULL,
+	`source_url` text NOT NULL,
+	`enabled` integer DEFAULT true NOT NULL,
+	`mode` text DEFAULT 'append' NOT NULL,
+	`refresh_interval_sec` integer,
+	`last_attempt_at` text,
+	`last_success_at` text,
+	`last_success_hash` text,
+	`last_error` text,
+	`next_refresh_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `site_page_registry_sources_site_url_idx` ON `site_page_registry_sources` (`site_id`,`source_url`);--> statement-breakpoint
+CREATE INDEX `site_page_registry_sources_site_enabled_idx` ON `site_page_registry_sources` (`site_id`,`enabled`);--> statement-breakpoint
+CREATE INDEX `site_page_registry_sources_next_refresh_idx` ON `site_page_registry_sources` (`next_refresh_at`);--> statement-breakpoint
+CREATE TABLE `site_page_registry_source_pages` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`source_id` integer NOT NULL,
+	`page_registry_id` integer NOT NULL,
+	`first_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`source_id`) REFERENCES `site_page_registry_sources`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`page_registry_id`) REFERENCES `site_page_registry`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `site_page_registry_source_pages_source_page_idx` ON `site_page_registry_source_pages` (`source_id`,`page_registry_id`);--> statement-breakpoint
+CREATE INDEX `site_page_registry_source_pages_page_idx` ON `site_page_registry_source_pages` (`page_registry_id`);--> statement-breakpoint
 CREATE TABLE `pending_page_candidates` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`site_key` text NOT NULL,

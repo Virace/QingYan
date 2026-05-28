@@ -142,6 +142,50 @@ export const adminPageLifecycleBodySchema = z
 	})
 	.default({});
 
+export const pageSourceTypeSchema = z.enum(["sitemap", "rss", "atom"]);
+export const pageSourceModeSchema = z.enum(["append", "replace"]);
+
+export const adminPageRegistrySourcesQuerySchema = z.object({
+	siteKey: z.string().min(1),
+});
+
+export const adminPageRegistrySourceCreateBodySchema = z.object({
+	siteKey: z.string().min(1),
+	sourceType: pageSourceTypeSchema,
+	sourceUrl: z.string().url(),
+	enabled: z.boolean().default(true),
+	mode: pageSourceModeSchema.default("append"),
+	refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
+});
+
+export const adminPageRegistrySourcePatchBodySchema = z
+	.object({
+		sourceType: pageSourceTypeSchema.optional(),
+		sourceUrl: z.string().url().optional(),
+		enabled: z.boolean().optional(),
+		mode: pageSourceModeSchema.optional(),
+		refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
+		nextRefreshAt: z.string().datetime().nullable().optional(),
+	})
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminPageRegistrySourceParamsSchema = z.object({
+	sourceId: z.coerce.number().int().positive(),
+});
+
+export const adminPageRegistryRefreshBodySchema = z
+	.object({
+		siteKey: z.string().min(1),
+		mode: pageSourceModeSchema.optional(),
+	})
+	.optional();
+
+export const adminPageRegistryMaintenanceJobParamsSchema = z.object({
+	jobId: z.string().min(1),
+});
+
 export const adminSiteCreateBodySchema = z.object({
 	siteKey: z
 		.string()

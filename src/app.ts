@@ -24,6 +24,7 @@ import { DevMockService } from "./modules/dev/mock-service";
 import { registerDatabaseDevRoutes } from "./modules/dev/routes";
 import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
+import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
 import { AppError } from "./modules/shared/errors";
 import { createSiteRegistry } from "./modules/shared/site-registry";
 import { loadOpenApiDocument, renderOpenApiHtml } from "./openapi/load-openapi";
@@ -38,6 +39,7 @@ type OpenApiDocument = Awaited<ReturnType<typeof loadOpenApiDocument>>;
 interface BuildAppOptions {
 	adminDistDirectory?: string;
 	akismetClient?: Pick<AkismetClient, "commentCheck">;
+	pageSourceFetchText?: typeof fetchPageSourceText;
 }
 
 function registerBaseRoutes(
@@ -112,6 +114,9 @@ export async function buildApp(
 	app.decorate("siteRegistry", createSiteRegistry());
 	if (options.akismetClient) {
 		app.decorate("akismetClient", options.akismetClient);
+	}
+	if (options.pageSourceFetchText) {
+		app.decorate("pageSourceFetchText", options.pageSourceFetchText);
 	}
 
 	app.setErrorHandler(async (error, request, reply) => {

@@ -169,6 +169,12 @@ describe("initial migration", () => {
 			const pageRegistryColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(site_page_registry)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const pageRegistrySourceColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(site_page_registry_sources)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const pageRegistrySourcePageColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(site_page_registry_source_pages)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const pendingCandidateColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(pending_page_candidates)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -316,6 +322,37 @@ describe("initial migration", () => {
 					"last_seen_at",
 					"trashed_at",
 					"deleted_at",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(pageRegistrySourceColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"site_id",
+					"source_type",
+					"source_url",
+					"enabled",
+					"mode",
+					"refresh_interval_sec",
+					"last_attempt_at",
+					"last_success_at",
+					"last_success_hash",
+					"last_error",
+					"next_refresh_at",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(
+				pageRegistrySourcePageColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"id",
+					"source_id",
+					"page_registry_id",
+					"first_seen_at",
+					"last_seen_at",
 					"created_at",
 					"updated_at",
 				]),
