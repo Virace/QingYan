@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	comments,
+	maintenanceJobs,
 	pageThreads,
 	pageViewSessions,
 	sitePageRegistry,
@@ -226,6 +227,69 @@ describe("admin pages", () => {
 				status: "deleted",
 				deletedAt: expect.any(String),
 			},
+		});
+	});
+
+	it("creates a page title refresh job for one page", async () => {
+		const fixture = await createTestApp({
+			pageTitleFetchHtml: async () => ({
+				status: 200,
+				text: "<title>Fresh Title</title>",
+			}),
+		});
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "post:title-refresh",
+			pageUrl: "/posts/title-refresh/",
+			title: null,
+			status: "active",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/post%3Atitle-refresh/title/refresh",
+			...withAdminWriteAuth(admin),
+			payload: { siteKey: "fangyuan" },
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			job: {
+				type: "page_metadata_refresh",
+				status: "queued",
+				siteKey: "fangyuan",
+				scope: {
+					siteKey: "fangyuan",
+					pageKeys: ["post:title-refresh"],
+					forceTitle: true,
+					trigger: "manual",
+				},
+			},
+		});
+		const [job] = await fixture.app.db.select().from(maintenanceJobs);
+		expect(job).toMatchObject({
+			type: "page_metadata_refresh",
+			status: "succeeded",
+			siteKey: "fangyuan",
+			concurrencyKey: "page-title:fangyuan:post:title-refresh",
+		});
+		const [page] = await fixture.app.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.pageKey, "post:title-refresh"));
+		expect(page).toMatchObject({
+			title: "Fresh Title",
+			status: "active",
+			titleRefreshStatusCode: 200,
 		});
 	});
 });

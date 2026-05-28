@@ -14,6 +14,7 @@ import {
 	createSite,
 	deleteBlacklistTarget,
 	deleteComment,
+	deletePageRegistrySource,
 	deletePage,
 	fetchPageRegistryMaintenanceJob,
 	ignorePendingPage,
@@ -31,6 +32,7 @@ import {
 	refreshCommentMetadata,
 	refreshPageRegistrySource,
 	refreshPageRegistrySources,
+	refreshPageTitle,
 	refreshSelectedCommentMetadata,
 	rejectPendingPage,
 	replyToComment,
@@ -65,12 +67,16 @@ const pageStatusOptions: Array<{ value: PageStatusFilter; label: string }> = [
 	{ value: "deleted", label: "已删除" },
 	{ value: "ignored", label: "已忽略" },
 	{ value: "stale", label: "待同步" },
+	{ value: "unreachable", label: "不可达" },
+	{ value: "not_found", label: "404" },
 ];
 
 function pageStatusLabel(status: PageRegistryStatus) {
 	const labels: Record<PageRegistryStatus, string> = {
 		active: "正常",
 		stale: "待同步",
+		unreachable: "不可达",
+		not_found: "404",
 		trash: "回收站",
 		deleted: "已删除",
 		ignored: "已忽略",
@@ -599,6 +605,7 @@ export function PagesPage({
 		null,
 	);
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
 		queryKey: ["admin", "pages", siteKey, search, status],
 		queryFn: () =>
@@ -662,6 +669,13 @@ export function PagesPage({
 		mutationFn: deletePage,
 		onSuccess: invalidatePages,
 	});
+	const refreshTitleMutation = useMutation({
+		mutationFn: refreshPageTitle,
+		onSuccess: (response) => {
+			setLatestSourceJob(response.job);
+			invalidatePages();
+		},
+	});
 	const approveMutation = useMutation({
 		mutationFn: approvePendingPage,
 		onSuccess: invalidatePages,
@@ -680,6 +694,10 @@ export function PagesPage({
 			setSourceUrl("");
 			invalidatePages();
 		},
+	});
+	const deleteSourceMutation = useMutation({
+		mutationFn: deletePageRegistrySource,
+		onSuccess: invalidatePages,
 	});
 	const refreshSourceMutation = useMutation({
 		mutationFn: refreshPageRegistrySource,
@@ -705,7 +723,8 @@ export function PagesPage({
 	const sourceMutationPending =
 		createSourceMutation.isPending ||
 		refreshSourceMutation.isPending ||
-		refreshAllSourcesMutation.isPending;
+		refreshAllSourcesMutation.isPending ||
+		deleteSourceMutation.isPending;
 	const currentSourceJob = sourceJobQuery.data?.job ?? latestSourceJob;
 	const mutatePage = (
 		page: AdminPage,
@@ -721,6 +740,19 @@ export function PagesPage({
 			return;
 		}
 		deleteMutation.mutate(input);
+	};
+	const removeSource = async (sourceId: number) => {
+		const confirmed = await confirm({
+			title: "删除页面来源",
+			description:
+				"确认删除这个页面来源？这只会删除来源配置和来源关联，不会删除页面、评论、点赞或访问数据。",
+			confirmText: "删除来源",
+			destructive: true,
+		});
+		if (!confirmed) {
+			return;
+		}
+		deleteSourceMutation.mutate(sourceId);
 	};
 
 	return (
@@ -860,15 +892,26 @@ export function PagesPage({
 										{source.lastError ?? "-"}
 									</p>
 								</div>
-								<Button
-									type="button"
-									size="sm"
-									variant="outline"
-									disabled={sourceMutationPending}
-									onClick={() => refreshSourceMutation.mutate(source.id)}
-								>
-									刷新
-								</Button>
+								<div className="flex flex-wrap gap-2">
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										disabled={sourceMutationPending}
+										onClick={() => refreshSourceMutation.mutate(source.id)}
+									>
+										刷新
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="destructive"
+										disabled={sourceMutationPending}
+										onClick={() => void removeSource(source.id)}
+									>
+										删除
+									</Button>
+								</div>
 							</div>
 						))}
 						{sourcesQuery.data?.items.length === 0 ? (
@@ -975,7 +1018,16 @@ export function PagesPage({
 				</div>
 				<div className="grid gap-3">
 					{query.data?.items.map((page) => (
-						<div key={page.pageKey} className="rounded-md border p-4">
+						<div
+							key={page.pageKey}
+							className={`rounded-md border p-4 ${
+								page.status === "stale" ||
+								page.status === "unreachable" ||
+								page.status === "not_found"
+									? "border-amber-300 bg-amber-50"
+									: ""
+							}`}
+						>
 							<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
 								<div className="min-w-0">
 									<p className="font-medium">
@@ -984,6 +1036,14 @@ export function PagesPage({
 									<p className="truncate text-xs text-muted-foreground">
 										{page.pageUrl ?? page.pageKey}
 									</p>
+									{page.titleRefreshError ? (
+										<p className="mt-1 text-xs text-amber-700">
+											Title 刷新错误：{page.titleRefreshError}
+											{page.titleRefreshStatusCode
+												? ` / HTTP ${page.titleRefreshStatusCode}`
+												: ""}
+										</p>
+									) : null}
 								</div>
 								<div className="flex flex-wrap gap-2">
 									<Badge variant="secondary">
@@ -1000,6 +1060,23 @@ export function PagesPage({
 										onClick={() => openComments({ pageKey: page.pageKey })}
 									>
 										查看评论
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										disabled={!siteKey || refreshTitleMutation.isPending}
+										onClick={() => {
+											if (!siteKey) {
+												return;
+											}
+											refreshTitleMutation.mutate({
+												siteKey,
+												pageKey: page.pageKey,
+											});
+										}}
+									>
+										刷新 title
 									</Button>
 									{page.status === "active" || page.status === "stale" ? (
 										<Button

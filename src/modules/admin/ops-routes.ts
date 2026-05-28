@@ -11,6 +11,7 @@ import { GitHubReleaseClient } from "../ops/github-release-client";
 import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
 import { OpsStatusService } from "../ops/ops-status-service";
 import { UpdateCheckService } from "../ops/update-check-service";
+import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
 import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { UpgradeService } from "../upgrade/upgrade-service";
@@ -27,6 +28,22 @@ const commentIpRefreshBodySchema = z.object({
 });
 const maintenanceJobParamsSchema = z.object({
 	jobId: z.string().min(1),
+});
+const maintenanceTasksQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	type: z.string().min(1).optional(),
+	status: z.string().min(1).optional(),
+	limit: z.coerce.number().int().positive().max(100).default(20),
+});
+const pageTitleRefreshTaskBodySchema = z.object({
+	siteKey: z.string().min(1),
+	pageKeys: z.array(z.string().min(1)).min(1).max(100).optional(),
+	onlyMissingTitle: z.boolean().default(true),
+	forceTitle: z.boolean().optional(),
+	batchSize: z.number().int().min(1).max(5000).optional(),
+	runAfter: z.string().datetime().nullable().optional(),
+	maxAttempts: z.number().int().min(1).max(10).optional(),
+	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
 });
 
 function readPackageVersion(): string {
@@ -83,6 +100,18 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		updateCheckService,
 	});
 	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
+	const titleRefresh = new PageMetadataRefreshService(
+		fastify.db,
+		maintenanceJobs,
+		{
+			fetchHtml:
+				fastify.pageTitleFetchHtml ??
+				(async (url) => {
+					const response = await fetch(url);
+					return { status: response.status, text: await response.text() };
+				}),
+		},
+	);
 	const systemSettings = new RuntimeSystemSettingsService(fastify.db);
 	const ipMaintenance = new CommentIpMaintenanceService(
 		fastify.db,
@@ -153,6 +182,52 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 		return {
 			job: await maintenanceJobs.get(parsed.data.jobId),
+		};
+	});
+
+	fastify.get("/tasks", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = maintenanceTasksQuerySchema.safeParse(request.query);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const jobs = (await maintenanceJobs.listRecent(parsed.data.limit)).filter(
+			(job) =>
+				(parsed.data.siteKey === undefined ||
+					job.siteKey === parsed.data.siteKey) &&
+				(parsed.data.type === undefined || job.type === parsed.data.type) &&
+				(parsed.data.status === undefined || job.status === parsed.data.status),
+		);
+		return {
+			items: jobs.map((job) => ({
+				source: "maintenance" as const,
+				...job,
+			})),
+		};
+	});
+
+	fastify.post("/tasks/page-title-refresh", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = pageTitleRefreshTaskBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		return {
+			job: await titleRefresh.createRefreshJob({
+				siteKey: parsed.data.siteKey,
+				pageKeys: parsed.data.pageKeys,
+				onlyMissingTitle: parsed.data.onlyMissingTitle,
+				forceTitle: parsed.data.forceTitle,
+				batchSize: parsed.data.batchSize,
+				trigger: "manual",
+				runAfter: parsed.data.runAfter ?? null,
+				maxAttempts: parsed.data.maxAttempts,
+				retryDelaySec: parsed.data.retryDelaySec,
+			}),
 		};
 	});
 };

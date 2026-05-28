@@ -4,6 +4,7 @@ import { PageRegistryService } from "../page-registry/service";
 import { fetchPageSourceText } from "../page-registry/source-fetcher";
 import { PageSourceRefreshService } from "../page-registry/source-refresh-service";
 import { PageSourceRepository } from "../page-registry/source-repository";
+import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
 import {
 	AppError,
 	InvalidRequestError,
@@ -35,6 +36,18 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	const service = new PageRegistryService(fastify.db);
 	const sourceRepository = new PageSourceRepository(fastify.db);
 	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
+	const titleRefresh = new PageMetadataRefreshService(
+		fastify.db,
+		maintenanceJobs,
+		{
+			fetchHtml:
+				fastify.pageTitleFetchHtml ??
+				(async (url) => {
+					const response = await fetch(url);
+					return { status: response.status, text: await response.text() };
+				}),
+		},
+	);
 	const sourceRefresh = new PageSourceRefreshService(
 		fastify.db,
 		maintenanceJobs,
@@ -43,6 +56,14 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			loadAllowedOriginsForSite: async (siteKey) => {
 				const site = await repository.getSiteByKey(siteKey);
 				return site ? (JSON.parse(site.allowedOriginsJson) as string[]) : [];
+			},
+			createTitleRefreshJob: async (input) => {
+				await titleRefresh.createRefreshJob({
+					siteKey: input.siteKey,
+					pageKeys: input.pageKeys,
+					onlyMissingTitle: true,
+					trigger: "source_refresh",
+				});
 			},
 		},
 	);
@@ -179,6 +200,7 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			trigger: "manual",
 		});
 		void sourceRefresh.runNextQueuedJob();
+		void titleRefresh.runNextQueuedJob();
 		return { job };
 	});
 
@@ -198,6 +220,7 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			trigger: "manual",
 		});
 		void sourceRefresh.runNextQueuedJob();
+		void titleRefresh.runNextQueuedJob();
 		return { job };
 	});
 

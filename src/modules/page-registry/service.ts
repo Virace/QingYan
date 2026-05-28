@@ -77,6 +77,20 @@ export class PageRegistryService {
 			);
 		}
 
+		return this.approvePendingCandidateForSite({
+			...input,
+			pageUrl: candidate.pageUrl,
+			candidateId: candidate.id,
+		});
+	}
+
+	public async approvePendingCandidateForSite(input: {
+		siteId: number;
+		siteKey: string;
+		pageKey: string;
+		pageUrl: string;
+		candidateId?: number;
+	}) {
 		const nowIso = new Date().toISOString();
 		const [pendingCountRow] = await this.db
 			.select({ value: sql<number>`COUNT(*)` })
@@ -94,7 +108,7 @@ export class PageRegistryService {
 			.values({
 				siteId: input.siteId,
 				pageKey: input.pageKey,
-				pageUrl: candidate.pageUrl,
+				pageUrl: input.pageUrl,
 				status: "active",
 				lastSeenAt: nowIso,
 				updatedAt: nowIso,
@@ -102,7 +116,7 @@ export class PageRegistryService {
 			.onConflictDoUpdate({
 				target: [sitePageRegistry.siteId, sitePageRegistry.pageKey],
 				set: {
-					pageUrl: candidate.pageUrl,
+					pageUrl: input.pageUrl,
 					status: "active",
 					lastSeenAt: nowIso,
 					trashedAt: null,
@@ -116,34 +130,62 @@ export class PageRegistryService {
 			.values({
 				siteId: input.siteId,
 				pageKey: input.pageKey,
-				pageUrl: candidate.pageUrl,
+				pageUrl: input.pageUrl,
 				pageViewCount: mergedPageViews,
 				updatedAt: nowIso,
 			})
 			.onConflictDoUpdate({
 				target: [pageThreads.siteId, pageThreads.pageKey],
 				set: {
-					pageUrl: candidate.pageUrl,
+					pageUrl: input.pageUrl,
 					pageViewCount: sql`${pageThreads.pageViewCount} + ${mergedPageViews}`,
 					updatedAt: nowIso,
 				},
 			});
 
-		await this.db
-			.update(pendingPageCandidates)
-			.set({
-				status: "approved",
-				updatedAt: nowIso,
-			})
-			.where(eq(pendingPageCandidates.id, candidate.id));
+		if (input.candidateId !== undefined) {
+			await this.db
+				.update(pendingPageCandidates)
+				.set({
+					status: "approved",
+					updatedAt: nowIso,
+				})
+				.where(eq(pendingPageCandidates.id, input.candidateId));
+		}
 
 		return {
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
-			pageUrl: candidate.pageUrl,
+			pageUrl: input.pageUrl,
 			status: "active",
 			mergedPageViews,
 		};
+	}
+
+	public async approvePendingCandidateIfPending(input: {
+		siteId: number;
+		siteKey: string;
+		pageKey: string;
+		pageUrl: string;
+	}) {
+		const [candidate] = await this.db
+			.select()
+			.from(pendingPageCandidates)
+			.where(
+				and(
+					eq(pendingPageCandidates.siteKey, input.siteKey),
+					eq(pendingPageCandidates.pageKey, input.pageKey),
+					eq(pendingPageCandidates.status, "pending"),
+				),
+			)
+			.limit(1);
+		if (!candidate) {
+			return null;
+		}
+		return this.approvePendingCandidateForSite({
+			...input,
+			candidateId: candidate.id,
+		});
 	}
 
 	public async rejectPendingCandidate(input: {

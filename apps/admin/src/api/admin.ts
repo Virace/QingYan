@@ -13,6 +13,8 @@ export type CommentStatus = "pending" | "approved" | "spam" | "trash";
 export type PageRegistryStatus =
 	| "active"
 	| "stale"
+	| "unreachable"
+	| "not_found"
 	| "trash"
 	| "deleted"
 	| "ignored";
@@ -90,6 +92,10 @@ export interface AdminPage {
 	createdAt: string;
 	trashedAt: string | null;
 	deletedAt: string | null;
+	titleRefreshAttemptedAt?: string | null;
+	titleRefreshedAt?: string | null;
+	titleRefreshStatusCode?: number | null;
+	titleRefreshError?: string | null;
 	visitorCount: number;
 	userCount: number;
 }
@@ -133,10 +139,17 @@ export interface MaintenanceJob {
 		| "page_source_refresh"
 		| "page_metadata_refresh";
 	status: MaintenanceJobStatus;
+	siteKey: string | null;
 	scope: unknown;
 	progress: unknown;
 	result: unknown;
 	error: unknown;
+	runAfter: string | null;
+	attempts: number;
+	maxAttempts: number;
+	retryDelaySec: number;
+	concurrencyKey: string | null;
+	lastHeartbeatAt: string | null;
 	createdAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;
@@ -578,6 +591,16 @@ export function deletePage(input: { pageKey: string; siteKey?: string }) {
 	);
 }
 
+export function refreshPageTitle(input: { pageKey: string; siteKey: string }) {
+	return requestJson<{ job: MaintenanceJob }>(
+		`/api/admin/pages/${encodeURIComponent(input.pageKey)}/title/refresh`,
+		{
+			method: "POST",
+			body: JSON.stringify({ siteKey: input.siteKey }),
+		},
+	);
+}
+
 export function listPendingPages(input: {
 	siteKey?: string;
 	search?: string;
@@ -650,6 +673,15 @@ export function createPageRegistrySource(input: {
 		{
 			method: "POST",
 			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function deletePageRegistrySource(sourceId: number) {
+	return requestJson<{ ok: true }>(
+		`/api/admin/page-registry/sources/${sourceId}`,
+		{
+			method: "DELETE",
 		},
 	);
 }

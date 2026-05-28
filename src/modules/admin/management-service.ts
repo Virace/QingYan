@@ -147,7 +147,14 @@ export class AdminManagementService {
 	public async listPages(input: {
 		siteKey?: string;
 		search?: string;
-		status?: "active" | "stale" | "trash" | "deleted" | "ignored";
+		status?:
+			| "active"
+			| "stale"
+			| "unreachable"
+			| "not_found"
+			| "trash"
+			| "deleted"
+			| "ignored";
 		limit: number;
 		offset: number;
 	}) {

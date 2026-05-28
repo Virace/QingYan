@@ -1,11 +1,14 @@
 import type { FastifyPluginAsync } from "fastify";
 import { PageRegistryService } from "../page-registry/service";
+import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
+import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
 import { InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import {
 	adminPageKeyParamsSchema,
 	adminPageLifecycleBodySchema,
+	adminPageTitleRefreshBodySchema,
 	adminPagesWithStatusQuerySchema,
 } from "./schemas";
 import { AdminSessionService } from "./session-service";
@@ -24,6 +27,18 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 		repository,
 	);
 	const pageRegistryService = new PageRegistryService(fastify.db);
+	const titleRefresh = new PageMetadataRefreshService(
+		fastify.db,
+		new MaintenanceJobRepository(fastify.db),
+		{
+			fetchHtml:
+				fastify.pageTitleFetchHtml ??
+				(async (url) => {
+					const response = await fetch(url);
+					return { status: response.status, text: await response.text() };
+				}),
+		},
+	);
 
 	fastify.get("/", async (request) => {
 		await sessionService.requireSession(request);
@@ -82,6 +97,37 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 		const parsed = await parseLifecycleRequest(request);
 		return {
 			page: await pageRegistryService.deletePage(parsed),
+		};
+	});
+
+	fastify.post("/:pageKey/title/refresh", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedParams = adminPageKeyParamsSchema.safeParse(request.params);
+		const parsedBody = adminPageTitleRefreshBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		const job = await titleRefresh.createRefreshJob({
+			siteKey: parsedBody.data.siteKey,
+			pageKeys: [parsedParams.data.pageKey],
+			forceTitle: true,
+			trigger: "manual",
+			runAfter: parsedBody.data.runAfter ?? null,
+			maxAttempts: parsedBody.data.maxAttempts,
+			retryDelaySec: parsedBody.data.retryDelaySec,
+		});
+		void titleRefresh.runNextQueuedJob();
+		return {
+			job: {
+				...job,
+				siteKey: parsedBody.data.siteKey,
+			},
 		};
 	});
 };

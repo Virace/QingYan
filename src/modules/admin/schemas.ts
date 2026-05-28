@@ -101,6 +101,8 @@ export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
 export const pageRegistryStatusSchema = z.enum([
 	"active",
 	"stale",
+	"unreachable",
+	"not_found",
 	"trash",
 	"deleted",
 	"ignored",
@@ -141,6 +143,13 @@ export const adminPageLifecycleBodySchema = z
 		siteKey: z.string().min(1).optional(),
 	})
 	.default({});
+
+export const adminPageTitleRefreshBodySchema = z.object({
+	siteKey: z.string().min(1),
+	runAfter: z.string().datetime().nullable().optional(),
+	maxAttempts: z.number().int().min(1).max(10).optional(),
+	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
+});
 
 export const pageSourceTypeSchema = z.enum(["sitemap", "rss", "atom"]);
 export const pageSourceModeSchema = z.enum(["append", "replace"]);
@@ -184,6 +193,13 @@ export const adminPageRegistryRefreshBodySchema = z
 
 export const adminPageRegistryMaintenanceJobParamsSchema = z.object({
 	jobId: z.string().min(1),
+});
+
+export const adminMaintenanceTasksQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	type: z.string().min(1).optional(),
+	status: z.string().min(1).optional(),
+	limit: z.coerce.number().int().positive().max(100).default(20),
 });
 
 export const adminSiteCreateBodySchema = z.object({

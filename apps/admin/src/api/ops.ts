@@ -98,19 +98,32 @@ export function fetchUpdateCheck() {
 export type IpVersion = "v4" | "v6";
 export type MaintenanceJobStatus =
 	| "queued"
+	| "delayed"
 	| "running"
+	| "retrying"
 	| "succeeded"
 	| "failed"
 	| "cancelled";
 
 export interface MaintenanceJob {
 	id: string;
-	type: "ip_region_update" | "comment_ip_refresh";
+	type:
+		| "ip_region_update"
+		| "comment_ip_refresh"
+		| "page_source_refresh"
+		| "page_metadata_refresh";
 	status: MaintenanceJobStatus;
+	siteKey: string | null;
 	scope: unknown;
 	progress: unknown;
 	result: unknown;
 	error: unknown;
+	runAfter: string | null;
+	attempts: number;
+	maxAttempts: number;
+	retryDelaySec: number;
+	concurrencyKey: string | null;
+	lastHeartbeatAt: string | null;
 	createdAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;
@@ -174,5 +187,43 @@ export function createCommentIpRefreshJob(input: {
 export function fetchMaintenanceJob(jobId: string) {
 	return requestJson<{ job: MaintenanceJob | null }>(
 		`/api/admin/ops/maintenance-jobs/${encodeURIComponent(jobId)}`,
+	);
+}
+
+export interface TaskCenterItem extends MaintenanceJob {
+	source: "maintenance";
+}
+
+export function listTasks(input: {
+	siteKey?: string;
+	type?: string;
+	status?: string;
+	limit?: number;
+}) {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(input)) {
+		if (value !== undefined && value !== "") {
+			params.set(key, String(value));
+		}
+	}
+	const query = params.toString();
+	return requestJson<{ items: TaskCenterItem[] }>(
+		`/api/admin/ops/tasks${query ? `?${query}` : ""}`,
+	);
+}
+
+export function createPageTitleRefreshTask(input: {
+	siteKey: string;
+	onlyMissingTitle?: boolean;
+	batchSize?: number;
+	maxAttempts?: number;
+	retryDelaySec?: number;
+}) {
+	return requestJson<{ job: MaintenanceJob }>(
+		"/api/admin/ops/tasks/page-title-refresh",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
 	);
 }

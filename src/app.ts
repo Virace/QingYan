@@ -40,6 +40,9 @@ interface BuildAppOptions {
 	adminDistDirectory?: string;
 	akismetClient?: Pick<AkismetClient, "commentCheck">;
 	pageSourceFetchText?: typeof fetchPageSourceText;
+	pageTitleFetchHtml?: (
+		url: string,
+	) => Promise<{ status: number; text: string }>;
 }
 
 function registerBaseRoutes(
@@ -117,6 +120,9 @@ export async function buildApp(
 	}
 	if (options.pageSourceFetchText) {
 		app.decorate("pageSourceFetchText", options.pageSourceFetchText);
+	}
+	if (options.pageTitleFetchHtml) {
+		app.decorate("pageTitleFetchHtml", options.pageTitleFetchHtml);
 	}
 
 	app.setErrorHandler(async (error, request, reply) => {

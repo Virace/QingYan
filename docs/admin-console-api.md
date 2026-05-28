@@ -297,14 +297,162 @@ Query：
 {
   siteKey: string;
   pageKey: string;
+  status:
+    | "active"
+    | "stale"
+    | "unreachable"
+    | "not_found"
+    | "trash"
+    | "deleted"
+    | "ignored";
   pageTitle: string | null;
   pageUrl: string | null;
   commentCount: number;
   rootCommentCount: number;
   pageLikeCount: number;
   updatedAt: string;
+  createdAt: string;
+  trashedAt: string | null;
+  deletedAt: string | null;
+  titleRefreshAttemptedAt: string | null;
+  titleRefreshedAt: string | null;
+  titleRefreshStatusCode: number | null;
+  titleRefreshError: string | null;
   visitorCount: number;
   userCount: number;
+}
+```
+
+### `POST /api/admin/pages/{pageKey}/title/refresh`
+
+为单个页面创建服务端异步 title 刷新任务。该接口只创建任务，页面 HTML 抓取在服务端 maintenance job 中执行。
+
+请求：
+
+```ts
+{
+  siteKey: string;
+  runAfter?: string | null;
+  maxAttempts?: number;
+  retryDelaySec?: number;
+}
+```
+
+响应：
+
+```ts
+{
+  job: MaintenanceJob;
+}
+```
+
+### `POST /api/admin/pages/{pageKey}/trash`
+
+将页面移入回收站。
+
+请求：
+
+```ts
+{
+  siteKey?: string;
+}
+```
+
+### `POST /api/admin/pages/{pageKey}/restore`
+
+恢复回收站页面。
+
+### `POST /api/admin/pages/{pageKey}/delete`
+
+将回收站页面标记为删除。
+
+## Page Registry
+
+### `GET /api/admin/page-registry/sources`
+
+列出当前站点页面来源。
+
+Query：
+
+```ts
+{
+  siteKey: string;
+}
+```
+
+响应：
+
+```ts
+{
+  items: PageRegistrySource[];
+}
+```
+
+### `POST /api/admin/page-registry/sources`
+
+创建 sitemap、RSS 或 Atom 页面来源。
+
+请求：
+
+```ts
+{
+  siteKey: string;
+  sourceType: "sitemap" | "rss" | "atom";
+  sourceUrl: string;
+  enabled: boolean;
+  mode: "append" | "replace";
+  refreshIntervalSec?: number | null;
+}
+```
+
+### `DELETE /api/admin/page-registry/sources/{sourceId}`
+
+删除页面来源配置和来源-页面关联，不删除页面登记、评论、点赞或访问数据。
+
+响应：
+
+```ts
+{
+  ok: true;
+}
+```
+
+### `POST /api/admin/page-registry/sources/{sourceId}/refresh`
+
+为单个来源创建 `page_source_refresh` 任务。
+
+响应：
+
+```ts
+{
+  job: MaintenanceJob;
+}
+```
+
+### `POST /api/admin/page-registry/refresh`
+
+为当前站点全部来源创建 `page_source_refresh` 任务。
+
+请求：
+
+```ts
+{
+  siteKey: string;
+  mode?: "append" | "replace";
+}
+```
+
+来源刷新如果命中待处理未知页面，会自动放行 pending candidate 并合并待处理访问量。
+
+### `GET /api/admin/page-registry/maintenance-jobs/{jobId}`
+
+获取页面来源维护任务。
+
+响应：
+
+```ts
+{
+  job: MaintenanceJob | null;
 }
 ```
 
@@ -1103,5 +1251,64 @@ Query：
   message: string;
   checkedAt?: string;
   errorCode?: string;
+}
+```
+
+### `GET /api/admin/ops/tasks`
+
+任务中心维护任务列表。该接口聚合 maintenance job；导入任务仍由 import-export job API 管理。
+
+Query：
+
+```ts
+{
+  siteKey?: string;
+  type?: string;
+  status?: string;
+  limit?: number; // default 20, max 100
+}
+```
+
+响应：
+
+```ts
+{
+  items: Array<MaintenanceJob & { source: "maintenance" }>;
+}
+```
+
+`MaintenanceJob`：
+
+```ts
+{
+  id: string;
+  type:
+    | "ip_region_update"
+    | "comment_ip_refresh"
+    | "page_source_refresh"
+    | "page_metadata_refresh";
+  status:
+    | "queued"
+    | "delayed"
+    | "running"
+    | "retrying"
+    | "succeeded"
+    | "failed"
+    | "cancelled";
+  siteKey: string | null;
+  scope: unknown;
+  progress: unknown;
+  result: unknown;
+  error: unknown;
+  runAfter: string | null;
+  attempts: number;
+  maxAttempts: number;
+  retryDelaySec: number;
+  concurrencyKey: string | null;
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
 }
 ```

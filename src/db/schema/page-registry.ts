@@ -20,6 +20,10 @@ export const sitePageRegistry = sqliteTable(
 		pageUrl: text("page_url").notNull(),
 		title: text("title"),
 		status: text("status").notNull().default("active"),
+		titleRefreshAttemptedAt: text("title_refresh_attempted_at"),
+		titleRefreshedAt: text("title_refreshed_at"),
+		titleRefreshStatusCode: integer("title_refresh_status_code"),
+		titleRefreshError: text("title_refresh_error"),
 		firstSeenAt: text("first_seen_at")
 			.notNull()
 			.default(sql`CURRENT_TIMESTAMP`),

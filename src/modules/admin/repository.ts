@@ -444,7 +444,14 @@ export class AdminRepository {
 	public async listPages(input: {
 		siteId?: number;
 		search?: string;
-		status?: "active" | "stale" | "trash" | "deleted" | "ignored";
+		status?:
+			| "active"
+			| "stale"
+			| "unreachable"
+			| "not_found"
+			| "trash"
+			| "deleted"
+			| "ignored";
 		limit: number;
 		offset: number;
 	}) {
@@ -460,6 +467,10 @@ export class AdminRepository {
 				pageTitle: sitePageRegistry.title,
 				pageUrl: sitePageRegistry.pageUrl,
 				status: sitePageRegistry.status,
+				titleRefreshAttemptedAt: sitePageRegistry.titleRefreshAttemptedAt,
+				titleRefreshedAt: sitePageRegistry.titleRefreshedAt,
+				titleRefreshStatusCode: sitePageRegistry.titleRefreshStatusCode,
+				titleRefreshError: sitePageRegistry.titleRefreshError,
 				trashedAt: sitePageRegistry.trashedAt,
 				deletedAt: sitePageRegistry.deletedAt,
 				createdAt: sitePageRegistry.createdAt,
@@ -517,6 +528,10 @@ export class AdminRepository {
 						createdAt: row.createdAt,
 						trashedAt: row.trashedAt,
 						deletedAt: row.deletedAt,
+						titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
+						titleRefreshedAt: row.titleRefreshedAt,
+						titleRefreshStatusCode: row.titleRefreshStatusCode,
+						titleRefreshError: row.titleRefreshError,
 						visitorCount: 0,
 						userCount: 0,
 					})),
@@ -570,6 +585,10 @@ export class AdminRepository {
 					createdAt: row.createdAt,
 					trashedAt: row.trashedAt,
 					deletedAt: row.deletedAt,
+					titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
+					titleRefreshedAt: row.titleRefreshedAt,
+					titleRefreshStatusCode: row.titleRefreshStatusCode,
+					titleRefreshError: row.titleRefreshError,
 					visitorCount:
 						row.pageThreadId === null
 							? 0

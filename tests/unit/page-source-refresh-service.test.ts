@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createDatabaseClients } from "../../src/db/client";
 import { applyDatabaseMigrations } from "../../src/db/migrations";
 import {
+	maintenanceJobs,
+	pageThreads,
+	pendingPageCandidates,
+	pendingPageViewSessions,
 	sitePageRegistry,
 	sitePageRegistrySourcePages,
 	sites,
@@ -51,14 +55,24 @@ function createService(
 	fixture: ReturnType<typeof createFixture>,
 	fetchText: (url: string) => Promise<string>,
 ) {
-	return new PageSourceRefreshService(
-		fixture.db,
-		new MaintenanceJobRepository(fixture.db),
-		{
-			fetchText,
-			loadAllowedOriginsForSite: async () => ["https://example.com"],
+	const jobs = new MaintenanceJobRepository(fixture.db);
+	return new PageSourceRefreshService(fixture.db, jobs, {
+		fetchText,
+		loadAllowedOriginsForSite: async () => ["https://example.com"],
+		createTitleRefreshJob: async (input) => {
+			await jobs.create({
+				type: "page_metadata_refresh",
+				siteKey: input.siteKey,
+				scope: {
+					siteKey: input.siteKey,
+					pageKeys: input.pageKeys,
+					onlyMissingTitle: true,
+					trigger: "source_refresh",
+				},
+				concurrencyKey: `page-title:${input.siteKey}`,
+			});
 		},
-	);
+	});
 }
 
 async function createSource(
@@ -348,6 +362,94 @@ describe("PageSourceRefreshService", () => {
 			siteKey: "fangyuan",
 			sourceIds: [dueSource.id],
 			trigger: "scheduled",
+		});
+	});
+
+	it("auto-approves pending unknown pages when a source confirms them", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const source = await createSource(fixture);
+		await fixture.db.insert(pendingPageCandidates).values({
+			siteKey: "fangyuan",
+			pageKey: "posts/source-confirmed/",
+			pageUrl: "/posts/source-confirmed/",
+			hitCount: 1,
+			status: "pending",
+		});
+		await fixture.db.insert(pendingPageViewSessions).values({
+			siteKey: "fangyuan",
+			pageKey: "posts/source-confirmed/",
+			fingerprint: "visitor-a",
+			hitCount: 1,
+		});
+		const service = createService(
+			fixture,
+			async () =>
+				"<urlset><url><loc>https://example.com/posts/source-confirmed/</loc></url></urlset>",
+		);
+
+		const job = await service.createRefreshJob({
+			siteKey: "fangyuan",
+			sourceIds: [source.id],
+			trigger: "manual",
+		});
+		await service.runNextQueuedJob();
+
+		const [candidate] = await fixture.db
+			.select()
+			.from(pendingPageCandidates)
+			.where(eq(pendingPageCandidates.pageKey, "posts/source-confirmed/"));
+		const [thread] = await fixture.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "posts/source-confirmed/"));
+		const saved = await new MaintenanceJobRepository(fixture.db).getRequired(
+			job.id,
+		);
+
+		expect(candidate).toMatchObject({ status: "approved" });
+		expect(thread).toMatchObject({
+			pageKey: "posts/source-confirmed/",
+			pageUrl: "/posts/source-confirmed/",
+			pageViewCount: 1,
+		});
+		expect(saved.result).toMatchObject({ approvedPending: 1 });
+	});
+
+	it("queues a lazy title refresh job for URL-only source entries", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const source = await createSource(fixture);
+		const service = createService(
+			fixture,
+			async () =>
+				"<urlset><url><loc>https://example.com/posts/title-later/</loc></url></urlset>",
+		);
+
+		await service.createRefreshJob({
+			siteKey: "fangyuan",
+			sourceIds: [source.id],
+			trigger: "manual",
+		});
+		await service.runNextQueuedJob();
+
+		const jobs = await fixture.db.select().from(maintenanceJobs);
+		expect(jobs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "page_metadata_refresh",
+					status: "queued",
+					siteKey: "fangyuan",
+					concurrencyKey: "page-title:fangyuan",
+				}),
+			]),
+		);
+		const titleJob = jobs.find((job) => job.type === "page_metadata_refresh");
+		expect(titleJob ? JSON.parse(titleJob.scopeJson) : null).toMatchObject({
+			siteKey: "fangyuan",
+			pageKeys: ["posts/title-later/"],
+			onlyMissingTitle: true,
+			trigger: "source_refresh",
 		});
 	});
 });

@@ -127,6 +127,84 @@ describe("MaintenanceJobRepository", () => {
 		});
 		expect(saved?.result).toEqual({ refreshed: 3 });
 	});
+
+	it("stores scheduling metadata and returns runnable jobs by concurrency key", async () => {
+		const fixture = createFixture();
+		const repository = new MaintenanceJobRepository(fixture.db);
+
+		const delayed = await repository.create({
+			type: "page_metadata_refresh",
+			siteKey: "fangyuan",
+			scope: { siteKey: "fangyuan" },
+			runAfter: "2026-05-29T01:00:00.000Z",
+			maxAttempts: 3,
+			retryDelaySec: 60,
+			concurrencyKey: "page-title:fangyuan",
+		});
+		const runnable = await repository.create({
+			type: "page_metadata_refresh",
+			siteKey: "fangyuan",
+			scope: { siteKey: "fangyuan", pageKeys: ["posts/a/"] },
+			runAfter: "2026-05-29T00:00:00.000Z",
+			concurrencyKey: "page-title:fangyuan:posts/a/",
+		});
+
+		expect(delayed).toMatchObject({
+			status: "delayed",
+			siteKey: "fangyuan",
+			attempts: 0,
+			maxAttempts: 3,
+			retryDelaySec: 60,
+			concurrencyKey: "page-title:fangyuan",
+		});
+		await repository.markRunning(runnable.id, { processed: 0 });
+
+		const jobs = await repository.listRunnable({
+			nowIso: "2026-05-29T00:30:00.000Z",
+			limit: 10,
+			maxConcurrentTotal: 2,
+			maxConcurrentByType: { page_metadata_refresh: 2 },
+		});
+
+		expect(jobs.map((job) => job.id)).not.toContain(delayed.id);
+		expect(jobs.map((job) => job.id)).not.toContain(runnable.id);
+	});
+
+	it("marks failed jobs as retrying until max attempts is reached", async () => {
+		const fixture = createFixture();
+		const repository = new MaintenanceJobRepository(fixture.db);
+		const job = await repository.create({
+			type: "page_metadata_refresh",
+			scope: { siteKey: "fangyuan" },
+			maxAttempts: 2,
+			retryDelaySec: 30,
+		});
+
+		await repository.markRunning(job.id, { processed: 0 });
+		const retrying = await repository.markFailedOrRetry(job.id, {
+			error: { message: "network" },
+			nowIso: "2026-05-29T00:00:00.000Z",
+		});
+
+		expect(retrying).toMatchObject({
+			status: "retrying",
+			attempts: 1,
+			error: { message: "network" },
+			runAfter: "2026-05-29T00:00:30.000Z",
+		});
+
+		await repository.markRunning(job.id, { processed: 0 });
+		const failed = await repository.markFailedOrRetry(job.id, {
+			error: { message: "still failing" },
+			nowIso: "2026-05-29T00:01:00.000Z",
+		});
+
+		expect(failed).toMatchObject({
+			status: "failed",
+			attempts: 2,
+			error: { message: "still failing" },
+		});
+	});
 });
 
 describe("CommentIpMaintenanceService", () => {

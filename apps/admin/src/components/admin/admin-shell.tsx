@@ -11,6 +11,7 @@ import {
 	RefreshCwIcon,
 	SettingsIcon,
 	ShieldIcon,
+	ListChecksIcon,
 	TerminalSquareIcon,
 	UsersIcon,
 	type LucideIcon,
@@ -34,6 +35,7 @@ import {
 	VisitorsPage,
 } from "./admin-pages";
 import { inputClass } from "./admin-ui";
+import { TasksPage } from "./tasks-page";
 
 export type AdminView =
 	| "overview"
@@ -44,6 +46,7 @@ export type AdminView =
 	| "blacklist"
 	| "sites"
 	| "data"
+	| "tasks"
 	| "ops"
 	| "settings"
 	| "system";
@@ -61,6 +64,7 @@ const navItems: Array<{
 	{ id: "blacklist", label: "黑名单", icon: ShieldIcon },
 	{ id: "sites", label: "站点", icon: GlobeIcon },
 	{ id: "data", label: "数据", icon: DatabaseIcon },
+	{ id: "tasks", label: "任务", icon: ListChecksIcon },
 	{ id: "ops", label: "运维", icon: TerminalSquareIcon },
 	{ id: "settings", label: "站点设置", icon: FlagIcon },
 	{ id: "system", label: "系统设置", icon: SettingsIcon },
@@ -146,6 +150,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 						}
 					/>
 				);
+			case "tasks":
+				return <TasksPage siteKey={activeSiteKey} />;
 			case "ops":
 				return <OpsPage siteKey={activeSiteKey} />;
 			case "settings":

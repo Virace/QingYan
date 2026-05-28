@@ -168,4 +168,50 @@ describe("admin page registry sources", () => {
 
 		expect(refreshResponse.statusCode).toBe(403);
 	});
+
+	it("deletes page registry sources with CSRF protection", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const sourceResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/sources",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				sourceType: "sitemap",
+				sourceUrl: "http://localhost:4321/sitemap.xml",
+				enabled: true,
+				mode: "append",
+			},
+		});
+		const sourceId = sourceResponse.json().source.id as number;
+
+		const forbidden = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+		expect(forbidden.statusCode).toBe(403);
+
+		const deleted = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(deleted.statusCode).toBe(200);
+		expect(deleted.json()).toEqual({ ok: true });
+
+		const listResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/page-registry/sources?siteKey=fangyuan",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+		expect(listResponse.json()).toMatchObject({ items: [] });
+	});
 });
