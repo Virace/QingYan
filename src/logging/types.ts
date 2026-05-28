@@ -21,6 +21,8 @@ export type AppEventName =
 	| "service.started"
 	| "service.stopped"
 	| "service.crashed"
+	| "ops.service_restart.requested"
+	| "ops.service_restart.rejected"
 	| "admin.login.succeeded"
 	| "admin.login.failed"
 	| "admin.login.blocked"

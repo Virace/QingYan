@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { adminBootstrapState, maintenanceJobs } from "../../src/db/schema";
+import {
+	adminBootstrapState,
+	auditLogs,
+	maintenanceJobs,
+} from "../../src/db/schema";
+import type {
+	ServiceControlController,
+	ServiceState,
+} from "../../src/modules/service-control/systemd-service";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -23,6 +31,32 @@ async function seedInstalledBootstrap(
 		passwordHash: createPasswordHash("replace-me"),
 		passwordRotatedAt: null,
 	});
+}
+
+class FakeServiceControl implements ServiceControlController {
+	public calls: string[] = [];
+
+	public constructor(private state: ServiceState = "running") {}
+
+	public async status() {
+		this.calls.push("status");
+		return this.state;
+	}
+
+	public async start() {
+		this.calls.push("start");
+		this.state = "running";
+	}
+
+	public async stop() {
+		this.calls.push("stop");
+		this.state = "stopped";
+	}
+
+	public async restart() {
+		this.calls.push("restart");
+		this.state = "running";
+	}
 }
 
 describe("admin ops routes", () => {
@@ -115,6 +149,144 @@ describe("admin ops routes", () => {
 			},
 			manualCommands: expect.arrayContaining(["qyctl status"]),
 		});
+	});
+
+	it("reports service control as disabled by default", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/service-control",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			enabled: false,
+			mode: "disabled",
+			state: "unknown",
+			restart: {
+				confirmation: "RESTART QINGYAN",
+			},
+		});
+	});
+
+	it("rejects service restart when service control is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/ops/service-control/restart",
+			...withAdminWriteAuth(admin),
+			payload: {
+				confirm: "RESTART QINGYAN",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "SERVICE_CONTROL_DISABLED",
+			},
+		});
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin",
+					action: "ops.service_restart.rejected",
+					targetType: "service",
+					targetId: "qingyan.service",
+				}),
+			]),
+		);
+	});
+
+	it("requires exact service restart confirmation", async () => {
+		const controller = new FakeServiceControl();
+		const fixture = await createTestApp({
+			serviceControl: controller,
+		});
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/ops/service-control/restart",
+			...withAdminWriteAuth(admin),
+			payload: {
+				confirm: "restart",
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "INVALID_REQUEST",
+			},
+		});
+		expect(controller.calls).toEqual([]);
+	});
+
+	it("restarts the service through an injected service controller", async () => {
+		const controller = new FakeServiceControl("running");
+		const fixture = await createTestApp({
+			serviceControl: controller,
+		});
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const statusResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/service-control",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+
+		expect(statusResponse.statusCode).toBe(200);
+		expect(statusResponse.json()).toMatchObject({
+			enabled: true,
+			mode: "systemd",
+			state: "running",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/ops/service-control/restart",
+			...withAdminWriteAuth(admin),
+			payload: {
+				confirm: "RESTART QINGYAN",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			ok: true,
+			state: "running",
+		});
+		expect(controller.calls).toEqual(["status", "restart", "status"]);
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin",
+					action: "ops.service_restart.requested",
+					targetType: "service",
+					targetId: "qingyan.service",
+				}),
+			]),
+		);
 	});
 
 	it("requires an admin session to check for updates", async () => {

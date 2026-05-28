@@ -73,6 +73,16 @@ export interface UpdatePlan {
 	manualCommands: string[];
 }
 
+export interface ServiceControlStatus {
+	enabled: boolean;
+	mode: "disabled" | "systemd";
+	unit: string;
+	state: "running" | "stopped" | "unknown";
+	restart: {
+		confirmation: "RESTART QINGYAN";
+	};
+}
+
 export function fetchOpsStatus() {
 	return requestJson<OpsStatus>("/api/admin/ops/status");
 }
@@ -93,6 +103,20 @@ export function fetchUpdateCheck() {
 	return requestJson<UpdateCheckResult>("/api/admin/ops/update/check", {
 		method: "POST",
 	});
+}
+
+export function fetchServiceControlStatus() {
+	return requestJson<ServiceControlStatus>("/api/admin/ops/service-control");
+}
+
+export function restartService(input: { confirm: string }) {
+	return requestJson<{ ok: boolean; state: ServiceControlStatus["state"] }>(
+		"/api/admin/ops/service-control/restart",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
 }
 
 export type IpVersion = "v4" | "v6";

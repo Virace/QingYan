@@ -9,6 +9,7 @@ import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
 import { createDatabaseClients } from "../../src/db/client";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import type { ServiceControlController } from "../../src/modules/service-control/systemd-service";
 import {
 	createSiteRegistry,
 	type SiteSeed,
@@ -151,6 +152,7 @@ export async function createTestApp(options?: {
 	pageTitleFetchHtml?: (
 		url: string,
 	) => Promise<{ status: number; text: string }>;
+	serviceControl?: ServiceControlController;
 }) {
 	const workspace = createTempWorkspace();
 	applyInitialMigration(workspace.databaseFile);
@@ -179,6 +181,7 @@ export async function createTestApp(options?: {
 		adminDistDirectory: options?.adminDistDirectory,
 		pageSourceFetchText: options?.pageSourceFetchText,
 		pageTitleFetchHtml: options?.pageTitleFetchHtml,
+		serviceControl: options?.serviceControl,
 	});
 
 	return {

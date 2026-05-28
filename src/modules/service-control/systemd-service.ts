@@ -16,6 +16,13 @@ export type CommandRunner = (
 	args: string[],
 ) => Promise<CommandResult>;
 
+export interface ServiceControlController {
+	status(): Promise<ServiceState>;
+	start(): Promise<void>;
+	stop(): Promise<void>;
+	restart(): Promise<void>;
+}
+
 async function defaultRunner(
 	command: string,
 	args: string[],

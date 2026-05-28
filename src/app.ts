@@ -25,6 +25,7 @@ import { registerDatabaseDevRoutes } from "./modules/dev/routes";
 import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
+import type { ServiceControlController } from "./modules/service-control/systemd-service";
 import { AppError } from "./modules/shared/errors";
 import { createSiteRegistry } from "./modules/shared/site-registry";
 import { loadOpenApiDocument, renderOpenApiHtml } from "./openapi/load-openapi";
@@ -43,6 +44,7 @@ interface BuildAppOptions {
 	pageTitleFetchHtml?: (
 		url: string,
 	) => Promise<{ status: number; text: string }>;
+	serviceControl?: ServiceControlController;
 }
 
 function registerBaseRoutes(
@@ -123,6 +125,9 @@ export async function buildApp(
 	}
 	if (options.pageTitleFetchHtml) {
 		app.decorate("pageTitleFetchHtml", options.pageTitleFetchHtml);
+	}
+	if (options.serviceControl) {
+		app.decorate("serviceControl", options.serviceControl);
 	}
 
 	app.setErrorHandler(async (error, request, reply) => {

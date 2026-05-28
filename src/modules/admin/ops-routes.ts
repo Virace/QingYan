@@ -6,12 +6,18 @@ import { z } from "zod";
 
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
+import {
+	getServiceControlStatus,
+	resolveAdminServiceControl,
+	serviceRestartConfirmation,
+} from "./service-control";
 import { CommentIpMaintenanceService } from "../comments/metadata/comment-ip-maintenance-service";
 import { GitHubReleaseClient } from "../ops/github-release-client";
 import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
 import { OpsStatusService } from "../ops/ops-status-service";
 import { UpdateCheckService } from "../ops/update-check-service";
 import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
+import { AppError } from "../shared/errors";
 import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { UpgradeService } from "../upgrade/upgrade-service";
@@ -28,6 +34,9 @@ const commentIpRefreshBodySchema = z.object({
 });
 const maintenanceJobParamsSchema = z.object({
 	jobId: z.string().min(1),
+});
+const serviceRestartBodySchema = z.object({
+	confirm: z.literal(serviceRestartConfirmation),
 });
 const maintenanceTasksQuerySchema = z.object({
 	siteKey: z.string().min(1).optional(),
@@ -99,6 +108,9 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		upgradeService,
 		updateCheckService,
 	});
+	const serviceControl = resolveAdminServiceControl({
+		injected: fastify.serviceControl,
+	});
 	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
 	const titleRefresh = new PageMetadataRefreshService(
 		fastify.db,
@@ -139,6 +151,56 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.post("/update/check", async (request) => {
 		await sessionService.requireSession(request);
 		return ops.checkForUpdates();
+	});
+
+	fastify.get("/service-control", async (request) => {
+		await sessionService.requireSession(request);
+		return getServiceControlStatus(serviceControl);
+	});
+
+	fastify.post("/service-control/restart", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const parsed = serviceRestartBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		if (!serviceControl.controller) {
+			await fastify.security.writeAudit({
+				requestId: request.context?.requestId,
+				actorType: "admin",
+				actorId: session.id,
+				event: "ops.service_restart.rejected",
+				level: "warn",
+				message: "服务重启请求被拒绝：服务控制未启用",
+				targetType: "service",
+				targetId: serviceControl.unit,
+				payload: {
+					mode: serviceControl.mode,
+				},
+			});
+			throw new AppError(403, "SERVICE_CONTROL_DISABLED", "服务控制未启用。");
+		}
+
+		await fastify.security.writeAudit({
+			requestId: request.context?.requestId,
+			actorType: "admin",
+			actorId: session.id,
+			event: "ops.service_restart.requested",
+			level: "warn",
+			message: "管理员请求重启 QingYan 服务",
+			targetType: "service",
+			targetId: serviceControl.unit,
+			payload: {
+				mode: serviceControl.mode,
+			},
+		});
+		await serviceControl.controller.restart();
+		return {
+			ok: true,
+			state: await serviceControl.controller.status(),
+		};
 	});
 
 	fastify.get("/ip-region", async (request) => {

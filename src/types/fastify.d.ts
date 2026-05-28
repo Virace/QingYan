@@ -7,6 +7,7 @@ import type { DevMockService } from "../modules/dev/mock-service";
 import type { AkismetClient } from "../modules/comments/akismet-client";
 import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
+import type { ServiceControlController } from "../modules/service-control/systemd-service";
 import type { SiteRegistry } from "../modules/shared/site-registry";
 
 export interface RequestContext {
@@ -43,6 +44,7 @@ declare module "fastify" {
 		pageTitleFetchHtml?: (
 			url: string,
 		) => Promise<{ status: number; text: string }>;
+		serviceControl?: ServiceControlController;
 		devMockService?: DevMockService;
 	}
 

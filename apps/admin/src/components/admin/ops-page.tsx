@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 
@@ -8,14 +8,17 @@ import {
 	fetchIpRegionMaintenanceStatus,
 	fetchMaintenanceJob,
 	fetchOpsStatus,
+	fetchServiceControlStatus,
 	fetchUpdateCheck,
 	fetchUpdatePlan,
 	fetchUpgradeDryRun,
+	restartService,
 	type IpVersion,
 	type UpdateCheckState,
 	type UpdatePlan,
 } from "@/api/ops";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
 	Card,
 	CardContent,
@@ -76,6 +79,16 @@ function UpdateCheckStateText({ state }: { state: UpdateCheckState }) {
 	return <span className={className}>{label}</span>;
 }
 
+function ServiceStateText({ state }: { state?: string }) {
+	if (state === "running") {
+		return <span className="font-medium text-emerald-700">运行中</span>;
+	}
+	if (state === "stopped") {
+		return <span className="font-medium text-amber-700">已停止</span>;
+	}
+	return <span className="font-medium text-muted-foreground">未知</span>;
+}
+
 function CommandList({ commands }: { commands: string[] }) {
 	return (
 		<div className="rounded-md border bg-muted/40 p-3">
@@ -122,14 +135,20 @@ function UpdatePlanPanel({ plan }: { plan?: UpdatePlan }) {
 }
 
 export function OpsPage({ siteKey }: { siteKey: string }) {
+	const restartConfirmId = useId();
 	const [refreshScope, setRefreshScope] =
 		useState<CommentIpRefreshScope>("missing");
 	const [refreshIpVersion, setRefreshIpVersion] =
 		useState<IpVersionSelection>("all");
 	const [refreshSite, setRefreshSite] = useState<SiteSelection>("current");
+	const [restartConfirm, setRestartConfirm] = useState("");
 	const statusQuery = useQuery({
 		queryKey: ["admin", "ops", "status"],
 		queryFn: fetchOpsStatus,
+	});
+	const serviceControlQuery = useQuery({
+		queryKey: ["admin", "ops", "service-control"],
+		queryFn: fetchServiceControlStatus,
 	});
 	const ipRegionQuery = useQuery({
 		queryKey: ["admin", "ops", "ip-region"],
@@ -150,6 +169,13 @@ export function OpsPage({ siteKey }: { siteKey: string }) {
 	const upgradeDryRunMutation = useMutation({
 		mutationFn: fetchUpgradeDryRun,
 	});
+	const restartMutation = useMutation({
+		mutationFn: restartService,
+		onSuccess: () => {
+			setRestartConfirm("");
+			void serviceControlQuery.refetch();
+		},
+	});
 	const ipRegionUpdateMutation = useMutation({
 		mutationFn: createIpRegionUpdateJob,
 		onSuccess: () => void ipRegionQuery.refetch(),
@@ -159,6 +185,7 @@ export function OpsPage({ siteKey }: { siteKey: string }) {
 		onSuccess: () => void ipRegionQuery.refetch(),
 	});
 	const status = statusQuery.data;
+	const serviceControl = serviceControlQuery.data;
 	const updatePlan = updatePlanMutation.data;
 	const updateCheck = updateCheckMutation.data ?? status?.update.check;
 	const activeJob = ipRegionQuery.data?.recentJobs.find(
@@ -302,6 +329,76 @@ export function OpsPage({ siteKey }: { siteKey: string }) {
 								{JSON.stringify(upgradeDryRunMutation.data, null, 2)}
 							</pre>
 						</div>
+					) : null}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-lg">服务控制</CardTitle>
+					<CardDescription>
+						服务重启只在后端启用系统服务控制后可用；请求会写入审计日志。
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="grid gap-4">
+					<div className="grid gap-3 md:grid-cols-3">
+						<div className="rounded-md border p-3">
+							<p className="text-xs text-muted-foreground">控制模式</p>
+							<p className="mt-1 text-sm font-medium">
+								{serviceControl?.mode ?? "加载中"}
+							</p>
+						</div>
+						<div className="rounded-md border p-3">
+							<p className="text-xs text-muted-foreground">服务单元</p>
+							<p className="mt-1 text-sm font-medium">
+								{serviceControl?.unit ?? "-"}
+							</p>
+						</div>
+						<div className="rounded-md border p-3">
+							<p className="text-xs text-muted-foreground">服务状态</p>
+							<p className="mt-1 text-sm">
+								<ServiceStateText state={serviceControl?.state} />
+							</p>
+						</div>
+					</div>
+					<div className="grid gap-3 md:grid-cols-[1fr_auto]">
+						<label className="grid gap-1 text-sm" htmlFor={restartConfirmId}>
+							<span className="text-muted-foreground">重启确认</span>
+							<Input
+								id={restartConfirmId}
+								value={restartConfirm}
+								placeholder={serviceControl?.restart.confirmation}
+								disabled={!serviceControl?.enabled || restartMutation.isPending}
+								onChange={(event) => setRestartConfirm(event.target.value)}
+							/>
+						</label>
+						<Button
+							type="button"
+							variant="destructive"
+							className="self-end"
+							disabled={
+								!serviceControl?.enabled ||
+								restartMutation.isPending ||
+								restartConfirm !== serviceControl.restart.confirmation
+							}
+							onClick={() =>
+								restartMutation.mutate({ confirm: restartConfirm })
+							}
+						>
+							重启服务
+						</Button>
+					</div>
+					{serviceControl?.enabled ? null : (
+						<p className="text-xs text-muted-foreground">
+							当前未启用服务控制。后端设置 QINGYAN_ADMIN_SERVICE_CONTROL=systemd
+							后，管理员可在此执行重启。
+						</p>
+					)}
+					{restartMutation.isError ? (
+						<p className="text-xs text-destructive">服务重启请求失败。</p>
+					) : null}
+					{restartMutation.isSuccess ? (
+						<p className="text-xs text-emerald-700">服务重启请求已提交。</p>
 					) : null}
 				</CardContent>
 			</Card>

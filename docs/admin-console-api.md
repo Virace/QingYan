@@ -1254,6 +1254,52 @@ Query：
 }
 ```
 
+### `GET /api/admin/ops/service-control`
+
+获取后台服务控制状态。默认 `QINGYAN_ADMIN_SERVICE_CONTROL` 未设置或不为
+`systemd` 时禁用，不会调用 `systemctl`。
+
+响应：
+
+```ts
+{
+  enabled: boolean;
+  mode: "disabled" | "systemd";
+  unit: "qingyan.service";
+  state: "running" | "stopped" | "unknown";
+  restart: {
+    confirmation: "RESTART QINGYAN";
+  };
+}
+```
+
+### `POST /api/admin/ops/service-control/restart`
+
+重启 QingYan 服务。该接口需要管理员会话、CSRF token，并且后端启用
+`QINGYAN_ADMIN_SERVICE_CONTROL=systemd`。请求会写入审计日志。
+
+请求：
+
+```ts
+{
+  confirm: "RESTART QINGYAN";
+}
+```
+
+响应：
+
+```ts
+{
+  ok: true;
+  state: "running" | "stopped" | "unknown";
+}
+```
+
+错误：
+
+- `400 INVALID_REQUEST`：确认短语不匹配。
+- `403 SERVICE_CONTROL_DISABLED`：服务控制未启用。
+
 ### `GET /api/admin/ops/tasks`
 
 任务中心维护任务列表。该接口聚合 maintenance job；导入任务仍由 import-export job API 管理。
