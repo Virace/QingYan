@@ -957,6 +957,47 @@ export class AdminRepository {
 		return this.getCommentById(commentId);
 	}
 
+	public async bulkUpdateComments(
+		commentIds: string[],
+		input: {
+			status?: CommentStatus;
+			isPinned?: boolean;
+			isFolded?: boolean;
+			contentRaw?: string;
+		},
+	) {
+		if (commentIds.length === 0) {
+			return [];
+		}
+
+		await this.db
+			.update(comments)
+			.set({
+				status: input.status,
+				isPinned: input.isPinned,
+				isFolded: input.isFolded,
+				contentRaw: input.contentRaw,
+				contentHtml: input.contentRaw
+					? renderCommentHtml(input.contentRaw)
+					: undefined,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
+
+		const updatedComments = await this.db
+			.select()
+			.from(comments)
+			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
+		const updatedById = new Map(
+			updatedComments.map((comment) => [comment.id, comment]),
+		);
+
+		return commentIds.flatMap((commentId) => {
+			const comment = updatedById.get(commentId);
+			return comment ? [comment] : [];
+		});
+	}
+
 	public async moveCommentsToTrash(commentIds: string[]) {
 		if (commentIds.length === 0) {
 			return [];

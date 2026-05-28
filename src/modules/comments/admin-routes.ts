@@ -4,7 +4,9 @@ import { InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "../admin/management-service";
 import { AdminRepository } from "../admin/repository";
 import {
+	adminCommentBulkMetadataRefreshBodySchema,
 	adminCommentBulkTrashBodySchema,
+	adminCommentBulkUpdateBodySchema,
 	adminCommentClearTrashBodySchema,
 	adminCommentParamsSchema,
 	adminCommentPatchBodySchema,
@@ -39,6 +41,22 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 		return service.listComments(parsed.data);
 	});
 
+	fastify.post("/bulk-update", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedBody = adminCommentBulkUpdateBodySchema.safeParse(request.body);
+		if (!parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: parsedBody.error.issues,
+			});
+		}
+
+		return service.bulkUpdateComments({
+			commentIds: parsedBody.data.commentIds,
+			patch: parsedBody.data.patch,
+			requestId: request.context?.requestId,
+		});
+	});
+
 	fastify.post("/bulk-trash", async (request) => {
 		await sessionService.requireSession(request);
 		const parsedBody = adminCommentBulkTrashBodySchema.safeParse(request.body);
@@ -67,6 +85,23 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsedBody.data.siteKey,
 			requestId: request.context?.requestId,
 		});
+	});
+
+	fastify.post("/metadata/refresh", async (request) => {
+		await sessionService.requireSession(request);
+		const parsedBody = adminCommentBulkMetadataRefreshBodySchema.safeParse(
+			request.body,
+		);
+		if (!parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: parsedBody.error.issues,
+			});
+		}
+
+		return service.bulkRefreshCommentMetadata(
+			parsedBody.data.commentIds,
+			request.context?.requestId,
+		);
 	});
 
 	fastify.patch("/:commentId", async (request) => {

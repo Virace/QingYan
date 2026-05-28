@@ -524,6 +524,220 @@ describe("admin comments", () => {
 		});
 	});
 
+	it("bulk updates comment status and flags", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:bulk-update",
+			pageTitle: "Bulk Update",
+			pageUrl: "/posts/bulk-update/",
+			commentCount: 2,
+			rootCommentCount: 2,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:bulk-update"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_bulk_update_1",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "pending",
+				authorName: "Bulk Update 1",
+				contentRaw: "bulk update 1",
+				contentHtml: "<p>bulk update 1</p>",
+			},
+			{
+				id: "c_bulk_update_2",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "pending",
+				authorName: "Bulk Update 2",
+				contentRaw: "bulk update 2",
+				contentHtml: "<p>bulk update 2</p>",
+			},
+		]);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/bulk-update",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				commentIds: ["c_bulk_update_1", "c_bulk_update_2"],
+				patch: {
+					status: "approved",
+					isFolded: true,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			updatedCount: 2,
+			comments: [
+				{
+					id: "c_bulk_update_1",
+					status: "approved",
+					isFolded: true,
+				},
+				{
+					id: "c_bulk_update_2",
+					status: "approved",
+					isFolded: true,
+				},
+			],
+		});
+	});
+
+	it("rejects bulk comment updates without csrf and over 100 ids", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const missingCsrf = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/bulk-update",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+			payload: {
+				commentIds: ["c_missing_csrf"],
+				patch: {
+					status: "approved",
+				},
+			},
+		});
+		expect(missingCsrf.statusCode).toBe(403);
+
+		const tooManyIds = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/bulk-update",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				commentIds: Array.from({ length: 101 }, (_, index) => `c_${index}`),
+				patch: {
+					status: "approved",
+				},
+			},
+		});
+		expect(tooManyIds.statusCode).toBe(400);
+	});
+
+	it("bulk refreshes selected comment ip metadata", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert(
+			"ipRegion",
+			"ipv4.dbPath",
+			"./data/missing-ip2region-v4.xdb",
+		);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:bulk-metadata-refresh",
+			pageTitle: "Bulk Metadata Refresh",
+			pageUrl: "/posts/bulk-metadata-refresh/",
+			commentCount: 2,
+			rootCommentCount: 2,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:bulk-metadata-refresh"));
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_bulk_refresh_1",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "approved",
+				authorName: "Bulk Refresh 1",
+				contentRaw: "bulk refresh 1",
+				contentHtml: "<p>bulk refresh 1</p>",
+			},
+			{
+				id: "c_bulk_refresh_2",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "approved",
+				authorName: "Bulk Refresh 2",
+				contentRaw: "bulk refresh 2",
+				contentHtml: "<p>bulk refresh 2</p>",
+			},
+		]);
+		await fixture.app.db.insert(commentRequestMetadata).values([
+			{
+				commentId: "c_bulk_refresh_1",
+				authorIp: "203.0.113.21",
+				ipLocationError: "old_error",
+			},
+			{
+				commentId: "c_bulk_refresh_2",
+				authorIp: "203.0.113.22",
+				ipLocationError: "old_error",
+			},
+		]);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/metadata/refresh",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				commentIds: ["c_bulk_refresh_1", "c_bulk_refresh_2"],
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			refreshedCount: 2,
+			failedCount: 0,
+			items: [
+				expect.objectContaining({
+					commentId: "c_bulk_refresh_1",
+					ipLocationError: "xdb_not_found",
+				}),
+				expect.objectContaining({
+					commentId: "c_bulk_refresh_2",
+					ipLocationError: "xdb_not_found",
+				}),
+			],
+		});
+	});
+
 	it("bulk moves comments to trash and clears only trashed comments", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

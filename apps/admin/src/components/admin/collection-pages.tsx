@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCwIcon } from "lucide-react";
 
 import {
+	bulkUpdateComments,
 	bulkTrashComments,
 	clearTrash,
 	createBlacklist,
@@ -15,7 +15,9 @@ import {
 	listUsers,
 	listVisitors,
 	refreshCommentMetadata,
+	refreshSelectedCommentMetadata,
 	replyToComment,
+	type AdminComment,
 	type CommentStatus,
 	updateComment,
 	updateSite,
@@ -32,10 +34,24 @@ import {
 import { Input } from "@/components/ui/input";
 
 import type { AdminView } from "./admin-shell";
-import { EmptyState, textareaClass } from "./admin-ui";
+import { EmptyState, inputClass } from "./admin-ui";
+import type { CommentActionId } from "./comment-actions";
+import { CommentsList } from "./comments-list";
 import { useAdminConfirmDialog } from "./confirm-dialog";
 
 type CommentView = "all" | "pending" | "approved" | "spam" | "trash";
+type BulkCommentAction =
+	| "approve"
+	| "pending"
+	| "spam"
+	| "trash"
+	| "restore"
+	| "delete"
+	| "pin"
+	| "unpin"
+	| "fold"
+	| "unfold"
+	| "refreshMetadata";
 
 const commentViews: Array<{
 	id: CommentView;
@@ -48,27 +64,6 @@ const commentViews: Array<{
 	{ id: "spam", label: "垃圾", status: "spam" },
 	{ id: "trash", label: "回收站", status: "trash" },
 ];
-
-function authorInitial(name: string) {
-	return name.trim().slice(0, 1).toUpperCase() || "?";
-}
-
-function formatIpLocation(location: {
-	country: string | null;
-	region: string | null;
-	city: string | null;
-	isp: string | null;
-	error: string | null;
-}) {
-	if (location.error) {
-		return `地址 ${location.error}`;
-	}
-	return (
-		[location.country, location.region, location.city, location.isp]
-			.filter(Boolean)
-			.join(" / ") || "地址 -"
-	);
-}
 
 function ResourceFilters({
 	search,
@@ -131,6 +126,8 @@ export function CommentsPage({
 	const [limit, setLimit] = useState(20);
 	const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 	const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
+	const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
+	const [bulkAction, setBulkAction] = useState<BulkCommentAction>("approve");
 	const currentView =
 		commentViews.find((item) => item.id === view) ?? commentViews[0];
 	const commentsQuery = useQuery({
@@ -164,6 +161,20 @@ export function CommentsPage({
 	});
 	const bulkTrashMutation = useMutation({
 		mutationFn: bulkTrashComments,
+		onSuccess: () => {
+			setSelectedCommentIds([]);
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
+	});
+	const bulkUpdateMutation = useMutation({
+		mutationFn: bulkUpdateComments,
+		onSuccess: () => {
+			setSelectedCommentIds([]);
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
+	});
+	const bulkRefreshMetadataMutation = useMutation({
+		mutationFn: refreshSelectedCommentMetadata,
 		onSuccess: () => {
 			setSelectedCommentIds([]);
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
@@ -227,12 +238,6 @@ export function CommentsPage({
 	const selectedVisibleIds = selectedCommentIds.filter((commentId) =>
 		visibleCommentIds.includes(commentId),
 	);
-	const selectedTrashIds = (commentsQuery.data?.items ?? [])
-		.filter(
-			(comment) =>
-				selectedCommentIds.includes(comment.id) && comment.status === "trash",
-		)
-		.map((comment) => comment.id);
 	const allVisibleSelected =
 		visibleCommentIds.length > 0 &&
 		visibleCommentIds.every((commentId) =>
@@ -291,6 +296,82 @@ export function CommentsPage({
 		}
 		clearTrashMutation.mutate({ siteKey });
 	};
+	const handleCommentAction = (
+		comment: AdminComment,
+		action: CommentActionId,
+	) => {
+		if (action === "approve") {
+			updateMutation.mutate({ id: comment.id, status: "approved" });
+			return;
+		}
+		if (action === "pending") {
+			updateMutation.mutate({ id: comment.id, status: "pending" });
+			return;
+		}
+		if (action === "spam") {
+			updateMutation.mutate({ id: comment.id, status: "spam" });
+			return;
+		}
+		if (action === "trash") {
+			void moveCommentsToTrash([comment.id]);
+			return;
+		}
+		if (action === "restore") {
+			updateMutation.mutate({ id: comment.id, status: "pending" });
+			return;
+		}
+		if (action === "delete") {
+			void permanentlyDeleteComment(comment.id);
+		}
+	};
+	const applyBulkAction = async () => {
+		const ids = selectedVisibleIds;
+		if (ids.length === 0) {
+			return;
+		}
+		if (bulkAction === "delete") {
+			const confirmed = await confirm({
+				title: "永久删除评论",
+				description: `确认永久删除 ${ids.length} 条评论？此操作不可恢复。`,
+				confirmText: "永久删除",
+				destructive: true,
+			});
+			if (!confirmed) {
+				return;
+			}
+			for (const commentId of ids) {
+				deleteMutation.mutate(commentId);
+			}
+			setSelectedCommentIds([]);
+			return;
+		}
+		if (bulkAction === "refreshMetadata") {
+			bulkRefreshMetadataMutation.mutate(ids);
+			return;
+		}
+		if (bulkAction === "trash") {
+			await moveCommentsToTrash(ids);
+			return;
+		}
+
+		const patchByAction: Record<
+			Exclude<BulkCommentAction, "delete" | "refreshMetadata" | "trash">,
+			{ status?: CommentStatus; isPinned?: boolean; isFolded?: boolean }
+		> = {
+			approve: { status: "approved" },
+			pending: { status: "pending" },
+			spam: { status: "spam" },
+			restore: { status: "pending" },
+			pin: { isPinned: true },
+			unpin: { isPinned: false },
+			fold: { isFolded: true },
+			unfold: { isFolded: false },
+		};
+		bulkUpdateMutation.mutate({
+			commentIds: ids,
+			patch: patchByAction[bulkAction],
+		});
+	};
 
 	return (
 		<Card>
@@ -327,53 +408,44 @@ export function CommentsPage({
 					共 {commentsQuery.data?.pagination.totalCount ?? "-"} 条，当前显示{" "}
 					{commentsQuery.data?.items.length ?? 0} 条。
 				</p>
-				<div className="flex flex-wrap gap-2">
-					{isTrashView ? (
-						<Button
-							type="button"
-							size="sm"
-							variant="destructive"
-							disabled={
-								selectedTrashIds.length === 0 || deleteMutation.isPending
-							}
-							onClick={async () => {
-								if (selectedTrashIds.length === 0) {
-									return;
-								}
-								const confirmed = await confirm({
-									title: "永久删除评论",
-									description: `确认永久删除 ${selectedTrashIds.length} 条回收站评论？此操作不可恢复。`,
-									confirmText: "永久删除",
-									destructive: true,
-								});
-								if (!confirmed) {
-									return;
-								}
-								for (const commentId of selectedTrashIds) {
-									deleteMutation.mutate(commentId);
-								}
-								setSelectedCommentIds([]);
-							}}
-						>
-							永久删除
-							{selectedTrashIds.length ? ` (${selectedTrashIds.length})` : ""}
-						</Button>
-					) : (
-						<Button
-							type="button"
-							size="sm"
-							variant="outline"
-							disabled={
-								selectedVisibleIds.length === 0 || bulkTrashMutation.isPending
-							}
-							onClick={() => moveCommentsToTrash(selectedVisibleIds)}
-						>
-							移入回收站
-							{selectedVisibleIds.length
-								? ` (${selectedVisibleIds.length})`
-								: ""}
-						</Button>
-					)}
+				<div className="flex flex-wrap items-center gap-2">
+					<span className="text-sm text-muted-foreground">
+						已选择 {selectedVisibleIds.length} 条
+					</span>
+					<select
+						className={inputClass}
+						value={bulkAction}
+						onChange={(event) =>
+							setBulkAction(event.target.value as BulkCommentAction)
+						}
+					>
+						<option value="approve">批准</option>
+						<option value="pending">设为待审</option>
+						<option value="spam">标记为垃圾</option>
+						<option value="trash">移入回收站</option>
+						<option value="restore">恢复为待审</option>
+						<option value="pin">置顶</option>
+						<option value="unpin">取消置顶</option>
+						<option value="fold">折叠</option>
+						<option value="unfold">展开</option>
+						<option value="refreshMetadata">刷新 IP 地址信息</option>
+						<option value="delete">永久删除</option>
+					</select>
+					<Button
+						type="button"
+						size="sm"
+						variant={bulkAction === "delete" ? "destructive" : "outline"}
+						disabled={
+							selectedVisibleIds.length === 0 ||
+							bulkUpdateMutation.isPending ||
+							bulkRefreshMetadataMutation.isPending ||
+							bulkTrashMutation.isPending ||
+							deleteMutation.isPending
+						}
+						onClick={applyBulkAction}
+					>
+						应用
+					</Button>
 					{isTrashView ? (
 						<Button
 							type="button"
@@ -387,326 +459,70 @@ export function CommentsPage({
 					) : null}
 				</div>
 				{commentsQuery.data?.items.length ? (
-					<div className="overflow-x-auto rounded-md border">
-						<table className="w-full text-left text-sm">
-							<thead className="bg-muted/60">
-								<tr>
-									<th className="p-3">
-										<input
-											type="checkbox"
-											aria-label="选择当前页评论"
-											checked={allVisibleSelected}
-											onChange={(event) =>
-												toggleAllVisibleComments(event.target.checked)
-											}
-										/>
-									</th>
-									<th className="p-3">状态</th>
-									<th className="p-3">作者</th>
-									<th className="p-3">页面</th>
-									<th className="p-3">内容</th>
-									<th className="p-3">操作</th>
-								</tr>
-							</thead>
-							<tbody>
-								{commentsQuery.data.items.map((comment) => (
-									<tr key={comment.id} className="border-t">
-										<td className="p-3">
-											<input
-												type="checkbox"
-												aria-label={`选择评论 ${comment.id}`}
-												checked={selectedCommentIds.includes(comment.id)}
-												onChange={(event) =>
-													toggleSelectedComment(
-														comment.id,
-														event.target.checked,
-													)
-												}
-											/>
-										</td>
-										<td className="p-3">
-											<Badge
-												variant={
-													comment.status === "approved"
-														? "secondary"
-														: comment.status === "spam"
-															? "destructive"
-															: "outline"
-												}
-											>
-												{comment.status === "approved"
-													? "已通过"
-													: comment.status === "spam"
-														? "Akismet 垃圾"
-														: comment.status === "trash"
-															? "回收站"
-															: "待审"}
-											</Badge>
-										</td>
-										<td className="p-3">
-											<div className="flex min-w-56 gap-3">
-												{comment.authorAvatarUrl ? (
-													<img
-														className="size-10 shrink-0 rounded-full border object-cover"
-														src={comment.authorAvatarUrl}
-														alt={`${comment.authorName} 头像`}
-														loading="lazy"
-													/>
-												) : (
-													<div
-														className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-muted text-sm font-medium text-muted-foreground"
-														aria-hidden="true"
-													>
-														{authorInitial(comment.authorName)}
-													</div>
-												)}
-												<div className="min-w-0">
-													<p className="truncate font-medium">
-														{comment.authorName}
-													</p>
-													<p className="truncate text-xs text-muted-foreground">
-														{comment.authorEmail ?? "-"}
-													</p>
-													<p className="text-xs text-muted-foreground">
-														IP {comment.authorIp ?? "-"}
-													</p>
-													<p className="max-w-48 truncate text-xs text-muted-foreground">
-														{formatIpLocation(comment.authorIpLocation)}
-													</p>
-													<p className="max-w-48 truncate text-xs text-muted-foreground">
-														UA {comment.authorUserAgent ?? "-"}
-													</p>
-													<div className="mt-2 flex flex-wrap gap-1">
-														{comment.blacklist.email ? (
-															<Badge variant="destructive">邮箱黑名单</Badge>
-														) : null}
-														{comment.blacklist.ip ? (
-															<Badge variant="destructive">IP 黑名单</Badge>
-														) : null}
-													</div>
-												</div>
-											</div>
-										</td>
-										<td className="max-w-56 p-3">
-											<p className="truncate">{comment.pageTitle ?? "-"}</p>
-											<p className="truncate text-xs text-muted-foreground">
-												{comment.pageKey}
-											</p>
-										</td>
-										<td className="max-w-80 p-3">
-											<p className="line-clamp-2">{comment.contentRaw}</p>
-											<p className="text-xs text-muted-foreground">
-												赞 {comment.voteUpCount} / 回复 {comment.replyCount}
-											</p>
-										</td>
-										<td className="p-3">
-											<div className="flex flex-wrap gap-2">
-												<Button
-													type="button"
-													size="sm"
-													variant="outline"
-													onClick={() =>
-														updateMutation.mutate({
-															id: comment.id,
-															status:
-																comment.status === "approved"
-																	? "pending"
-																	: "approved",
-														})
-													}
-												>
-													{comment.status === "approved" ? "待审" : "通过"}
-												</Button>
-												{comment.status !== "pending" ? (
-													<Button
-														type="button"
-														size="sm"
-														variant="outline"
-														onClick={() =>
-															updateMutation.mutate({
-																id: comment.id,
-																status: "pending",
-															})
-														}
-													>
-														待审
-													</Button>
-												) : null}
-												{comment.status !== "spam" ? (
-													<Button
-														type="button"
-														size="sm"
-														variant="outline"
-														onClick={() =>
-															updateMutation.mutate({
-																id: comment.id,
-																status: "spam",
-															})
-														}
-													>
-														垃圾
-													</Button>
-												) : null}
-												<Button
-													type="button"
-													size="sm"
-													variant="outline"
-													onClick={() =>
-														updateMutation.mutate({
-															id: comment.id,
-															isPinned: !comment.isPinned,
-														})
-													}
-												>
-													{comment.isPinned ? "取消置顶" : "置顶"}
-												</Button>
-												<Button
-													type="button"
-													size="sm"
-													variant="outline"
-													onClick={() =>
-														updateMutation.mutate({
-															id: comment.id,
-															isFolded: !comment.isFolded,
-														})
-													}
-												>
-													{comment.isFolded ? "展开" : "折叠"}
-												</Button>
-												{comment.status === "trash" ? (
-													<Button
-														type="button"
-														size="sm"
-														variant="outline"
-														onClick={() =>
-															updateMutation.mutate({
-																id: comment.id,
-																status: "pending",
-															})
-														}
-													>
-														恢复
-													</Button>
-												) : (
-													<Button
-														type="button"
-														size="sm"
-														variant="outline"
-														disabled={bulkTrashMutation.isPending}
-														onClick={() => moveCommentsToTrash([comment.id])}
-													>
-														移入回收站
-													</Button>
-												)}
-												{isTrashView ? (
-													<Button
-														type="button"
-														size="sm"
-														variant="destructive"
-														onClick={() => permanentlyDeleteComment(comment.id)}
-													>
-														永久删除
-													</Button>
-												) : null}
-												{comment.authorEmail ? (
-													<Button
-														type="button"
-														size="sm"
-														variant={
-															comment.blacklist.email
-																? "destructive"
-																: "outline"
-														}
-														disabled={blacklistMutationPending}
-														onClick={() =>
-															toggleCommentBlacklist({
-																targetType: "email",
-																targetValue: comment.authorEmail ?? "",
-																isBlacklisted: comment.blacklist.email,
-															})
-														}
-													>
-														{comment.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
-													</Button>
-												) : null}
-												{comment.authorIp ? (
-													<Button
-														type="button"
-														size="sm"
-														variant="outline"
-														disabled={refreshMetadataMutation.isPending}
-														onClick={() =>
-															refreshMetadataMutation.mutate(comment.id)
-														}
-													>
-														<RefreshCwIcon data-icon="inline-start" />
-														刷新地址
-													</Button>
-												) : null}
-												{comment.authorIp ? (
-													<Button
-														type="button"
-														size="sm"
-														variant={
-															comment.blacklist.ip ? "destructive" : "outline"
-														}
-														disabled={blacklistMutationPending}
-														onClick={() =>
-															toggleCommentBlacklist({
-																targetType: "ip",
-																targetValue: comment.authorIp ?? "",
-																isBlacklisted: comment.blacklist.ip,
-															})
-														}
-													>
-														{comment.blacklist.ip ? "解除 IP" : "拉黑 IP"}
-													</Button>
-												) : null}
-											</div>
-											<form
-												className="mt-3 flex flex-col gap-2"
-												onSubmit={(event) => {
-													event.preventDefault();
-													const raw = (replyDrafts[comment.id] ?? "").trim();
-													if (!raw) {
-														return;
-													}
-													replyMutation.mutate({
-														commentId: comment.id,
-														raw,
-													});
-												}}
-											>
-												<textarea
-													className={textareaClass}
-													rows={2}
-													placeholder="快速回复"
-													value={replyDrafts[comment.id] ?? ""}
-													onChange={(event) =>
-														setReplyDrafts((current) => ({
-															...current,
-															[comment.id]: event.target.value,
-														}))
-													}
-												/>
-												<Button
-													type="submit"
-													size="sm"
-													variant="outline"
-													disabled={
-														replyMutation.isPending ||
-														!(replyDrafts[comment.id] ?? "").trim()
-													}
-												>
-													回复
-												</Button>
-											</form>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
+					<CommentsList
+						comments={commentsQuery.data.items}
+						selectedCommentIds={selectedCommentIds}
+						allVisibleSelected={allVisibleSelected}
+						activeReplyId={activeReplyId}
+						replyDrafts={replyDrafts}
+						mutationPending={
+							updateMutation.isPending ||
+							deleteMutation.isPending ||
+							bulkTrashMutation.isPending ||
+							bulkUpdateMutation.isPending ||
+							bulkRefreshMetadataMutation.isPending ||
+							refreshMetadataMutation.isPending ||
+							blacklistMutationPending
+						}
+						onToggleAll={toggleAllVisibleComments}
+						onToggleOne={toggleSelectedComment}
+						onAction={handleCommentAction}
+						onTogglePinned={(comment) =>
+							updateMutation.mutate({
+								id: comment.id,
+								isPinned: !comment.isPinned,
+							})
+						}
+						onToggleFolded={(comment) =>
+							updateMutation.mutate({
+								id: comment.id,
+								isFolded: !comment.isFolded,
+							})
+						}
+						onReplyOpen={setActiveReplyId}
+						onReplyCancel={() => setActiveReplyId(null)}
+						onReplyDraftChange={(commentId, value) =>
+							setReplyDrafts((current) => ({
+								...current,
+								[commentId]: value,
+							}))
+						}
+						onReplySubmit={(commentId) => {
+							const raw = (replyDrafts[commentId] ?? "").trim();
+							if (!raw) {
+								return;
+							}
+							replyMutation.mutate({ commentId, raw });
+							setActiveReplyId(null);
+						}}
+						onRefreshMetadata={(commentId) =>
+							refreshMetadataMutation.mutate(commentId)
+						}
+						onToggleEmailBlacklist={(comment) =>
+							toggleCommentBlacklist({
+								targetType: "email",
+								targetValue: comment.authorEmail ?? "",
+								isBlacklisted: comment.blacklist.email,
+							})
+						}
+						onToggleIpBlacklist={(comment) =>
+							toggleCommentBlacklist({
+								targetType: "ip",
+								targetValue: comment.authorIp ?? "",
+								isBlacklisted: comment.blacklist.ip,
+							})
+						}
+					/>
 				) : (
 					<EmptyState text={commentsQuery.isLoading ? "加载中" : "暂无评论"} />
 				)}

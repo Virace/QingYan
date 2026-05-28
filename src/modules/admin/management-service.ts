@@ -389,6 +389,42 @@ export class AdminManagementService {
 		return comment;
 	}
 
+	public async bulkUpdateComments(input: {
+		commentIds: string[];
+		patch: {
+			status?: CommentStatus;
+			isPinned?: boolean;
+			isFolded?: boolean;
+			contentRaw?: string;
+		};
+		requestId?: string;
+	}) {
+		const comments = await this.repository.bulkUpdateComments(
+			input.commentIds,
+			input.patch,
+		);
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			actorType: "admin",
+			event: input.patch.status
+				? "comments.status.changed"
+				: "comments.updated",
+			message: "批量更新评论",
+			targetType: "comment",
+			targetId: comments.map((comment) => comment.id).join(","),
+			payload: {
+				commentIds: comments.map((comment) => comment.id),
+				patch: input.patch,
+			},
+		});
+
+		return {
+			comments,
+			updatedCount: comments.length,
+		};
+	}
+
 	public async refreshCommentMetadata(commentId: string, requestId?: string) {
 		const comment = await this.repository.getCommentById(commentId);
 		if (!comment || comment.deletedAt) {
@@ -443,6 +479,29 @@ export class AdminManagementService {
 		} finally {
 			resolver.close();
 		}
+	}
+
+	public async bulkRefreshCommentMetadata(
+		commentIds: string[],
+		requestId?: string,
+	) {
+		const items = [];
+		for (const commentId of commentIds) {
+			try {
+				items.push(await this.refreshCommentMetadata(commentId, requestId));
+			} catch (error) {
+				items.push({
+					commentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+
+		return {
+			refreshedCount: items.filter((item) => !("error" in item)).length,
+			failedCount: items.filter((item) => "error" in item).length,
+			items,
+		};
 	}
 
 	public async deleteComment(commentId: string, requestId?: string) {

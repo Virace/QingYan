@@ -421,6 +421,32 @@ export function bulkTrashComments(commentIds: string[]) {
 	);
 }
 
+export function bulkUpdateComments(input: {
+	commentIds: string[];
+	patch: Partial<Pick<AdminComment, "status" | "isPinned" | "isFolded">> & {
+		contentRaw?: string;
+	};
+}) {
+	return requestJson<{ comments: AdminComment[]; updatedCount: number }>(
+		"/api/admin/comments/bulk-update",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function refreshSelectedCommentMetadata(commentIds: string[]) {
+	return requestJson<{
+		refreshedCount: number;
+		failedCount: number;
+		items: unknown[];
+	}>("/api/admin/comments/metadata/refresh", {
+		method: "POST",
+		body: JSON.stringify({ commentIds }),
+	});
+}
+
 export function clearTrash(input: { siteKey?: string }) {
 	return requestJson<{ deletedCount: number }>(
 		"/api/admin/comments/trash/clear",

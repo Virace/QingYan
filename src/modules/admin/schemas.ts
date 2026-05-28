@@ -145,6 +145,15 @@ export const adminCommentBulkTrashBodySchema = z.object({
 	commentIds: z.array(z.string().min(1)).min(1).max(100),
 });
 
+export const adminCommentBulkUpdateBodySchema = z.object({
+	commentIds: z.array(z.string().min(1)).min(1).max(100),
+	patch: adminCommentPatchBodySchema,
+});
+
+export const adminCommentBulkMetadataRefreshBodySchema = z.object({
+	commentIds: z.array(z.string().min(1)).min(1).max(100),
+});
+
 export const adminCommentClearTrashBodySchema = z.object({
 	siteKey: z.string().min(1).optional(),
 });
