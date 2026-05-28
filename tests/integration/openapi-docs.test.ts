@@ -59,6 +59,18 @@ describe("openapi docs", () => {
 		expect(spec.components.schemas.CreateCommentRequest.required).not.toContain(
 			"options",
 		);
+		expect(JSON.stringify(spec.components.schemas.CommentAuthor)).toContain(
+			"avatarUrl",
+		);
+		expect(JSON.stringify(spec.components.schemas.CommentAuthor)).not.toContain(
+			"gravatarUrl",
+		);
+		expect(
+			JSON.stringify(spec.components.schemas.CommentAvatarDisplay),
+		).toContain("external");
+		expect(
+			JSON.stringify(spec.components.schemas.CommentAvatarDisplay),
+		).not.toContain("gravatar");
 
 		expect(docs.statusCode).toBe(200);
 		expect(docs.headers["content-type"]).toContain("text/html");

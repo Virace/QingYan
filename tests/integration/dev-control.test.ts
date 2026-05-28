@@ -138,7 +138,7 @@ describe("dev control routes", () => {
 			},
 			commentDisplay: {
 				avatar: {
-					gravatar: {
+					external: {
 						enabled: false,
 					},
 					display: {
@@ -283,7 +283,7 @@ describe("dev control routes", () => {
 			},
 			commentDisplay: {
 				avatar: {
-					gravatar: {
+					external: {
 						enabled: false,
 					},
 					display: {
@@ -303,7 +303,7 @@ describe("dev control routes", () => {
 		expect(thread.json()).toMatchObject({
 			commentDisplay: {
 				avatar: {
-					gravatar: {
+					external: {
 						enabled: false,
 					},
 					display: {

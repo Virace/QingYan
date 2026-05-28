@@ -47,6 +47,30 @@ describe("system settings ownership", () => {
 					key: "akismet.apiKey",
 					secret: true,
 				}),
+				expect.objectContaining({
+					category: "avatar",
+					key: "external.enabled",
+					value: false,
+					secret: false,
+				}),
+				expect.objectContaining({
+					category: "avatar",
+					key: "external.baseUrl",
+					value: "https://gravatar.com/avatar",
+					secret: false,
+				}),
+				expect.objectContaining({
+					category: "avatar",
+					key: "external.hashAlgorithm",
+					value: "sha256",
+					secret: false,
+				}),
+				expect.objectContaining({
+					category: "avatar",
+					key: "external.query",
+					value: "s=80&d=404&r=g",
+					secret: false,
+				}),
 			]),
 		);
 	});

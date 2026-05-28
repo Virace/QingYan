@@ -1,4 +1,4 @@
-import { buildGravatarUrl } from "./gravatar";
+import { buildExternalAvatarUrl } from "./gravatar";
 import { sanitizeOptionalSafeHttpUrl } from "../shared/url-policy";
 import type {
 	CommentAuthorIdentity,
@@ -11,6 +11,7 @@ interface PresenterCommentInput {
 	parentId: string | null;
 	authorIdentity?: CommentAuthorIdentity | string;
 	authorName: string;
+	authorEmail: string | null;
 	authorEmailHash: string | null;
 	authorWebsite: string | null;
 	authorIp?: string | null;
@@ -144,15 +145,13 @@ export function presentComments(
 
 	for (const comment of comments) {
 		const verifiedAuthor = options?.verifiedAuthor;
-		const gravatarUrl = buildGravatarUrl({
-			enabled: options?.avatar?.gravatar.enabled ?? false,
-			emailHash: comment.authorEmailHash,
+		const avatarUrl = buildExternalAvatarUrl({
+			enabled: options?.avatar?.external.enabled ?? false,
+			email: comment.authorEmail,
 			baseUrl:
-				options?.avatar?.gravatar.baseUrl ?? "https://gravatar.com/avatar",
-			size: options?.avatar?.gravatar.size,
-			defaultImage: options?.avatar?.gravatar.defaultImage,
-			rating: options?.avatar?.gravatar.rating,
-			forceDefault: options?.avatar?.gravatar.forceDefault,
+				options?.avatar?.external.baseUrl ?? "https://gravatar.com/avatar",
+			hashAlgorithm: options?.avatar?.external.hashAlgorithm ?? "sha256",
+			query: options?.avatar?.external.query ?? "s=80&d=404&r=g",
 		});
 		const isVerifiedAuthor =
 			comment.authorIdentity === "verified" && verifiedAuthor?.enabled === true;
@@ -166,7 +165,7 @@ export function presentComments(
 				? verifiedAuthor?.displayName
 				: comment.authorName,
 			website: sanitizeOptionalSafeHttpUrl(comment.authorWebsite),
-			gravatarUrl,
+			avatarUrl,
 		};
 		if (isVerifiedAuthor && verifiedAuthor?.badgeLabel) {
 			author.badge = {

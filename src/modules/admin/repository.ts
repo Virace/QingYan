@@ -28,7 +28,7 @@ import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
 import type { CommentStatus } from "../comments/moderation-types";
-import { buildGravatarUrl } from "../comments/gravatar";
+import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { SystemSettings } from "../system-settings/definitions";
 
 function parseStringArray(payload?: string | null): string[] {
@@ -380,16 +380,14 @@ export class AdminRepository {
 					status: row.status,
 					authorName: row.authorName,
 					authorEmail: row.authorEmail,
-					authorGravatarUrl:
-						buildGravatarUrl({
-							enabled: input.avatar?.gravatar.enabled ?? false,
-							emailHash: row.authorEmailHash,
+					authorAvatarUrl:
+						buildExternalAvatarUrl({
+							enabled: input.avatar?.external.enabled ?? false,
+							email: row.authorEmail,
 							baseUrl:
-								input.avatar?.gravatar.baseUrl ?? "https://gravatar.com/avatar",
-							size: input.avatar?.gravatar.size,
-							defaultImage: input.avatar?.gravatar.defaultImage,
-							rating: input.avatar?.gravatar.rating,
-							forceDefault: input.avatar?.gravatar.forceDefault,
+								input.avatar?.external.baseUrl ?? "https://gravatar.com/avatar",
+							hashAlgorithm: input.avatar?.external.hashAlgorithm ?? "sha256",
+							query: input.avatar?.external.query ?? "s=80&d=404&r=g",
 						}) ?? null,
 					authorIp: row.authorIp,
 					authorUserAgent: row.authorUserAgent,

@@ -32,7 +32,7 @@ export interface AdminComment {
 	status: CommentStatus;
 	authorName: string;
 	authorEmail: string | null;
-	authorGravatarUrl: string | null;
+	authorAvatarUrl: string | null;
 	authorIp: string | null;
 	authorUserAgent: string | null;
 	blacklist: {
@@ -319,21 +319,11 @@ export interface AdminSystemSettings {
 		};
 	};
 	avatar: {
-		gravatar: {
+		external: {
 			enabled: boolean;
 			baseUrl: string;
-			size: number;
-			defaultImage:
-				| "404"
-				| "mp"
-				| "identicon"
-				| "monsterid"
-				| "wavatar"
-				| "retro"
-				| "robohash"
-				| "blank";
-			rating: "g" | "pg" | "r" | "x";
-			forceDefault: boolean;
+			hashAlgorithm: "sha256" | "md5";
+			query: string;
 		};
 		display: {
 			shape: "circle" | "rounded" | "square";

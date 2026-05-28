@@ -61,29 +61,25 @@ export const settingUiMetadata: Record<string, SettingUiMetadata> = {
 			city: "城市",
 		},
 	},
-	"systemSettings.avatar.gravatar.defaultImage": {
-		label: "Gravatar 默认图片",
-		description: "控制没有匹配头像时的 Gravatar default 参数。",
+	"systemSettings.avatar.external.enabled": {
+		label: "启用外部头像 URL",
+		description: "开启后公开评论作者会返回 author.avatarUrl。",
+	},
+	"systemSettings.avatar.external.baseUrl": {
+		label: "头像接口地址",
+		description: "外部头像服务的 avatar endpoint，不包含邮箱 hash。",
+	},
+	"systemSettings.avatar.external.hashAlgorithm": {
+		label: "邮箱哈希算法",
+		description: "按外部头像服务文档选择。",
 		options: {
-			"404": "返回 404",
-			mp: "Mystery Person",
-			identicon: "Identicon",
-			monsterid: "MonsterID",
-			wavatar: "Wavatar",
-			retro: "Retro",
-			robohash: "Robohash",
-			blank: "Blank",
+			sha256: "SHA-256",
+			md5: "MD5",
 		},
 	},
-	"systemSettings.avatar.gravatar.rating": {
-		label: "Gravatar 评级",
-		description: "控制允许返回的 Gravatar rating。",
-		options: {
-			g: "G",
-			pg: "PG",
-			r: "R",
-			x: "X",
-		},
+	"systemSettings.avatar.external.query": {
+		label: "头像 URL 参数",
+		description: "不包含开头的 ?，多个参数用 & 分隔。",
 	},
 	"systemSettings.avatar.display.shape": {
 		label: "头像形状",

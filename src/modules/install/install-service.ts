@@ -44,7 +44,10 @@ import {
 	type IpRegionUpdateResult,
 	type IpVersion,
 } from "../comments/metadata/ip-region-updater";
-import { normalizeGravatarBaseUrl } from "../comments/gravatar";
+import {
+	normalizeExternalAvatarBaseUrl,
+	validateExternalAvatarQuery,
+} from "../comments/gravatar";
 import {
 	isSafeHttpUrl,
 	normalizeOriginList,
@@ -519,9 +522,12 @@ function buildSystemSettingsInput(input: unknown): SystemSettings {
 	return {
 		...settings,
 		avatar: {
-			gravatar: {
-				...settings.avatar.gravatar,
-				baseUrl: normalizeGravatarBaseUrl(settings.avatar.gravatar.baseUrl),
+			external: {
+				...settings.avatar.external,
+				baseUrl: normalizeExternalAvatarBaseUrl(
+					settings.avatar.external.baseUrl,
+				),
+				query: validateExternalAvatarQuery(settings.avatar.external.query),
 			},
 			display: settings.avatar.display,
 		},

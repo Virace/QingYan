@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 
 import {
@@ -458,7 +459,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(publicBody).not.toContain("中国|广东省|深圳市|移动|CN");
 	});
 
-	it("returns Gravatar URL when global Gravatar is enabled", async () => {
+	it("returns external avatar URL when enabled", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -471,16 +472,18 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		}
 
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
-		await systemSettings.upsert("avatar", "gravatar.enabled", true);
+		await systemSettings.upsert("avatar", "external.enabled", true);
 		await systemSettings.upsert(
 			"avatar",
-			"gravatar.baseUrl",
+			"external.baseUrl",
 			"https://cravatar.cn/avatar",
 		);
-		await systemSettings.upsert("avatar", "gravatar.size", 160);
-		await systemSettings.upsert("avatar", "gravatar.defaultImage", "identicon");
-		await systemSettings.upsert("avatar", "gravatar.rating", "pg");
-		await systemSettings.upsert("avatar", "gravatar.forceDefault", true);
+		await systemSettings.upsert("avatar", "external.hashAlgorithm", "md5");
+		await systemSettings.upsert(
+			"avatar",
+			"external.query",
+			"s=160&d=identicon&f=y",
+		);
 		await systemSettings.upsert("avatar", "display.shape", "rounded");
 		await systemSettings.upsert("avatar", "display.sizePx", 48);
 
@@ -512,8 +515,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			throw new Error("Expected page thread to exist");
 		}
 
-		const aliceHash =
-			"ff8d9819fc0e12bf0d24892e45987e249a28dce836a85cad60e28eaaa8c6d976";
+		const aliceMd5 = createHash("md5")
+			.update("alice@example.com")
+			.digest("hex");
 		await fixture.app.db.insert(comments).values({
 			id: "c_gravatar",
 			siteId: site.id,
@@ -522,7 +526,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			visitorId: visitor.id,
 			status: "approved",
 			authorName: "Alice",
-			authorEmailHash: aliceHash,
+			authorEmail: "alice@example.com",
 			contentRaw: "hello",
 			contentHtml: "<p>hello</p>",
 			createdAt: "2026-05-06T10:00:00.000Z",
@@ -543,11 +547,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json().comments[0].author).toMatchObject({
 			name: "Alice",
-			gravatarUrl: `https://cravatar.cn/avatar/${aliceHash}?s=160&d=identicon&r=pg&f=y`,
+			avatarUrl: `https://cravatar.cn/avatar/${aliceMd5}?s=160&d=identicon&f=y`,
 		});
+		expect(response.json().comments[0].author.gravatarUrl).toBeUndefined();
 		expect(response.json().commentDisplay).toMatchObject({
 			avatar: {
-				gravatar: {
+				external: {
 					enabled: true,
 				},
 				display: {
@@ -556,7 +561,6 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				},
 			},
 		});
-		expect(response.json().comments[0].author.avatarUrl).toBeUndefined();
 	});
 
 	it("returns verified author badge from the current site settings", async () => {

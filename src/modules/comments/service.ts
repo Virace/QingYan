@@ -66,8 +66,8 @@ function buildPublicCommentDisplay(
 ) {
 	return {
 		avatar: {
-			gravatar: {
-				enabled: options.avatar.gravatar.enabled,
+			external: {
+				enabled: options.avatar.external.enabled,
 			},
 			display: options.avatar.display,
 		},
@@ -144,13 +144,11 @@ export class CommentsService {
 		const avatarSettings: SystemSettings["avatar"] = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
-					gravatar: {
+					external: {
 						enabled: false,
 						baseUrl: "https://gravatar.com/avatar",
-						size: 80,
-						defaultImage: "404",
-						rating: "g",
-						forceDefault: false,
+						hashAlgorithm: "sha256",
+						query: "s=80&d=404&r=g",
 					},
 					display: {
 						shape: "circle",
@@ -317,13 +315,11 @@ export class CommentsService {
 		const avatarSettings: SystemSettings["avatar"] = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
 			: {
-					gravatar: {
+					external: {
 						enabled: false,
 						baseUrl: "https://gravatar.com/avatar",
-						size: 80,
-						defaultImage: "404",
-						rating: "g",
-						forceDefault: false,
+						hashAlgorithm: "sha256",
+						query: "s=80&d=404&r=g",
 					},
 					display: {
 						shape: "circle",

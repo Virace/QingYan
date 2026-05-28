@@ -53,13 +53,11 @@ describe("admin system settings", () => {
 				precision: "province",
 			},
 			avatar: {
-				gravatar: {
+				external: {
 					enabled: false,
 					baseUrl: "https://gravatar.com/avatar",
-					size: 80,
-					defaultImage: "404",
-					rating: "g",
-					forceDefault: false,
+					hashAlgorithm: "sha256",
+					query: "s=80&d=404&r=g",
 				},
 				display: {
 					shape: "circle",
@@ -375,7 +373,7 @@ describe("admin system settings", () => {
 		expect(afterUpdate.json().captcha.turnstile.secretKeyConfigured).toBe(true);
 	});
 
-	it("updates global Gravatar settings", async () => {
+	it("updates external avatar settings", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -394,13 +392,11 @@ describe("admin system settings", () => {
 					retentionDays: 7,
 				},
 				avatar: {
-					gravatar: {
+					external: {
 						enabled: true,
 						baseUrl: "https://cravatar.cn/avatar/",
-						size: 160,
-						defaultImage: "identicon",
-						rating: "pg",
-						forceDefault: true,
+						hashAlgorithm: "md5",
+						query: "s=160&d=identicon&f=y",
 					},
 					display: {
 						shape: "rounded",
@@ -413,13 +409,11 @@ describe("admin system settings", () => {
 		expect(updateResponse.statusCode).toBe(200);
 		expect(updateResponse.json()).toMatchObject({
 			avatar: {
-				gravatar: {
+				external: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar",
-					size: 160,
-					defaultImage: "identicon",
-					rating: "pg",
-					forceDefault: true,
+					hashAlgorithm: "md5",
+					query: "s=160&d=identicon&f=y",
 				},
 				display: {
 					shape: "rounded",
@@ -443,13 +437,11 @@ describe("admin system settings", () => {
 				retentionDays: 7,
 			},
 			avatar: {
-				gravatar: {
+				external: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar",
-					size: 160,
-					defaultImage: "identicon",
-					rating: "pg",
-					forceDefault: true,
+					hashAlgorithm: "md5",
+					query: "s=160&d=identicon&f=y",
 				},
 				display: {
 					shape: "rounded",
@@ -457,6 +449,71 @@ describe("admin system settings", () => {
 				},
 			},
 		});
+	});
+
+	it("rejects invalid external avatar settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const invalidHash = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				avatar: {
+					external: {
+						enabled: true,
+						baseUrl: "https://gravatar.com/avatar",
+						hashAlgorithm: "sha1",
+						query: "s=80",
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
+					},
+				},
+			},
+		});
+
+		expect(invalidHash.statusCode).toBe(400);
+
+		const invalidQuery = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				avatar: {
+					external: {
+						enabled: true,
+						baseUrl: "https://gravatar.com/avatar",
+						hashAlgorithm: "sha256",
+						query: "?s=80",
+					},
+					display: {
+						shape: "circle",
+						sizePx: 40,
+					},
+				},
+			},
+		});
+
+		expect(invalidQuery.statusCode).toBe(400);
 	});
 
 	it("updates global Akismet settings without returning the API key", async () => {

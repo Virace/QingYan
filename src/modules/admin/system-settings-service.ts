@@ -8,7 +8,10 @@ import {
 } from "../system-settings/codec";
 import type { SystemSettings } from "../system-settings/definitions";
 import { createSystemSettingsDefaults } from "../system-settings/definitions";
-import { normalizeGravatarBaseUrl } from "../comments/gravatar";
+import {
+	normalizeExternalAvatarBaseUrl,
+	validateExternalAvatarQuery,
+} from "../comments/gravatar";
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
 
 type AdminSystemSettingsInput = {
@@ -149,13 +152,13 @@ export class AdminSystemSettingsService {
 			ipRegion: input.ipRegion ?? current.ipRegion,
 			avatar: input.avatar
 				? {
-						gravatar: {
-							enabled: input.avatar.gravatar.enabled,
-							baseUrl: normalizeGravatarBaseUrl(input.avatar.gravatar.baseUrl),
-							size: input.avatar.gravatar.size,
-							defaultImage: input.avatar.gravatar.defaultImage,
-							rating: input.avatar.gravatar.rating,
-							forceDefault: input.avatar.gravatar.forceDefault,
+						external: {
+							enabled: input.avatar.external.enabled,
+							baseUrl: normalizeExternalAvatarBaseUrl(
+								input.avatar.external.baseUrl,
+							),
+							hashAlgorithm: input.avatar.external.hashAlgorithm,
+							query: validateExternalAvatarQuery(input.avatar.external.query),
 						},
 						display: {
 							shape: input.avatar.display.shape,

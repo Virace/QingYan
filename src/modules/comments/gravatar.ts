@@ -1,62 +1,69 @@
-export interface GravatarUrlInput {
+import { createHash } from "node:crypto";
+
+export const externalAvatarHashAlgorithms = ["sha256", "md5"] as const;
+
+export type ExternalAvatarHashAlgorithm =
+	(typeof externalAvatarHashAlgorithms)[number];
+
+export interface ExternalAvatarUrlInput {
 	enabled: boolean;
-	emailHash?: string | null;
+	email?: string | null;
 	baseUrl: string;
-	size?: number;
-	defaultImage?: GravatarDefaultImage;
-	rating?: GravatarRating;
-	forceDefault?: boolean;
+	hashAlgorithm: ExternalAvatarHashAlgorithm;
+	query: string;
 }
 
-export const gravatarDefaultImages = [
-	"404",
-	"mp",
-	"identicon",
-	"monsterid",
-	"wavatar",
-	"retro",
-	"robohash",
-	"blank",
-] as const;
-
-export const gravatarRatings = ["g", "pg", "r", "x"] as const;
-
-export type GravatarDefaultImage = (typeof gravatarDefaultImages)[number];
-export type GravatarRating = (typeof gravatarRatings)[number];
-
-export function normalizeGravatarBaseUrl(baseUrl: string): string {
+export function normalizeExternalAvatarBaseUrl(baseUrl: string): string {
 	let parsed: URL;
 	try {
 		parsed = new URL(baseUrl);
 	} catch {
-		throw new Error("Invalid Gravatar base URL");
+		throw new Error("Invalid external avatar base URL");
 	}
 
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error("Gravatar base URL must use http or https");
+		throw new Error("External avatar base URL must use http or https");
 	}
 
 	const normalized = parsed.toString().replace(/\/+$/u, "");
 	if (!normalized) {
-		throw new Error("Invalid Gravatar base URL");
+		throw new Error("Invalid external avatar base URL");
 	}
 
 	return normalized;
 }
 
-export function buildGravatarUrl(input: GravatarUrlInput): string | undefined {
-	if (!input.enabled || !input.emailHash) {
+export function validateExternalAvatarQuery(query: string): string {
+	const trimmed = query.trim();
+	if (trimmed.startsWith("?")) {
+		throw new Error("External avatar query must not start with ?");
+	}
+	if (trimmed.includes("#")) {
+		throw new Error("External avatar query must not include #");
+	}
+	if (/\s/u.test(trimmed)) {
+		throw new Error("External avatar query must not include whitespace");
+	}
+
+	return trimmed;
+}
+
+function hashAvatarEmail(
+	email: string,
+	algorithm: ExternalAvatarHashAlgorithm,
+): string {
+	return createHash(algorithm).update(email.trim().toLowerCase()).digest("hex");
+}
+
+export function buildExternalAvatarUrl(
+	input: ExternalAvatarUrlInput,
+): string | undefined {
+	if (!input.enabled || !input.email) {
 		return undefined;
 	}
 
-	const baseUrl = normalizeGravatarBaseUrl(input.baseUrl);
-	const params = new URLSearchParams({
-		s: String(input.size ?? 80),
-		d: input.defaultImage ?? "404",
-		r: input.rating ?? "g",
-	});
-	if (input.forceDefault) {
-		params.set("f", "y");
-	}
-	return `${baseUrl}/${input.emailHash}?${params.toString()}`;
+	const baseUrl = normalizeExternalAvatarBaseUrl(input.baseUrl);
+	const hash = hashAvatarEmail(input.email, input.hashAlgorithm);
+	const query = validateExternalAvatarQuery(input.query);
+	return query ? `${baseUrl}/${hash}?${query}` : `${baseUrl}/${hash}`;
 }

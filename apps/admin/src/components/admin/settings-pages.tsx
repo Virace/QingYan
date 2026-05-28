@@ -1505,21 +1505,21 @@ export function SystemSettingsPage() {
 						</div>
 					</div>
 					<div className="flex flex-col gap-3 rounded-md border p-3 md:col-span-2">
-						<p className="text-sm font-medium">头像 / Gravatar</p>
+						<p className="text-sm font-medium">头像 / 外部头像 URL</p>
 						<p className="text-sm text-muted-foreground">
-							后端只返回 author.gravatarUrl，不托管、不代理、不缓存头像图片。
-							图片缺失或加载失败时由前端继续显示名称首字母或文字 fallback。
+							后端只返回 author.avatarUrl，不托管、不代理、不缓存头像图片。 图片
+							404 或加载失败时由前端继续显示名称首字母或文字 fallback。
 						</p>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="启用 Gravatar">
+							<Field label="启用外部头像 URL">
 								<select
 									className={inputClass}
-									value={String(draft.avatar.gravatar.enabled)}
+									value={String(draft.avatar.external.enabled)}
 									onChange={(event) =>
 										updateAvatar({
 											...draft.avatar,
-											gravatar: {
-												...draft.avatar.gravatar,
+											external: {
+												...draft.avatar.external,
 												enabled: event.target.value === "true",
 											},
 										})
@@ -1529,106 +1529,62 @@ export function SystemSettingsPage() {
 									<option value="true">开启</option>
 								</select>
 							</Field>
-							<Field label="Gravatar Base URL">
+							<Field label="头像接口地址">
 								<Input
-									value={draft.avatar.gravatar.baseUrl}
+									value={draft.avatar.external.baseUrl}
 									onChange={(event) =>
 										updateAvatar({
 											...draft.avatar,
-											gravatar: {
-												...draft.avatar.gravatar,
+											external: {
+												...draft.avatar.external,
 												baseUrl: event.target.value,
 											},
 										})
 									}
 								/>
 								<span className="text-xs text-muted-foreground">
-									国内部署可填写镜像地址，例如 https://cravatar.cn/avatar。
+									例如 https://gravatar.com/avatar 或
+									https://cravatar.cn/avatar。
 								</span>
 							</Field>
-							<Field label="Gravatar 图片尺寸">
-								<Input
-									type="number"
-									min={1}
-									max={2048}
-									value={draft.avatar.gravatar.size}
+							<Field label="邮箱哈希算法">
+								<select
+									className={inputClass}
+									value={draft.avatar.external.hashAlgorithm}
 									onChange={(event) =>
 										updateAvatar({
 											...draft.avatar,
-											gravatar: {
-												...draft.avatar.gravatar,
-												size: Number(event.target.value),
+											external: {
+												...draft.avatar.external,
+												hashAlgorithm: event.target
+													.value as AdminSystemSettings["avatar"]["external"]["hashAlgorithm"],
+											},
+										})
+									}
+								>
+									<option value="sha256">SHA-256</option>
+									<option value="md5">MD5</option>
+								</select>
+							</Field>
+							<Field label="头像 URL 参数">
+								<Input
+									value={draft.avatar.external.query}
+									placeholder="s=80&d=404&r=g"
+									onChange={(event) =>
+										updateAvatar({
+											...draft.avatar,
+											external: {
+												...draft.avatar.external,
+												query: event.target.value,
 											},
 										})
 									}
 								/>
 								<span className="text-xs text-muted-foreground">
-									对应 Gravatar s 参数，范围 1 到 2048。
+									参数不包含开头的 ?，多个参数用 & 分隔。常见参考：Gravatar 使用
+									SHA-256 和 s=80&d=404&r=g；Cravatar 当前文档使用 MD5；WeAvatar
+									可按官方文档填写 d=initials、d=color 等参数。
 								</span>
-							</Field>
-							<Field label="默认图片">
-								<select
-									className={inputClass}
-									value={draft.avatar.gravatar.defaultImage}
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											gravatar: {
-												...draft.avatar.gravatar,
-												defaultImage: event.target
-													.value as AdminSystemSettings["avatar"]["gravatar"]["defaultImage"],
-											},
-										})
-									}
-								>
-									<option value="404">404</option>
-									<option value="mp">Mystery Person</option>
-									<option value="identicon">Identicon</option>
-									<option value="monsterid">MonsterID</option>
-									<option value="wavatar">Wavatar</option>
-									<option value="retro">Retro</option>
-									<option value="robohash">Robohash</option>
-									<option value="blank">Blank</option>
-								</select>
-							</Field>
-							<Field label="允许评级">
-								<select
-									className={inputClass}
-									value={draft.avatar.gravatar.rating}
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											gravatar: {
-												...draft.avatar.gravatar,
-												rating: event.target
-													.value as AdminSystemSettings["avatar"]["gravatar"]["rating"],
-											},
-										})
-									}
-								>
-									<option value="g">G</option>
-									<option value="pg">PG</option>
-									<option value="r">R</option>
-									<option value="x">X</option>
-								</select>
-							</Field>
-							<Field label="强制默认图">
-								<select
-									className={inputClass}
-									value={String(draft.avatar.gravatar.forceDefault)}
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											gravatar: {
-												...draft.avatar.gravatar,
-												forceDefault: event.target.value === "true",
-											},
-										})
-									}
-								>
-									<option value="false">关闭</option>
-									<option value="true">开启</option>
-								</select>
 							</Field>
 							<Field label="头像形状">
 								<select

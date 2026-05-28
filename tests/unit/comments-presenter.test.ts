@@ -6,6 +6,7 @@ const baseComment = {
 	id: "c_1",
 	parentId: null,
 	authorName: "Visitor",
+	authorEmail: null,
 	authorEmailHash: null,
 	authorWebsite: null,
 	contentRaw: "hello",

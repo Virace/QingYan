@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -41,6 +42,7 @@ async function createCustomTestApp(options?: {
 	allowWebsite?: boolean;
 	moderation?: ReturnType<typeof serializeSiteModerationSettings>;
 	akismetVerdict?: AkismetReviewResult["verdict"];
+	externalAvatar?: boolean;
 }) {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), "qingyan-comments-create-"),
@@ -77,6 +79,30 @@ async function createCustomTestApp(options?: {
 				valueJson: JSON.stringify("akismet-test-key"),
 			});
 		}
+		if (options?.externalAvatar) {
+			await db.insert(systemSettings).values([
+				{
+					category: "avatar",
+					key: "external.enabled",
+					valueJson: JSON.stringify(true),
+				},
+				{
+					category: "avatar",
+					key: "external.baseUrl",
+					valueJson: JSON.stringify("https://cravatar.cn/avatar"),
+				},
+				{
+					category: "avatar",
+					key: "external.hashAlgorithm",
+					valueJson: JSON.stringify("md5"),
+				},
+				{
+					category: "avatar",
+					key: "external.query",
+					valueJson: JSON.stringify("s=160&d=identicon"),
+				},
+			]);
+		}
 	} finally {
 		sqlite.close();
 	}
@@ -105,6 +131,7 @@ describe("POST /qingyan/api/comments", () => {
 	it("returns a full public comment when an approved visitor comment is created", async () => {
 		const fixture = await createCustomTestApp({
 			require: ["nickname", "email"],
+			externalAvatar: true,
 			moderation: serializeSiteModerationSettings({
 				mode: "none",
 				provider: "none",
@@ -142,12 +169,16 @@ describe("POST /qingyan/api/comments", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
+		const visitorAvatarHash = createHash("md5")
+			.update("visitor@example.com")
+			.digest("hex");
 		expect(response.json()).toMatchObject({
 			comment: {
 				parentId: null,
 				author: {
 					name: "Visitor",
 					website: "https://visitor.example.com/",
+					avatarUrl: `https://cravatar.cn/avatar/${visitorAvatarHash}?s=160&d=identicon`,
 				},
 				content: {
 					raw: "hello <qingyan>",

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
@@ -101,7 +103,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		});
 	});
 
-	it("returns Gravatar URL from thread API when global Gravatar is enabled", async () => {
+	it("returns external avatar URL from thread API when enabled", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -114,15 +116,18 @@ describe("GET /qingyan/api/comments/thread", () => {
 		}
 
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
-		await systemSettings.upsert("avatar", "gravatar.enabled", true);
+		await systemSettings.upsert("avatar", "external.enabled", true);
 		await systemSettings.upsert(
 			"avatar",
-			"gravatar.baseUrl",
+			"external.baseUrl",
 			"https://cravatar.cn/avatar",
 		);
-		await systemSettings.upsert("avatar", "gravatar.size", 120);
-		await systemSettings.upsert("avatar", "gravatar.defaultImage", "retro");
-		await systemSettings.upsert("avatar", "gravatar.rating", "pg");
+		await systemSettings.upsert("avatar", "external.hashAlgorithm", "md5");
+		await systemSettings.upsert(
+			"avatar",
+			"external.query",
+			"s=120&d=retro&r=pg",
+		);
 		await systemSettings.upsert("avatar", "display.shape", "square");
 		await systemSettings.upsert("avatar", "display.sizePx", 36);
 
@@ -140,31 +145,32 @@ describe("GET /qingyan/api/comments/thread", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:gravatar-thread",
-			pageTitle: "Gravatar Thread",
-			pageUrl: "/posts/gravatar-thread/",
+			pageKey: "post:external-avatar-thread",
+			pageTitle: "External Avatar Thread",
+			pageUrl: "/posts/external-avatar-thread/",
 			commentCount: 1,
 			rootCommentCount: 1,
 		});
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:gravatar-thread"));
+			.where(eq(pageThreads.pageKey, "post:external-avatar-thread"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
 
-		const aliceHash =
-			"ff8d9819fc0e12bf0d24892e45987e249a28dce836a85cad60e28eaaa8c6d976";
+		const aliceMd5 = createHash("md5")
+			.update("alice@example.com")
+			.digest("hex");
 		await fixture.app.db.insert(comments).values({
-			id: "c_gravatar_thread",
+			id: "c_external_avatar_thread",
 			siteId: site.id,
 			pageThreadId: pageThread.id,
 			parentId: null,
 			visitorId: visitor.id,
 			status: "approved",
 			authorName: "Alice",
-			authorEmailHash: aliceHash,
+			authorEmail: "alice@example.com",
 			contentRaw: "hello",
 			contentHtml: "<p>hello</p>",
 			createdAt: "2026-05-06T10:00:00.000Z",
@@ -173,20 +179,21 @@ describe("GET /qingyan/api/comments/thread", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:gravatar-thread",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:external-avatar-thread",
 			cookies: {
 				qingyan_visitor: "viewer_gravatar_thread",
 			},
-			headers: refererFor("post:gravatar-thread"),
+			headers: refererFor("post:external-avatar-thread"),
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().comments[0].author.gravatarUrl).toBe(
-			`https://cravatar.cn/avatar/${aliceHash}?s=120&d=retro&r=pg`,
+		expect(response.json().comments[0].author.avatarUrl).toBe(
+			`https://cravatar.cn/avatar/${aliceMd5}?s=120&d=retro&r=pg`,
 		);
+		expect(response.json().comments[0].author.gravatarUrl).toBeUndefined();
 		expect(response.json().commentDisplay).toMatchObject({
 			avatar: {
-				gravatar: {
+				external: {
 					enabled: true,
 				},
 				display: {
@@ -195,6 +202,5 @@ describe("GET /qingyan/api/comments/thread", () => {
 				},
 			},
 		});
-		expect(response.json().comments[0].author.avatarUrl).toBeUndefined();
 	});
 });

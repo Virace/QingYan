@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AppConfig } from "../../config/types";
-import { gravatarDefaultImages, gravatarRatings } from "../comments/gravatar";
+import { externalAvatarHashAlgorithms } from "../comments/gravatar";
 import { normalizeOrigin } from "../shared/url-policy";
 
 export const systemSettingCategories = [
@@ -56,13 +56,21 @@ const adminLoginRateLimitRuleSchema = failureRateLimitRuleSchema.extend({
 export const avatarDisplayShapes = ["circle", "rounded", "square"] as const;
 
 export const avatarSettingsSchema = z.object({
-	gravatar: z.object({
+	external: z.object({
 		enabled: z.boolean(),
 		baseUrl: z.string().url(),
-		size: z.number().int().min(1).max(2048),
-		defaultImage: z.enum(gravatarDefaultImages),
-		rating: z.enum(gravatarRatings),
-		forceDefault: z.boolean(),
+		hashAlgorithm: z.enum(externalAvatarHashAlgorithms),
+		query: z
+			.string()
+			.refine((value) => !value.trim().startsWith("?"), {
+				message: "头像 URL 参数不能以 ? 开头。",
+			})
+			.refine((value) => !value.trim().includes("#"), {
+				message: "头像 URL 参数不能包含 #。",
+			})
+			.refine((value) => !/\s/u.test(value.trim()), {
+				message: "头像 URL 参数不能包含空白字符。",
+			}),
 	}),
 	display: z.object({
 		shape: z.enum(avatarDisplayShapes),
@@ -301,13 +309,11 @@ export const defaultSystemSettings: SystemSettings = {
 		},
 	},
 	avatar: {
-		gravatar: {
+		external: {
 			enabled: false,
 			baseUrl: "https://gravatar.com/avatar",
-			size: 80,
-			defaultImage: "404",
-			rating: "g",
-			forceDefault: false,
+			hashAlgorithm: "sha256",
+			query: "s=80&d=404&r=g",
 		},
 		display: {
 			shape: "circle",

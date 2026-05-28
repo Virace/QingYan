@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 
@@ -139,7 +141,7 @@ describe("admin comments", () => {
 		expect(trashList.json().pagination.totalCount).toBe(1);
 	});
 
-	it("returns admin comment gravatar urls when global Gravatar is enabled", async () => {
+	it("returns admin comment avatar urls when external avatars are enabled", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -153,46 +155,48 @@ describe("admin comments", () => {
 		}
 
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
-		await systemSettings.upsert("avatar", "gravatar.enabled", true);
+		await systemSettings.upsert("avatar", "external.enabled", true);
 		await systemSettings.upsert(
 			"avatar",
-			"gravatar.baseUrl",
+			"external.baseUrl",
 			"https://cravatar.cn/avatar",
 		);
-		await systemSettings.upsert("avatar", "gravatar.size", 160);
-		await systemSettings.upsert("avatar", "gravatar.defaultImage", "identicon");
-		await systemSettings.upsert("avatar", "gravatar.rating", "pg");
-		await systemSettings.upsert("avatar", "gravatar.forceDefault", true);
+		await systemSettings.upsert("avatar", "external.hashAlgorithm", "md5");
+		await systemSettings.upsert(
+			"avatar",
+			"external.query",
+			"s=160&d=identicon",
+		);
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:admin-gravatar",
-			pageTitle: "Admin Gravatar",
-			pageUrl: "/posts/admin-gravatar/",
+			pageKey: "post:admin-avatar",
+			pageTitle: "Admin Avatar",
+			pageUrl: "/posts/admin-avatar/",
 			commentCount: 1,
 			rootCommentCount: 1,
 		});
 		const [thread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:admin-gravatar"));
+			.where(eq(pageThreads.pageKey, "post:admin-avatar"));
 		if (!thread) {
 			throw new Error("Expected thread to exist");
 		}
 
-		const aliceHash =
-			"ff8d9819fc0e12bf0d24892e45987e249a28dce836a85cad60e28eaaa8c6d976";
+		const aliceMd5 = createHash("md5")
+			.update("alice@example.com")
+			.digest("hex");
 		await fixture.app.db.insert(comments).values({
-			id: "c_admin_gravatar",
+			id: "c_admin_avatar",
 			siteId: site.id,
 			pageThreadId: thread.id,
 			parentId: null,
 			status: "approved",
 			authorName: "Alice",
 			authorEmail: "alice@example.com",
-			authorEmailHash: aliceHash,
-			contentRaw: "gravatar",
-			contentHtml: "<p>gravatar</p>",
+			contentRaw: "avatar",
+			contentHtml: "<p>avatar</p>",
 			createdAt: "2026-05-28T10:00:00.000Z",
 			updatedAt: "2026-05-28T10:00:00.000Z",
 		});
@@ -206,11 +210,12 @@ describe("admin comments", () => {
 		});
 		expect(enabledList.statusCode).toBe(200);
 		expect(enabledList.json().items[0]).toMatchObject({
-			id: "c_admin_gravatar",
-			authorGravatarUrl: `https://cravatar.cn/avatar/${aliceHash}?s=160&d=identicon&r=pg&f=y`,
+			id: "c_admin_avatar",
+			authorAvatarUrl: `https://cravatar.cn/avatar/${aliceMd5}?s=160&d=identicon`,
 		});
+		expect(enabledList.json().items[0].authorGravatarUrl).toBeUndefined();
 
-		await systemSettings.upsert("avatar", "gravatar.enabled", false);
+		await systemSettings.upsert("avatar", "external.enabled", false);
 		const disabledList = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
@@ -220,8 +225,8 @@ describe("admin comments", () => {
 		});
 		expect(disabledList.statusCode).toBe(200);
 		expect(disabledList.json().items[0]).toMatchObject({
-			id: "c_admin_gravatar",
-			authorGravatarUrl: null,
+			id: "c_admin_avatar",
+			authorAvatarUrl: null,
 		});
 	});
 

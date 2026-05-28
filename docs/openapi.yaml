@@ -693,10 +693,10 @@ components:
             - string
             - 'null'
           format: uri
-        gravatarUrl:
+        avatarUrl:
           type: string
           format: uri
-          description: Optional Gravatar image URL generated from the comment author email hash. QingYan does not host, proxy, cache, or upload avatar files.
+          description: Optional external avatar image URL generated from the comment author email. QingYan does not host, proxy, cache, upload, or guarantee avatar files.
         badge:
           type: object
           required: [label]
@@ -747,15 +747,16 @@ components:
           $ref: '#/components/schemas/CommentDisplayDevice'
     CommentAvatarDisplay:
       type: object
-      required: [gravatar, display]
-      description: Avatar display hints for public comment frontends. QingYan still only emits third-party author.gravatarUrl and does not host avatar images.
+      required: [external, display]
+      description: Avatar display hints for public comment frontends. QingYan may emit third-party author.avatarUrl and does not host avatar images.
       properties:
-        gravatar:
+        external:
           type: object
           required: [enabled]
           properties:
             enabled:
               type: boolean
+              description: Whether public comments may include author.avatarUrl.
         display:
           type: object
           required: [shape, sizePx]

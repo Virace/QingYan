@@ -404,13 +404,11 @@ function installCompleteConfigPayload(databaseFile: string) {
 				},
 			},
 			avatar: {
-				gravatar: {
+				external: {
 					enabled: true,
 					baseUrl: "https://cravatar.cn/avatar/",
-					size: 160,
-					defaultImage: "identicon",
-					rating: "pg",
-					forceDefault: true,
+					hashAlgorithm: "md5",
+					query: "s=160&d=identicon",
 				},
 				display: {
 					shape: "rounded",
@@ -492,22 +490,16 @@ describe("install bootstrap", () => {
 			'data-path="systemSettings.captcha.turnstile.siteKey"',
 		);
 		expect(response.body).toContain(
-			'data-path="systemSettings.avatar.gravatar.enabled"',
+			'data-path="systemSettings.avatar.external.enabled"',
 		);
 		expect(response.body).toContain(
-			'data-path="systemSettings.avatar.gravatar.baseUrl"',
+			'data-path="systemSettings.avatar.external.baseUrl"',
 		);
 		expect(response.body).toContain(
-			'data-path="systemSettings.avatar.gravatar.size"',
+			'data-path="systemSettings.avatar.external.hashAlgorithm"',
 		);
 		expect(response.body).toContain(
-			'data-path="systemSettings.avatar.gravatar.defaultImage"',
-		);
-		expect(response.body).toContain(
-			'data-path="systemSettings.avatar.gravatar.rating"',
-		);
-		expect(response.body).toContain(
-			'data-path="systemSettings.avatar.gravatar.forceDefault"',
+			'data-path="systemSettings.avatar.external.query"',
 		);
 		expect(response.body).toContain(
 			'data-path="systemSettings.avatar.display.shape"',
@@ -515,7 +507,9 @@ describe("install bootstrap", () => {
 		expect(response.body).toContain(
 			'data-path="systemSettings.avatar.display.sizePx"',
 		);
-		expect(response.body).toContain("Gravatar Base URL");
+		expect(response.body).toContain("头像接口地址");
+		expect(response.body).toContain("邮箱哈希算法");
+		expect(response.body).toContain("头像 URL 参数");
 		expect(response.body).toContain("Akismet");
 		expect(response.body).toContain(
 			'<label>Akismet API Key<input data-path="systemSettings.antiSpam.akismet.apiKey" autocomplete="off">',
@@ -977,13 +971,23 @@ describe("install bootstrap", () => {
 					}),
 					expect.objectContaining({
 						category: "avatar",
-						key: "gravatar.enabled",
+						key: "external.enabled",
 						valueJson: "true",
 					}),
 					expect.objectContaining({
 						category: "avatar",
-						key: "gravatar.baseUrl",
+						key: "external.baseUrl",
 						valueJson: JSON.stringify("https://cravatar.cn/avatar"),
+					}),
+					expect.objectContaining({
+						category: "avatar",
+						key: "external.hashAlgorithm",
+						valueJson: JSON.stringify("md5"),
+					}),
+					expect.objectContaining({
+						category: "avatar",
+						key: "external.query",
+						valueJson: JSON.stringify("s=160&d=identicon"),
 					}),
 				]),
 			);

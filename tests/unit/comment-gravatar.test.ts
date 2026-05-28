@@ -1,87 +1,108 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
-	buildGravatarUrl,
-	normalizeGravatarBaseUrl,
+	buildExternalAvatarUrl,
+	normalizeExternalAvatarBaseUrl,
+	validateExternalAvatarQuery,
 } from "../../src/modules/comments/gravatar";
 
-const aliceHash =
-	"ff8d9819fc0e12bf0d24892e45987e249a28dce836a85cad60e28eaaa8c6d976";
+const aliceEmail = "Alice@Example.COM ";
+const aliceNormalizedEmail = "alice@example.com";
+const aliceSha256 = createHash("sha256")
+	.update(aliceNormalizedEmail)
+	.digest("hex");
+const aliceMd5 = createHash("md5").update(aliceNormalizedEmail).digest("hex");
 
-describe("comment Gravatar URL", () => {
+describe("external avatar URL", () => {
 	it("does not return a URL when disabled", () => {
 		expect(
-			buildGravatarUrl({
+			buildExternalAvatarUrl({
 				enabled: false,
-				emailHash: aliceHash,
+				email: aliceEmail,
 				baseUrl: "https://gravatar.com/avatar",
+				hashAlgorithm: "sha256",
+				query: "s=80&d=404&r=g",
 			}),
 		).toBeUndefined();
 	});
 
-	it("does not return a URL without an email hash", () => {
+	it("does not return a URL without an email", () => {
 		expect(
-			buildGravatarUrl({
+			buildExternalAvatarUrl({
 				enabled: true,
-				emailHash: null,
+				email: null,
 				baseUrl: "https://gravatar.com/avatar",
+				hashAlgorithm: "sha256",
+				query: "s=80&d=404&r=g",
 			}),
 		).toBeUndefined();
 	});
 
-	it("builds the default Gravatar URL with fixed public parameters", () => {
+	it("builds the default SHA-256 Gravatar-compatible URL", () => {
 		expect(
-			buildGravatarUrl({
+			buildExternalAvatarUrl({
 				enabled: true,
-				emailHash: aliceHash,
+				email: aliceEmail,
 				baseUrl: "https://gravatar.com/avatar",
-				size: 80,
-				defaultImage: "404",
-				rating: "g",
-				forceDefault: false,
+				hashAlgorithm: "sha256",
+				query: "s=80&d=404&r=g",
 			}),
-		).toBe(`https://gravatar.com/avatar/${aliceHash}?s=80&d=404&r=g`);
+		).toBe(`https://gravatar.com/avatar/${aliceSha256}?s=80&d=404&r=g`);
 	});
 
-	it("builds Gravatar URL with configured public parameters", () => {
+	it("builds an MD5 Cravatar-style URL", () => {
 		expect(
-			buildGravatarUrl({
+			buildExternalAvatarUrl({
 				enabled: true,
-				emailHash: aliceHash,
-				baseUrl: "https://gravatar.com/avatar",
-				size: 160,
-				defaultImage: "identicon",
-				rating: "pg",
-				forceDefault: true,
+				email: aliceEmail,
+				baseUrl: "https://cravatar.cn/avatar/",
+				hashAlgorithm: "md5",
+				query: "s=160&d=identicon&f=y",
 			}),
-		).toBe(
-			`https://gravatar.com/avatar/${aliceHash}?s=160&d=identicon&r=pg&f=y`,
-		);
+		).toBe(`https://cravatar.cn/avatar/${aliceMd5}?s=160&d=identicon&f=y`);
 	});
 
-	it("normalizes a mirror base URL before building", () => {
-		expect(normalizeGravatarBaseUrl("https://cravatar.cn/avatar/")).toBe(
+	it("omits the question mark for an empty query", () => {
+		expect(
+			buildExternalAvatarUrl({
+				enabled: true,
+				email: aliceEmail,
+				baseUrl: "https://gravatar.com/avatar/",
+				hashAlgorithm: "sha256",
+				query: "",
+			}),
+		).toBe(`https://gravatar.com/avatar/${aliceSha256}`);
+	});
+
+	it("normalizes endpoint base URLs", () => {
+		expect(normalizeExternalAvatarBaseUrl("https://cravatar.cn/avatar/")).toBe(
 			"https://cravatar.cn/avatar",
 		);
-		expect(
-			buildGravatarUrl({
-				enabled: true,
-				emailHash: aliceHash,
-				baseUrl: "https://cravatar.cn/avatar/",
-				size: 80,
-				defaultImage: "404",
-				rating: "g",
-				forceDefault: false,
-			}),
-		).toBe(`https://cravatar.cn/avatar/${aliceHash}?s=80&d=404&r=g`);
 	});
 
 	it("rejects non-http avatar base URLs", () => {
-		expect(() => normalizeGravatarBaseUrl("file:///tmp/avatar")).toThrow(
-			"Gravatar base URL must use http or https",
+		expect(() => normalizeExternalAvatarBaseUrl("file:///tmp/avatar")).toThrow(
+			"External avatar base URL must use http or https",
 		);
-		expect(() => normalizeGravatarBaseUrl("/avatar")).toThrow(
-			"Invalid Gravatar base URL",
+		expect(() => normalizeExternalAvatarBaseUrl("/avatar")).toThrow(
+			"Invalid external avatar base URL",
+		);
+	});
+
+	it("rejects query strings with a leading question mark", () => {
+		expect(() => validateExternalAvatarQuery("?s=80&d=404")).toThrow(
+			"External avatar query must not start with ?",
+		);
+	});
+
+	it("rejects query strings with fragments or whitespace", () => {
+		expect(() => validateExternalAvatarQuery("s=80#frag")).toThrow(
+			"External avatar query must not include #",
+		);
+		expect(() => validateExternalAvatarQuery("s=80&d=bad value")).toThrow(
+			"External avatar query must not include whitespace",
 		);
 	});
 });

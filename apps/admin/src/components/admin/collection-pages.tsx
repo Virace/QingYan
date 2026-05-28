@@ -422,10 +422,10 @@ export function CommentsPage({
 										</td>
 										<td className="p-3">
 											<div className="flex min-w-56 gap-3">
-												{comment.authorGravatarUrl ? (
+												{comment.authorAvatarUrl ? (
 													<img
 														className="size-10 shrink-0 rounded-full border object-cover"
-														src={comment.authorGravatarUrl}
+														src={comment.authorAvatarUrl}
 														alt={`${comment.authorName} 头像`}
 														loading="lazy"
 													/>

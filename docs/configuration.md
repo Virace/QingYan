@@ -204,12 +204,10 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 - `ipRegion.ipv4.sources`
 - `ipRegion.ipv6.dbPath`
 - `ipRegion.ipv6.sources`
-- `avatar.gravatar.enabled`
-- `avatar.gravatar.baseUrl`
-- `avatar.gravatar.size`
-- `avatar.gravatar.defaultImage`
-- `avatar.gravatar.rating`
-- `avatar.gravatar.forceDefault`
+- `avatar.external.enabled`
+- `avatar.external.baseUrl`
+- `avatar.external.hashAlgorithm`
+- `avatar.external.query`
 - `avatar.display.shape`
 - `avatar.display.sizePx`
 
@@ -221,22 +219,40 @@ Admin Console API 会返回 logging、mail、captcha、ipRegion 和 avatar 的 t
 
 日志目录仍属于部署环境，不在后台修改。后台 cookie 名称、SameSite 和 Secure 仍属于启动配置；新登录会话 TTL、logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
 
-### Gravatar 作者头像 URL
+### 外部头像 URL
 
-`system_settings` 中的 `avatar.gravatar` 控制公开评论是否返回 Gravatar URL：
+`system_settings` 中的 `avatar.external` 控制公开评论是否返回外部头像 URL：
 
-- `avatar.gravatar.enabled`：是否启用后端 Gravatar URL 生成，默认关闭。
-- `avatar.gravatar.baseUrl`：Gravatar 头像 endpoint base URL，默认 `https://gravatar.com/avatar`，可替换为镜像地址。
-- `avatar.gravatar.size`：Gravatar `s` 参数，范围 1 到 2048，默认 `80`。
-- `avatar.gravatar.defaultImage`：Gravatar `d` 参数，默认 `404`。可选值为 `404`、`mp`、`identicon`、`monsterid`、`wavatar`、`retro`、`robohash`、`blank`。
-- `avatar.gravatar.rating`：Gravatar `r` 参数，默认 `g`。可选值为 `g`、`pg`、`r`、`x`。
-- `avatar.gravatar.forceDefault`：是否追加 `f=y` 强制使用默认图，默认关闭。
+- `avatar.external.enabled`：是否启用后端外部头像 URL 生成，默认关闭。
+- `avatar.external.baseUrl`：头像服务 endpoint base URL，默认 `https://gravatar.com/avatar`。生成时会在末尾追加邮箱 hash。
+- `avatar.external.hashAlgorithm`：邮箱哈希算法，可选 `sha256` 或 `md5`，默认 `sha256`。
+- `avatar.external.query`：头像 URL 查询参数，不包含开头的 `?`，多个参数用 `&` 分隔，默认 `s=80&d=404&r=g`。
 - `avatar.display.shape`：给前端评论组件的头像形状建议，可选 `circle`、`rounded`、`square`，默认 `circle`。
 - `avatar.display.sizePx`：给前端评论组件的头像显示尺寸建议，范围 16 到 256，默认 `40`。
 
-启用后，公开评论作者结构可能包含 `author.gravatarUrl`。该字段只表示第三方 Gravatar 图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件。字段名故意不使用 `avatarUrl`，避免误解为后端提供通用头像系统。没有该字段、Gravatar 图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。
+启用后，公开评论作者结构可能包含 `author.avatarUrl`。该字段只表示第三方头像图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件，也不保证远端头像文件一定存在。没有该字段、外部头像图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。使用 `d=404` 时，前端需要接受一次图片请求返回 404；QingYan 不会额外代理或探测头像是否存在。
 
-公开评论 bootstrap/thread 响应还会返回 `commentDisplay.avatar`，其中 `gravatar.enabled` 表示当前是否可能返回 `author.gravatarUrl`，`display.shape` 和 `display.sizePx` 是前端展示头像容器时的建议。`display.sizePx` 不必等于 Gravatar 请求的 `avatar.gravatar.size`；例如可以请求 160px 图像并以 40px 显示。
+公开评论 bootstrap/thread 响应还会返回 `commentDisplay.avatar`，其中 `external.enabled` 表示当前是否可能返回 `author.avatarUrl`，`display.shape` 和 `display.sizePx` 是前端展示头像容器时的建议。头像请求尺寸由 `avatar.external.query` 自行决定，展示尺寸由 `avatar.display.sizePx` 决定，两者不要求一致。
+
+常见配置示例：
+
+- Gravatar：`baseUrl=https://gravatar.com/avatar`，`hashAlgorithm=sha256`，`query=s=80&d=404&r=g`。参考 [Gravatar image requests](https://docs.gravatar.com/sdk/images/)。
+- Cravatar：`baseUrl=https://cravatar.cn/avatar`，`hashAlgorithm=md5`，`query=s=160&d=identicon`。参考 [Cravatar API](https://cravatar.com/developer/api)。
+- WeAvatar：`baseUrl=https://weavatar.com/avatar`，按官方文档选择参数，例如 `d=initials&name=Alice` 或 `d=color`。参考 [WeAvatar 文档](https://weavatar.com/doc)。
+
+当前没有运行时代码兼容旧 `avatar.gravatar.*`。测试部署如需迁移 SQLite 中已有设置，可先备份数据库，再执行类似 SQL：
+
+```sql
+UPDATE system_settings SET key = 'external.enabled' WHERE category = 'avatar' AND key = 'gravatar.enabled';
+UPDATE system_settings SET key = 'external.baseUrl' WHERE category = 'avatar' AND key = 'gravatar.baseUrl';
+DELETE FROM system_settings WHERE category = 'avatar' AND key IN ('gravatar.size', 'gravatar.defaultImage', 'gravatar.rating', 'gravatar.forceDefault');
+INSERT INTO system_settings (category, key, value_json)
+SELECT 'avatar', 'external.hashAlgorithm', '"sha256"'
+WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE category = 'avatar' AND key = 'external.hashAlgorithm');
+INSERT INTO system_settings (category, key, value_json)
+SELECT 'avatar', 'external.query', '"s=80&d=404&r=g"'
+WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE category = 'avatar' AND key = 'external.query');
+```
 
 ### 普通评论者资料记忆推荐集成
 

@@ -347,7 +347,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>显示名称<input data-path="siteSettings.comments.verifiedAuthor.displayName" autocomplete="name" required><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.displayName">公开评论区展示的作者名称。</span></label>
 </div>
 <div class="grid">
-<label>邮箱<input data-path="siteSettings.comments.verifiedAuthor.email" type="email" autocomplete="email"><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.email">启用可信作者时必须填写；用于 Gravatar 头像和保留可信作者邮箱。</span></label>
+<label>邮箱<input data-path="siteSettings.comments.verifiedAuthor.email" type="email" autocomplete="email"><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.email">启用可信作者时必须填写；用于外部头像 URL 和保留可信作者邮箱。</span></label>
 <label>作者主页 URL<input data-path="siteSettings.comments.verifiedAuthor.website" autocomplete="url"><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.website">可选，只作为评论作者链接，不参与后台登录或站点归属判断。</span></label>
 </div>
 <label>Badge 文案<input data-path="siteSettings.comments.verifiedAuthor.badgeLabel" required><span class="hint" data-hint-for="siteSettings.comments.verifiedAuthor.badgeLabel">例如 管理员、楼主、作者。</span></label>
@@ -409,16 +409,12 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>SMTP 密码<input data-path="systemSettings.mail.smtp.password" type="password" autocomplete="new-password"><span class="hint" data-hint-for="systemSettings.mail.smtp.password"></span></label>
 </fieldset>
 <fieldset>
-<legend>头像 / Gravatar</legend>
-<label class="check"><input data-path="systemSettings.avatar.gravatar.enabled" data-type="boolean" type="checkbox">启用 Gravatar<span class="hint" data-hint-for="systemSettings.avatar.gravatar.enabled">开启后公开评论作者会返回 author.gravatarUrl。</span></label>
-<label>Gravatar Base URL<input data-path="systemSettings.avatar.gravatar.baseUrl"><span class="hint" data-hint-for="systemSettings.avatar.gravatar.baseUrl">默认 https://gravatar.com/avatar；国内部署可配置镜像地址。</span></label>
+<legend>头像 / 外部头像 URL</legend>
+<label class="check"><input data-path="systemSettings.avatar.external.enabled" data-type="boolean" type="checkbox">启用外部头像 URL<span class="hint" data-hint-for="systemSettings.avatar.external.enabled">开启后公开评论作者会返回 author.avatarUrl。</span></label>
+<label>头像接口地址<input data-path="systemSettings.avatar.external.baseUrl"><span class="hint" data-hint-for="systemSettings.avatar.external.baseUrl">例如 https://gravatar.com/avatar 或 https://cravatar.cn/avatar。</span></label>
 <div class="grid">
-<label>Gravatar 图片尺寸<input data-path="systemSettings.avatar.gravatar.size" type="number" min="1" max="2048" step="1" data-type="number"><span class="hint" data-hint-for="systemSettings.avatar.gravatar.size">对应 Gravatar s 参数，范围 1 到 2048。</span></label>
-<label>默认图片<select data-path="systemSettings.avatar.gravatar.defaultImage"><option value="404">404</option><option value="mp">Mystery Person</option><option value="identicon">Identicon</option><option value="monsterid">MonsterID</option><option value="wavatar">Wavatar</option><option value="retro">Retro</option><option value="robohash">Robohash</option><option value="blank">Blank</option></select><span class="hint" data-hint-for="systemSettings.avatar.gravatar.defaultImage">对应 Gravatar d 参数。</span></label>
-</div>
-<div class="grid">
-<label>允许评级<select data-path="systemSettings.avatar.gravatar.rating"><option value="g">G</option><option value="pg">PG</option><option value="r">R</option><option value="x">X</option></select><span class="hint" data-hint-for="systemSettings.avatar.gravatar.rating">对应 Gravatar r 参数。</span></label>
-<label class="check"><input data-path="systemSettings.avatar.gravatar.forceDefault" data-type="boolean" type="checkbox">强制默认图<span class="hint" data-hint-for="systemSettings.avatar.gravatar.forceDefault">开启后追加 f=y。</span></label>
+<label>邮箱哈希算法<select data-path="systemSettings.avatar.external.hashAlgorithm"><option value="sha256">SHA-256</option><option value="md5">MD5</option></select><span class="hint" data-hint-for="systemSettings.avatar.external.hashAlgorithm">按外部头像服务官方文档选择。</span></label>
+<label>头像 URL 参数<input data-path="systemSettings.avatar.external.query" placeholder="s=80&d=404&r=g"><span class="hint" data-hint-for="systemSettings.avatar.external.query">不包含开头的 ?，多个参数用 & 分隔。</span></label>
 </div>
 <div class="grid">
 <label>头像形状<select data-path="systemSettings.avatar.display.shape"><option value="circle">圆形</option><option value="rounded">圆角</option><option value="square">方形</option></select><span class="hint" data-hint-for="systemSettings.avatar.display.shape">前端展示头像容器时使用。</span></label>

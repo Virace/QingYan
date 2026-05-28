@@ -27,6 +27,7 @@ type RuntimeCommentRecord = {
 	id: string;
 	parentId: string | null;
 	authorName: string;
+	authorEmail: string | null;
 	authorEmailHash: string | null;
 	authorWebsite: string | null;
 	contentRaw: string;
@@ -367,6 +368,7 @@ export class DevMockService {
 			comments: presentComments(
 				selectedComments.map((comment) => ({
 					...comment,
+					authorEmail: comment.authorEmail ?? null,
 					authorEmailHash: comment.authorEmailHash ?? null,
 					updatedAt: comment.updatedAt ?? comment.createdAt,
 				})),
@@ -389,8 +391,8 @@ export class DevMockService {
 	private buildCommentDisplay() {
 		return {
 			avatar: {
-				gravatar: {
-					enabled: defaultSystemSettings.avatar.gravatar.enabled,
+				external: {
+					enabled: defaultSystemSettings.avatar.external.enabled,
 				},
 				display: defaultSystemSettings.avatar.display,
 			},
@@ -410,6 +412,7 @@ export class DevMockService {
 			id: rootId,
 			parentId: null,
 			authorName: "Seed Root",
+			authorEmail: null,
 			authorEmailHash: null,
 			authorWebsite: null,
 			contentRaw: "seeded root comment",
@@ -428,6 +431,7 @@ export class DevMockService {
 			id: replyId,
 			parentId: rootId,
 			authorName: "Seed Reply",
+			authorEmail: null,
 			authorEmailHash: null,
 			authorWebsite: null,
 			contentRaw: "seeded reply comment",
@@ -466,6 +470,7 @@ export class DevMockService {
 				id: input.id,
 				parentId: input.parentId,
 				authorName: input.authorName,
+				authorEmail: null,
 				authorEmailHash: null,
 				authorWebsite: input.authorWebsite ?? null,
 				contentRaw: input.contentRaw,
@@ -895,6 +900,7 @@ export class DevMockService {
 			id: commentId,
 			parentId: input.parentCommentId,
 			authorName: input.authorName,
+			authorEmail: null,
 			authorEmailHash: null,
 			authorWebsite: input.authorWebsite ?? null,
 			contentRaw: input.contentRaw,
