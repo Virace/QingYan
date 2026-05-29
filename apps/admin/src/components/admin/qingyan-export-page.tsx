@@ -3,7 +3,6 @@ import { useMutation } from "@tanstack/react-query";
 import { DownloadIcon } from "lucide-react";
 
 import { exportQingYanData } from "@/api/import-export";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -12,6 +11,9 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+
+import { AdminErrorAlert } from "./admin-error-alert";
+import { StatTile } from "./admin-ui";
 
 function downloadJson(fileName: string, payload: unknown) {
 	const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -89,22 +91,16 @@ export function QingYanExportPage({ siteKey }: { siteKey: string }) {
 							["评论", exportMutation.data.data.comments.length],
 							["黑名单", exportMutation.data.data.blacklistRules.length],
 						].map(([label, value]) => (
-							<div key={label} className="rounded-md border p-3">
-								<p className="text-xs text-muted-foreground">{label}</p>
-								<p className="mt-1 text-xl font-semibold">{value}</p>
-							</div>
+							<StatTile key={label} label={String(label)} value={value} />
 						))}
 					</div>
 				) : null}
 				{exportMutation.error ? (
-					<Alert variant="destructive">
-						<AlertTitle>导出失败</AlertTitle>
-						<AlertDescription>
-							{exportMutation.error instanceof Error
-								? exportMutation.error.message
-								: "请求失败。"}
-						</AlertDescription>
-					</Alert>
+					<AdminErrorAlert
+						error={exportMutation.error}
+						title="导出失败"
+						fallback="请求失败。"
+					/>
 				) : null}
 			</CardContent>
 		</Card>

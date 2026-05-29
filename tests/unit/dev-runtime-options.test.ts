@@ -20,7 +20,6 @@ async function createInstalledDevWorkspace(adminConsolePath = "/admin") {
 		publicPath: "/qingyan",
 		token: "install-token",
 		disabled: false,
-		restartMode: "manual",
 		transitionMode: "manual",
 	};
 	await applyInstall({

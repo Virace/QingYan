@@ -108,7 +108,8 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 			<CardHeader>
 				<CardTitle className="text-lg">页面来源维护</CardTitle>
 				<CardDescription>
-					从 sitemap、RSS 或 Atom 刷新页面登记；刷新任务进入任务中心队列。
+					从 sitemap、RSS 或 Atom
+					刷新页面登记；操作会创建维护任务，执行状态可在任务中心统一查看。
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="grid gap-4">

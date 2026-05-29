@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/types";
 import { joinPublicPath, qingyanCookiePath } from "../../config/public-path";
 import type { SqliteClient } from "../../db/client";
+import { buildErrorResponse } from "../shared/error-response";
 import { AppError } from "../shared/errors";
 import {
 	upgradeRoutes,
@@ -127,25 +128,13 @@ export function createUpgradeApp(
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.id;
 		if (error instanceof AppError) {
-			reply.status(error.statusCode).send({
-				error: {
-					code: error.code,
-					message: error.message,
-					requestId,
-					details: error.details ?? null,
-				},
-			});
+			const response = buildErrorResponse(error, requestId);
+			reply.status(response.statusCode).send(response.body);
 			return;
 		}
 		app.log.error({ err: error }, "Unhandled upgrade request error");
-		reply.status(500).send({
-			error: {
-				code: "INTERNAL_ERROR",
-				message: "服务器内部错误。",
-				requestId,
-				details: null,
-			},
-		});
+		const response = buildErrorResponse(error, requestId);
+		reply.status(response.statusCode).send(response.body);
 	});
 
 	app.get(upgradePath, async (_request, reply) =>

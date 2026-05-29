@@ -6,7 +6,6 @@ import {
 	applyQingYanImportJob,
 	dryRunQingYanImport,
 } from "@/api/import-export";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -16,7 +15,8 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 
-import { Field, inputClass } from "./admin-ui";
+import { AdminErrorAlert } from "./admin-error-alert";
+import { Field, StatTile, inputClass } from "./admin-ui";
 import { qingyanExistingStrategyLabels } from "./display-labels";
 
 export function QingYanImportPage({ siteKey }: { siteKey: string }) {
@@ -137,10 +137,7 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 							],
 							["冲突", dryRunMutation.data.dryRun.summary.conflicts],
 						].map(([label, value]) => (
-							<div key={label} className="rounded-md border p-3">
-								<p className="text-xs text-muted-foreground">{label}</p>
-								<p className="mt-1 text-xl font-semibold">{value}</p>
-							</div>
+							<StatTile key={label} label={String(label)} value={value} />
 						))}
 					</div>
 				) : null}
@@ -152,22 +149,16 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 							["评论", applyMutation.data.apply.summary.createdComments],
 							["记录", applyMutation.data.apply.summary.importRecordsCreated],
 						].map(([label, value]) => (
-							<div key={label} className="rounded-md border p-3">
-								<p className="text-xs text-muted-foreground">{label}</p>
-								<p className="mt-1 text-xl font-semibold">{value}</p>
-							</div>
+							<StatTile key={label} label={String(label)} value={value} />
 						))}
 					</div>
 				) : null}
 				{dryRunMutation.error || applyMutation.error ? (
-					<Alert variant="destructive">
-						<AlertTitle>导入失败</AlertTitle>
-						<AlertDescription>
-							{(dryRunMutation.error ?? applyMutation.error) instanceof Error
-								? (dryRunMutation.error ?? applyMutation.error)?.message
-								: "请求失败。"}
-						</AlertDescription>
-					</Alert>
+					<AdminErrorAlert
+						error={dryRunMutation.error ?? applyMutation.error}
+						title="导入失败"
+						fallback="请求失败。"
+					/>
 				) : null}
 			</CardContent>
 		</Card>

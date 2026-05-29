@@ -1,6 +1,10 @@
 import { createHmac } from "node:crypto";
 
 import { AppError } from "../../shared/errors";
+import {
+	createIframeCaptchaChallenge,
+	fetchCaptchaProviderJson,
+} from "./provider-helpers";
 
 const DEFAULT_WIDTH = 320;
 const DEFAULT_HEIGHT = 360;
@@ -15,22 +19,15 @@ export function createGeeTestChallenge(input: {
 	pageKey: string;
 	widgetPath: string;
 }) {
-	const publicChallenge = {
+	return createIframeCaptchaChallenge({
+		providerKind: "geetest",
 		challengeId: input.challengeId,
-		mode: "iframe_widget" as const,
-		iframeSrc: `${input.widgetPath}?siteKey=${encodeURIComponent(input.siteKey)}&pageKey=${encodeURIComponent(input.pageKey)}&challengeId=${encodeURIComponent(input.challengeId)}`,
+		widgetPath: input.widgetPath,
+		siteKey: input.siteKey,
+		pageKey: input.pageKey,
 		width: DEFAULT_WIDTH,
 		height: DEFAULT_HEIGHT,
-	};
-	return {
-		mode: "iframe_widget" as const,
-		providerKind: "geetest" as const,
-		challengePayloadJson: JSON.stringify({
-			publicChallenge,
-		}),
-		publicChallenge,
-		expiresAt: "",
-	};
+	});
 }
 
 export function renderGeeTestWidgetHtml(input: {
@@ -139,35 +136,16 @@ export async function verifyGeeTestToken(input: {
 		sign_token: signToken,
 	});
 
-	let response: Response;
-	try {
-		response = await fetch(
-			`${input.apiServer.replace(/\/$/, "")}/validate?captcha_id=${encodeURIComponent(input.captchaId)}`,
-			{
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-				},
-				body,
+	const result = (await fetchCaptchaProviderJson({
+		url: `${input.apiServer.replace(/\/$/, "")}/validate?captcha_id=${encodeURIComponent(input.captchaId)}`,
+		init: {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
 			},
-		);
-	} catch {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	if (!response.ok) {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	const result = (await response.json()) as {
+			body,
+		},
+	})) as {
 		result?: string;
 	};
 	if (result.result !== "success") {

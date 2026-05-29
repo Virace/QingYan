@@ -112,7 +112,7 @@ function UpdatePlanPanel({ plan }: { plan?: UpdatePlan }) {
 	);
 }
 
-export function OpsPage({ siteKey }: { siteKey: string }) {
+export function OpsPage() {
 	const restartConfirmId = useId();
 	const [restartConfirm, setRestartConfirm] = useState("");
 	const statusQuery = useQuery({
@@ -339,23 +339,6 @@ export function OpsPage({ siteKey }: { siteKey: string }) {
 					{restartMutation.isSuccess ? (
 						<p className="text-xs text-emerald-700">服务重启请求已提交。</p>
 					) : null}
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-lg">IP 地域与评论地址维护</CardTitle>
-					<CardDescription>
-						IP 库更新和评论 IP 刷新已经移动到任务中心。
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="grid gap-3">
-					<p className="text-sm text-muted-foreground">
-						这些操作涉及外部网络访问和批量数据更新，现在统一在任务页配置和查看执行状态。
-					</p>
-					<p className="text-xs text-muted-foreground">
-						请从左侧导航进入“任务”，使用 IP 地域与评论地址维护面板。
-					</p>
 				</CardContent>
 			</Card>
 

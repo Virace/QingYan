@@ -969,7 +969,7 @@ components:
           type: string
         pageKey:
           type: string
-          description: Optional legacy/dev page identity. Normal public requests derive the page key from the allowed Referer header.
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
         pageUrl:
@@ -978,7 +978,7 @@ components:
               format: uri
             - type: string
               pattern: ^/
-          description: Optional legacy/dev page URL. Normal public requests derive and store the page path from the allowed Referer header.
+          description: Dev/mock compatibility field. Normal public requests derive and store the page path from the allowed Referer header and ignore explicit page identity.
         parentCommentId:
           type:
             - string

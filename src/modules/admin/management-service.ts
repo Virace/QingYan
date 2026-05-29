@@ -22,6 +22,7 @@ import {
 	InvalidRequestError,
 	ResourceNotFoundError,
 } from "../shared/errors";
+import { buildPaginationResult } from "../shared/pagination";
 import type { SiteRegistry } from "../shared/site-registry";
 import {
 	type CommentMetadataSettings,
@@ -134,14 +135,11 @@ export class AdminManagementService {
 			offset: input.offset,
 		});
 
-		return {
-			items: result.items,
-			pagination: {
-				limit: input.limit,
-				offset: input.offset,
-				totalCount: result.totalCount,
-			},
-		};
+		return buildPaginationResult(result.items, {
+			limit: input.limit,
+			offset: input.offset,
+			totalCount: result.totalCount,
+		});
 	}
 
 	public async listPages(input: {
@@ -179,14 +177,11 @@ export class AdminManagementService {
 			offset: input.offset,
 		});
 
-		return {
-			items: result.items,
-			pagination: {
-				limit: input.limit,
-				offset: input.offset,
-				totalCount: result.totalCount,
-			},
-		};
+		return buildPaginationResult(result.items, {
+			limit: input.limit,
+			offset: input.offset,
+			totalCount: result.totalCount,
+		});
 	}
 
 	public async listUsers(input: {
@@ -203,14 +198,11 @@ export class AdminManagementService {
 			offset: input.offset,
 		});
 
-		return {
-			items: result.items,
-			pagination: {
-				limit: input.limit,
-				offset: input.offset,
-				totalCount: result.totalCount,
-			},
-		};
+		return buildPaginationResult(result.items, {
+			limit: input.limit,
+			offset: input.offset,
+			totalCount: result.totalCount,
+		});
 	}
 
 	public async listVisitors(input: {
@@ -227,14 +219,11 @@ export class AdminManagementService {
 			offset: input.offset,
 		});
 
-		return {
-			items: result.items,
-			pagination: {
-				limit: input.limit,
-				offset: input.offset,
-				totalCount: result.totalCount,
-			},
-		};
+		return buildPaginationResult(result.items, {
+			limit: input.limit,
+			offset: input.offset,
+			totalCount: result.totalCount,
+		});
 	}
 
 	public async listSitesSummary() {
@@ -703,14 +692,11 @@ export class AdminManagementService {
 			offset: input.offset,
 		});
 
-		return {
-			items: result.items,
-			pagination: {
-				limit: input.limit,
-				offset: input.offset,
-				totalCount: result.totalCount,
-			},
-		};
+		return buildPaginationResult(result.items, {
+			limit: input.limit,
+			offset: input.offset,
+			totalCount: result.totalCount,
+		});
 	}
 
 	public async createBlacklist(input: {

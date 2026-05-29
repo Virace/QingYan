@@ -29,12 +29,13 @@ import { qingyanCookiePath } from "../../config/public-path";
 import { ModerationService } from "./moderation-service";
 import { AkismetClient } from "./akismet-client";
 import { resolvePublicPageContext } from "../shared/page-context";
+import { setPublicVisitorCookie } from "../shared/public-visitor-cookie";
 import {
 	mergeStaffDisplaySettings,
 	mergeVerifiedAuthorSettings,
 } from "./verified-author";
 
-function requireLegacyPageKey(pageKey?: string): string {
+function requireDevPageKey(pageKey?: string): string {
 	if (!pageKey) {
 		throw new InvalidRequestError();
 	}
@@ -42,7 +43,7 @@ function requireLegacyPageKey(pageKey?: string): string {
 	return pageKey;
 }
 
-function requireLegacyPageUrl(pageUrl?: string): string {
+function requireDevPageUrl(pageUrl?: string): string {
 	if (!pageUrl) {
 		throw new InvalidRequestError();
 	}
@@ -111,16 +112,14 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.getBootstrap({
 				...parsed.data,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -140,13 +139,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			userAgent: request.context?.userAgent,
 			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 
 		return {
 			capability: result.capability,
@@ -175,18 +172,16 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.getThread({
 				...parsed.data,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
 				pageTitle: undefined,
 				pageUrl: undefined,
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -203,13 +198,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 
 		return {
 			pagination: result.pagination,
@@ -232,22 +225,20 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.createComment({
 				siteKey: parsed.data.siteKey,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
 				pageTitle: parsed.data.pageTitle,
-				pageUrl: requireLegacyPageUrl(parsed.data.pageUrl),
+				pageUrl: requireDevPageUrl(parsed.data.pageUrl),
 				parentCommentId: parsed.data.parentCommentId,
 				author: parsed.data.author,
 				contentRaw: parsed.data.content.raw,
 				captcha: parsed.data.captcha,
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -274,13 +265,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			userAgent: request.context?.userAgent,
 			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 		const settings = await readRepository.getSiteSettings(pageContext.site.id);
 		const avatarSettings = await systemSettingsService.getAvatarSettings();
 		const [presentedComment] = presentComments(
@@ -324,19 +313,17 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsedBody.data.siteKey)) {
 			const result = await fastify.devMockService.castVote({
 				siteKey: parsedBody.data.siteKey,
-				pageKey: requireLegacyPageKey(parsedBody.data.pageKey),
+				pageKey: requireDevPageKey(parsedBody.data.pageKey),
 				commentId: parsedParams.data.commentId,
 				choice: parsedBody.data.choice,
 				captcha: parsedBody.data.captcha,
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -357,13 +344,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 
 		return {
 			commentId: result.commentId,
@@ -383,16 +368,14 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.getCaptchaState({
 				...parsed.data,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -411,13 +394,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 
 		return {
 			required: result.required,
@@ -437,16 +418,14 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.refreshCaptcha({
 				...parsed.data,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -465,13 +444,11 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 
 		return {
 			required: result.required,
@@ -491,7 +468,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.verifyCaptcha({
 				siteKey: parsed.data.siteKey,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
 				challengeId: parsed.data.challengeId,
 				value: parsed.data.value,
 				visitorKey: request.context?.visitor?.key,

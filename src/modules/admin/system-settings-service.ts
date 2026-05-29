@@ -3,6 +3,7 @@ import type { AppConfig } from "../../config/types";
 import {
 	flattenSystemSettings,
 	maskSystemSettings,
+	preserveConfiguredSecrets,
 	readSystemSettingsRows,
 	type SystemSettingRow,
 } from "../system-settings/codec";
@@ -81,7 +82,7 @@ export class AdminSystemSettingsService {
 	public async updateSettings(input: AdminSystemSettingsInput) {
 		const rows = (await this.repository.listAll()) as SystemSettingRow[];
 		const current = readSystemSettingsRows(rows, this.defaults);
-		const next: SystemSettings = {
+		const patch: SystemSettings = {
 			...current,
 			admin: input.admin ?? current.admin,
 			security: input.security ?? current.security,
@@ -92,10 +93,6 @@ export class AdminSystemSettingsService {
 						smtp: {
 							...current.mail.smtp,
 							...input.mail.smtp,
-							password: input.mail.smtp.password ?? current.mail.smtp.password,
-							passwordConfigured: Boolean(
-								input.mail.smtp.password ?? current.mail.smtp.password,
-							),
 						},
 					}
 				: current.mail,
@@ -107,46 +104,18 @@ export class AdminSystemSettingsService {
 						turnstile: {
 							...current.captcha.turnstile,
 							...input.captcha.turnstile,
-							secretKey:
-								input.captcha.turnstile?.secretKey ??
-								current.captcha.turnstile.secretKey,
-							secretKeyConfigured: Boolean(
-								input.captcha.turnstile?.secretKey ??
-									current.captcha.turnstile.secretKey,
-							),
 						},
 						hcaptcha: {
 							...current.captcha.hcaptcha,
 							...input.captcha.hcaptcha,
-							secretKey:
-								input.captcha.hcaptcha?.secretKey ??
-								current.captcha.hcaptcha.secretKey,
-							secretKeyConfigured: Boolean(
-								input.captcha.hcaptcha?.secretKey ??
-									current.captcha.hcaptcha.secretKey,
-							),
 						},
 						recaptcha: {
 							...current.captcha.recaptcha,
 							...input.captcha.recaptcha,
-							apiKey:
-								input.captcha.recaptcha?.apiKey ??
-								current.captcha.recaptcha.apiKey,
-							apiKeyConfigured: Boolean(
-								input.captcha.recaptcha?.apiKey ??
-									current.captcha.recaptcha.apiKey,
-							),
 						},
 						geetest: {
 							...current.captcha.geetest,
 							...input.captcha.geetest,
-							captchaKey:
-								input.captcha.geetest?.captchaKey ??
-								current.captcha.geetest.captchaKey,
-							captchaKeyConfigured: Boolean(
-								input.captcha.geetest?.captchaKey ??
-									current.captcha.geetest.captchaKey,
-							),
 						},
 					}
 				: current.captcha,
@@ -173,17 +142,11 @@ export class AdminSystemSettingsService {
 						akismet: {
 							...current.antiSpam.akismet,
 							...input.antiSpam.akismet,
-							apiKey:
-								input.antiSpam.akismet.apiKey ??
-								current.antiSpam.akismet.apiKey,
-							apiKeyConfigured: Boolean(
-								input.antiSpam.akismet.apiKey ??
-									current.antiSpam.akismet.apiKey,
-							),
 						},
 					}
 				: current.antiSpam,
 		};
+		const next = preserveConfiguredSecrets(current, patch);
 
 		for (const row of flattenSystemSettings(next)) {
 			await this.repository.upsert(row.category, row.key, row.value);

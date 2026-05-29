@@ -84,3 +84,23 @@ export function EmptyState({ text }: { text: string }) {
 		</div>
 	);
 }
+
+export function StatTile({
+	label,
+	value,
+	help,
+}: {
+	label: string;
+	value: ReactNode;
+	help?: ReactNode;
+}) {
+	return (
+		<div className="rounded-md border p-3">
+			<p className="text-xs text-muted-foreground">{label}</p>
+			<p className="mt-1 text-sm font-medium">{value}</p>
+			{help ? (
+				<p className="mt-1 text-xs text-muted-foreground">{help}</p>
+			) : null}
+		</div>
+	);
+}

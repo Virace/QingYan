@@ -41,7 +41,7 @@ describe("resolveMinimalInstallConfig", () => {
 		expect(config.transitionMode).toBe("exit_for_supervisor");
 	});
 
-	it("maps legacy restart mode exit to supervisor transition", () => {
+	it("ignores removed install restart mode environment", () => {
 		const configPath = createConfigPath();
 
 		const config = resolveMinimalInstallConfig({
@@ -49,19 +49,7 @@ describe("resolveMinimalInstallConfig", () => {
 			QINGYAN_INSTALL_RESTART_MODE: "exit",
 		});
 
-		expect(config.transitionMode).toBe("exit_for_supervisor");
-	});
-
-	it("lets transition mode override legacy restart mode", () => {
-		const configPath = createConfigPath();
-
-		const config = resolveMinimalInstallConfig({
-			QINGYAN_CONFIG_PATH: configPath,
-			QINGYAN_INSTALL_TRANSITION_MODE: "manual",
-			QINGYAN_INSTALL_RESTART_MODE: "exit",
-		});
-
-		expect(config.transitionMode).toBe("manual");
+		expect(config.transitionMode).toBe("reload_in_process");
 	});
 
 	it("rejects invalid install transition mode", () => {
@@ -73,16 +61,5 @@ describe("resolveMinimalInstallConfig", () => {
 				QINGYAN_INSTALL_TRANSITION_MODE: "restart_api",
 			}),
 		).toThrow("QINGYAN_INSTALL_TRANSITION_MODE");
-	});
-
-	it("rejects invalid legacy install restart mode", () => {
-		const configPath = createConfigPath();
-
-		expect(() =>
-			resolveMinimalInstallConfig({
-				QINGYAN_CONFIG_PATH: configPath,
-				QINGYAN_INSTALL_RESTART_MODE: "reload",
-			}),
-		).toThrow("QINGYAN_INSTALL_RESTART_MODE");
 	});
 });

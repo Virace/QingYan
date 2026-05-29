@@ -21,7 +21,7 @@ const tabs: Array<{ id: DataTab; label: string }> = [
 	{ id: "wordpress", label: "WordPress 迁移" },
 	{ id: "export", label: "导出" },
 	{ id: "import", label: "导入" },
-	{ id: "jobs", label: "任务记录" },
+	{ id: "jobs", label: "导入记录" },
 ];
 
 export function DataPage({ site }: { site: AdminSiteSummary }) {

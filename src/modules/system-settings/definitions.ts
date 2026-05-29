@@ -339,14 +339,36 @@ export const defaultSystemSettings: SystemSettings = {
 	},
 };
 
-export const secretSystemSettingPaths = new Set([
-	"mail.smtp.password",
-	"captcha.turnstile.secretKey",
-	"captcha.hcaptcha.secretKey",
-	"captcha.recaptcha.apiKey",
-	"captcha.geetest.captchaKey",
-	"antiSpam.akismet.apiKey",
-]);
+export const secretFieldDescriptors = [
+	{
+		valuePath: "mail.smtp.password",
+		configuredPath: "mail.smtp.passwordConfigured",
+	},
+	{
+		valuePath: "captcha.turnstile.secretKey",
+		configuredPath: "captcha.turnstile.secretKeyConfigured",
+	},
+	{
+		valuePath: "captcha.hcaptcha.secretKey",
+		configuredPath: "captcha.hcaptcha.secretKeyConfigured",
+	},
+	{
+		valuePath: "captcha.recaptcha.apiKey",
+		configuredPath: "captcha.recaptcha.apiKeyConfigured",
+	},
+	{
+		valuePath: "captcha.geetest.captchaKey",
+		configuredPath: "captcha.geetest.captchaKeyConfigured",
+	},
+	{
+		valuePath: "antiSpam.akismet.apiKey",
+		configuredPath: "antiSpam.akismet.apiKeyConfigured",
+	},
+] as const;
+
+export const secretSystemSettingPaths: ReadonlySet<string> = new Set(
+	secretFieldDescriptors.map((descriptor) => descriptor.valuePath),
+);
 
 export function createSystemSettingsDefaults(input?: {
 	adminSession?: SystemSettings["admin"]["session"];

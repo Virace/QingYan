@@ -199,7 +199,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 	});
 
-	it("resolves imported html page keys from Referer instead of legacy query values", async () => {
+	it("resolves imported html page keys from Referer instead of explicit query values", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -1027,7 +1027,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(response.json().captcha.challenge.challengeId).toMatch(/^cap_/);
 	});
 
-	it("accepts legacy path-only pageUrl in bootstrap requests without storing unknown pages", async () => {
+	it("ignores explicit path-only pageUrl in bootstrap requests without storing unknown pages", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 

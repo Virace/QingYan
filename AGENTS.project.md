@@ -4,28 +4,16 @@
 
 ## 开发过程文档
 
-开发过程文档默认保存在仓库外：
+`spec` 是阶段任务说明，用于描述目标、范围、边界和验收标准。`plan`
+是基于 spec 编写的执行计划，用于拆分实现步骤、验证方式和交付顺序。
 
-```text
-E:\Project\Docs\Web\QingYan
-```
+由 Superpowers skills 生成或驱动的 spec、plan、brainstorming 纪要、outline、
+implementation plan、开发大纲等过程文档，不存放在项目仓库内；具体仓库外存放位置遵循全局
+Agent 规则中的“文档与记忆”约定或用户当次指定路径。
 
-仓库内 `docs/superpowers/` 属于历史漂移目录，不应再创建；若发现该目录或新的 spec / plan / outline 文件出现在仓库内，应迁移到上面的仓库外目录后删除仓库内副本。
-
-以下内容默认视为执行过程产物，不进入 git 提交范围，除非用户明确要求：
-
-- `docs/superpowers/plans/` 下的所有文档
-- `docs/superpowers/specs/` 下的设计 / spec 文档
-- `E:\Project\Docs\Web\QingYan\superpowers\plans\` 下的所有文档
-- `E:\Project\Docs\Web\QingYan\superpowers\specs\` 下的设计 / spec 文档
-- 任何 task plan、outline、brainstorming 纪要、implementation plan、开发大纲类文档
-
-处理原则：
-
-1. 可以为了执行在本地创建或修改这些文档
-2. 新建时优先写入仓库外文档目录，不写入仓库内 `docs/superpowers/`
-3. 如果某个 skill 默认要求“写 spec 并提交”，在本仓库中一律以本规则覆盖
-4. 默认不 `git add`，不提交，不混入功能提交
+仓库内 `docs/superpowers/` 属于历史漂移目录，不应再创建；若发现新的
+Superpowers 过程文档出现在仓库内，应迁移到仓库外目录后删除仓库内副本。除非用户明确要求，
+这些过程文档不进入 git 提交范围。
 
 ## 测试约束
 

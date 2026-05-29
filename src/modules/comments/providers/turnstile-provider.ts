@@ -1,4 +1,8 @@
 import { AppError } from "../../shared/errors";
+import {
+	createIframeCaptchaChallenge,
+	fetchCaptchaProviderJson,
+} from "./provider-helpers";
 
 const DEFAULT_WIDTH = 320;
 const DEFAULT_HEIGHT = 120;
@@ -13,22 +17,15 @@ export function createTurnstileChallenge(input: {
 	pageKey: string;
 	widgetPath: string;
 }) {
-	const publicChallenge = {
+	return createIframeCaptchaChallenge({
+		providerKind: "turnstile",
 		challengeId: input.challengeId,
-		mode: "iframe_widget" as const,
-		iframeSrc: `${input.widgetPath}?siteKey=${encodeURIComponent(input.siteKey)}&pageKey=${encodeURIComponent(input.pageKey)}&challengeId=${encodeURIComponent(input.challengeId)}`,
+		widgetPath: input.widgetPath,
+		siteKey: input.siteKey,
+		pageKey: input.pageKey,
 		width: DEFAULT_WIDTH,
 		height: DEFAULT_HEIGHT,
-	};
-	return {
-		mode: "iframe_widget" as const,
-		providerKind: "turnstile" as const,
-		challengePayloadJson: JSON.stringify({
-			publicChallenge,
-		}),
-		publicChallenge,
-		expiresAt: "",
-	};
+	});
 }
 
 export function renderTurnstileWidgetHtml(input: {
@@ -126,35 +123,16 @@ export async function verifyTurnstileToken(input: {
 		body.set("remoteip", input.remoteIp);
 	}
 
-	let response: Response;
-	try {
-		response = await fetch(
-			"https://challenges.cloudflare.com/turnstile/v0/siteverify",
-			{
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-				},
-				body,
+	const result = (await fetchCaptchaProviderJson({
+		url: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+		init: {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
 			},
-		);
-	} catch {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	if (!response.ok) {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	const result = (await response.json()) as {
+			body,
+		},
+	})) as {
 		success?: boolean;
 		action?: string;
 		hostname?: string;

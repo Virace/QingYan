@@ -1,5 +1,6 @@
 import type { TaskExecutionOptions } from "@/api/ops";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 import { inputClass } from "./admin-ui";
 
@@ -66,6 +67,12 @@ export function TaskExecutionOptionsFields({
 }) {
 	const update = (patch: Partial<TaskExecutionOptionsValue>) =>
 		onChange({ ...value, ...patch });
+	const batchSizeId = "task-options-batch-size";
+	const timeoutMsId = "task-options-timeout-ms";
+	const maxBytesId = "task-options-max-bytes";
+	const maxAttemptsId = "task-options-max-attempts";
+	const retryDelaySecId = "task-options-retry-delay-sec";
+	const runAfterId = "task-options-run-after";
 
 	return (
 		<div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-3">
@@ -82,63 +89,81 @@ export function TaskExecutionOptionsFields({
 				</select>
 			</label>
 			{showBatchSize ? (
-				<label className="grid gap-1 text-sm">
-					<span className="text-muted-foreground">单批数量</span>
+				<div className="grid gap-1 text-sm">
+					<Label className="text-muted-foreground" htmlFor={batchSizeId}>
+						单批数量
+					</Label>
 					<Input
+						id={batchSizeId}
 						type="number"
 						min={1}
 						value={value.batchSize}
 						onChange={(event) => update({ batchSize: event.target.value })}
 					/>
-				</label>
+				</div>
 			) : null}
-			<label className="grid gap-1 text-sm">
-				<span className="text-muted-foreground">超时 ms</span>
+			<div className="grid gap-1 text-sm">
+				<Label className="text-muted-foreground" htmlFor={timeoutMsId}>
+					超时 ms
+				</Label>
 				<Input
+					id={timeoutMsId}
 					type="number"
 					min={1000}
 					value={value.timeoutMs}
 					onChange={(event) => update({ timeoutMs: event.target.value })}
 				/>
-			</label>
+			</div>
 			{showMaxBytes ? (
-				<label className="grid gap-1 text-sm">
-					<span className="text-muted-foreground">最大字节</span>
+				<div className="grid gap-1 text-sm">
+					<Label className="text-muted-foreground" htmlFor={maxBytesId}>
+						最大字节
+					</Label>
 					<Input
+						id={maxBytesId}
 						type="number"
 						min={65536}
 						value={value.maxBytes}
 						onChange={(event) => update({ maxBytes: event.target.value })}
 					/>
-				</label>
+				</div>
 			) : null}
-			<label className="grid gap-1 text-sm">
-				<span className="text-muted-foreground">最大尝试</span>
+			<div className="grid gap-1 text-sm">
+				<Label className="text-muted-foreground" htmlFor={maxAttemptsId}>
+					最大尝试
+				</Label>
 				<Input
+					id={maxAttemptsId}
 					type="number"
 					min={1}
 					max={10}
 					value={value.maxAttempts}
 					onChange={(event) => update({ maxAttempts: event.target.value })}
 				/>
-			</label>
-			<label className="grid gap-1 text-sm">
-				<span className="text-muted-foreground">重试间隔秒</span>
+			</div>
+			<div className="grid gap-1 text-sm">
+				<Label className="text-muted-foreground" htmlFor={retryDelaySecId}>
+					重试间隔秒
+				</Label>
 				<Input
+					id={retryDelaySecId}
 					type="number"
 					min={0}
 					value={value.retryDelaySec}
 					onChange={(event) => update({ retryDelaySec: event.target.value })}
 				/>
-			</label>
-			<label className="grid gap-1 text-sm">
-				<span className="text-muted-foreground">延迟到</span>
+			</div>
+			<div className="grid gap-1 text-sm">
+				<Label className="text-muted-foreground" htmlFor={runAfterId}>
+					延迟到
+				</Label>
 				<Input
+					id={runAfterId}
 					type="datetime-local"
 					value={value.runAfter}
 					onChange={(event) => update({ runAfter: event.target.value })}
 				/>
-			</label>
+			</div>
 		</div>
 	);
 }

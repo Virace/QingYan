@@ -6,6 +6,7 @@ import {
 	normalizePublicPath,
 	qingyanCookiePath,
 } from "../../config/public-path";
+import { buildErrorResponse } from "../shared/error-response";
 import { AppError, InvalidRequestError } from "../shared/errors";
 import {
 	defaultAdminSessionTtlMinutes,
@@ -943,25 +944,13 @@ export function buildInstallApp(input: {
 	app.setErrorHandler((error, request, reply) => {
 		const requestId = request.id;
 		if (error instanceof AppError) {
-			reply.status(error.statusCode).send({
-				error: {
-					code: error.code,
-					message: error.message,
-					requestId,
-					details: error.details ?? null,
-				},
-			});
+			const response = buildErrorResponse(error, requestId);
+			reply.status(response.statusCode).send(response.body);
 			return;
 		}
 		app.log.error({ err: error }, "Unhandled install request error");
-		reply.status(500).send({
-			error: {
-				code: "INTERNAL_ERROR",
-				message: "服务器内部错误。",
-				requestId,
-				details: null,
-			},
-		});
+		const response = buildErrorResponse(error, requestId);
+		reply.status(response.statusCode).send(response.body);
 	});
 
 	app.get(adminPath, async (_, reply) => {

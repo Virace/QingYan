@@ -1,9 +1,11 @@
 import {
 	defaultSystemSettings,
+	secretFieldDescriptors,
 	secretSystemSettingPaths,
 	systemSettingsSchema,
 	type SystemSettings,
 } from "./definitions";
+import { getPathValue, setPathValue } from "../shared/object-path";
 
 export interface SystemSettingRow {
 	category: string;
@@ -16,23 +18,6 @@ export interface SystemSettingUpsert {
 	key: string;
 	value: unknown;
 	secret: boolean;
-}
-
-function setPathValue(
-	target: Record<string, unknown>,
-	path: string,
-	value: unknown,
-) {
-	const keys = path.split(".");
-	let cursor = target;
-	for (const key of keys.slice(0, -1)) {
-		const next = cursor[key];
-		if (!next || typeof next !== "object" || Array.isArray(next)) {
-			cursor[key] = {};
-		}
-		cursor = cursor[key] as Record<string, unknown>;
-	}
-	cursor[keys[keys.length - 1] ?? ""] = value;
 }
 
 function flattenObject(
@@ -89,27 +74,28 @@ export function flattenSystemSettings(
 
 export function maskSystemSettings(settings: SystemSettings): SystemSettings {
 	const next = structuredClone(settings);
-	next.mail.smtp.password = undefined;
-	next.mail.smtp.passwordConfigured = Boolean(settings.mail.smtp.password);
-	next.captcha.turnstile.secretKey = undefined;
-	next.captcha.turnstile.secretKeyConfigured = Boolean(
-		settings.captcha.turnstile.secretKey,
-	);
-	next.captcha.hcaptcha.secretKey = undefined;
-	next.captcha.hcaptcha.secretKeyConfigured = Boolean(
-		settings.captcha.hcaptcha.secretKey,
-	);
-	next.captcha.recaptcha.apiKey = undefined;
-	next.captcha.recaptcha.apiKeyConfigured = Boolean(
-		settings.captcha.recaptcha.apiKey,
-	);
-	next.captcha.geetest.captchaKey = undefined;
-	next.captcha.geetest.captchaKeyConfigured = Boolean(
-		settings.captcha.geetest.captchaKey,
-	);
-	next.antiSpam.akismet.apiKey = undefined;
-	next.antiSpam.akismet.apiKeyConfigured = Boolean(
-		settings.antiSpam.akismet.apiKey,
-	);
+	for (const descriptor of secretFieldDescriptors) {
+		setPathValue(next, descriptor.valuePath, undefined);
+		setPathValue(
+			next,
+			descriptor.configuredPath,
+			Boolean(getPathValue(settings, descriptor.valuePath)),
+		);
+	}
 	return next;
+}
+
+export function preserveConfiguredSecrets(
+	current: SystemSettings,
+	patch: SystemSettings,
+): SystemSettings {
+	const next = structuredClone(patch);
+	for (const descriptor of secretFieldDescriptors) {
+		const value = getPathValue(next, descriptor.valuePath);
+		const storedValue =
+			value === undefined ? getPathValue(current, descriptor.valuePath) : value;
+		setPathValue(next, descriptor.valuePath, storedValue);
+		setPathValue(next, descriptor.configuredPath, Boolean(storedValue));
+	}
+	return systemSettingsSchema.parse(next);
 }

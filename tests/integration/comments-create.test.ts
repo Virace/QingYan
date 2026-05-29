@@ -249,7 +249,7 @@ describe("POST /qingyan/api/comments", () => {
 		});
 	});
 
-	it("creates page threads from Referer when legacy comment payload identity is stale", async () => {
+	it("creates page threads from Referer when explicit comment payload identity is stale", async () => {
 		const fixture = await createCustomTestApp({
 			require: [],
 		});

@@ -1,4 +1,5 @@
 import type { StartupConfig } from "./types";
+import { setPathValue } from "../modules/shared/object-path";
 
 type EnvValueKind = "string" | "number" | "boolean" | "sameSite";
 
@@ -153,23 +154,6 @@ function parseEnvValue(mapping: EnvMapping, rawValue: string): unknown {
 		throw new Error(`${mapping.envName} must be strict, lax, or none.`);
 	}
 	return rawValue;
-}
-
-function setPathValue(
-	target: Record<string, unknown>,
-	path: string,
-	value: unknown,
-) {
-	const keys = path.split(".");
-	let cursor = target;
-	for (const key of keys.slice(0, -1)) {
-		const current = cursor[key];
-		if (!current || typeof current !== "object" || Array.isArray(current)) {
-			cursor[key] = {};
-		}
-		cursor = cursor[key] as Record<string, unknown>;
-	}
-	cursor[keys[keys.length - 1] ?? ""] = value;
 }
 
 export function applyStartupEnvOverrides(

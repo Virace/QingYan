@@ -10,8 +10,9 @@ import { PageFeedbackService } from "./service";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { qingyanCookiePath } from "../../config/public-path";
 import { resolvePublicPageContext } from "../shared/page-context";
+import { setPublicVisitorCookie } from "../shared/public-visitor-cookie";
 
-function requireLegacyPageKey(pageKey?: string): string {
+function requireDevPageKey(pageKey?: string): string {
 	if (!pageKey) {
 		throw new InvalidRequestError();
 	}
@@ -19,7 +20,7 @@ function requireLegacyPageKey(pageKey?: string): string {
 	return pageKey;
 }
 
-function requireLegacyPageUrl(pageUrl?: string): string {
+function requireDevPageUrl(pageUrl?: string): string {
 	if (!pageUrl) {
 		throw new InvalidRequestError();
 	}
@@ -60,17 +61,15 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		if (fastify.devMockService?.ownsSite(parsed.data.siteKey)) {
 			const result = await fastify.devMockService.likePage({
 				...parsed.data,
-				pageKey: requireLegacyPageKey(parsed.data.pageKey),
-				pageUrl: requireLegacyPageUrl(parsed.data.pageUrl),
+				pageKey: requireDevPageKey(parsed.data.pageKey),
+				pageUrl: requireDevPageUrl(parsed.data.pageUrl),
 				visitorKey: request.context?.visitor?.key,
 			});
-			if (result.visitorKey) {
-				reply.setCookie("qingyan_visitor", result.visitorKey, {
-					path: visitorCookiePath,
-					sameSite: "lax",
-					httpOnly: true,
-				});
-			}
+			setPublicVisitorCookie({
+				reply,
+				visitorKey: result.visitorKey,
+				path: visitorCookiePath,
+			});
 
 			return result.body;
 		}
@@ -88,13 +87,11 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
-		if (result.visitorKey) {
-			reply.setCookie("qingyan_visitor", result.visitorKey, {
-				path: visitorCookiePath,
-				sameSite: "lax",
-				httpOnly: true,
-			});
-		}
+		setPublicVisitorCookie({
+			reply,
+			visitorKey: result.visitorKey,
+			path: visitorCookiePath,
+		});
 
 		return result;
 	});

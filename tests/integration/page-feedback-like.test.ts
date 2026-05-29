@@ -161,7 +161,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		});
 	});
 
-	it("creates page threads from Referer when legacy like payload identity is stale", async () => {
+	it("creates page threads from Referer when explicit like payload identity is stale", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedActivePage(fixture, "lol_voice_collation.html");

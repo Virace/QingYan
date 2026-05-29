@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { resolveConfigPath } from "../../config/load-config";
 import { buildPublicUrl, normalizePublicPath } from "../../config/public-path";
 
-export type InstallRestartMode = "manual" | "exit";
 export type InstallTransitionMode =
 	| "reload_in_process"
 	| "exit_for_supervisor"
@@ -17,7 +16,6 @@ export interface MinimalInstallConfig {
 	publicPath: string;
 	token: string;
 	disabled: boolean;
-	restartMode: InstallRestartMode;
 	transitionMode: InstallTransitionMode;
 }
 
@@ -32,31 +30,16 @@ function parsePort(value: string | undefined, fallback: number): number {
 	return port;
 }
 
-function parseRestartMode(value: string | undefined): InstallRestartMode {
+function parseTransitionMode(value: string | undefined): InstallTransitionMode {
 	if (!value) {
-		return "manual";
-	}
-	if (value === "manual" || value === "exit") {
-		return value;
-	}
-	throw new Error("QINGYAN_INSTALL_RESTART_MODE must be manual or exit.");
-}
-
-function parseTransitionMode(input: {
-	value: string | undefined;
-	legacyRestartMode: InstallRestartMode;
-}): InstallTransitionMode {
-	if (!input.value) {
-		return input.legacyRestartMode === "exit"
-			? "exit_for_supervisor"
-			: "reload_in_process";
+		return "reload_in_process";
 	}
 	if (
-		input.value === "reload_in_process" ||
-		input.value === "exit_for_supervisor" ||
-		input.value === "manual"
+		value === "reload_in_process" ||
+		value === "exit_for_supervisor" ||
+		value === "manual"
 	) {
-		return input.value;
+		return value;
 	}
 	throw new Error(
 		"QINGYAN_INSTALL_TRANSITION_MODE must be reload_in_process, exit_for_supervisor, or manual.",
@@ -66,9 +49,6 @@ function parseTransitionMode(input: {
 export function resolveMinimalInstallConfig(
 	environment: NodeJS.ProcessEnv = process.env,
 ): MinimalInstallConfig {
-	const restartMode = parseRestartMode(
-		environment.QINGYAN_INSTALL_RESTART_MODE,
-	);
 	return {
 		configPath: resolveConfigPath(environment.QINGYAN_CONFIG_PATH),
 		host: environment.QINGYAN_SERVER_HOST ?? "127.0.0.1",
@@ -76,11 +56,9 @@ export function resolveMinimalInstallConfig(
 		publicPath: normalizePublicPath(environment.QINGYAN_PUBLIC_PATH),
 		token: environment.QINGYAN_INSTALL_TOKEN ?? `qy_install_${randomUUID()}`,
 		disabled: environment.QINGYAN_INSTALL_DISABLED === "true",
-		restartMode,
-		transitionMode: parseTransitionMode({
-			value: environment.QINGYAN_INSTALL_TRANSITION_MODE,
-			legacyRestartMode: restartMode,
-		}),
+		transitionMode: parseTransitionMode(
+			environment.QINGYAN_INSTALL_TRANSITION_MODE,
+		),
 	};
 }
 

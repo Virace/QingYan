@@ -19,10 +19,7 @@ import {
 } from "@/components/ui/card";
 
 import { Field, inputClass } from "./admin-ui";
-
-function formatTime(value: string | null) {
-	return value ? new Date(value).toLocaleString() : "-";
-}
+import { formatAdminDateTime } from "./time-format";
 
 function formatSummary(value: unknown) {
 	if (!value || typeof value !== "object") {
@@ -63,7 +60,7 @@ function BackupPanel({ backup }: { backup: ImportJobBackup | null }) {
 				</div>
 				<div>
 					<p className="text-xs text-muted-foreground">创建时间</p>
-					<p className="font-medium">{formatTime(backup.createdAt)}</p>
+					<p className="font-medium">{formatAdminDateTime(backup.createdAt)}</p>
 				</div>
 				<div>
 					<p className="text-xs text-muted-foreground">备份目录</p>
@@ -119,7 +116,7 @@ function JobDetail({ job }: { job: ImportJobListItem }) {
 					</div>
 					<div>
 						<p className="text-xs text-muted-foreground">应用时间</p>
-						<p className="font-medium">{formatTime(job.appliedAt)}</p>
+						<p className="font-medium">{formatAdminDateTime(job.appliedAt)}</p>
 					</div>
 				</div>
 				<div>
@@ -242,9 +239,15 @@ export function ImportJobsPage({ siteKey }: { siteKey: string }) {
 											{job.sourceFileName}
 										</td>
 										<td className="p-2">{backupLabel(job.backup)}</td>
-										<td className="p-2">{formatTime(job.createdAt)}</td>
-										<td className="p-2">{formatTime(job.updatedAt)}</td>
-										<td className="p-2">{formatTime(job.appliedAt)}</td>
+										<td className="p-2">
+											{formatAdminDateTime(job.createdAt)}
+										</td>
+										<td className="p-2">
+											{formatAdminDateTime(job.updatedAt)}
+										</td>
+										<td className="p-2">
+											{formatAdminDateTime(job.appliedAt)}
+										</td>
 										<td className="p-2">
 											<Button
 												type="button"

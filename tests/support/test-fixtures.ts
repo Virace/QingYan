@@ -15,14 +15,24 @@ import {
 	type SiteSeed,
 } from "../../src/modules/shared/site-registry";
 
-function createTempWorkspace() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-"));
+export interface TestWorkspace {
+	directory: string;
+	databaseFile: string;
+	configPath: string;
+	logsDirectory: string;
+	cleanup: () => void;
+}
+
+export function createTestWorkspace(prefix = "qingyan-"): TestWorkspace {
+	const directory = mkdtempSync(path.join(tmpdir(), prefix));
 	const databaseFile = path.join(directory, "qingyan.db");
+	const configPath = path.join(directory, "config", "qingyan.yml");
 	const logsDirectory = path.join(directory, "logs");
 
 	return {
 		directory,
 		databaseFile,
+		configPath,
 		logsDirectory,
 		cleanup() {
 			rmSync(directory, { recursive: true, force: true });
@@ -158,7 +168,7 @@ export async function createTestApp(options?: {
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
 }) {
-	const workspace = createTempWorkspace();
+	const workspace = createTestWorkspace();
 	applyInitialMigration(workspace.databaseFile);
 
 	const baseConfig = createTestConfig(

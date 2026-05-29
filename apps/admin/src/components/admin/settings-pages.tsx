@@ -42,7 +42,7 @@ import {
 	recaptchaVariantLabels,
 	scopeLabels,
 } from "./display-labels";
-import { PaginationControls } from "./collection-pages";
+import { PaginationControls } from "./admin-pagination";
 
 export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();

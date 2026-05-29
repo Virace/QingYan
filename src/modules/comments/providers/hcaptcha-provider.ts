@@ -1,4 +1,8 @@
 import { AppError } from "../../shared/errors";
+import {
+	createIframeCaptchaChallenge,
+	fetchCaptchaProviderJson,
+} from "./provider-helpers";
 
 const DEFAULT_WIDTH = 320;
 const DEFAULT_HEIGHT = 140;
@@ -13,22 +17,15 @@ export function createHCaptchaChallenge(input: {
 	pageKey: string;
 	widgetPath: string;
 }) {
-	const publicChallenge = {
+	return createIframeCaptchaChallenge({
+		providerKind: "hcaptcha",
 		challengeId: input.challengeId,
-		mode: "iframe_widget" as const,
-		iframeSrc: `${input.widgetPath}?siteKey=${encodeURIComponent(input.siteKey)}&pageKey=${encodeURIComponent(input.pageKey)}&challengeId=${encodeURIComponent(input.challengeId)}`,
+		widgetPath: input.widgetPath,
+		siteKey: input.siteKey,
+		pageKey: input.pageKey,
 		width: DEFAULT_WIDTH,
 		height: DEFAULT_HEIGHT,
-	};
-	return {
-		mode: "iframe_widget" as const,
-		providerKind: "hcaptcha" as const,
-		challengePayloadJson: JSON.stringify({
-			publicChallenge,
-		}),
-		publicChallenge,
-		expiresAt: "",
-	};
+	});
 }
 
 export function renderHCaptchaWidgetHtml(input: {
@@ -126,32 +123,16 @@ export async function verifyHCaptchaToken(input: {
 		body.set("remoteip", input.remoteIp);
 	}
 
-	let response: Response;
-	try {
-		response = await fetch("https://api.hcaptcha.com/siteverify", {
+	const result = (await fetchCaptchaProviderJson({
+		url: "https://api.hcaptcha.com/siteverify",
+		init: {
 			method: "POST",
 			headers: {
 				"content-type": "application/x-www-form-urlencoded",
 			},
 			body,
-		});
-	} catch {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	if (!response.ok) {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	const result = (await response.json()) as {
+		},
+	})) as {
 		success?: boolean;
 		hostname?: string;
 	};

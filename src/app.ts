@@ -26,6 +26,7 @@ import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
 import type { ServiceControlController } from "./modules/service-control/systemd-service";
+import { buildErrorResponse } from "./modules/shared/error-response";
 import { AppError } from "./modules/shared/errors";
 import { createSiteRegistry } from "./modules/shared/site-registry";
 import { loadOpenApiDocument, renderOpenApiHtml } from "./openapi/load-openapi";
@@ -163,14 +164,8 @@ export async function buildApp(
 		}
 
 		if (error instanceof AppError) {
-			return reply.status(error.statusCode).send({
-				error: {
-					code: error.code,
-					message: error.message,
-					requestId,
-					details: error.details ?? null,
-				},
-			});
+			const response = buildErrorResponse(error, requestId);
+			return reply.status(response.statusCode).send(response.body);
 		}
 
 		const errorDetails = describeError(error);
@@ -193,14 +188,8 @@ export async function buildApp(
 			.catch((logError: unknown) => {
 				app.log.error({ err: logError }, "Failed to write request error log");
 			});
-		return reply.status(500).send({
-			error: {
-				code: "INTERNAL_ERROR",
-				message: "服务器内部错误。",
-				requestId,
-				details: null,
-			},
-		});
+		const response = buildErrorResponse(error, requestId);
+		return reply.status(response.statusCode).send(response.body);
 	});
 
 	await app.register(cookiePlugin);

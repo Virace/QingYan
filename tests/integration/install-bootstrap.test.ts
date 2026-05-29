@@ -1,13 +1,11 @@
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readdirSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { eq } from "drizzle-orm";
@@ -30,6 +28,7 @@ import {
 	resolveInstallLockPath,
 	resolveInstallState,
 } from "../../src/modules/install/state";
+import { createTestWorkspace } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -40,13 +39,12 @@ afterEach(async () => {
 });
 
 function createWorkspace() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-install-"));
-	const configPath = path.join(directory, "config", "qingyan.yml");
-	const databaseFile = path.join(directory, "data", "qingyan.db");
-	cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+	const workspace = createTestWorkspace("qingyan-install-");
+	const databaseFile = path.join(workspace.directory, "data", "qingyan.db");
+	cleanups.push(workspace.cleanup);
 	return {
-		directory,
-		configPath,
+		directory: workspace.directory,
+		configPath: workspace.configPath,
 		databaseFile,
 	};
 }
@@ -59,7 +57,6 @@ function createMinimalConfig(configPath: string): MinimalInstallConfig {
 		publicPath: "/qingyan",
 		token: "install-token",
 		disabled: false,
-		restartMode: "manual",
 		transitionMode: "manual",
 	};
 }

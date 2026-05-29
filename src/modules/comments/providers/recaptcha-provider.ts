@@ -1,4 +1,8 @@
 import { AppError } from "../../shared/errors";
+import {
+	createIframeCaptchaChallenge,
+	fetchCaptchaProviderJson,
+} from "./provider-helpers";
 
 const DEFAULT_WIDTH = 320;
 const DEFAULT_HEIGHT = 140;
@@ -13,22 +17,15 @@ export function createRecaptchaChallenge(input: {
 	pageKey: string;
 	widgetPath: string;
 }) {
-	const publicChallenge = {
+	return createIframeCaptchaChallenge({
+		providerKind: "recaptcha",
 		challengeId: input.challengeId,
-		mode: "iframe_widget" as const,
-		iframeSrc: `${input.widgetPath}?siteKey=${encodeURIComponent(input.siteKey)}&pageKey=${encodeURIComponent(input.pageKey)}&challengeId=${encodeURIComponent(input.challengeId)}`,
+		widgetPath: input.widgetPath,
+		siteKey: input.siteKey,
+		pageKey: input.pageKey,
 		width: DEFAULT_WIDTH,
 		height: DEFAULT_HEIGHT,
-	};
-	return {
-		mode: "iframe_widget" as const,
-		providerKind: "recaptcha" as const,
-		challengePayloadJson: JSON.stringify({
-			publicChallenge,
-		}),
-		publicChallenge,
-		expiresAt: "",
-	};
+	});
 }
 
 export function renderRecaptchaWidgetHtml(input: {
@@ -144,43 +141,24 @@ export async function verifyRecaptchaToken(input: {
 	userIpAddress?: string;
 	expectedHostname?: string;
 }) {
-	let response: Response;
-	try {
-		response = await fetch(
-			`https://recaptchaenterprise.googleapis.com/v1/projects/${encodeURIComponent(input.projectId)}/assessments?key=${encodeURIComponent(input.apiKey)}`,
-			{
-				method: "POST",
-				headers: {
-					"content-type": "application/json; charset=utf-8",
-				},
-				body: JSON.stringify({
-					event: {
-						token: input.token,
-						siteKey: input.siteKey,
-						userAgent: input.userAgent,
-						userIpAddress: input.userIpAddress,
-						expectedAction: input.expectedAction,
-					},
-				}),
+	const result = (await fetchCaptchaProviderJson({
+		url: `https://recaptchaenterprise.googleapis.com/v1/projects/${encodeURIComponent(input.projectId)}/assessments?key=${encodeURIComponent(input.apiKey)}`,
+		init: {
+			method: "POST",
+			headers: {
+				"content-type": "application/json; charset=utf-8",
 			},
-		);
-	} catch {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	if (!response.ok) {
-		throw new AppError(
-			502,
-			"CAPTCHA_PROVIDER_UNAVAILABLE",
-			"验证码服务暂时不可用。",
-		);
-	}
-
-	const result = (await response.json()) as {
+			body: JSON.stringify({
+				event: {
+					token: input.token,
+					siteKey: input.siteKey,
+					userAgent: input.userAgent,
+					userIpAddress: input.userIpAddress,
+					expectedAction: input.expectedAction,
+				},
+			}),
+		},
+	})) as {
 		tokenProperties?: {
 			valid?: boolean;
 			action?: string;

@@ -19,6 +19,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 
+import { PaginationControls } from "./admin-pagination";
 import { EmptyState } from "./admin-ui";
 import { inputClass } from "./admin-ui";
 import { IpMaintenanceTaskPanel } from "./ip-maintenance-task-panel";
@@ -49,7 +50,7 @@ const taskStatuses: Array<[MaintenanceJobStatus | "", string]> = [
 	["cancelled", "取消"],
 ];
 
-const pageSize = 20;
+const defaultPageSize = 20;
 
 export function TasksPage({ siteKey }: { siteKey: string }) {
 	const [typeFilter, setTypeFilter] = useState("");
@@ -57,6 +58,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		"",
 	);
 	const [page, setPage] = useState(0);
+	const [pageSize, setPageSize] = useState(defaultPageSize);
 	const [executionOptions, setExecutionOptions] = useState(
 		defaultTaskExecutionOptions({
 			batchSize: "50",
@@ -65,7 +67,15 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		}),
 	);
 	const tasksQuery = useQuery({
-		queryKey: ["admin", "tasks", siteKey, typeFilter, statusFilter, page],
+		queryKey: [
+			"admin",
+			"tasks",
+			siteKey,
+			typeFilter,
+			statusFilter,
+			page,
+			pageSize,
+		],
 		queryFn: () =>
 			listTasks({
 				siteKey,
@@ -102,14 +112,16 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 			["queued", "delayed", "running", "retrying"].includes(job.status),
 		) ?? [];
 	const totalCount = tasksQuery.data?.totalCount ?? 0;
-	const hasPrevious = page > 0;
-	const hasNext = (page + 1) * pageSize < totalCount;
 	const updateTypeFilter = (value: string) => {
 		setTypeFilter(value);
 		setPage(0);
 	};
 	const updateStatusFilter = (value: MaintenanceJobStatus | "") => {
 		setStatusFilter(value);
+		setPage(0);
+	};
+	const updatePageSize = (value: number) => {
+		setPageSize(value);
 		setPage(0);
 	};
 
@@ -222,7 +234,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 					<CardDescription>最近创建或更新的维护任务。</CardDescription>
 				</CardHeader>
 				<CardContent className="grid gap-3">
-					<div className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
+					<div className="grid gap-3 md:grid-cols-2">
 						<label className="grid gap-1 text-sm">
 							<span className="text-muted-foreground">类型</span>
 							<select
@@ -255,28 +267,15 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 								))}
 							</select>
 						</label>
-						<Button
-							type="button"
-							variant="outline"
-							className="self-end"
-							disabled={!hasPrevious}
-							onClick={() => setPage((current) => Math.max(0, current - 1))}
-						>
-							上一页
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							className="self-end"
-							disabled={!hasNext}
-							onClick={() => setPage((current) => current + 1)}
-						>
-							下一页
-						</Button>
 					</div>
-					<p className="text-xs text-muted-foreground">
-						第 {page + 1} 页 / 共 {totalCount} 个任务
-					</p>
+					<PaginationControls
+						limit={pageSize}
+						pageIndex={page}
+						totalCount={totalCount}
+						itemCount={tasksQuery.data?.items.length ?? 0}
+						setLimit={updatePageSize}
+						setPageIndex={setPage}
+					/>
 					{tasksQuery.data?.items.map((job) => (
 						<TaskSummary key={job.id} job={job} />
 					))}

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import {
 	type AdminComment,
@@ -23,7 +23,6 @@ import {
 	listSites,
 	listUsers,
 	listVisitors,
-	type MaintenanceJob,
 	type PageRegistryStatus,
 	refreshCommentMetadata,
 	refreshPageTitle,
@@ -47,6 +46,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 import type { AdminView } from "./admin-shell";
+import { PaginationControls } from "./admin-pagination";
 import { EmptyState, inputClass } from "./admin-ui";
 import type { CommentActionId } from "./comment-actions";
 import { CommentsList } from "./comments-list";
@@ -132,68 +132,6 @@ function usePaginationState(defaultLimit = 20): PaginationState {
 		setPageIndex,
 		resetPage: () => setPageIndexState(0),
 	};
-}
-
-export function PaginationControls({
-	limit,
-	pageIndex,
-	totalCount,
-	itemCount,
-	setLimit,
-	setPageIndex,
-}: {
-	limit: number;
-	pageIndex: number;
-	totalCount: number;
-	itemCount: number;
-	setLimit: (value: number) => void;
-	setPageIndex: (value: number) => void;
-}) {
-	const limitInputId = useId();
-	const pageCount = Math.max(1, Math.ceil(totalCount / limit));
-	const canPrevious = pageIndex > 0;
-	const canNext = pageIndex + 1 < pageCount;
-
-	return (
-		<div className="flex flex-col gap-2 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
-			<p>
-				共 {totalCount} 条，当前显示 {itemCount} 条，第 {pageIndex + 1} /{" "}
-				{pageCount} 页。
-			</p>
-			<div className="flex flex-wrap items-center gap-2">
-				<label className="flex items-center gap-2" htmlFor={limitInputId}>
-					<span>每页</span>
-					<Input
-						id={limitInputId}
-						type="number"
-						min={1}
-						max={100}
-						className="h-8 w-20"
-						value={limit}
-						onChange={(event) => setLimit(Number(event.target.value) || 20)}
-					/>
-				</label>
-				<Button
-					type="button"
-					size="sm"
-					variant="outline"
-					disabled={!canPrevious}
-					onClick={() => setPageIndex(pageIndex - 1)}
-				>
-					上一页
-				</Button>
-				<Button
-					type="button"
-					size="sm"
-					variant="outline"
-					disabled={!canNext}
-					onClick={() => setPageIndex(pageIndex + 1)}
-				>
-					下一页
-				</Button>
-			</div>
-		</div>
-	);
 }
 
 const commentViews: Array<{
@@ -729,9 +667,6 @@ export function PagesPage({
 	const [sortOrder, setSortOrder] = useState<AdminPageSortOrder>("desc");
 	const pagePagination = usePaginationState(20);
 	const pendingPagePagination = usePaginationState(20);
-	const [latestSourceJob, setLatestSourceJob] = useState<MaintenanceJob | null>(
-		null,
-	);
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
@@ -796,10 +731,7 @@ export function PagesPage({
 	});
 	const refreshTitleMutation = useMutation({
 		mutationFn: refreshPageTitle,
-		onSuccess: (response) => {
-			setLatestSourceJob(response.job);
-			invalidatePages();
-		},
+		onSuccess: invalidatePages,
 	});
 	const approveMutation = useMutation({
 		mutationFn: approvePendingPage,
@@ -1066,6 +998,7 @@ export function PagesPage({
 										type="button"
 										size="sm"
 										variant="outline"
+										title="为当前页面创建维护任务，执行状态可在任务中心查看。"
 										disabled={!siteKey || refreshTitleMutation.isPending}
 										onClick={() => {
 											if (!siteKey) {
@@ -1077,7 +1010,7 @@ export function PagesPage({
 											});
 										}}
 									>
-										刷新 title
+										创建 Title 任务
 									</Button>
 									{page.status === "active" || page.status === "stale" ? (
 										<Button

@@ -87,7 +87,8 @@ export function IpMaintenanceTaskPanel({ siteKey }: { siteKey: string }) {
 			<CardHeader>
 				<CardTitle className="text-lg">IP 地域与评论地址维护</CardTitle>
 				<CardDescription>
-					检查 IP 库更新，并刷新评论 IP 派生信息；维护动作进入任务中心队列。
+					检查 IP 库更新，并刷新评论 IP
+					派生信息；操作会创建维护任务，执行状态可在任务中心统一查看。
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="grid gap-4">

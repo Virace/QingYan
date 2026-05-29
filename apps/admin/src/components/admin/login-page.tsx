@@ -8,7 +8,6 @@ import {
 	loginAdmin,
 	type CaptchaChallenge,
 } from "@/api/session";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -19,6 +18,8 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+import { AdminErrorAlert } from "./admin-error-alert";
 
 export function LoginPage({ onLogin }: { onLogin: () => void }) {
 	const [username, setUsername] = useState("");
@@ -80,10 +81,11 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
 				<CardContent>
 					<form className="flex flex-col gap-4" onSubmit={submitLogin}>
 						{message ? (
-							<Alert variant="destructive">
-								<AlertTitle>登录失败</AlertTitle>
-								<AlertDescription>{message}</AlertDescription>
-							</Alert>
+							<AdminErrorAlert
+								error={message}
+								title="登录失败"
+								fallback="管理员登录失败。"
+							/>
 						) : null}
 						<div className="flex flex-col gap-2">
 							<Label htmlFor="admin-username">用户名</Label>

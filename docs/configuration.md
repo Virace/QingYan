@@ -40,7 +40,7 @@ startup 环境变量会覆盖安装表单中对应字段，并在安装计划中
 | `QINGYAN_SERVER_PORT` | install app 监听 port |
 | `QINGYAN_PUBLIC_PATH` | QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径 |
 
-旧变量 `QINGYAN_INSTALL_RESTART_MODE=exit` 仍会兼容映射为 `exit_for_supervisor`，但新部署应使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
+首个正式 release 前已移除旧变量 `QINGYAN_INSTALL_RESTART_MODE`。安装切换模式只使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
 
 ## Startup Config
 
@@ -319,7 +319,7 @@ WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内�
 
 ## Future Upgrade Lifecycle
 
-当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`。
+当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
 
 启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，会通过 HttpOnly `qingyan_upgrade` cookie 完成一次性升级令牌校验。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
