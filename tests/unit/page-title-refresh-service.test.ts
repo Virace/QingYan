@@ -234,12 +234,13 @@ describe("PageMetadataRefreshService", () => {
 			status: 200,
 			text: "<title>Ignored</title>",
 		}));
+		const runAfter = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 		const job = await service.createRefreshJob({
 			siteKey: "fangyuan",
 			onlyMissingTitle: true,
 			trigger: "manual",
-			runAfter: "2026-05-29T00:30:00.000Z",
+			runAfter,
 			maxAttempts: 3,
 			retryDelaySec: 90,
 		});
@@ -252,7 +253,7 @@ describe("PageMetadataRefreshService", () => {
 			type: "page_metadata_refresh",
 			status: "delayed",
 			siteKey: "fangyuan",
-			runAfter: "2026-05-29T00:30:00.000Z",
+			runAfter,
 			maxAttempts: 3,
 			retryDelaySec: 90,
 			concurrencyKey: "page-title:fangyuan",

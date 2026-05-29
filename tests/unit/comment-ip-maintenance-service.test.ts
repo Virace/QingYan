@@ -131,12 +131,13 @@ describe("MaintenanceJobRepository", () => {
 	it("stores scheduling metadata and returns runnable jobs by concurrency key", async () => {
 		const fixture = createFixture();
 		const repository = new MaintenanceJobRepository(fixture.db);
+		const delayedRunAfter = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 		const delayed = await repository.create({
 			type: "page_metadata_refresh",
 			siteKey: "fangyuan",
 			scope: { siteKey: "fangyuan" },
-			runAfter: "2026-05-29T01:00:00.000Z",
+			runAfter: delayedRunAfter,
 			maxAttempts: 3,
 			retryDelaySec: 60,
 			concurrencyKey: "page-title:fangyuan",

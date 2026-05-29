@@ -11,6 +11,7 @@ import {
 	commentModeration,
 	comments,
 	pageThreads,
+	sitePageRegistry,
 	siteSettings,
 	sites,
 	systemSettings,
@@ -30,6 +31,8 @@ import {
 import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 
 const cleanups: Array<() => Promise<void>> = [];
+
+type CustomFixture = Awaited<ReturnType<typeof createCustomTestApp>>;
 
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
@@ -127,6 +130,22 @@ async function createCustomTestApp(options?: {
 	};
 }
 
+async function seedActivePage(fixture: CustomFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
+}
+
 describe("POST /qingyan/api/comments", () => {
 	it("returns a full public comment when an approved visitor comment is created", async () => {
 		const fixture = await createCustomTestApp({
@@ -142,6 +161,7 @@ describe("POST /qingyan/api/comments", () => {
 			}),
 		});
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "posts/create-full-response/");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -206,6 +226,7 @@ describe("POST /qingyan/api/comments", () => {
 	it("accepts create payloads without unused options", async () => {
 		const fixture = await createCustomTestApp({ require: [] });
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "posts/no-options/");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -233,6 +254,7 @@ describe("POST /qingyan/api/comments", () => {
 			require: [],
 		});
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "lol_voice_collation.html");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -281,6 +303,7 @@ describe("POST /qingyan/api/comments", () => {
 	it("rejects requests missing configured required identity fields", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:required-email");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -378,6 +401,7 @@ describe("POST /qingyan/api/comments", () => {
 				akismetVerdict: testCase.akismetVerdict,
 			});
 			cleanups.push(fixture.cleanup);
+			await seedActivePage(fixture, `post:${testCase.name}`);
 
 			const response = await fixture.app.inject({
 				method: "POST",
@@ -436,6 +460,7 @@ describe("POST /qingyan/api/comments", () => {
 			allowWebsite: false,
 		});
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:anonymous");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -479,6 +504,7 @@ describe("POST /qingyan/api/comments", () => {
 	it("creates a verified author comment when admin session is present", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:verified-create");
 
 		const [site] = await fixture.app.db
 			.select()
@@ -562,6 +588,7 @@ describe("POST /qingyan/api/comments", () => {
 	it("renders verified comment names from current profile unless snapshot mode is selected", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:verified-display-mode");
 
 		const [site] = await fixture.app.db
 			.select()
@@ -665,6 +692,7 @@ describe("POST /qingyan/api/comments", () => {
 	it("rejects reserved verified author email for visitor comments", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:reserved-email");
 
 		const [site] = await fixture.app.db
 			.select()

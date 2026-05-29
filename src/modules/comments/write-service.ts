@@ -357,6 +357,10 @@ export class CommentsWriteService {
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
+		await this.readRepository.assertPageInteractive({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
 
 		const visitor = await this.readRepository.getOrCreateVisitor({
 			siteId: site.id,

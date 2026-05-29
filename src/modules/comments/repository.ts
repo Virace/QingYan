@@ -282,6 +282,10 @@ export class CommentsRepository {
 		return thread;
 	}
 
+	public async ensurePageThreadForRegisteredPage(input: ThreadRecordInput) {
+		return this.getOrCreatePageThread(input);
+	}
+
 	public async getPageThread(input: { siteId: number; pageKey: string }) {
 		const [thread] = await this.db
 			.select()
@@ -320,6 +324,9 @@ export class CommentsRepository {
 		pageKey: string;
 	}) {
 		const page = await this.getPageRegistryEntry(input);
+		if (!page) {
+			throw new AppError(403, "PAGE_NOT_REGISTERED", "页面尚未登记。");
+		}
 		if (
 			page?.status === "trash" ||
 			page?.status === "deleted" ||

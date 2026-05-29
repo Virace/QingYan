@@ -151,6 +151,7 @@ export class CommentsService {
 			registryPage?.status !== "trash" &&
 			registryPage?.status !== "deleted" &&
 			registryPage?.status !== "ignored";
+		const pageRegistered = Boolean(registryPage);
 		const settings = await this.repository.getSiteSettings(site.id);
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
@@ -186,15 +187,24 @@ export class CommentsService {
 					pageUrl: input.pageUrl,
 				})
 			: undefined;
-		if (existingThread && visitor && pageInteractive) {
+		let thread = existingThread;
+		if (!thread && visitor && pageInteractive && pageRegistered) {
+			thread = await this.repository.ensurePageThreadForRegisteredPage({
+				siteId: site.id,
+				pageKey: input.pageKey,
+				pageTitle: input.pageTitle,
+				pageUrl: input.pageUrl,
+			});
+		}
+		if (thread && visitor && pageInteractive) {
 			await this.repository.recordPageView({
-				pageThreadId: existingThread.id,
+				pageThreadId: thread.id,
 				visitorId: visitor.id,
 				pageKey: input.pageKey,
 				userAgent: input.userAgent,
 			});
 		}
-		if (!existingThread && pageInteractive) {
+		if (!thread && pageInteractive && !pageRegistered) {
 			await this.repository.recordPendingPageView({
 				siteKey: site.siteKey,
 				pageKey: input.pageKey,
@@ -205,16 +215,16 @@ export class CommentsService {
 			});
 		}
 		const refreshedThread =
-			existingThread && pageInteractive
+			thread && pageInteractive
 				? await this.repository.getPageThread({
 						siteId: site.id,
 						pageKey: input.pageKey,
 					})
 				: undefined;
 		const commentBundle =
-			existingThread && visitor && pageInteractive
+			thread && visitor && pageInteractive
 				? await this.repository.listPublicComments({
-						pageThreadId: existingThread.id,
+						pageThreadId: thread.id,
 						sortBy: pagination.sortBy,
 						limit: pagination.limit,
 						offset: pagination.offset,
@@ -227,16 +237,13 @@ export class CommentsService {
 						viewerVoteMap: new Map<string, "up" | "down">(),
 					};
 		const pageFeedback =
-			existingThread && visitor && pageInteractive
-				? await this.repository.getViewerPageFeedback(
-						existingThread.id,
-						visitor.id,
-					)
+			thread && visitor && pageInteractive
+				? await this.repository.getViewerPageFeedback(thread.id, visitor.id)
 				: {
 						liked: false,
 					};
 		const captcha =
-			this.captchaService && existingThread && visitor && pageInteractive
+			this.captchaService && thread && visitor && pageInteractive
 				? await this.captchaService.getState({
 						siteKey: input.siteKey,
 						pageKey: input.pageKey,

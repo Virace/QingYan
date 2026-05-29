@@ -22,6 +22,22 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(
+	fixture: TestFixture,
+	siteId: number,
+	pageKey: string,
+	pageUrl: string,
+) {
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId,
+		pageKey,
+		pageUrl,
+		status: "active",
+	});
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -40,6 +56,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await seedActivePage(fixture, site.id, "post:welcome", "/posts/welcome/");
 
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
@@ -193,6 +210,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"lol_voice_collation.html",
+			"/lol_voice_collation.html",
+		);
 
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
@@ -317,6 +340,123 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 	});
 
+	it("records official PV for active registry pages without creating pending candidates", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/registered-bootstrap/",
+			pageUrl: "/posts/registered-bootstrap/",
+			status: "active",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Registered",
+			headers: {
+				referer: "http://localhost:4321/posts/registered-bootstrap/",
+				"user-agent": "registered-bootstrap-test",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			pagination: {
+				totalCount: 0,
+				rootCount: 0,
+			},
+			pageMetrics: {
+				pageViewCount: 1,
+			},
+			pageFeedback: {
+				likeCount: 0,
+				liked: false,
+			},
+		});
+		expect(response.json().thread).toBeUndefined();
+		expect(response.json().comments).toEqual([]);
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			siteId: site.id,
+			pageKey: "posts/registered-bootstrap/",
+			pageUrl: "/posts/registered-bootstrap/",
+			pageViewCount: 1,
+			pageLikeCount: 0,
+		});
+	});
+
+	it("deduplicates official PV for registered pages in the same visitor window", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/registered-dedupe/",
+			pageUrl: "/posts/registered-dedupe/",
+			status: "active",
+		});
+
+		const first = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Registered%20Dedupe",
+			headers: {
+				referer: "http://localhost:4321/posts/registered-dedupe/",
+				"user-agent": "registered-dedupe-test",
+			},
+		});
+		const visitorCookie = first.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		expect(first.statusCode).toBe(200);
+		expect(first.json().pageMetrics.pageViewCount).toBe(1);
+
+		const second = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Registered%20Dedupe",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			headers: {
+				referer: "http://localhost:4321/posts/registered-dedupe/",
+				"user-agent": "registered-dedupe-test",
+			},
+		});
+
+		expect(second.statusCode).toBe(200);
+		expect(second.json().pageMetrics.pageViewCount).toBe(1);
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]?.pageViewCount).toBe(1);
+	});
+
 	it("does not record official or pending page views for trashed registry pages", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -411,6 +551,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"post:metadata-display",
+			"/posts/metadata-display/",
+		);
 		await fixture.app.db
 			.update(siteSettings)
 			.set({
@@ -535,6 +681,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await seedActivePage(fixture, site.id, "post:gravatar", "/posts/gravatar/");
 
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
 		await systemSettings.upsert("avatar", "external.enabled", true);
@@ -675,6 +822,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"post:verified-badge",
+			"/posts/verified-badge/",
+		);
 
 		await fixture.app.db
 			.update(siteSettings)
@@ -847,6 +1000,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await seedActivePage(fixture, site.id, "post:always", "/post:always");
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:always",

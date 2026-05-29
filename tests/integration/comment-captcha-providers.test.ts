@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { captchaSessions, siteSettings } from "../../src/db/schema";
+import {
+	captchaSessions,
+	sitePageRegistry,
+	siteSettings,
+	sites,
+} from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -20,6 +25,24 @@ function jsonResponse(body: unknown, status = 200) {
 		headers: {
 			"content-type": "application/json",
 		},
+	});
+}
+
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
 	});
 }
 
@@ -56,6 +79,7 @@ describe("comment captcha providers", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:turnstile");
 
 		const state = await fixture.app.inject({
 			method: "GET",
@@ -160,6 +184,7 @@ describe("comment captcha providers", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:hcaptcha");
 
 		const state = await fixture.app.inject({
 			method: "GET",
@@ -235,6 +260,8 @@ describe("comment captcha providers", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:recaptcha");
+		await seedActivePage(fixture, "post:recaptcha-low-score");
 
 		const state = await fixture.app.inject({
 			method: "GET",
@@ -358,6 +385,7 @@ describe("comment captcha providers", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:geetest");
 
 		const state = await fixture.app.inject({
 			method: "GET",

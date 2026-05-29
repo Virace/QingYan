@@ -5,6 +5,7 @@ import {
 	captchaSessions,
 	comments,
 	pageThreads,
+	sitePageRegistry,
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
@@ -18,6 +19,24 @@ function refererFor(pageKey: string) {
 	};
 }
 
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -25,9 +44,34 @@ afterEach(async () => {
 });
 
 describe("POST /qingyan/api/comments/:commentId/vote", () => {
+	it("rejects votes for pages missing from the registry without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments/missing_registry_vote/vote",
+			headers: refererFor("post:missing-registry-vote"),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:missing-registry-vote",
+				choice: "up",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("casts one vote and blocks duplicate votes from the same visitor", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:vote");
 
 		const [site] = await fixture.app.db
 			.select()
@@ -114,6 +158,7 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:vote-captcha");
 
 		const [site] = await fixture.app.db
 			.select()

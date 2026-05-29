@@ -4,7 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { captchaSessions, siteSettings } from "../../src/db/schema";
+import {
+	captchaSessions,
+	sitePageRegistry,
+	siteSettings,
+	sites,
+} from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import {
 	getForcedTestCaptchaAnswer,
@@ -26,6 +31,24 @@ function readAppJsonl(logsDirectory: string): string {
 		path.join(logsDirectory, "app", `${today}.jsonl`),
 		"utf-8",
 	);
+}
+
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
 }
 
 afterEach(async () => {
@@ -90,6 +113,7 @@ describe("logging business events", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:logging-events");
 
 		const captchaState = await fixture.app.inject({
 			method: "GET",

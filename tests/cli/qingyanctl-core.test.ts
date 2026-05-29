@@ -7,7 +7,14 @@ import { describe, expect, it } from "vitest";
 import { runCli } from "../../src/cli/main";
 import type { CliRuntime } from "../../src/cli/runtime";
 import { createDatabaseClients } from "../../src/db/client";
-import { adminBootstrapState } from "../../src/db/schema";
+import {
+	adminBootstrapState,
+	pageThreads,
+	pendingPageCandidates,
+	pendingPageViewSessions,
+	sitePageRegistry,
+	sites,
+} from "../../src/db/schema";
 import {
 	createPasswordHash,
 	verifyPasswordHash,
@@ -193,5 +200,82 @@ describe("qingyanctl core commands", () => {
 		expect(result.exitCode).toBe(0);
 		expect(service.calls).toEqual(["start"]);
 		expect(result.output.stdout.join("\n")).toContain("服务已启动");
+	});
+
+	it("reconciles registered pending page candidates from the CLI", async () => {
+		const fixture = createRuntimeFixture();
+		try {
+			await fixture.db.insert(sites).values({
+				id: 1,
+				siteKey: "fangyuan",
+				name: "FangYuan",
+				allowedOriginsJson: JSON.stringify(["https://example.com"]),
+			});
+			await fixture.db.insert(sitePageRegistry).values({
+				siteId: 1,
+				pageKey: "posts/registered-pending/",
+				pageUrl: "/posts/registered-pending/",
+				status: "active",
+			});
+			await fixture.db.insert(pendingPageCandidates).values({
+				siteKey: "fangyuan",
+				pageKey: "posts/registered-pending/",
+				pageUrl: "/posts/registered-pending/",
+				status: "pending",
+				hitCount: 2,
+			});
+			await fixture.db.insert(pendingPageViewSessions).values([
+				{
+					siteKey: "fangyuan",
+					pageKey: "posts/registered-pending/",
+					fingerprint: "registered-pending:a",
+				},
+				{
+					siteKey: "fangyuan",
+					pageKey: "posts/registered-pending/",
+					fingerprint: "registered-pending:b",
+				},
+			]);
+			const service = new FakeService("running");
+
+			const dryRun = await runCli(
+				["page-registry", "reconcile-pending", "--site-key", "fangyuan"],
+				{
+					openRuntime: fixture.openRuntime,
+					service,
+				},
+			);
+			expect(dryRun.exitCode).toBe(0);
+			expect(dryRun.output.stdout.join("\n")).toContain("模式：dry-run");
+			expect(await fixture.db.select().from(pageThreads)).toEqual([]);
+			expect(service.calls).toEqual([]);
+
+			const applied = await runCli(
+				[
+					"page-registry",
+					"reconcile-pending",
+					"--site-key",
+					"fangyuan",
+					"--yes",
+				],
+				{
+					openRuntime: fixture.openRuntime,
+					service,
+				},
+			);
+
+			expect(applied.exitCode).toBe(0);
+			expect(applied.output.stdout.join("\n")).toContain("模式：apply");
+			expect(service.calls).toEqual(["status", "stop", "start"]);
+			const [thread] = await fixture.db.select().from(pageThreads);
+			expect(thread).toMatchObject({
+				pageKey: "posts/registered-pending/",
+				pageViewCount: 2,
+			});
+			const [candidate] = await fixture.db.select().from(pendingPageCandidates);
+			expect(candidate?.status).toBe("approved");
+		} finally {
+			fixture.cleanup();
+		}
 	});
 });

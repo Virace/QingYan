@@ -12,6 +12,24 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -19,6 +37,33 @@ afterEach(async () => {
 });
 
 describe("POST /qingyan/api/page-feedback/like", () => {
+	it("rejects likes for pages missing from the registry without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/posts/unregistered-like/",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/unregistered-like/",
+				pageTitle: "Unregistered Like",
+				pageUrl: "https://fangyuan.example.com/posts/unregistered-like/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("rejects likes for deleted registry pages without creating a page thread", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -63,6 +108,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 	it("likes a page once and blocks repeated likes from the same visitor", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:like");
 
 		const firstLike = await fixture.app.inject({
 			method: "POST",
@@ -118,6 +164,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 	it("creates page threads from Referer when legacy like payload identity is stale", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "lol_voice_collation.html");
 
 		const firstLike = await fixture.app.inject({
 			method: "POST",
@@ -151,6 +198,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:like-threshold");
 
 		const blockedLike = await fixture.app.inject({
 			method: "POST",

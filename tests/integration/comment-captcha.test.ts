@@ -19,6 +19,24 @@ function refererFor(pageKey: string) {
 	};
 }
 
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -61,6 +79,7 @@ describe("comment captcha", () => {
 	it("returns an idle state in threshold mode before the page threshold is hit", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:threshold-idle");
 
 		const response = await fixture.app.inject({
 			method: "GET",
@@ -83,6 +102,7 @@ describe("comment captcha", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:captcha");
 
 		const stateResponse = await fixture.app.inject({
 			method: "GET",
@@ -165,6 +185,7 @@ describe("comment captcha", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:captcha-refresh");
 
 		const initialState = await fixture.app.inject({
 			method: "GET",

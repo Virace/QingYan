@@ -20,6 +20,24 @@ function refererFor(pageKey: string) {
 	};
 }
 
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -27,6 +45,45 @@ afterEach(async () => {
 });
 
 describe("POST /qingyan/api/comments", () => {
+	it("rejects comments for pages missing from the registry without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: refererFor("posts/unregistered-comment/"),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/unregistered-comment/",
+				pageTitle: "Unregistered Comment",
+				pageUrl: "https://fangyuan.example.com/posts/unregistered-comment/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "must not create thread",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("rejects comments for trashed registry pages without creating a page thread", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -80,6 +137,7 @@ describe("POST /qingyan/api/comments", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
+		await seedActivePage(fixture, "post:dangerous-website");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -119,6 +177,7 @@ describe("POST /qingyan/api/comments", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:create-comment-no-captcha");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -157,6 +216,7 @@ describe("POST /qingyan/api/comments", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
+		await seedActivePage(fixture, "post:create-comment");
 
 		const blocked = await fixture.app.inject({
 			method: "POST",
@@ -280,6 +340,7 @@ describe("POST /qingyan/api/comments", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
+		await seedActivePage(fixture, "post:path-only-comment");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -333,6 +394,7 @@ describe("POST /qingyan/api/comments", () => {
 				},
 			}),
 		});
+		await seedActivePage(fixture, "post:request-metadata");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -410,6 +472,7 @@ describe("POST /qingyan/api/comments", () => {
 				collectUserAgent: false,
 			}),
 		});
+		await seedActivePage(fixture, "post:request-metadata-disabled");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -465,6 +528,7 @@ describe("POST /qingyan/api/comments", () => {
 				collectUserAgent: false,
 			}),
 		});
+		await seedActivePage(fixture, "post:runtime-metadata-disabled");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -521,6 +585,7 @@ describe("POST /qingyan/api/comments", () => {
 				},
 			}),
 		});
+		await seedActivePage(fixture, "post:missing-region-db");
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
 		await systemSettings.upsert("ipRegion", "enabled", true);
 		await systemSettings.upsert(
@@ -585,6 +650,7 @@ describe("POST /qingyan/api/comments", () => {
 				},
 			}),
 		});
+		await seedActivePage(fixture, "post:display-disabled-location");
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
 		await systemSettings.upsert(
 			"ipRegion",
@@ -641,6 +707,7 @@ describe("POST /qingyan/api/comments", () => {
 			captchaThresholdWindowSec: 60,
 			captchaThresholdMaxActions: 3,
 		});
+		await seedActivePage(fixture, "post:threshold-comment");
 
 		const first = await fixture.app.inject({
 			method: "POST",
@@ -719,6 +786,7 @@ describe("POST /qingyan/api/comments", () => {
 			autoBlacklistScope: "post",
 			autoBlacklistTtlSec: 1800,
 		});
+		await seedActivePage(fixture, "post:auto-blacklist");
 
 		const makePayload = (suffix: string) => ({
 			siteKey: "fangyuan",

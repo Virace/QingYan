@@ -6,6 +6,7 @@ import {
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
+	sites,
 } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -19,6 +20,61 @@ afterEach(async () => {
 });
 
 describe("admin page registry", () => {
+	it("does not list registered pages as pending unknown pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "posts/already-registered-pending/",
+			pageUrl: "/posts/already-registered-pending/",
+			status: "active",
+		});
+		await fixture.app.db.insert(pendingPageCandidates).values({
+			siteKey: "fangyuan",
+			pageKey: "posts/already-registered-pending/",
+			pageUrl: "/posts/already-registered-pending/",
+			hitCount: 2,
+			status: "pending",
+		});
+		await fixture.app.db.insert(pendingPageCandidates).values({
+			siteKey: "fangyuan",
+			pageKey: "posts/actually-unknown/",
+			pageUrl: "/posts/actually-unknown/",
+			hitCount: 1,
+			status: "pending",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/page-registry/pending?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			items: [
+				{
+					siteKey: "fangyuan",
+					pageKey: "posts/actually-unknown/",
+					status: "pending",
+				},
+			],
+			pagination: {
+				totalCount: 1,
+			},
+		});
+	});
+
 	it("lists, rejects and ignores pending page candidates", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

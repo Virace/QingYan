@@ -19,6 +19,7 @@ import { FullBackupService } from "../modules/backup/full-backup-service";
 import { RestoreService } from "../modules/backup/restore-service";
 import { GitHubReleaseClient } from "../modules/ops/github-release-client";
 import { OpsStatusService } from "../modules/ops/ops-status-service";
+import { PageRegistryService } from "../modules/page-registry/service";
 import {
 	type UpdateCheckService,
 	type UpdateCheckState,
@@ -80,6 +81,17 @@ function flagString(parsed: ParsedArgs, name: string): string | undefined {
 
 function hasFlag(parsed: ParsedArgs, name: string): boolean {
 	return parsed.flags.get(name) === true;
+}
+
+function flagStrings(parsed: ParsedArgs, name: string): string[] {
+	const value = parsed.flags.get(name);
+	if (typeof value !== "string") {
+		return [];
+	}
+	return value
+		.split(",")
+		.map((item) => item.trim())
+		.filter(Boolean);
 }
 
 function publicAdminUrl(publicBaseUrl: string, consolePath: string): string {
@@ -407,6 +419,44 @@ async function commandRestore(
 	throw new Error("RESTORE_APPLY_NOT_IMPLEMENTED");
 }
 
+async function commandPageRegistry(
+	parsed: ParsedArgs,
+	deps: Required<CliDeps>,
+): Promise<number> {
+	const subcommand = parsed.positionals[1];
+	if (subcommand !== "reconcile-pending") {
+		throw new Error("Usage: qyctl page-registry reconcile-pending");
+	}
+	const siteKey = flagString(parsed, "site-key");
+	const pageKeys = flagStrings(parsed, "page-key");
+	const apply = hasFlag(parsed, "yes");
+	await withRuntime(parsed, deps, async (runtime) => {
+		const service = new PageRegistryService(runtime.db);
+		const input = {
+			siteKey,
+			pageKeys: pageKeys.length > 0 ? pageKeys : undefined,
+		};
+		if (!apply) {
+			const summary = await service.reconcileRegisteredPendingCandidates({
+				...input,
+				dryRun: true,
+			});
+			deps.output.stdout.push("已登记 pending 页面修复");
+			deps.output.stdout.push("模式：dry-run");
+			deps.output.stdout.push(JSON.stringify(summary, null, 2));
+			deps.output.stdout.push("确认无误后追加 --yes 执行写入。");
+			return;
+		}
+		await deps.service.runWithStoppedService(async () => {
+			const summary = await service.reconcileRegisteredPendingCandidates(input);
+			deps.output.stdout.push("已登记 pending 页面修复");
+			deps.output.stdout.push("模式：apply");
+			deps.output.stdout.push(JSON.stringify(summary, null, 2));
+		});
+	});
+	return 0;
+}
+
 function formatUpdateCheckState(state: UpdateCheckState): string {
 	return {
 		not_checked: "尚未检查",
@@ -517,6 +567,8 @@ export async function runCli(
 			exitCode = await commandBackup(parsed, fullDeps);
 		} else if (command === "restore") {
 			exitCode = await commandRestore(parsed, fullDeps);
+		} else if (command === "page-registry") {
+			exitCode = await commandPageRegistry(parsed, fullDeps);
 		} else if (command === "update") {
 			exitCode = await commandUpdate(parsed, fullDeps);
 		} else {

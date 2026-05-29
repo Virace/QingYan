@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 import type { AppConfig } from "../../src/config/types";
-import { siteSettings } from "../../src/db/schema";
+import { sitePageRegistry, siteSettings, sites } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -48,6 +49,24 @@ function refererFor(pageKey: string, origin = "http://localhost:4321") {
 	};
 }
 
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey,
+		pageUrl: `/${pageKey}`,
+		status: "active",
+	});
+}
+
 describe("public origin guard", () => {
 	it("answers CORS preflight for a configured frontend origin", async () => {
 		const fixture = await createTestApp({
@@ -84,6 +103,7 @@ describe("public origin guard", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
+		await seedActivePage(fixture, "post:allowed-origin");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -106,6 +126,8 @@ describe("public origin guard", () => {
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "never",
 		});
+		await seedActivePage(fixture, "post:old-origin");
+		await seedActivePage(fixture, "post:new-origin");
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
 		const update = await fixture.app.inject({
@@ -196,6 +218,7 @@ describe("public origin guard", () => {
 			mutateConfig: allowMissingOrigin,
 		});
 		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:missing-origin-opt-out");
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -225,6 +248,7 @@ describe("public origin guard", () => {
 			"publicOriginGuard.allowMissingOrigin",
 			true,
 		);
+		await seedActivePage(fixture, "post:runtime-missing-origin");
 
 		const response = await fixture.app.inject({
 			method: "POST",

@@ -10,6 +10,20 @@ import {
 } from "../../db/schema";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 
+type ReconcileRegisteredPendingCandidatesInput = {
+	siteKey?: string;
+	pageKeys?: string[];
+	dryRun?: boolean;
+};
+
+type ReconcileRegisteredPendingCandidatesSummary = {
+	matchedCandidates: number;
+	createdThreads: number;
+	reusedThreads: number;
+	mergedPendingPv: number;
+	approvedCandidates: number;
+};
+
 export class PageRegistryService {
 	public constructor(private readonly db: AppDatabase) {}
 
@@ -21,6 +35,7 @@ export class PageRegistryService {
 		offset: number;
 	}) {
 		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const status = input.status ?? "pending";
 		const rows = await this.db
 			.select()
 			.from(pendingPageCandidates)
@@ -29,9 +44,7 @@ export class PageRegistryService {
 					input.siteKey
 						? eq(pendingPageCandidates.siteKey, input.siteKey)
 						: undefined,
-					input.status
-						? eq(pendingPageCandidates.status, input.status)
-						: undefined,
+					eq(pendingPageCandidates.status, status),
 					searchValue
 						? or(
 								like(pendingPageCandidates.pageKey, searchValue),
@@ -41,11 +54,138 @@ export class PageRegistryService {
 				),
 			)
 			.orderBy(desc(pendingPageCandidates.updatedAt));
+		const filteredRows =
+			status === "pending"
+				? await this.excludeRegisteredPendingCandidates(rows)
+				: rows;
 
 		return {
-			items: rows.slice(input.offset, input.offset + input.limit),
-			totalCount: rows.length,
+			items: filteredRows.slice(input.offset, input.offset + input.limit),
+			totalCount: filteredRows.length,
 		};
+	}
+
+	public async reconcileRegisteredPendingCandidates(
+		input: ReconcileRegisteredPendingCandidatesInput = {},
+	): Promise<ReconcileRegisteredPendingCandidatesSummary> {
+		const emptySummary: ReconcileRegisteredPendingCandidatesSummary = {
+			matchedCandidates: 0,
+			createdThreads: 0,
+			reusedThreads: 0,
+			mergedPendingPv: 0,
+			approvedCandidates: 0,
+		};
+		if (input.pageKeys?.length === 0) {
+			return emptySummary;
+		}
+
+		const pageKeyFilter = input.pageKeys
+			? or(
+					...input.pageKeys.map((pageKey) =>
+						eq(pendingPageCandidates.pageKey, pageKey),
+					),
+				)
+			: undefined;
+		const rows = await this.db
+			.select({
+				candidateId: pendingPageCandidates.id,
+				siteId: sites.id,
+				siteKey: sites.siteKey,
+				pageKey: pendingPageCandidates.pageKey,
+				candidatePageUrl: pendingPageCandidates.pageUrl,
+				registryPageUrl: sitePageRegistry.pageUrl,
+			})
+			.from(pendingPageCandidates)
+			.innerJoin(sites, eq(sites.siteKey, pendingPageCandidates.siteKey))
+			.innerJoin(
+				sitePageRegistry,
+				and(
+					eq(sitePageRegistry.siteId, sites.id),
+					eq(sitePageRegistry.pageKey, pendingPageCandidates.pageKey),
+				),
+			)
+			.where(
+				and(
+					eq(pendingPageCandidates.status, "pending"),
+					input.siteKey
+						? eq(pendingPageCandidates.siteKey, input.siteKey)
+						: undefined,
+					pageKeyFilter,
+					or(
+						eq(sitePageRegistry.status, "active"),
+						eq(sitePageRegistry.status, "stale"),
+					),
+				),
+			);
+
+		const summary = { ...emptySummary };
+		for (const row of rows) {
+			summary.matchedCandidates += 1;
+
+			const [pendingCountRow] = await this.db
+				.select({ value: sql<number>`COUNT(*)` })
+				.from(pendingPageViewSessions)
+				.where(
+					and(
+						eq(pendingPageViewSessions.siteKey, row.siteKey),
+						eq(pendingPageViewSessions.pageKey, row.pageKey),
+					),
+				);
+			const mergedPageViews = Number(pendingCountRow?.value ?? 0);
+			const [thread] = await this.db
+				.select()
+				.from(pageThreads)
+				.where(
+					and(
+						eq(pageThreads.siteId, row.siteId),
+						eq(pageThreads.pageKey, row.pageKey),
+					),
+				)
+				.limit(1);
+
+			if (thread) {
+				summary.reusedThreads += 1;
+			} else {
+				summary.createdThreads += 1;
+			}
+			summary.mergedPendingPv += mergedPageViews;
+			summary.approvedCandidates += 1;
+
+			if (input.dryRun) {
+				continue;
+			}
+
+			const nowIso = new Date().toISOString();
+			const pageUrl = row.registryPageUrl || row.candidatePageUrl;
+			if (thread) {
+				await this.db
+					.update(pageThreads)
+					.set({
+						pageUrl,
+						pageViewCount: sql`${pageThreads.pageViewCount} + ${mergedPageViews}`,
+						updatedAt: nowIso,
+					})
+					.where(eq(pageThreads.id, thread.id));
+			} else {
+				await this.db.insert(pageThreads).values({
+					siteId: row.siteId,
+					pageKey: row.pageKey,
+					pageUrl,
+					pageViewCount: mergedPageViews,
+					updatedAt: nowIso,
+				});
+			}
+
+			await this.db
+				.update(pendingPageCandidates)
+				.set({
+					status: "approved",
+					updatedAt: nowIso,
+				})
+				.where(eq(pendingPageCandidates.id, row.candidateId));
+		}
+
+		return summary;
 	}
 
 	public async approvePendingCandidate(input: {
@@ -309,6 +449,33 @@ export class PageRegistryService {
 			);
 		}
 		return candidate;
+	}
+
+	private async excludeRegisteredPendingCandidates(
+		rows: Array<typeof pendingPageCandidates.$inferSelect>,
+	) {
+		const filteredRows: Array<typeof pendingPageCandidates.$inferSelect> = [];
+		for (const row of rows) {
+			const [registeredPage] = await this.db
+				.select({ id: sitePageRegistry.id })
+				.from(sitePageRegistry)
+				.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
+				.where(
+					and(
+						eq(sites.siteKey, row.siteKey),
+						eq(sitePageRegistry.pageKey, row.pageKey),
+						or(
+							eq(sitePageRegistry.status, "active"),
+							eq(sitePageRegistry.status, "stale"),
+						),
+					),
+				)
+				.limit(1);
+			if (!registeredPage) {
+				filteredRows.push(row);
+			}
+		}
+		return filteredRows;
 	}
 
 	private async setPageLifecycle(
