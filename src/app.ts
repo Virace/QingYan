@@ -43,6 +43,7 @@ interface BuildAppOptions {
 	pageSourceFetchText?: typeof fetchPageSourceText;
 	pageTitleFetchHtml?: (
 		url: string,
+		options: { timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
 }

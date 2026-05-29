@@ -145,6 +145,91 @@ describe("admin pages", () => {
 		});
 	});
 
+	it("sorts page management rows by whitelisted fields", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values([
+			{
+				siteId: site.id,
+				pageKey: "post:beta",
+				pageTitle: "Beta",
+				pageUrl: "/posts/beta/",
+				commentCount: 2,
+			},
+			{
+				siteId: site.id,
+				pageKey: "post:alpha",
+				pageTitle: "Alpha",
+				pageUrl: "/posts/alpha/",
+				commentCount: 5,
+			},
+		]);
+		await fixture.app.db.insert(sitePageRegistry).values([
+			{
+				siteId: site.id,
+				pageKey: "post:beta",
+				pageUrl: "/posts/beta/",
+				title: "Beta",
+				status: "active",
+				updatedAt: "2026-05-30T00:00:01.000Z",
+			},
+			{
+				siteId: site.id,
+				pageKey: "post:alpha",
+				pageUrl: "/posts/alpha/",
+				title: "Alpha",
+				status: "active",
+				updatedAt: "2026-05-30T00:00:02.000Z",
+			},
+		]);
+
+		const byTitle = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/pages?siteKey=fangyuan&sortBy=title&sortOrder=asc&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(byTitle.statusCode).toBe(200);
+		expect(
+			(byTitle.json() as { items: Array<{ pageTitle: string }> }).items.map(
+				(item) => item.pageTitle,
+			),
+		).toEqual(["Alpha", "Beta"]);
+
+		const byCommentCount = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/pages?siteKey=fangyuan&sortBy=commentCount&sortOrder=desc&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(byCommentCount.statusCode).toBe(200);
+		expect(
+			(byCommentCount.json() as { items: Array<{ commentCount: number }> })
+				.items[0].commentCount,
+		).toBe(5);
+
+		const invalidSort = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/pages?siteKey=fangyuan&sortBy=__proto__&sortOrder=desc",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(invalidSort.statusCode).toBe(400);
+	});
+
 	it("filters page status and moves pages through trash restore and deleted lifecycle", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

@@ -364,6 +364,7 @@ CREATE TABLE `maintenance_jobs` (
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`max_attempts` integer DEFAULT 1 NOT NULL,
 	`retry_delay_sec` integer DEFAULT 0 NOT NULL,
+	`priority` integer DEFAULT 0 NOT NULL,
 	`concurrency_key` text,
 	`last_heartbeat_at` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,

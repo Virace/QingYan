@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
 
-import { and, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	inArray,
+	isNull,
+	lte,
+	or,
+	sql,
+} from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import { maintenanceJobs } from "../../db/schema";
@@ -18,6 +28,21 @@ export type MaintenanceJobStatus =
 	| "succeeded"
 	| "failed"
 	| "cancelled";
+export type MaintenanceWaitingReason =
+	| "ready_for_runner"
+	| "delayed_until_run_after"
+	| "global_concurrency_limit"
+	| "type_concurrency_limit"
+	| "concurrency_key_blocked"
+	| "retry_wait"
+	| "terminal";
+
+export interface MaintenanceQueueState {
+	waitingReason: MaintenanceWaitingReason;
+	waitingDescription: string;
+	blockedByJobId?: string;
+	readyAt: string | null;
+}
 
 export interface MaintenanceJobRecord {
 	id: string;
@@ -32,6 +57,7 @@ export interface MaintenanceJobRecord {
 	attempts: number;
 	maxAttempts: number;
 	retryDelaySec: number;
+	priority: number;
 	concurrencyKey: string | null;
 	lastHeartbeatAt: string | null;
 	createdAt: string;
@@ -71,6 +97,7 @@ function serialize(
 		attempts: row.attempts,
 		maxAttempts: row.maxAttempts,
 		retryDelaySec: row.retryDelaySec,
+		priority: row.priority,
 		concurrencyKey: row.concurrencyKey,
 		lastHeartbeatAt: row.lastHeartbeatAt,
 		createdAt: row.createdAt,
@@ -104,6 +131,7 @@ export class MaintenanceJobRepository {
 			runAfter,
 			maxAttempts: input.maxAttempts ?? 1,
 			retryDelaySec: input.retryDelaySec ?? 0,
+			priority: 0,
 			concurrencyKey: input.concurrencyKey ?? null,
 			createdAt: timestamp,
 			updatedAt: timestamp,
@@ -135,6 +163,35 @@ export class MaintenanceJobRepository {
 			.orderBy(desc(maintenanceJobs.createdAt))
 			.limit(limit);
 		return rows.map(serialize);
+	}
+
+	public async listForTaskCenter(input: {
+		siteKey?: string;
+		type?: MaintenanceJobType;
+		status?: MaintenanceJobStatus;
+		limit: number;
+		offset: number;
+	}) {
+		const whereCondition = and(
+			input.siteKey ? eq(maintenanceJobs.siteKey, input.siteKey) : undefined,
+			input.type ? eq(maintenanceJobs.type, input.type) : undefined,
+			input.status ? eq(maintenanceJobs.status, input.status) : undefined,
+		);
+		const rows = await this.db
+			.select()
+			.from(maintenanceJobs)
+			.where(whereCondition)
+			.orderBy(desc(maintenanceJobs.createdAt))
+			.limit(input.limit)
+			.offset(input.offset);
+		const [total] = await this.db
+			.select({ value: count() })
+			.from(maintenanceJobs)
+			.where(whereCondition);
+		return {
+			items: rows.map(serialize),
+			totalCount: Number(total?.value ?? 0),
+		};
 	}
 
 	public async listRunnable(options: RunnableJobOptions = {}) {
@@ -170,7 +227,12 @@ export class MaintenanceJobRepository {
 					),
 				),
 			)
-			.orderBy(maintenanceJobs.createdAt)
+			.orderBy(
+				desc(maintenanceJobs.priority),
+				sql`CASE WHEN ${maintenanceJobs.runAfter} IS NULL THEN 1 ELSE 0 END`,
+				maintenanceJobs.runAfter,
+				maintenanceJobs.createdAt,
+			)
 			.limit(limit);
 
 		const selected: MaintenanceJobRecord[] = [];
@@ -189,6 +251,103 @@ export class MaintenanceJobRepository {
 			selected.push(job);
 		}
 		return selected;
+	}
+
+	public async describeQueueState(
+		job: MaintenanceJobRecord,
+		options: RunnableJobOptions = {},
+	): Promise<MaintenanceQueueState> {
+		const now = options.nowIso ?? nowIso();
+		if (["succeeded", "failed", "cancelled"].includes(job.status)) {
+			return {
+				waitingReason: "terminal",
+				waitingDescription: "任务已经结束。",
+				readyAt: null,
+			};
+		}
+		if (job.runAfter && job.runAfter > now) {
+			return {
+				waitingReason:
+					job.status === "retrying" ? "retry_wait" : "delayed_until_run_after",
+				waitingDescription:
+					job.status === "retrying"
+						? `任务等待重试，下一次可执行时间为 ${job.runAfter}。`
+						: `任务设置了延迟执行，预计 ${job.runAfter} 后可运行。`,
+				readyAt: job.runAfter,
+			};
+		}
+		const running = await this.db
+			.select()
+			.from(maintenanceJobs)
+			.where(eq(maintenanceJobs.status, "running"));
+		const maxConcurrentTotal = options.maxConcurrentTotal ?? 1;
+		if (running.length >= maxConcurrentTotal) {
+			return {
+				waitingReason: "global_concurrency_limit",
+				waitingDescription: "全局运行任务数已达到上限，任务正在排队。",
+				readyAt: null,
+			};
+		}
+		const typeLimit = options.maxConcurrentByType?.[job.type];
+		const runningSameType = running.filter((row) => row.type === job.type);
+		if (typeLimit !== undefined && runningSameType.length >= typeLimit) {
+			return {
+				waitingReason: "type_concurrency_limit",
+				waitingDescription: "同类型运行任务数已达到上限，任务正在排队。",
+				readyAt: null,
+			};
+		}
+		if (job.concurrencyKey) {
+			const blocking = running.find(
+				(row) => row.concurrencyKey === job.concurrencyKey,
+			);
+			if (blocking) {
+				return {
+					waitingReason: "concurrency_key_blocked",
+					waitingDescription: "同一互斥键已有任务运行，当前任务必须等待。",
+					blockedByJobId: blocking.id,
+					readyAt: null,
+				};
+			}
+		}
+		return {
+			waitingReason: "ready_for_runner",
+			waitingDescription: "任务已满足运行条件，正在等待 runner 拉取。",
+			readyAt: now,
+		};
+	}
+
+	public async runNow(id: string) {
+		const timestamp = nowIso();
+		const job = await this.getRequired(id);
+		if (!["delayed", "retrying", "queued"].includes(job.status)) {
+			return job;
+		}
+		await this.db
+			.update(maintenanceJobs)
+			.set({
+				status: "queued",
+				runAfter: null,
+				updatedAt: timestamp,
+			})
+			.where(eq(maintenanceJobs.id, id));
+		return this.getRequired(id);
+	}
+
+	public async prioritize(id: string) {
+		const timestamp = nowIso();
+		const job = await this.getRequired(id);
+		if (!["queued", "delayed", "retrying"].includes(job.status)) {
+			return job;
+		}
+		await this.db
+			.update(maintenanceJobs)
+			.set({
+				priority: job.priority + 1,
+				updatedAt: timestamp,
+			})
+			.where(eq(maintenanceJobs.id, id));
+		return this.getRequired(id);
 	}
 
 	public async hasActiveJob(input?: {

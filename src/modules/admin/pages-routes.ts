@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { PageRegistryService } from "../page-registry/service";
 import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
 import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
-import { InvalidRequestError } from "../shared/errors";
+import { AppError, InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import {
@@ -33,9 +33,26 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 		{
 			fetchHtml:
 				fastify.pageTitleFetchHtml ??
-				(async (url) => {
-					const response = await fetch(url);
-					return { status: response.status, text: await response.text() };
+				(async (url, options) => {
+					const controller = new AbortController();
+					const timeout = setTimeout(
+						() => controller.abort(),
+						options.timeoutMs,
+					);
+					try {
+						const response = await fetch(url, { signal: controller.signal });
+						const text = await response.text();
+						if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
+							throw new AppError(
+								413,
+								"PAGE_TITLE_HTML_TOO_LARGE",
+								"页面 HTML 内容超过大小限制。",
+							);
+						}
+						return { status: response.status, text };
+					} finally {
+						clearTimeout(timeout);
+					}
 				}),
 		},
 	);

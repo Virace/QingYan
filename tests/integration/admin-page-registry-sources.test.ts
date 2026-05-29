@@ -214,4 +214,80 @@ describe("admin page registry sources", () => {
 		});
 		expect(listResponse.json()).toMatchObject({ items: [] });
 	});
+
+	it("stores execution options on page source refresh jobs", async () => {
+		const fixture = await createTestApp({
+			pageSourceFetchText: async () => "<urlset />",
+		});
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const sourceResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/sources",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				sourceType: "sitemap",
+				sourceUrl: "http://localhost:4321/sitemap.xml",
+				enabled: true,
+				mode: "append",
+			},
+		});
+		const sourceId = sourceResponse.json().source.id as number;
+
+		const singleResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/page-registry/sources/${sourceId}/refresh`,
+			...withAdminWriteAuth(admin),
+			payload: {
+				timeoutMs: 12_000,
+				maxBytes: 1_048_576,
+				runAfter: "2099-01-01T00:00:00.000Z",
+				maxAttempts: 4,
+				retryDelaySec: 120,
+			},
+		});
+
+		expect(singleResponse.statusCode).toBe(200);
+		expect(singleResponse.json().job).toMatchObject({
+			status: "delayed",
+			runAfter: "2099-01-01T00:00:00.000Z",
+			maxAttempts: 4,
+			retryDelaySec: 120,
+			scope: {
+				timeoutMs: 12_000,
+				maxBytes: 1_048_576,
+			},
+		});
+
+		const allFixture = await createTestApp({
+			pageSourceFetchText: async () => "<urlset />",
+		});
+		cleanups.push(allFixture.cleanup);
+		const allAdmin = await loginAsAdmin(allFixture.app);
+		const allResponse = await allFixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/refresh",
+			...withAdminWriteAuth(allAdmin),
+			payload: {
+				siteKey: "fangyuan",
+				timeoutMs: 15_000,
+				maxBytes: 2_097_152,
+				maxAttempts: 3,
+				retryDelaySec: 90,
+			},
+		});
+
+		expect(allResponse.statusCode).toBe(200);
+		expect(allResponse.json().job).toMatchObject({
+			maxAttempts: 3,
+			retryDelaySec: 90,
+			scope: {
+				siteKey: "fangyuan",
+				timeoutMs: 15_000,
+				maxBytes: 2_097_152,
+			},
+		});
+	});
 });

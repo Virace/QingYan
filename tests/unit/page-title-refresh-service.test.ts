@@ -74,7 +74,10 @@ async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
 
 function createService(
 	fixture: ReturnType<typeof createFixture>,
-	fetchHtml: (url: string) => Promise<{ status: number; text: string }>,
+	fetchHtml: (
+		url: string,
+		options: { timeoutMs: number; maxBytes: number },
+	) => Promise<{ status: number; text: string }>,
 ) {
 	const jobs = new MaintenanceJobRepository(fixture.db);
 	return {
@@ -243,6 +246,8 @@ describe("PageMetadataRefreshService", () => {
 			runAfter,
 			maxAttempts: 3,
 			retryDelaySec: 90,
+			timeoutMs: 4500,
+			maxBytes: 131072,
 		});
 
 		const [row] = await fixture.db
@@ -258,5 +263,34 @@ describe("PageMetadataRefreshService", () => {
 			retryDelaySec: 90,
 			concurrencyKey: "page-title:fangyuan",
 		});
+		expect(JSON.parse(row.scopeJson)).toMatchObject({
+			timeoutMs: 4500,
+			maxBytes: 131072,
+		});
+	});
+
+	it("passes task timeout and max bytes to HTML fetch", async () => {
+		const fixture = createFixture();
+		await seedSiteAndPages(fixture);
+		const seenOptions: Array<{ timeoutMs: number; maxBytes: number }> = [];
+		const { service } = createService(fixture, async (_url, options) => {
+			seenOptions.push(options);
+			return {
+				status: 200,
+				text: "<title>Fresh</title>",
+			};
+		});
+
+		await service.createRefreshJob({
+			siteKey: "fangyuan",
+			pageKeys: ["posts/ok/"],
+			forceTitle: true,
+			trigger: "manual",
+			timeoutMs: 4500,
+			maxBytes: 131072,
+		});
+		await service.runNextQueuedJob();
+
+		expect(seenOptions).toEqual([{ timeoutMs: 4500, maxBytes: 131072 }]);
 	});
 });

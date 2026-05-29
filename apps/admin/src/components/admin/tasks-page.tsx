@@ -1,10 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
+import { useState } from "react";
 
 import {
 	createPageTitleRefreshTask,
 	listTasks,
-	type MaintenanceJob,
+	prioritizeTask,
+	runTaskNow,
+	type MaintenanceJobStatus,
 } from "@/api/ops";
 import { refreshPageRegistrySources } from "@/api/admin";
 import { Button } from "@/components/ui/button";
@@ -17,45 +20,60 @@ import {
 } from "@/components/ui/card";
 
 import { EmptyState } from "./admin-ui";
+import { inputClass } from "./admin-ui";
+import { IpMaintenanceTaskPanel } from "./ip-maintenance-task-panel";
+import { PageSourceTaskPanel } from "./page-source-task-panel";
+import {
+	defaultTaskExecutionOptions,
+	TaskExecutionOptionsFields,
+	toTaskExecutionOptions,
+} from "./task-execution-options";
+import { TaskSummary } from "./task-summary";
 
-function taskLabel(type: MaintenanceJob["type"]) {
-	const labels: Record<MaintenanceJob["type"], string> = {
-		ip_region_update: "IP 库更新",
-		comment_ip_refresh: "评论 IP 刷新",
-		page_source_refresh: "页面来源刷新",
-		page_metadata_refresh: "页面 Title 刷新",
-	};
-	return labels[type];
-}
+const taskTypes = [
+	["", "全部类型"],
+	["page_source_refresh", "页面来源刷新"],
+	["page_metadata_refresh", "页面 Title 刷新"],
+	["comment_ip_refresh", "评论 IP 刷新"],
+	["ip_region_update", "IP 库更新"],
+] as const;
 
-function statusLabel(status: MaintenanceJob["status"]) {
-	const labels: Record<MaintenanceJob["status"], string> = {
-		queued: "等待中",
-		delayed: "延迟中",
-		running: "运行中",
-		retrying: "等待重试",
-		succeeded: "已完成",
-		failed: "失败",
-		cancelled: "已取消",
-	};
-	return labels[status];
-}
+const taskStatuses: Array<[MaintenanceJobStatus | "", string]> = [
+	["", "全部状态"],
+	["queued", "排队"],
+	["delayed", "延迟"],
+	["running", "运行中"],
+	["retrying", "等待重试"],
+	["succeeded", "成功"],
+	["failed", "失败"],
+	["cancelled", "取消"],
+];
 
-function JsonBlock({ value }: { value: unknown }) {
-	if (!value) {
-		return null;
-	}
-	return (
-		<pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-xs">
-			{JSON.stringify(value, null, 2)}
-		</pre>
-	);
-}
+const pageSize = 20;
 
 export function TasksPage({ siteKey }: { siteKey: string }) {
+	const [typeFilter, setTypeFilter] = useState("");
+	const [statusFilter, setStatusFilter] = useState<MaintenanceJobStatus | "">(
+		"",
+	);
+	const [page, setPage] = useState(0);
+	const [executionOptions, setExecutionOptions] = useState(
+		defaultTaskExecutionOptions({
+			batchSize: "50",
+			timeoutMs: "8000",
+			maxBytes: "524288",
+		}),
+	);
 	const tasksQuery = useQuery({
-		queryKey: ["admin", "tasks", siteKey],
-		queryFn: () => listTasks({ siteKey, limit: 30 }),
+		queryKey: ["admin", "tasks", siteKey, typeFilter, statusFilter, page],
+		queryFn: () =>
+			listTasks({
+				siteKey,
+				type: typeFilter || undefined,
+				status: statusFilter || undefined,
+				limit: pageSize,
+				offset: page * pageSize,
+			}),
 		refetchInterval: (query) =>
 			query.state.data?.items.some((job) =>
 				["queued", "delayed", "running", "retrying"].includes(job.status),
@@ -71,10 +89,29 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		mutationFn: createPageTitleRefreshTask,
 		onSuccess: () => void tasksQuery.refetch(),
 	});
+	const runNowMutation = useMutation({
+		mutationFn: runTaskNow,
+		onSuccess: () => void tasksQuery.refetch(),
+	});
+	const prioritizeMutation = useMutation({
+		mutationFn: prioritizeTask,
+		onSuccess: () => void tasksQuery.refetch(),
+	});
 	const activeTasks =
 		tasksQuery.data?.items.filter((job) =>
 			["queued", "delayed", "running", "retrying"].includes(job.status),
 		) ?? [];
+	const totalCount = tasksQuery.data?.totalCount ?? 0;
+	const hasPrevious = page > 0;
+	const hasNext = (page + 1) * pageSize < totalCount;
+	const updateTypeFilter = (value: string) => {
+		setTypeFilter(value);
+		setPage(0);
+	};
+	const updateStatusFilter = (value: MaintenanceJobStatus | "") => {
+		setStatusFilter(value);
+		setPage(0);
+	};
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -90,7 +127,12 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 						type="button"
 						variant="outline"
 						disabled={!siteKey || refreshSourcesMutation.isPending}
-						onClick={() => refreshSourcesMutation.mutate({ siteKey })}
+						onClick={() =>
+							refreshSourcesMutation.mutate({
+								siteKey,
+								...toTaskExecutionOptions(executionOptions),
+							})
+						}
 					>
 						<RefreshCwIcon data-icon="inline-start" />
 						刷新当前站点来源
@@ -103,6 +145,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 							refreshMissingTitleMutation.mutate({
 								siteKey,
 								onlyMissingTitle: true,
+								...toTaskExecutionOptions(executionOptions),
 							})
 						}
 					>
@@ -121,6 +164,15 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 				</CardContent>
 			</Card>
 
+			<TaskExecutionOptionsFields
+				value={executionOptions}
+				onChange={setExecutionOptions}
+			/>
+
+			<PageSourceTaskPanel siteKey={siteKey} />
+
+			<IpMaintenanceTaskPanel siteKey={siteKey} />
+
 			<Card>
 				<CardHeader>
 					<CardTitle className="text-lg">当前任务</CardTitle>
@@ -128,14 +180,36 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 				</CardHeader>
 				<CardContent className="grid gap-3">
 					{activeTasks.map((job) => (
-						<div key={job.id} className="rounded-md border p-3 text-sm">
-							<p className="font-medium">
-								{taskLabel(job.type)} / {statusLabel(job.status)}
-							</p>
-							<p className="mt-1 text-xs text-muted-foreground">
-								{job.id} / {job.updatedAt}
-							</p>
-							<JsonBlock value={job.progress} />
+						<div key={job.id} className="grid gap-2">
+							<TaskSummary job={job} />
+							{["queued", "delayed", "retrying"].includes(job.status) ? (
+								<div className="flex flex-wrap gap-2">
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										disabled={runNowMutation.isPending}
+										onClick={() => runNowMutation.mutate(job.id)}
+									>
+										立即执行
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										disabled={prioritizeMutation.isPending}
+										onClick={() => prioritizeMutation.mutate(job.id)}
+									>
+										提高优先级
+									</Button>
+									{job.queueState.waitingReason ===
+									"concurrency_key_blocked" ? (
+										<p className="self-center text-xs text-muted-foreground">
+											提高优先级不会绕过同一互斥键的运行限制。
+										</p>
+									) : null}
+								</div>
+							) : null}
 						</div>
 					))}
 					{activeTasks.length === 0 ? <EmptyState text="暂无当前任务" /> : null}
@@ -148,21 +222,63 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 					<CardDescription>最近创建或更新的维护任务。</CardDescription>
 				</CardHeader>
 				<CardContent className="grid gap-3">
+					<div className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">类型</span>
+							<select
+								className={inputClass}
+								value={typeFilter}
+								onChange={(event) => updateTypeFilter(event.target.value)}
+							>
+								{taskTypes.map(([value, label]) => (
+									<option key={value} value={value}>
+										{label}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className="grid gap-1 text-sm">
+							<span className="text-muted-foreground">状态</span>
+							<select
+								className={inputClass}
+								value={statusFilter}
+								onChange={(event) =>
+									updateStatusFilter(
+										event.target.value as MaintenanceJobStatus | "",
+									)
+								}
+							>
+								{taskStatuses.map(([value, label]) => (
+									<option key={value} value={value}>
+										{label}
+									</option>
+								))}
+							</select>
+						</label>
+						<Button
+							type="button"
+							variant="outline"
+							className="self-end"
+							disabled={!hasPrevious}
+							onClick={() => setPage((current) => Math.max(0, current - 1))}
+						>
+							上一页
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							className="self-end"
+							disabled={!hasNext}
+							onClick={() => setPage((current) => current + 1)}
+						>
+							下一页
+						</Button>
+					</div>
+					<p className="text-xs text-muted-foreground">
+						第 {page + 1} 页 / 共 {totalCount} 个任务
+					</p>
 					{tasksQuery.data?.items.map((job) => (
-						<div key={job.id} className="rounded-md border p-3 text-sm">
-							<div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-								<p className="font-medium">
-									{taskLabel(job.type)} / {statusLabel(job.status)}
-								</p>
-								<p className="text-xs text-muted-foreground">{job.updatedAt}</p>
-							</div>
-							<p className="mt-1 break-all text-xs text-muted-foreground">
-								{job.id}
-							</p>
-							<JsonBlock value={job.progress} />
-							<JsonBlock value={job.result} />
-							<JsonBlock value={job.error} />
-						</div>
+						<TaskSummary key={job.id} job={job} />
 					))}
 					{tasksQuery.data?.items.length === 0 ? (
 						<EmptyState text="暂无任务" />

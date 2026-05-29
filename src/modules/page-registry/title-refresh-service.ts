@@ -28,10 +28,15 @@ export interface PageMetadataRefreshScope {
 	runAfter?: string | null;
 	maxAttempts?: number;
 	retryDelaySec?: number;
+	timeoutMs?: number;
+	maxBytes?: number;
 }
 
 export interface PageMetadataRefreshOptions {
-	fetchHtml: (url: string) => Promise<{ status: number; text: string }>;
+	fetchHtml: (
+		url: string,
+		options: { timeoutMs: number; maxBytes: number },
+	) => Promise<{ status: number; text: string }>;
 	now?: () => Date;
 	settings?: {
 		batchSize: number;
@@ -190,7 +195,7 @@ export class PageMetadataRefreshService {
 					skipped += 1;
 					continue;
 				}
-				const result = await this.refreshOne(row);
+				const result = await this.refreshOne(row, scope);
 				if (result.ok) {
 					updated += 1;
 				} else {
@@ -224,12 +229,24 @@ export class PageMetadataRefreshService {
 		};
 	}
 
-	private async refreshOne(row: RefreshRow): Promise<RefreshOneResult> {
+	private async refreshOne(
+		row: RefreshRow,
+		scope: PageMetadataRefreshScope,
+	): Promise<RefreshOneResult> {
 		const nowIso = this.nowIso();
 		const allowedOrigins = parseAllowedOrigins(row.allowedOriginsJson);
 		const fullUrl = resolvePageUrl(row.pageUrl, allowedOrigins);
 		try {
-			const response = await this.options.fetchHtml(fullUrl);
+			const response = await this.options.fetchHtml(fullUrl, {
+				timeoutMs:
+					scope.timeoutMs ??
+					this.options.settings?.timeoutMs ??
+					defaultTaskQueueSettings.pageTitleRefresh.timeoutMs,
+				maxBytes:
+					scope.maxBytes ??
+					this.options.settings?.maxBytes ??
+					defaultTaskQueueSettings.pageTitleRefresh.maxBytes,
+			});
 			if (response.status < 200 || response.status >= 300) {
 				const error = `http_${response.status}`;
 				await this.recordFailure(row, nowIso, response.status, error);

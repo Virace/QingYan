@@ -155,6 +155,16 @@ export class AdminManagementService {
 			| "trash"
 			| "deleted"
 			| "ignored";
+		sortBy:
+			| "updatedAt"
+			| "createdAt"
+			| "commentCount"
+			| "visitorCount"
+			| "userCount"
+			| "pageLikeCount"
+			| "title"
+			| "pageKey";
+		sortOrder: "asc" | "desc";
 		limit: number;
 		offset: number;
 	}) {
@@ -163,6 +173,8 @@ export class AdminManagementService {
 			siteId,
 			search: input.search,
 			status: input.status,
+			sortBy: input.sortBy,
+			sortOrder: input.sortOrder,
 			limit: input.limit,
 			offset: input.offset,
 		});

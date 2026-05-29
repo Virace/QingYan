@@ -18,6 +18,7 @@ import {
 	adminPageRegistrySourceCreateBodySchema,
 	adminPageRegistrySourceParamsSchema,
 	adminPageRegistrySourcePatchBodySchema,
+	adminPageRegistrySourceRefreshBodySchema,
 	adminPageRegistrySourcesQuerySchema,
 	adminPendingPageApproveBodySchema,
 	adminPendingPageDecisionBodySchema,
@@ -42,9 +43,26 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 		{
 			fetchHtml:
 				fastify.pageTitleFetchHtml ??
-				(async (url) => {
-					const response = await fetch(url);
-					return { status: response.status, text: await response.text() };
+				(async (url, options) => {
+					const controller = new AbortController();
+					const timeout = setTimeout(
+						() => controller.abort(),
+						options.timeoutMs,
+					);
+					try {
+						const response = await fetch(url, { signal: controller.signal });
+						const text = await response.text();
+						if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
+							throw new AppError(
+								413,
+								"PAGE_TITLE_HTML_TOO_LARGE",
+								"页面 HTML 内容超过大小限制。",
+							);
+						}
+						return { status: response.status, text };
+					} finally {
+						clearTimeout(timeout);
+					}
 				}),
 		},
 	);
@@ -187,6 +205,9 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 		const params = parseOrThrow(
 			adminPageRegistrySourceParamsSchema.safeParse(request.params),
 		);
+		const body = parseOrThrow(
+			adminPageRegistrySourceRefreshBodySchema.safeParse(request.body),
+		);
 		const source = await sourceRepository.getSource(params.sourceId);
 		if (!source) {
 			throw new ResourceNotFoundError(
@@ -198,6 +219,11 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: source.siteKey,
 			sourceIds: [source.id],
 			trigger: "manual",
+			timeoutMs: body?.timeoutMs,
+			maxBytes: body?.maxBytes,
+			runAfter: body?.runAfter ?? null,
+			maxAttempts: body?.maxAttempts,
+			retryDelaySec: body?.retryDelaySec,
 		});
 		void sourceRefresh.runNextQueuedJob();
 		void titleRefresh.runNextQueuedJob();
@@ -218,6 +244,11 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsed.siteKey,
 			mode: parsed.mode,
 			trigger: "manual",
+			timeoutMs: parsed.timeoutMs,
+			maxBytes: parsed.maxBytes,
+			runAfter: parsed.runAfter ?? null,
+			maxAttempts: parsed.maxAttempts,
+			retryDelaySec: parsed.retryDelaySec,
 		});
 		void sourceRefresh.runNextQueuedJob();
 		void titleRefresh.runNextQueuedJob();

@@ -359,6 +359,120 @@ describe("admin ops routes", () => {
 		});
 	});
 
+	it("lists task center jobs with pagination and queue state", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+		await fixture.app.db.insert(maintenanceJobs).values([
+			{
+				id: "maintenance_task_delayed",
+				type: "page_metadata_refresh",
+				status: "delayed",
+				siteKey: "fangyuan",
+				scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
+				runAfter: "2099-01-01T00:00:00.000Z",
+				attempts: 0,
+				maxAttempts: 3,
+				retryDelaySec: 60,
+				concurrencyKey: "page-title:fangyuan",
+				createdAt: "2026-05-30T00:00:02.000Z",
+				updatedAt: "2026-05-30T00:00:02.000Z",
+			},
+			{
+				id: "maintenance_task_older",
+				type: "page_metadata_refresh",
+				status: "queued",
+				siteKey: "fangyuan",
+				scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
+				runAfter: null,
+				attempts: 0,
+				maxAttempts: 1,
+				retryDelaySec: 0,
+				concurrencyKey: "page-title:fangyuan-older",
+				createdAt: "2026-05-30T00:00:01.000Z",
+				updatedAt: "2026-05-30T00:00:01.000Z",
+			},
+		]);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/tasks?siteKey=fangyuan&limit=1&offset=0",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			totalCount: 2,
+			limit: 1,
+			offset: 0,
+			items: [
+				{
+					id: "maintenance_task_delayed",
+					status: "delayed",
+					priority: 0,
+					queueState: {
+						waitingReason: "delayed_until_run_after",
+						readyAt: "2099-01-01T00:00:00.000Z",
+					},
+				},
+			],
+		});
+		expect(response.json().items[0].queueState.waitingDescription).toContain(
+			"2099-01-01T00:00:00.000Z",
+		);
+	});
+
+	it("runs delayed tasks now and raises queued task priority", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+		await fixture.app.db.insert(maintenanceJobs).values({
+			id: "maintenance_task_prioritize",
+			type: "page_metadata_refresh",
+			status: "delayed",
+			siteKey: "fangyuan",
+			scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
+			runAfter: "2099-01-01T00:00:00.000Z",
+			attempts: 0,
+			maxAttempts: 1,
+			retryDelaySec: 0,
+			concurrencyKey: "page-title:fangyuan",
+		});
+
+		const runNowResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/ops/tasks/maintenance_task_prioritize/run-now",
+			...withAdminWriteAuth(admin),
+		});
+
+		expect(runNowResponse.statusCode).toBe(200);
+		expect(runNowResponse.json()).toMatchObject({
+			job: {
+				id: "maintenance_task_prioritize",
+				status: "queued",
+				runAfter: null,
+			},
+		});
+
+		const prioritizeResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/ops/tasks/maintenance_task_prioritize/prioritize",
+			...withAdminWriteAuth(admin),
+		});
+
+		expect(prioritizeResponse.statusCode).toBe(200);
+		expect(prioritizeResponse.json()).toMatchObject({
+			job: {
+				id: "maintenance_task_prioritize",
+				priority: 1,
+			},
+		});
+	});
+
 	it("creates a missing-title refresh task from the task center", async () => {
 		const fixture = await createTestApp({
 			pageTitleFetchHtml: async () => ({

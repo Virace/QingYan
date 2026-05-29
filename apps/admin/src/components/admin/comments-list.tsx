@@ -9,6 +9,7 @@ import {
 	commentActionsForStatus,
 } from "./comment-actions";
 import { CommentActionButton } from "./comment-row-actions";
+import { ExternalLinkText } from "./external-link-text";
 import { formatAdminCommentTime } from "./time-format";
 
 function rowTone(status: CommentStatus) {
@@ -279,14 +280,9 @@ export function CommentsList(props: CommentsListProps) {
 									{comment.pageKey}
 								</button>
 								{comment.pageUrl ? (
-									<a
-										className="block truncate text-xs text-muted-foreground underline-offset-2 hover:underline"
-										href={comment.pageUrl}
-										target="_blank"
-										rel="noreferrer"
-									>
+									<ExternalLinkText href={comment.pageUrl} className="text-xs">
 										{comment.pageUrl}
-									</a>
+									</ExternalLinkText>
 								) : null}
 							</div>
 						</div>

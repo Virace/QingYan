@@ -31,6 +31,7 @@ import {
 	inputClass,
 	textareaClass,
 } from "./admin-ui";
+import { useAdminConfirmDialog } from "./confirm-dialog";
 import {
 	blacklistMatchModeLabels,
 	blacklistTargetTypeLabels,
@@ -45,6 +46,7 @@ import { PaginationControls } from "./collection-pages";
 
 export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const [targetValue, setTargetValue] = useState("");
 	const [reason, setReason] = useState("");
 	const [search, setSearch] = useState("");
@@ -78,6 +80,18 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 		mutationFn: deleteBlacklist,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
 	});
+	const removeRule = async (ruleId: number) => {
+		const confirmed = await confirm({
+			title: "删除黑名单规则",
+			description: "确认删除这条黑名单规则？删除后目标会恢复评论或访问能力。",
+			confirmText: "删除规则",
+			destructive: true,
+		});
+		if (!confirmed) {
+			return;
+		}
+		deleteMutation.mutate(ruleId);
+	};
 
 	return (
 		<div className="grid gap-4 lg:grid-cols-[360px_1fr]">
@@ -195,7 +209,7 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 									type="button"
 									size="sm"
 									variant="destructive"
-									onClick={() => deleteMutation.mutate(rule.id)}
+									onClick={() => void removeRule(rule.id)}
 								>
 									删除
 								</Button>

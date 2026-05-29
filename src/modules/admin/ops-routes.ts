@@ -13,8 +13,13 @@ import {
 } from "./service-control";
 import { CommentIpMaintenanceService } from "../comments/metadata/comment-ip-maintenance-service";
 import { GitHubReleaseClient } from "../ops/github-release-client";
-import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
+import {
+	MaintenanceJobRepository,
+	type MaintenanceJobStatus,
+	type MaintenanceJobType,
+} from "../ops/maintenance-job-repository";
 import { OpsStatusService } from "../ops/ops-status-service";
+import { defaultTaskQueueSettings } from "../ops/task-settings";
 import { UpdateCheckService } from "../ops/update-check-service";
 import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
 import { AppError } from "../shared/errors";
@@ -25,12 +30,19 @@ import { UpgradeService } from "../upgrade/upgrade-service";
 const ipVersionSchema = z.enum(["v4", "v6"]);
 const ipRegionUpdateBodySchema = z.object({
 	ipVersions: z.array(ipVersionSchema).min(1).max(2),
+	timeoutMs: z.number().int().min(1000).max(60_000).optional(),
+	runAfter: z.string().datetime().nullable().optional(),
+	maxAttempts: z.number().int().min(1).max(10).optional(),
+	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
 });
 const commentIpRefreshBodySchema = z.object({
 	scope: z.enum(["missing", "failed", "stale", "all"]),
 	ipVersions: z.array(ipVersionSchema).min(1).max(2),
 	siteKey: z.string().min(1).optional(),
 	batchSize: z.number().int().min(1).max(5000).default(500),
+	runAfter: z.string().datetime().nullable().optional(),
+	maxAttempts: z.number().int().min(1).max(10).optional(),
+	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
 });
 const maintenanceJobParamsSchema = z.object({
 	jobId: z.string().min(1),
@@ -43,6 +55,7 @@ const maintenanceTasksQuerySchema = z.object({
 	type: z.string().min(1).optional(),
 	status: z.string().min(1).optional(),
 	limit: z.coerce.number().int().positive().max(100).default(20),
+	offset: z.coerce.number().int().min(0).default(0),
 });
 const pageTitleRefreshTaskBodySchema = z.object({
 	siteKey: z.string().min(1),
@@ -50,6 +63,13 @@ const pageTitleRefreshTaskBodySchema = z.object({
 	onlyMissingTitle: z.boolean().default(true),
 	forceTitle: z.boolean().optional(),
 	batchSize: z.number().int().min(1).max(5000).optional(),
+	timeoutMs: z.number().int().min(1000).max(60_000).optional(),
+	maxBytes: z
+		.number()
+		.int()
+		.min(65_536)
+		.max(10 * 1024 * 1024)
+		.optional(),
 	runAfter: z.string().datetime().nullable().optional(),
 	maxAttempts: z.number().int().min(1).max(10).optional(),
 	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
@@ -118,9 +138,26 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		{
 			fetchHtml:
 				fastify.pageTitleFetchHtml ??
-				(async (url) => {
-					const response = await fetch(url);
-					return { status: response.status, text: await response.text() };
+				(async (url, options) => {
+					const controller = new AbortController();
+					const timeout = setTimeout(
+						() => controller.abort(),
+						options.timeoutMs,
+					);
+					try {
+						const response = await fetch(url, { signal: controller.signal });
+						const text = await response.text();
+						if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
+							throw new AppError(
+								413,
+								"PAGE_TITLE_HTML_TOO_LARGE",
+								"页面 HTML 内容超过大小限制。",
+							);
+						}
+						return { status: response.status, text };
+					} finally {
+						clearTimeout(timeout);
+					}
 				}),
 		},
 	);
@@ -255,18 +292,53 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-		const jobs = (await maintenanceJobs.listRecent(parsed.data.limit)).filter(
-			(job) =>
-				(parsed.data.siteKey === undefined ||
-					job.siteKey === parsed.data.siteKey) &&
-				(parsed.data.type === undefined || job.type === parsed.data.type) &&
-				(parsed.data.status === undefined || job.status === parsed.data.status),
-		);
+		const { items, totalCount } = await maintenanceJobs.listForTaskCenter({
+			siteKey: parsed.data.siteKey,
+			type: parsed.data.type as MaintenanceJobType | undefined,
+			status: parsed.data.status as MaintenanceJobStatus | undefined,
+			limit: parsed.data.limit,
+			offset: parsed.data.offset,
+		});
 		return {
-			items: jobs.map((job) => ({
-				source: "maintenance" as const,
-				...job,
-			})),
+			items: await Promise.all(
+				items.map(async (job) => ({
+					source: "maintenance" as const,
+					...job,
+					queueState: await maintenanceJobs.describeQueueState(
+						job,
+						defaultTaskQueueSettings,
+					),
+				})),
+			),
+			totalCount,
+			limit: parsed.data.limit,
+			offset: parsed.data.offset,
+		};
+	});
+
+	fastify.post("/tasks/:jobId/run-now", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		return {
+			job: await maintenanceJobs.runNow(parsed.data.jobId),
+		};
+	});
+
+	fastify.post("/tasks/:jobId/prioritize", async (request) => {
+		await sessionService.requireSession(request);
+		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		return {
+			job: await maintenanceJobs.prioritize(parsed.data.jobId),
 		};
 	});
 
@@ -285,6 +357,8 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 				onlyMissingTitle: parsed.data.onlyMissingTitle,
 				forceTitle: parsed.data.forceTitle,
 				batchSize: parsed.data.batchSize,
+				timeoutMs: parsed.data.timeoutMs,
+				maxBytes: parsed.data.maxBytes,
 				trigger: "manual",
 				runAfter: parsed.data.runAfter ?? null,
 				maxAttempts: parsed.data.maxAttempts,

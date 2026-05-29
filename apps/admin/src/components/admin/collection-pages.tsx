@@ -4,34 +4,28 @@ import { useId, useState } from "react";
 import {
 	type AdminComment,
 	type AdminPage,
+	type AdminPageSortBy,
+	type AdminPageSortOrder,
 	approvePendingPage,
 	bulkTrashComments,
 	bulkUpdateComments,
 	type CommentStatus,
 	clearTrash,
 	createBlacklist,
-	createPageRegistrySource,
 	createSite,
 	deleteBlacklistTarget,
 	deleteComment,
-	deletePageRegistrySource,
 	deletePage,
-	fetchPageRegistryMaintenanceJob,
 	ignorePendingPage,
 	listComments,
 	listPages,
-	listPageRegistrySources,
 	listPendingPages,
 	listSites,
 	listUsers,
 	listVisitors,
 	type MaintenanceJob,
-	type PageSourceMode,
-	type PageSourceType,
 	type PageRegistryStatus,
 	refreshCommentMetadata,
-	refreshPageRegistrySource,
-	refreshPageRegistrySources,
 	refreshPageTitle,
 	refreshSelectedCommentMetadata,
 	rejectPendingPage,
@@ -57,6 +51,7 @@ import { EmptyState, inputClass } from "./admin-ui";
 import type { CommentActionId } from "./comment-actions";
 import { CommentsList } from "./comments-list";
 import { useAdminConfirmDialog } from "./confirm-dialog";
+import { ExternalLinkText } from "./external-link-text";
 
 type PageStatusFilter = "all" | PageRegistryStatus;
 
@@ -84,18 +79,16 @@ function pageStatusLabel(status: PageRegistryStatus) {
 	return labels[status];
 }
 
-function sourceTypeLabel(value: PageSourceType) {
-	const labels: Record<PageSourceType, string> = {
-		sitemap: "Sitemap",
-		rss: "RSS",
-		atom: "Atom",
-	};
-	return labels[value];
-}
-
-function sourceModeLabel(value: PageSourceMode) {
-	return value === "append" ? "追加" : "替换";
-}
+const pageSortOptions: Array<{ value: AdminPageSortBy; label: string }> = [
+	{ value: "updatedAt", label: "最近更新" },
+	{ value: "createdAt", label: "创建时间" },
+	{ value: "commentCount", label: "评论数" },
+	{ value: "visitorCount", label: "访客数" },
+	{ value: "userCount", label: "用户数" },
+	{ value: "pageLikeCount", label: "点赞数" },
+	{ value: "title", label: "标题" },
+	{ value: "pageKey", label: "页面键" },
+];
 
 type CommentView = "all" | "pending" | "approved" | "spam" | "trash";
 type BulkCommentAction =
@@ -371,12 +364,24 @@ export function CommentsPage({
 		isBlacklisted: boolean;
 	}) => {
 		if (input.isBlacklisted) {
-			deleteBlacklistMutation.mutate({
-				siteKey,
-				targetType: input.targetType,
-				matchMode: "exact",
-				targetValue: input.targetValue,
-			});
+			void (async () => {
+				const confirmed = await confirm({
+					title: "解除黑名单",
+					description:
+						"确认删除这条黑名单规则？删除后该目标会恢复评论或访问能力。",
+					confirmText: "解除黑名单",
+					destructive: true,
+				});
+				if (!confirmed) {
+					return;
+				}
+				deleteBlacklistMutation.mutate({
+					siteKey,
+					targetType: input.targetType,
+					matchMode: "exact",
+					targetValue: input.targetValue,
+				});
+			})();
 			return;
 		}
 
@@ -425,6 +430,7 @@ export function CommentsPage({
 			title: "移入回收站",
 			description: `确认将 ${commentIds.length} 条评论移入回收站？可在回收站中恢复。`,
 			confirmText: "移入回收站",
+			destructive: true,
 		});
 		if (!confirmed) {
 			return;
@@ -605,7 +611,11 @@ export function CommentsPage({
 					<Button
 						type="button"
 						size="sm"
-						variant={bulkAction === "delete" ? "destructive" : "outline"}
+						variant={
+							bulkAction === "delete" || bulkAction === "trash"
+								? "destructive"
+								: "outline"
+						}
 						disabled={
 							selectedVisibleIds.length === 0 ||
 							bulkUpdateMutation.isPending ||
@@ -715,9 +725,8 @@ export function PagesPage({
 }) {
 	const [search, setSearch] = useState("");
 	const [status, setStatus] = useState<PageStatusFilter>("all");
-	const [sourceType, setSourceType] = useState<PageSourceType>("sitemap");
-	const [sourceUrl, setSourceUrl] = useState("");
-	const [sourceMode, setSourceMode] = useState<PageSourceMode>("append");
+	const [sortBy, setSortBy] = useState<AdminPageSortBy>("updatedAt");
+	const [sortOrder, setSortOrder] = useState<AdminPageSortOrder>("desc");
 	const pagePagination = usePaginationState(20);
 	const pendingPagePagination = usePaginationState(20);
 	const [latestSourceJob, setLatestSourceJob] = useState<MaintenanceJob | null>(
@@ -732,6 +741,8 @@ export function PagesPage({
 			siteKey,
 			search,
 			status,
+			sortBy,
+			sortOrder,
 			pagePagination.limit,
 			pagePagination.offset,
 		],
@@ -740,6 +751,8 @@ export function PagesPage({
 				siteKey,
 				search,
 				status: status === "all" ? undefined : status,
+				sortBy,
+				sortOrder,
 				limit: pagePagination.limit,
 				offset: pagePagination.offset,
 			}),
@@ -763,33 +776,10 @@ export function PagesPage({
 				offset: pendingPagePagination.offset,
 			}),
 	});
-	const sourcesQuery = useQuery({
-		queryKey: ["admin", "page-registry", "sources", siteKey],
-		queryFn: () => listPageRegistrySources({ siteKey: siteKey ?? "" }),
-		enabled: Boolean(siteKey),
-	});
-	const sourceJobQuery = useQuery({
-		queryKey: [
-			"admin",
-			"page-registry",
-			"maintenance-job",
-			latestSourceJob?.id,
-		],
-		queryFn: () => fetchPageRegistryMaintenanceJob(latestSourceJob?.id ?? ""),
-		enabled: Boolean(latestSourceJob?.id),
-		refetchInterval:
-			latestSourceJob?.status === "queued" ||
-			latestSourceJob?.status === "running"
-				? 2000
-				: false,
-	});
 	const invalidatePages = () => {
 		void queryClient.invalidateQueries({ queryKey: ["admin", "pages"] });
 		void queryClient.invalidateQueries({
 			queryKey: ["admin", "page-registry", "pending"],
-		});
-		void queryClient.invalidateQueries({
-			queryKey: ["admin", "page-registry", "sources"],
 		});
 	};
 	const trashMutation = useMutation({
@@ -823,31 +813,6 @@ export function PagesPage({
 		mutationFn: ignorePendingPage,
 		onSuccess: invalidatePages,
 	});
-	const createSourceMutation = useMutation({
-		mutationFn: createPageRegistrySource,
-		onSuccess: () => {
-			setSourceUrl("");
-			invalidatePages();
-		},
-	});
-	const deleteSourceMutation = useMutation({
-		mutationFn: deletePageRegistrySource,
-		onSuccess: invalidatePages,
-	});
-	const refreshSourceMutation = useMutation({
-		mutationFn: refreshPageRegistrySource,
-		onSuccess: (response) => {
-			setLatestSourceJob(response.job);
-			invalidatePages();
-		},
-	});
-	const refreshAllSourcesMutation = useMutation({
-		mutationFn: refreshPageRegistrySources,
-		onSuccess: (response) => {
-			setLatestSourceJob(response.job);
-			invalidatePages();
-		},
-	});
 	const lifecyclePending =
 		trashMutation.isPending ||
 		restoreMutation.isPending ||
@@ -855,18 +820,22 @@ export function PagesPage({
 		approveMutation.isPending ||
 		rejectMutation.isPending ||
 		ignoreMutation.isPending;
-	const sourceMutationPending =
-		createSourceMutation.isPending ||
-		refreshSourceMutation.isPending ||
-		refreshAllSourcesMutation.isPending ||
-		deleteSourceMutation.isPending;
-	const currentSourceJob = sourceJobQuery.data?.job ?? latestSourceJob;
-	const mutatePage = (
+	const mutatePage = async (
 		page: AdminPage,
 		action: "trash" | "restore" | "delete",
 	) => {
 		const input = { siteKey: page.siteKey, pageKey: page.pageKey };
 		if (action === "trash") {
+			const confirmed = await confirm({
+				title: "移入回收站",
+				description:
+					"页面将进入回收站，公开评论、点赞和访问统计入口会被排除。该操作可恢复，但仍会影响站点交互。",
+				confirmText: "移入回收站",
+				destructive: true,
+			});
+			if (!confirmed) {
+				return;
+			}
 			trashMutation.mutate(input);
 			return;
 		}
@@ -874,20 +843,17 @@ export function PagesPage({
 			restoreMutation.mutate(input);
 			return;
 		}
-		deleteMutation.mutate(input);
-	};
-	const removeSource = async (sourceId: number) => {
 		const confirmed = await confirm({
-			title: "删除页面来源",
+			title: "标记删除",
 			description:
-				"确认删除这个页面来源？这只会删除来源配置和来源关联，不会删除页面、评论、点赞或访问数据。",
-			confirmText: "删除来源",
+				"页面将标记为删除状态，公开交互入口会被排除。恢复路径取决于后续后台能力，请谨慎操作。",
+			confirmText: "标记删除",
 			destructive: true,
 		});
 		if (!confirmed) {
 			return;
 		}
-		deleteSourceMutation.mutate(sourceId);
+		deleteMutation.mutate(input);
 	};
 
 	return (
@@ -924,162 +890,38 @@ export function PagesPage({
 						))}
 					</select>
 				</label>
-				<div className="grid gap-3 rounded-md border p-4">
-					<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-						<div>
-							<h3 className="font-medium">页面来源</h3>
-							<p className="text-xs text-muted-foreground">
-								从 sitemap、RSS 或 Atom 刷新页面登记；不会创建评论或写入 PV。
-							</p>
-						</div>
-						<Button
-							type="button"
-							size="sm"
-							variant="outline"
-							disabled={!siteKey || sourceMutationPending}
-							onClick={() => {
-								if (!siteKey) {
-									return;
-								}
-								refreshAllSourcesMutation.mutate({ siteKey });
+				<div className="flex flex-col gap-3 md:flex-row">
+					<label className="grid gap-1 text-sm md:w-56">
+						<span className="text-muted-foreground">排序字段</span>
+						<select
+							className={inputClass}
+							value={sortBy}
+							onChange={(event) => {
+								setSortBy(event.target.value as AdminPageSortBy);
+								pagePagination.resetPage();
 							}}
 						>
-							刷新全部来源
-						</Button>
-					</div>
-					<form
-						className="grid gap-3 md:grid-cols-[140px_1fr_120px_auto]"
-						onSubmit={(event) => {
-							event.preventDefault();
-							if (!siteKey || !sourceUrl.trim()) {
-								return;
-							}
-							createSourceMutation.mutate({
-								siteKey,
-								sourceType,
-								sourceUrl: sourceUrl.trim(),
-								enabled: true,
-								mode: sourceMode,
-							});
-						}}
-					>
-						<label className="grid gap-1 text-sm">
-							<span className="text-muted-foreground">类型</span>
-							<select
-								className={inputClass}
-								value={sourceType}
-								onChange={(event) =>
-									setSourceType(event.target.value as PageSourceType)
-								}
-							>
-								<option value="sitemap">Sitemap</option>
-								<option value="rss">RSS</option>
-								<option value="atom">Atom</option>
-							</select>
-						</label>
-						<label className="grid gap-1 text-sm" htmlFor="page-source-url">
-							<span className="text-muted-foreground">URL</span>
-							<Input
-								id="page-source-url"
-								placeholder="https://example.com/sitemap.xml"
-								value={sourceUrl}
-								onChange={(event) => setSourceUrl(event.target.value)}
-							/>
-						</label>
-						<label className="grid gap-1 text-sm">
-							<span className="text-muted-foreground">模式</span>
-							<select
-								className={inputClass}
-								value={sourceMode}
-								onChange={(event) =>
-									setSourceMode(event.target.value as PageSourceMode)
-								}
-							>
-								<option value="append">追加</option>
-								<option value="replace">替换</option>
-							</select>
-						</label>
-						<Button
-							type="submit"
-							className="self-end"
-							disabled={!siteKey || sourceMutationPending}
+							{pageSortOptions.map((option) => (
+								<option key={option.value} value={option.value}>
+									{option.label}
+								</option>
+							))}
+						</select>
+					</label>
+					<label className="grid gap-1 text-sm md:w-36">
+						<span className="text-muted-foreground">排序方向</span>
+						<select
+							className={inputClass}
+							value={sortOrder}
+							onChange={(event) => {
+								setSortOrder(event.target.value as AdminPageSortOrder);
+								pagePagination.resetPage();
+							}}
 						>
-							添加来源
-						</Button>
-					</form>
-					<div className="grid gap-2">
-						{sourcesQuery.data?.items.map((source) => (
-							<div
-								key={source.id}
-								className="flex flex-col gap-2 rounded-md border p-3 md:flex-row md:items-start md:justify-between"
-							>
-								<div className="min-w-0">
-									<div className="flex flex-wrap gap-2">
-										<Badge variant="secondary">
-											{sourceTypeLabel(source.sourceType)}
-										</Badge>
-										<Badge variant="outline">
-											{sourceModeLabel(source.mode)}
-										</Badge>
-										{source.enabled ? (
-											<Badge variant="outline">启用</Badge>
-										) : (
-											<Badge variant="secondary">停用</Badge>
-										)}
-									</div>
-									<p className="mt-2 truncate text-sm font-medium">
-										{source.sourceUrl}
-									</p>
-									<p className="text-xs text-muted-foreground">
-										最近成功 {source.lastSuccessAt ?? "-"} / 最近错误{" "}
-										{source.lastError ?? "-"}
-									</p>
-								</div>
-								<div className="flex flex-wrap gap-2">
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										disabled={sourceMutationPending}
-										onClick={() => refreshSourceMutation.mutate(source.id)}
-									>
-										刷新
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant="destructive"
-										disabled={sourceMutationPending}
-										onClick={() => void removeSource(source.id)}
-									>
-										删除
-									</Button>
-								</div>
-							</div>
-						))}
-						{sourcesQuery.data?.items.length === 0 ? (
-							<EmptyState text="暂无页面来源" />
-						) : null}
-					</div>
-					{currentSourceJob ? (
-						<div className="rounded-md border p-3 text-sm">
-							<p className="font-medium">页面来源刷新任务</p>
-							<p className="mt-1 text-xs text-muted-foreground">
-								{currentSourceJob.type} / {currentSourceJob.status} /{" "}
-								{currentSourceJob.updatedAt}
-							</p>
-							{currentSourceJob.progress ? (
-								<pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-xs">
-									{JSON.stringify(currentSourceJob.progress, null, 2)}
-								</pre>
-							) : null}
-							{currentSourceJob.result ? (
-								<pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-xs">
-									{JSON.stringify(currentSourceJob.result, null, 2)}
-								</pre>
-							) : null}
-						</div>
-					) : null}
+							<option value="desc">降序</option>
+							<option value="asc">升序</option>
+						</select>
+					</label>
 				</div>
 				<div className="grid gap-3 rounded-md border p-4">
 					<div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
@@ -1108,9 +950,9 @@ export function PagesPage({
 						>
 							<div className="min-w-0">
 								<p className="truncate font-medium">{candidate.pageKey}</p>
-								<p className="truncate text-xs text-muted-foreground">
+								<ExternalLinkText href={candidate.pageUrl} className="text-xs">
 									{candidate.pageUrl}
-								</p>
+								</ExternalLinkText>
 								<p className="text-xs text-muted-foreground">
 									访问 {candidate.hitCount} / 最近 {candidate.lastSeenAt}
 								</p>
@@ -1192,9 +1034,9 @@ export function PagesPage({
 									<p className="font-medium">
 										{page.pageTitle ?? page.pageKey}
 									</p>
-									<p className="truncate text-xs text-muted-foreground">
+									<ExternalLinkText href={page.pageUrl} className="text-xs">
 										{page.pageUrl ?? page.pageKey}
-									</p>
+									</ExternalLinkText>
 									{page.titleRefreshError ? (
 										<p className="mt-1 text-xs text-amber-700">
 											Title 刷新错误：{page.titleRefreshError}
@@ -1241,9 +1083,9 @@ export function PagesPage({
 										<Button
 											type="button"
 											size="sm"
-											variant="outline"
+											variant="destructive"
 											disabled={lifecyclePending}
-											onClick={() => mutatePage(page, "trash")}
+											onClick={() => void mutatePage(page, "trash")}
 										>
 											移入回收站
 										</Button>
@@ -1262,9 +1104,9 @@ export function PagesPage({
 											<Button
 												type="button"
 												size="sm"
-												variant="outline"
+												variant="destructive"
 												disabled={lifecyclePending}
-												onClick={() => mutatePage(page, "delete")}
+												onClick={() => void mutatePage(page, "delete")}
 											>
 												标记删除
 											</Button>
@@ -1293,6 +1135,7 @@ export function UsersPage({
 	const [search, setSearch] = useState("");
 	const pagination = usePaginationState(20);
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
 		queryKey: [
 			"admin",
@@ -1323,12 +1166,24 @@ export function UsersPage({
 		isBlacklisted: boolean;
 	}) => {
 		if (input.isBlacklisted) {
-			deleteBlacklistMutation.mutate({
-				siteKey,
-				targetType: "email",
-				matchMode: "exact",
-				targetValue: input.targetValue,
-			});
+			void (async () => {
+				const confirmed = await confirm({
+					title: "解除邮箱黑名单",
+					description:
+						"确认删除这条邮箱黑名单规则？删除后该邮箱会恢复评论能力。",
+					confirmText: "解除黑名单",
+					destructive: true,
+				});
+				if (!confirmed) {
+					return;
+				}
+				deleteBlacklistMutation.mutate({
+					siteKey,
+					targetType: "email",
+					matchMode: "exact",
+					targetValue: input.targetValue,
+				});
+			})();
 			return;
 		}
 
@@ -1451,6 +1306,7 @@ export function VisitorsPage({
 	const [search, setSearch] = useState("");
 	const pagination = usePaginationState(20);
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
 		queryKey: [
 			"admin",
@@ -1481,12 +1337,24 @@ export function VisitorsPage({
 		isBlacklisted: boolean;
 	}) => {
 		if (input.isBlacklisted) {
-			deleteBlacklistMutation.mutate({
-				siteKey,
-				targetType: "visitor",
-				matchMode: "exact",
-				targetValue: input.targetValue,
-			});
+			void (async () => {
+				const confirmed = await confirm({
+					title: "解除访客黑名单",
+					description:
+						"确认删除这条访客黑名单规则？删除后该访客会恢复评论或访问能力。",
+					confirmText: "解除黑名单",
+					destructive: true,
+				});
+				if (!confirmed) {
+					return;
+				}
+				deleteBlacklistMutation.mutate({
+					siteKey,
+					targetType: "visitor",
+					matchMode: "exact",
+					targetValue: input.targetValue,
+				});
+			})();
 			return;
 		}
 
@@ -1541,10 +1409,19 @@ export function VisitorsPage({
 											"-"}
 									</p>
 									{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
-										<p className="max-w-xl truncate text-xs text-muted-foreground">
-											最近页面{" "}
-											{visitor.lastSeenPageKey ?? visitor.lastSeenPageUrl}
-										</p>
+										<div className="mt-1 max-w-xl text-xs">
+											<p className="truncate text-muted-foreground">
+												最近页面 {visitor.lastSeenPageKey ?? "-"}
+											</p>
+											<ExternalLinkText
+												href={visitor.lastSeenPageUrl}
+												className="text-xs"
+											>
+												{visitor.lastSeenPageUrl ??
+													visitor.lastSeenPageKey ??
+													"-"}
+											</ExternalLinkText>
+										</div>
 									) : null}
 								</div>
 								<div className="flex flex-wrap gap-2">
@@ -1718,9 +1595,11 @@ export function SitesPage({
 									<Badge variant="outline">用户 {site.userCount}</Badge>
 									<Badge variant="outline">访客 {site.visitorCount}</Badge>
 								</div>
-								<p className="mt-3 text-xs text-muted-foreground">
-									{draftOrigin || "-"}
-								</p>
+								<div className="mt-3 text-xs">
+									<ExternalLinkText href={draftOrigin}>
+										{draftOrigin || "-"}
+									</ExternalLinkText>
+								</div>
 								<div className="mt-4 flex flex-wrap gap-2">
 									<Button
 										type="button"

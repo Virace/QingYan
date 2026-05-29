@@ -171,6 +171,37 @@ describe("MaintenanceJobRepository", () => {
 		expect(jobs.map((job) => job.id)).not.toContain(runnable.id);
 	});
 
+	it("orders runnable jobs by priority, runAfter, and creation time", async () => {
+		const fixture = createFixture();
+		const repository = new MaintenanceJobRepository(fixture.db);
+		const first = await repository.create({
+			type: "page_metadata_refresh",
+			scope: { siteKey: "fangyuan", pageKeys: ["first"] },
+		});
+		const dueEarlier = await repository.create({
+			type: "page_metadata_refresh",
+			scope: { siteKey: "fangyuan", pageKeys: ["due-earlier"] },
+			runAfter: "2026-05-29T00:10:00.000Z",
+		});
+		const prioritized = await repository.create({
+			type: "page_metadata_refresh",
+			scope: { siteKey: "fangyuan", pageKeys: ["prioritized"] },
+		});
+		await repository.prioritize(prioritized.id);
+
+		const jobs = await repository.listRunnable({
+			nowIso: "2026-05-29T00:30:00.000Z",
+			limit: 10,
+			maxConcurrentTotal: 10,
+		});
+
+		expect(jobs.map((job) => job.id)).toEqual([
+			prioritized.id,
+			dueEarlier.id,
+			first.id,
+		]);
+	});
+
 	it("marks failed jobs as retrying until max attempts is reached", async () => {
 		const fixture = createFixture();
 		const repository = new MaintenanceJobRepository(fixture.db);
@@ -245,6 +276,33 @@ describe("CommentIpMaintenanceService", () => {
 		expect(failed[0]?.ipLocationError).toBe("old_error");
 	});
 
+	it("does not consume non-IP maintenance jobs", async () => {
+		const fixture = createFixture();
+		await seedCommentMetadata(fixture);
+		const repository = new MaintenanceJobRepository(fixture.db);
+		const service = new CommentIpMaintenanceService(fixture.db, repository, {
+			resolveIp: () => ({
+				country: "中国",
+				region: "浙江省",
+				city: "杭州市",
+				isp: "移动",
+				raw: "中国|浙江省|杭州市|移动",
+			}),
+		});
+		const titleJob = await repository.create({
+			type: "page_metadata_refresh",
+			scope: { siteKey: "fangyuan" },
+		});
+
+		const result = await service.runNextQueuedJob();
+
+		expect(result).toBeNull();
+		expect(await repository.getRequired(titleJob.id)).toMatchObject({
+			status: "queued",
+			type: "page_metadata_refresh",
+		});
+	});
+
 	it("refreshes all matching IP locations without reprocessing updated rows", async () => {
 		const fixture = createFixture();
 		await seedCommentMetadata(fixture);
@@ -271,6 +329,63 @@ describe("CommentIpMaintenanceService", () => {
 			processed: 3,
 			refreshed: 3,
 			failed: 0,
+		});
+	});
+
+	it("stores IP update task timeout and passes it to the updater", async () => {
+		const fixture = createFixture();
+		await seedCommentMetadata(fixture);
+		const repository = new MaintenanceJobRepository(fixture.db);
+		const updates: Array<{
+			ipVersion: string;
+			timeoutMs?: number;
+		}> = [];
+		const service = new CommentIpMaintenanceService(fixture.db, repository, {
+			loadIpRegionSettings: async () => ({
+				enabled: true,
+				cachePolicy: "file",
+				precision: "city",
+				autoUpdate: { enabled: false, schedule: "monthly" },
+				ipv4: {
+					dbPath: "./data/ip2region_v4.xdb",
+					sources: ["https://example.com/v4.xdb"],
+				},
+				ipv6: {
+					dbPath: "./data/ip2region_v6.xdb",
+					sources: ["https://example.com/v6.xdb"],
+				},
+			}),
+			updater: {
+				update: async (input) => {
+					updates.push({
+						ipVersion: input.ipVersion,
+						timeoutMs: input.timeoutMs,
+					});
+					return {
+						status: "skipped",
+						refreshedComments: 0,
+					};
+				},
+			},
+		});
+
+		const job = await service.createIpRegionUpdateJob({
+			ipVersions: ["v4"],
+			timeoutMs: 15_000,
+			runAfter: "2026-05-29T00:00:00.000Z",
+			maxAttempts: 3,
+			retryDelaySec: 60,
+		});
+		await service.runNextQueuedJob();
+
+		expect(updates).toEqual([{ ipVersion: "v4", timeoutMs: 15_000 }]);
+		expect(await repository.getRequired(job.id)).toMatchObject({
+			maxAttempts: 3,
+			retryDelaySec: 60,
+			scope: {
+				ipVersions: ["v4"],
+				timeoutMs: 15_000,
+			},
 		});
 	});
 

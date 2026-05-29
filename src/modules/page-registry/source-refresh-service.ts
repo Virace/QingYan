@@ -28,7 +28,10 @@ export interface PageSourceRefreshCounters {
 }
 
 export interface PageSourceRefreshOptions {
-	fetchText: (url: string) => Promise<string>;
+	fetchText: (
+		url: string,
+		options: { timeoutMs?: number; maxBytes?: number },
+	) => Promise<string>;
 	loadAllowedOriginsForSite: (siteKey: string) => Promise<string[]>;
 	createTitleRefreshJob?: (input: {
 		siteKey: string;
@@ -41,6 +44,11 @@ interface PageSourceRefreshJobScope {
 	sourceIds?: number[];
 	mode?: PageSourceMode;
 	trigger: PageSourceRefreshTrigger;
+	timeoutMs?: number;
+	maxBytes?: number;
+	runAfter?: string | null;
+	maxAttempts?: number;
+	retryDelaySec?: number;
 }
 
 function emptyCounters(): PageSourceRefreshCounters {
@@ -94,13 +102,16 @@ export class PageSourceRefreshService {
 			type: "page_source_refresh",
 			siteKey: input.siteKey,
 			scope: input,
+			runAfter: input.runAfter ?? null,
+			maxAttempts: input.maxAttempts,
+			retryDelaySec: input.retryDelaySec,
 			concurrencyKey,
 		});
 	}
 
 	public async runNextQueuedJob() {
-		const active = (await this.jobs.listRecent(20)).find(
-			(job) => job.status === "queued" && job.type === "page_source_refresh",
+		const active = (await this.jobs.listRunnable({ limit: 20 })).find(
+			(job) => job.type === "page_source_refresh",
 		);
 		if (!active) {
 			return null;
@@ -158,7 +169,7 @@ export class PageSourceRefreshService {
 		const errors: Array<{ sourceId: number; url: string; reason: string }> = [];
 
 		for (const source of selectedSources) {
-			const sourceResult = await this.refreshSource(source, scope.mode);
+			const sourceResult = await this.refreshSource(source, scope);
 			counters.processed += sourceResult.processed;
 			counters.created += sourceResult.created;
 			counters.updated += sourceResult.updated;
@@ -181,7 +192,7 @@ export class PageSourceRefreshService {
 
 	private async refreshSource(
 		source: PageRegistrySourceRecord,
-		overrideMode?: PageSourceMode,
+		scope: PageSourceRefreshJobScope,
 	) {
 		const now = new Date();
 		const nowIso = now.toISOString();
@@ -195,7 +206,10 @@ export class PageSourceRefreshService {
 		const allowedOrigins = await this.options.loadAllowedOriginsForSite(
 			source.siteKey,
 		);
-		const xml = await this.options.fetchText(source.sourceUrl);
+		const xml = await this.options.fetchText(source.sourceUrl, {
+			timeoutMs: scope.timeoutMs,
+			maxBytes: scope.maxBytes,
+		});
 		const parsed = parsePageSourceXml(xml, source.sourceType);
 
 		for (const entry of parsed.entries) {
@@ -259,7 +273,7 @@ export class PageSourceRefreshService {
 			}
 		}
 
-		const mode = overrideMode ?? source.mode;
+		const mode = scope.mode ?? source.mode;
 		if (mode === "replace") {
 			counters.stale += await this.repository.markMissingSourcePagesStale({
 				sourceId: source.id,

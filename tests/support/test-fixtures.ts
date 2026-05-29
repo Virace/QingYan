@@ -148,9 +148,13 @@ export async function createTestApp(options?: {
 	adminDistDirectory?: string;
 	seedSite?: SiteSeed | false;
 	mutateConfig?: (config: AppConfig) => void;
-	pageSourceFetchText?: (url: string) => Promise<string>;
+	pageSourceFetchText?: (
+		url: string,
+		options?: { timeoutMs?: number; maxBytes?: number },
+	) => Promise<string>;
 	pageTitleFetchHtml?: (
 		url: string,
+		options: { timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
 }) {

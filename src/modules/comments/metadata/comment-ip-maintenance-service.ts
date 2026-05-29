@@ -24,12 +24,21 @@ export interface CommentIpRefreshInput {
 	ipVersions: IpVersion[];
 	siteKey?: string;
 	batchSize?: number;
+	runAfter?: string | null;
+	maxAttempts?: number;
+	retryDelaySec?: number;
 }
 
 export interface CommentIpMaintenanceOptions {
 	resolveIp?: (ip: string, ipVersion: IpVersion) => IpRegionSnapshot;
 	loadIpRegionSettings?: () => Promise<SystemSettings["ipRegion"]>;
-	updater?: Pick<IpRegionUpdater, "update">;
+	updater?: {
+		update(input: {
+			ipVersion: IpVersion;
+			config: SystemSettings["ipRegion"];
+			timeoutMs?: number;
+		}): Promise<unknown>;
+	};
 }
 
 function nowIso(): string {
@@ -121,20 +130,36 @@ export class CommentIpMaintenanceService {
 				siteKey: input.siteKey,
 				batchSize: input.batchSize ?? 500,
 			},
+			runAfter: input.runAfter ?? null,
+			maxAttempts: input.maxAttempts,
+			retryDelaySec: input.retryDelaySec,
 		});
 	}
 
-	public async createIpRegionUpdateJob(input: { ipVersions: IpVersion[] }) {
+	public async createIpRegionUpdateJob(input: {
+		ipVersions: IpVersion[];
+		timeoutMs?: number;
+		runAfter?: string | null;
+		maxAttempts?: number;
+		retryDelaySec?: number;
+	}) {
 		await this.assertNoActiveJob();
 		return this.jobs.create({
 			type: "ip_region_update",
-			scope: { ipVersions: input.ipVersions },
+			scope: {
+				ipVersions: input.ipVersions,
+				timeoutMs: input.timeoutMs,
+			},
+			runAfter: input.runAfter ?? null,
+			maxAttempts: input.maxAttempts,
+			retryDelaySec: input.retryDelaySec,
 		});
 	}
 
 	public async runNextQueuedJob() {
-		const active = (await this.jobs.listRecent(20)).find(
-			(job) => job.status === "queued",
+		const active = (await this.jobs.listRunnable({ limit: 20 })).find(
+			(job) =>
+				job.type === "comment_ip_refresh" || job.type === "ip_region_update",
 		);
 		if (!active) {
 			return null;
@@ -147,7 +172,7 @@ export class CommentIpMaintenanceService {
 		}
 		return this.runIpRegionUpdate(
 			active.id,
-			active.scope as { ipVersions: IpVersion[] },
+			active.scope as { ipVersions: IpVersion[]; timeoutMs?: number },
 		);
 	}
 
@@ -163,7 +188,7 @@ export class CommentIpMaintenanceService {
 
 	private async runIpRegionUpdate(
 		jobId: string,
-		scope: { ipVersions: IpVersion[] },
+		scope: { ipVersions: IpVersion[]; timeoutMs?: number },
 	) {
 		await this.jobs.markRunning(jobId, {
 			phase: "updating",
@@ -176,7 +201,11 @@ export class CommentIpMaintenanceService {
 			for (const ipVersion of scope.ipVersions) {
 				results.push({
 					ipVersion,
-					result: await updater.update({ ipVersion, config: settings }),
+					result: await updater.update({
+						ipVersion,
+						config: settings,
+						timeoutMs: scope.timeoutMs,
+					}),
 				});
 			}
 			return this.jobs.markSucceeded(jobId, { results });

@@ -66,6 +66,54 @@ function toCountMap<T extends number | null | undefined>(
 	return map;
 }
 
+type AdminPageSortBy =
+	| "updatedAt"
+	| "createdAt"
+	| "commentCount"
+	| "visitorCount"
+	| "userCount"
+	| "pageLikeCount"
+	| "title"
+	| "pageKey";
+
+interface AdminPageItem {
+	siteKey: string;
+	pageKey: string;
+	status: string;
+	pageTitle: string | null;
+	pageUrl: string | null;
+	commentCount: number;
+	rootCommentCount: number;
+	pageLikeCount: number;
+	updatedAt: string;
+	createdAt: string;
+	trashedAt: string | null;
+	deletedAt: string | null;
+	titleRefreshAttemptedAt: string | null;
+	titleRefreshedAt: string | null;
+	titleRefreshStatusCode: number | null;
+	titleRefreshError: string | null;
+	visitorCount: number;
+	userCount: number;
+}
+
+function comparePageSortValue(
+	left: AdminPageItem,
+	right: AdminPageItem,
+	sortBy: AdminPageSortBy,
+) {
+	if (sortBy === "title") {
+		return (left.pageTitle ?? "").localeCompare(right.pageTitle ?? "");
+	}
+	if (sortBy === "pageKey") {
+		return left.pageKey.localeCompare(right.pageKey);
+	}
+	if (sortBy === "createdAt" || sortBy === "updatedAt") {
+		return (left[sortBy] ?? "").localeCompare(right[sortBy] ?? "");
+	}
+	return Number(left[sortBy] ?? 0) - Number(right[sortBy] ?? 0);
+}
+
 export class AdminRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
@@ -452,6 +500,8 @@ export class AdminRepository {
 			| "trash"
 			| "deleted"
 			| "ignored";
+		sortBy: AdminPageSortBy;
+		sortOrder: "asc" | "desc";
 		limit: number;
 		offset: number;
 	}) {
@@ -509,33 +559,37 @@ export class AdminRepository {
 			.map((row) => row.pageThreadId)
 			.filter((id): id is number => id !== null);
 		if (pageThreadIds.length === 0) {
+			const items: AdminPageItem[] = rows.map((row) => ({
+				siteKey: row.siteKey,
+				pageKey: row.pageKey,
+				status: row.status,
+				pageTitle: row.pageTitle ?? row.threadPageTitle,
+				pageUrl: resolvePublicPageUrl(
+					row.pageUrl ?? row.threadPageUrl,
+					parseStringArray(row.allowedOriginsJson),
+				),
+				commentCount: 0,
+				rootCommentCount: 0,
+				pageLikeCount: 0,
+				updatedAt: row.updatedAt,
+				createdAt: row.createdAt,
+				trashedAt: row.trashedAt,
+				deletedAt: row.deletedAt,
+				titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
+				titleRefreshedAt: row.titleRefreshedAt,
+				titleRefreshStatusCode: row.titleRefreshStatusCode,
+				titleRefreshError: row.titleRefreshError,
+				visitorCount: 0,
+				userCount: 0,
+			}));
+			const direction = input.sortOrder === "asc" ? 1 : -1;
+			const sortedItems = items.sort(
+				(left, right) =>
+					comparePageSortValue(left, right, input.sortBy) * direction,
+			);
 			return {
-				items: rows
-					.slice(input.offset, input.offset + input.limit)
-					.map((row) => ({
-						siteKey: row.siteKey,
-						pageKey: row.pageKey,
-						status: row.status,
-						pageTitle: row.pageTitle ?? row.threadPageTitle,
-						pageUrl: resolvePublicPageUrl(
-							row.pageUrl ?? row.threadPageUrl,
-							parseStringArray(row.allowedOriginsJson),
-						),
-						commentCount: 0,
-						rootCommentCount: 0,
-						pageLikeCount: 0,
-						updatedAt: row.updatedAt,
-						createdAt: row.createdAt,
-						trashedAt: row.trashedAt,
-						deletedAt: row.deletedAt,
-						titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
-						titleRefreshedAt: row.titleRefreshedAt,
-						titleRefreshStatusCode: row.titleRefreshStatusCode,
-						titleRefreshError: row.titleRefreshError,
-						visitorCount: 0,
-						userCount: 0,
-					})),
-				totalCount: rows.length,
+				items: sortedItems.slice(input.offset, input.offset + input.limit),
+				totalCount: sortedItems.length,
 			};
 		}
 
@@ -566,39 +620,41 @@ export class AdminRepository {
 				.groupBy(comments.pageThreadId),
 		);
 
+		const items: AdminPageItem[] = rows.map((row) => ({
+			siteKey: row.siteKey,
+			pageKey: row.pageKey,
+			status: row.status,
+			pageTitle: row.pageTitle ?? row.threadPageTitle,
+			pageUrl: resolvePublicPageUrl(
+				row.pageUrl ?? row.threadPageUrl,
+				parseStringArray(row.allowedOriginsJson),
+			),
+			commentCount: row.commentCount ?? 0,
+			rootCommentCount: row.rootCommentCount ?? 0,
+			pageLikeCount: row.pageLikeCount ?? 0,
+			updatedAt: row.updatedAt,
+			createdAt: row.createdAt,
+			trashedAt: row.trashedAt,
+			deletedAt: row.deletedAt,
+			titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
+			titleRefreshedAt: row.titleRefreshedAt,
+			titleRefreshStatusCode: row.titleRefreshStatusCode,
+			titleRefreshError: row.titleRefreshError,
+			visitorCount:
+				row.pageThreadId === null
+					? 0
+					: (visitorCounts.get(row.pageThreadId) ?? 0),
+			userCount:
+				row.pageThreadId === null ? 0 : (userCounts.get(row.pageThreadId) ?? 0),
+		}));
+		const direction = input.sortOrder === "asc" ? 1 : -1;
+		const sortedItems = items.sort(
+			(left, right) =>
+				comparePageSortValue(left, right, input.sortBy) * direction,
+		);
 		return {
-			items: rows
-				.slice(input.offset, input.offset + input.limit)
-				.map((row) => ({
-					siteKey: row.siteKey,
-					pageKey: row.pageKey,
-					status: row.status,
-					pageTitle: row.pageTitle ?? row.threadPageTitle,
-					pageUrl: resolvePublicPageUrl(
-						row.pageUrl ?? row.threadPageUrl,
-						parseStringArray(row.allowedOriginsJson),
-					),
-					commentCount: row.commentCount ?? 0,
-					rootCommentCount: row.rootCommentCount ?? 0,
-					pageLikeCount: row.pageLikeCount ?? 0,
-					updatedAt: row.updatedAt,
-					createdAt: row.createdAt,
-					trashedAt: row.trashedAt,
-					deletedAt: row.deletedAt,
-					titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
-					titleRefreshedAt: row.titleRefreshedAt,
-					titleRefreshStatusCode: row.titleRefreshStatusCode,
-					titleRefreshError: row.titleRefreshError,
-					visitorCount:
-						row.pageThreadId === null
-							? 0
-							: (visitorCounts.get(row.pageThreadId) ?? 0),
-					userCount:
-						row.pageThreadId === null
-							? 0
-							: (userCounts.get(row.pageThreadId) ?? 0),
-				})),
-			totalCount: rows.length,
+			items: sortedItems.slice(input.offset, input.offset + input.limit),
+			totalCount: sortedItems.length,
 		};
 	}
 
@@ -708,6 +764,7 @@ export class AdminRepository {
 				lastUserAgent: visitors.lastUserAgent,
 				lastSeenPageKey: visitors.lastSeenPageKey,
 				lastSeenPageUrl: visitors.lastSeenPageUrl,
+				allowedOriginsJson: sites.allowedOriginsJson,
 				lastSeenAt: visitors.lastSeenAt,
 				createdAt: visitors.createdAt,
 			})
@@ -804,7 +861,10 @@ export class AdminRepository {
 					lastIp: row.lastIp,
 					lastUserAgent: row.lastUserAgent,
 					lastSeenPageKey: row.lastSeenPageKey,
-					lastSeenPageUrl: row.lastSeenPageUrl,
+					lastSeenPageUrl: resolvePublicPageUrl(
+						row.lastSeenPageUrl,
+						parseStringArray(row.allowedOriginsJson),
+					),
 					lastSeenAt: row.lastSeenAt,
 					createdAt: row.createdAt,
 					commentCount: commentStats?.commentCount ?? 0,

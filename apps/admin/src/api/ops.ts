@@ -146,12 +146,37 @@ export interface MaintenanceJob {
 	attempts: number;
 	maxAttempts: number;
 	retryDelaySec: number;
+	priority: number;
 	concurrencyKey: string | null;
 	lastHeartbeatAt: string | null;
 	createdAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;
 	updatedAt: string;
+}
+
+export interface TaskQueueState {
+	waitingReason:
+		| "ready_for_runner"
+		| "delayed_until_run_after"
+		| "global_concurrency_limit"
+		| "type_concurrency_limit"
+		| "concurrency_key_blocked"
+		| "retry_wait"
+		| "terminal";
+	waitingDescription: string;
+	blockedByJobId?: string;
+	readyAt: string | null;
+}
+
+export interface TaskExecutionOptions {
+	executionMode?: "async";
+	batchSize?: number;
+	timeoutMs?: number;
+	maxBytes?: number;
+	maxAttempts?: number;
+	retryDelaySec?: number;
+	runAfter?: string | null;
 }
 
 export interface IpRegionMaintenanceStatus {
@@ -183,7 +208,9 @@ export function fetchIpRegionMaintenanceStatus() {
 	return requestJson<IpRegionMaintenanceStatus>("/api/admin/ops/ip-region");
 }
 
-export function createIpRegionUpdateJob(input: { ipVersions: IpVersion[] }) {
+export function createIpRegionUpdateJob(
+	input: { ipVersions: IpVersion[] } & TaskExecutionOptions,
+) {
 	return requestJson<{ job: MaintenanceJob }>(
 		"/api/admin/ops/ip-region/update",
 		{
@@ -193,12 +220,13 @@ export function createIpRegionUpdateJob(input: { ipVersions: IpVersion[] }) {
 	);
 }
 
-export function createCommentIpRefreshJob(input: {
-	scope: "missing" | "failed" | "stale" | "all";
-	ipVersions: IpVersion[];
-	siteKey?: string;
-	batchSize?: number;
-}) {
+export function createCommentIpRefreshJob(
+	input: {
+		scope: "missing" | "failed" | "stale" | "all";
+		ipVersions: IpVersion[];
+		siteKey?: string;
+	} & TaskExecutionOptions,
+) {
 	return requestJson<{ job: MaintenanceJob }>(
 		"/api/admin/ops/comment-ip/refresh",
 		{
@@ -216,6 +244,7 @@ export function fetchMaintenanceJob(jobId: string) {
 
 export interface TaskCenterItem extends MaintenanceJob {
 	source: "maintenance";
+	queueState: TaskQueueState;
 }
 
 export function listTasks(input: {
@@ -223,6 +252,7 @@ export function listTasks(input: {
 	type?: string;
 	status?: string;
 	limit?: number;
+	offset?: number;
 }) {
 	const params = new URLSearchParams();
 	for (const [key, value] of Object.entries(input)) {
@@ -231,18 +261,36 @@ export function listTasks(input: {
 		}
 	}
 	const query = params.toString();
-	return requestJson<{ items: TaskCenterItem[] }>(
-		`/api/admin/ops/tasks${query ? `?${query}` : ""}`,
+	return requestJson<{
+		items: TaskCenterItem[];
+		totalCount: number;
+		limit: number;
+		offset: number;
+	}>(`/api/admin/ops/tasks${query ? `?${query}` : ""}`);
+}
+
+export function runTaskNow(jobId: string) {
+	return requestJson<{ job: MaintenanceJob }>(
+		`/api/admin/ops/tasks/${encodeURIComponent(jobId)}/run-now`,
+		{ method: "POST" },
 	);
 }
 
-export function createPageTitleRefreshTask(input: {
-	siteKey: string;
-	onlyMissingTitle?: boolean;
-	batchSize?: number;
-	maxAttempts?: number;
-	retryDelaySec?: number;
-}) {
+export function prioritizeTask(jobId: string) {
+	return requestJson<{ job: MaintenanceJob }>(
+		`/api/admin/ops/tasks/${encodeURIComponent(jobId)}/prioritize`,
+		{ method: "POST" },
+	);
+}
+
+export function createPageTitleRefreshTask(
+	input: {
+		siteKey: string;
+		onlyMissingTitle?: boolean;
+		pageKeys?: string[];
+		forceTitle?: boolean;
+	} & TaskExecutionOptions,
+) {
 	return requestJson<{ job: MaintenanceJob }>(
 		"/api/admin/ops/tasks/page-title-refresh",
 		{

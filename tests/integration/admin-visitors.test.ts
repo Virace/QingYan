@@ -163,7 +163,7 @@ describe("admin visitors", () => {
 					lastIp: "127.0.0.1",
 					lastUserAgent: "QingYan Metadata Browser",
 					lastSeenPageKey: "posts/visitor-metadata/",
-					lastSeenPageUrl: "/posts/visitor-metadata/",
+					lastSeenPageUrl: "http://localhost:4321/posts/visitor-metadata/",
 				},
 			],
 			pagination: {

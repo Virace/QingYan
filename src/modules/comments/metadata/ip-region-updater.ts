@@ -46,6 +46,7 @@ export interface IpRegionUpdaterOptions {
 	downloadDatabase?: (input: {
 		sources: string[];
 		targetPath: string;
+		timeoutMs?: number;
 	}) => Promise<DownloadedDatabase>;
 	resolveIp?: (ip: string) => IpRegionSnapshot;
 	verifyFile?: (filePath: string) => boolean;
@@ -66,6 +67,7 @@ async function downloadWithFallback(
 		sources: string[];
 		targetPath: string;
 		verifyFile: (filePath: string) => boolean;
+		timeoutMs?: number;
 	},
 	fetchImpl = fetch,
 ): Promise<DownloadedDatabase> {
@@ -73,8 +75,14 @@ async function downloadWithFallback(
 
 	for (const sourceUrl of input.sources) {
 		const tmpPath = `${input.targetPath}.${Date.now()}.tmp`;
+		const controller = new AbortController();
+		const timeout = input.timeoutMs
+			? setTimeout(() => controller.abort(), input.timeoutMs)
+			: undefined;
 		try {
-			const response = await fetchImpl(sourceUrl);
+			const response = await fetchImpl(sourceUrl, {
+				signal: controller.signal,
+			});
 			if (!response.ok) {
 				continue;
 			}
@@ -92,6 +100,10 @@ async function downloadWithFallback(
 			};
 		} catch {
 			await rm(tmpPath, { force: true });
+		} finally {
+			if (timeout) {
+				clearTimeout(timeout);
+			}
 		}
 	}
 
@@ -111,6 +123,7 @@ export class IpRegionUpdater {
 	public async update(input: {
 		ipVersion: IpVersion;
 		config: IpRegionConfig;
+		timeoutMs?: number;
 	}): Promise<IpRegionUpdateResult> {
 		if (!input.config.enabled) {
 			return this.record(input.ipVersion, {
@@ -121,7 +134,11 @@ export class IpRegionUpdater {
 		}
 
 		try {
-			return await this.updateEnabled(input.ipVersion, input.config);
+			return await this.updateEnabled(
+				input.ipVersion,
+				input.config,
+				input.timeoutMs,
+			);
 		} catch (error) {
 			return this.record(input.ipVersion, {
 				status: "failed",
@@ -134,11 +151,16 @@ export class IpRegionUpdater {
 	private async updateEnabled(
 		ipVersion: IpVersion,
 		config: IpRegionConfig,
+		timeoutMs?: number,
 	): Promise<IpRegionUpdateResult> {
 		const database = ipVersion === "v4" ? config.ipv4 : config.ipv6;
 		const targetPath = path.resolve(process.cwd(), database.dbPath);
 		const previous = await this.getState(ipVersion);
-		const downloaded = await this.download(database.sources, targetPath);
+		const downloaded = await this.download(
+			database.sources,
+			targetPath,
+			timeoutMs,
+		);
 
 		if (previous?.fileHash === downloaded.fileHash) {
 			await rm(downloaded.filePath, { force: true });
@@ -175,14 +197,15 @@ export class IpRegionUpdater {
 		});
 	}
 
-	private download(sources: string[], targetPath: string) {
+	private download(sources: string[], targetPath: string, timeoutMs?: number) {
 		if (this.options.downloadDatabase) {
-			return this.options.downloadDatabase({ sources, targetPath });
+			return this.options.downloadDatabase({ sources, targetPath, timeoutMs });
 		}
 
 		return downloadWithFallback({
 			sources,
 			targetPath,
+			timeoutMs,
 			verifyFile: this.options.verifyFile ?? Ip2Region.verify,
 		});
 	}

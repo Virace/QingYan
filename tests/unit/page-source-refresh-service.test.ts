@@ -53,7 +53,10 @@ async function seedSite(fixture: ReturnType<typeof createFixture>) {
 
 function createService(
 	fixture: ReturnType<typeof createFixture>,
-	fetchText: (url: string) => Promise<string>,
+	fetchText: (
+		url: string,
+		options: { timeoutMs?: number; maxBytes?: number },
+	) => Promise<string>,
 ) {
 	const jobs = new MaintenanceJobRepository(fixture.db);
 	return new PageSourceRefreshService(fixture.db, jobs, {
@@ -451,5 +454,77 @@ describe("PageSourceRefreshService", () => {
 			onlyMissingTitle: true,
 			trigger: "source_refresh",
 		});
+	});
+
+	it("passes task timeout and max bytes to source fetch", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const source = await createSource(fixture);
+		const fetchCalls: Array<{
+			url: string;
+			options: { timeoutMs?: number; maxBytes?: number };
+		}> = [];
+		const service = createService(fixture, async (url, options) => {
+			fetchCalls.push({ url, options });
+			return "<urlset><url><loc>https://example.com/posts/options/</loc></url></urlset>";
+		});
+
+		const job = await service.createRefreshJob({
+			siteKey: "fangyuan",
+			sourceIds: [source.id],
+			trigger: "manual",
+			timeoutMs: 12_000,
+			maxBytes: 1_048_576,
+			runAfter: "2026-05-29T00:00:00.000Z",
+			maxAttempts: 4,
+			retryDelaySec: 120,
+		});
+		await service.runNextQueuedJob();
+
+		expect(fetchCalls).toEqual([
+			{
+				url: "https://example.com/sitemap.xml",
+				options: {
+					timeoutMs: 12_000,
+					maxBytes: 1_048_576,
+				},
+			},
+		]);
+		expect(
+			await new MaintenanceJobRepository(fixture.db).getRequired(job.id),
+		).toMatchObject({
+			maxAttempts: 4,
+			retryDelaySec: 120,
+			scope: expect.objectContaining({
+				timeoutMs: 12_000,
+				maxBytes: 1_048_576,
+			}),
+		});
+	});
+
+	it("only consumes runnable page source refresh jobs", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		await createSource(fixture);
+		const jobs = new MaintenanceJobRepository(fixture.db);
+		await jobs.create({
+			type: "page_metadata_refresh",
+			siteKey: "fangyuan",
+			scope: { siteKey: "fangyuan" },
+			concurrencyKey: "page-title:fangyuan",
+		});
+		const service = new PageSourceRefreshService(fixture.db, jobs, {
+			fetchText: async () => "<urlset />",
+			loadAllowedOriginsForSite: async () => ["https://example.com"],
+		});
+
+		const result = await service.runNextQueuedJob();
+
+		expect(result).toBeNull();
+		const [metadataJob] = await fixture.db
+			.select()
+			.from(maintenanceJobs)
+			.where(eq(maintenanceJobs.type, "page_metadata_refresh"));
+		expect(metadataJob?.status).toBe("queued");
 	});
 });

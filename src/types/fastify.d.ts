@@ -40,9 +40,13 @@ declare module "fastify" {
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
 		akismetClient?: Pick<AkismetClient, "commentCheck">;
-		pageSourceFetchText?: (url: string) => Promise<string>;
+		pageSourceFetchText?: (
+			url: string,
+			options: { timeoutMs?: number; maxBytes?: number },
+		) => Promise<string>;
 		pageTitleFetchHtml?: (
 			url: string,
+			options: { timeoutMs: number; maxBytes: number },
 		) => Promise<{ status: number; text: string }>;
 		serviceControl?: ServiceControlController;
 		devMockService?: DevMockService;

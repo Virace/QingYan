@@ -108,6 +108,19 @@ export const pageRegistryStatusSchema = z.enum([
 	"ignored",
 ]);
 
+export const adminPageSortBySchema = z.enum([
+	"updatedAt",
+	"createdAt",
+	"commentCount",
+	"visitorCount",
+	"userCount",
+	"pageLikeCount",
+	"title",
+	"pageKey",
+]);
+
+export const adminPageSortOrderSchema = z.enum(["asc", "desc"]);
+
 export const pendingPageStatusSchema = z.enum([
 	"pending",
 	"approved",
@@ -118,6 +131,8 @@ export const pendingPageStatusSchema = z.enum([
 export const adminPagesWithStatusQuerySchema =
 	adminCollectionQuerySchema.extend({
 		status: pageRegistryStatusSchema.optional(),
+		sortBy: adminPageSortBySchema.default("updatedAt"),
+		sortOrder: adminPageSortOrderSchema.default("desc"),
 	});
 
 export const adminPendingPageApproveBodySchema = z.object({
@@ -149,6 +164,13 @@ export const adminPageTitleRefreshBodySchema = z.object({
 	runAfter: z.string().datetime().nullable().optional(),
 	maxAttempts: z.number().int().min(1).max(10).optional(),
 	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
+	timeoutMs: z.number().int().min(1000).max(60_000).optional(),
+	maxBytes: z
+		.number()
+		.int()
+		.min(65_536)
+		.max(10 * 1024 * 1024)
+		.optional(),
 });
 
 export const pageSourceTypeSchema = z.enum(["sitemap", "rss", "atom"]);
@@ -184,12 +206,30 @@ export const adminPageRegistrySourceParamsSchema = z.object({
 	sourceId: z.coerce.number().int().positive(),
 });
 
-export const adminPageRegistryRefreshBodySchema = z
-	.object({
-		siteKey: z.string().min(1),
-		mode: pageSourceModeSchema.optional(),
-	})
-	.optional();
+export const adminTaskExecutionOptionsSchema = z.object({
+	executionMode: z.literal("async").optional(),
+	timeoutMs: z.number().int().min(1000).max(60_000).optional(),
+	maxBytes: z
+		.number()
+		.int()
+		.min(65_536)
+		.max(10 * 1024 * 1024)
+		.optional(),
+	runAfter: z.string().datetime().nullable().optional(),
+	maxAttempts: z.number().int().min(1).max(10).optional(),
+	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
+});
+
+export const adminPageRegistrySourceRefreshBodySchema =
+	adminTaskExecutionOptionsSchema.optional();
+
+export const adminPageRegistryRefreshBodySchema =
+	adminTaskExecutionOptionsSchema
+		.extend({
+			siteKey: z.string().min(1),
+			mode: pageSourceModeSchema.optional(),
+		})
+		.optional();
 
 export const adminPageRegistryMaintenanceJobParamsSchema = z.object({
 	jobId: z.string().min(1),

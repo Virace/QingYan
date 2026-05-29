@@ -1,4 +1,5 @@
 import { requestJson } from "./client";
+import type { TaskExecutionOptions } from "./ops";
 
 export interface Page<T> {
 	items: T[];
@@ -21,9 +22,21 @@ export type PageRegistryStatus =
 export type PendingPageStatus = "pending" | "approved" | "rejected" | "ignored";
 export type PageSourceType = "sitemap" | "rss" | "atom";
 export type PageSourceMode = "append" | "replace";
+export type AdminPageSortBy =
+	| "updatedAt"
+	| "createdAt"
+	| "commentCount"
+	| "visitorCount"
+	| "userCount"
+	| "pageLikeCount"
+	| "title"
+	| "pageKey";
+export type AdminPageSortOrder = "asc" | "desc";
 export type MaintenanceJobStatus =
 	| "queued"
+	| "delayed"
 	| "running"
+	| "retrying"
 	| "succeeded"
 	| "failed"
 	| "cancelled";
@@ -559,6 +572,8 @@ export function listPages(input: {
 	siteKey?: string;
 	search?: string;
 	status?: PageRegistryStatus;
+	sortBy?: AdminPageSortBy;
+	sortOrder?: AdminPageSortOrder;
 	limit?: number;
 	offset?: number;
 }) {
@@ -690,19 +705,25 @@ export function deletePageRegistrySource(sourceId: number) {
 	);
 }
 
-export function refreshPageRegistrySource(sourceId: number) {
+export function refreshPageRegistrySource(input: {
+	sourceId: number;
+	options?: TaskExecutionOptions;
+}) {
 	return requestJson<{ job: MaintenanceJob }>(
-		`/api/admin/page-registry/sources/${sourceId}/refresh`,
+		`/api/admin/page-registry/sources/${input.sourceId}/refresh`,
 		{
 			method: "POST",
+			body: JSON.stringify(input.options ?? {}),
 		},
 	);
 }
 
-export function refreshPageRegistrySources(input: {
-	siteKey: string;
-	mode?: PageSourceMode;
-}) {
+export function refreshPageRegistrySources(
+	input: {
+		siteKey: string;
+		mode?: PageSourceMode;
+	} & TaskExecutionOptions,
+) {
 	return requestJson<{ job: MaintenanceJob }>(
 		"/api/admin/page-registry/refresh",
 		{
