@@ -3,6 +3,8 @@ import { normalizePagination } from "../shared/pagination";
 import {
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
+	mergeEngagementSettings,
+	resolveEngagementTrustMode,
 } from "../shared/site-settings-defaults";
 import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
@@ -21,15 +23,15 @@ function buildCapability(settings?: {
 	defaultStatus: string;
 	maxDepth: number;
 	allowWebsite: boolean;
-	allowPageLike: boolean;
 	captchaMode: string;
+	supportsVote?: boolean;
 }) {
 	const supportsCaptcha = (settings?.captchaMode ?? "threshold") !== "never";
 
 	return {
 		enabled: settings?.commentsEnabled ?? true,
 		supportsReply: (settings?.maxDepth ?? 3) > 1,
-		supportsVote: true,
+		supportsVote: settings?.supportsVote ?? false,
 		supportsCaptcha,
 		defaultStatus: settings?.defaultStatus ?? "pending",
 		message: null,
@@ -153,6 +155,8 @@ export class CommentsService {
 			registryPage?.status !== "ignored";
 		const pageRegistered = Boolean(registryPage);
 		const settings = await this.repository.getSiteSettings(site.id);
+		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const trustMode = resolveEngagementTrustMode(engagement);
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
 		);
@@ -177,18 +181,24 @@ export class CommentsService {
 		const publicApiSettings = this.loadPublicApiSettings
 			? await this.loadPublicApiSettings()
 			: { advisoryFields: { enabled: false } };
-		const visitor = pageInteractive
-			? await this.repository.getOrCreateVisitor({
-					siteId: site.id,
-					visitorKey: input.visitorKey,
-					ip: input.ip,
-					userAgent: input.userAgent,
-					pageKey: input.pageKey,
-					pageUrl: input.pageUrl,
-				})
-			: undefined;
+		const visitor =
+			pageInteractive && engagement.visitors.enabled
+				? await this.repository.getOrCreateVisitor({
+						siteId: site.id,
+						visitorKey: input.visitorKey,
+						ip: input.ip,
+						userAgent: input.userAgent,
+						pageKey: input.pageKey,
+						pageUrl: input.pageUrl,
+					})
+				: undefined;
 		let thread = existingThread;
-		if (!thread && visitor && pageInteractive && pageRegistered) {
+		if (
+			!thread &&
+			pageInteractive &&
+			pageRegistered &&
+			engagement.pageViews.enabled
+		) {
 			thread = await this.repository.ensurePageThreadForRegisteredPage({
 				siteId: site.id,
 				pageKey: input.pageKey,
@@ -196,23 +206,42 @@ export class CommentsService {
 				pageUrl: input.pageUrl,
 			});
 		}
-		if (thread && visitor && pageInteractive) {
-			await this.repository.recordPageView({
-				pageThreadId: thread.id,
-				visitorId: visitor.id,
-				pageKey: input.pageKey,
-				userAgent: input.userAgent,
-			});
+		if (thread && pageInteractive && engagement.pageViews.enabled) {
+			if (visitor) {
+				await this.repository.recordPageView({
+					pageThreadId: thread.id,
+					visitorId: visitor.id,
+					pageKey: input.pageKey,
+					userAgent: input.userAgent,
+				});
+			} else {
+				await this.repository.recordLightweightPageView({
+					pageThreadId: thread.id,
+				});
+			}
 		}
-		if (!thread && pageInteractive && !pageRegistered) {
-			await this.repository.recordPendingPageView({
-				siteKey: site.siteKey,
-				pageKey: input.pageKey,
-				pageUrl: input.pageUrl ?? input.pageKey,
-				visitorKey: visitor?.visitorKey ?? input.visitorKey,
-				ip: input.ip,
-				userAgent: input.userAgent,
-			});
+		if (
+			!thread &&
+			pageInteractive &&
+			!pageRegistered &&
+			engagement.pageViews.enabled
+		) {
+			if (engagement.visitors.enabled) {
+				await this.repository.recordPendingPageView({
+					siteKey: site.siteKey,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl ?? input.pageKey,
+					visitorKey: visitor?.visitorKey ?? input.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+				});
+			} else {
+				await this.repository.recordLightweightPendingPageView({
+					siteKey: site.siteKey,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl ?? input.pageKey,
+				});
+			}
 		}
 		const refreshedThread =
 			thread && pageInteractive
@@ -222,13 +251,13 @@ export class CommentsService {
 					})
 				: undefined;
 		const commentBundle =
-			thread && visitor && pageInteractive
+			thread && pageInteractive
 				? await this.repository.listPublicComments({
 						pageThreadId: thread.id,
 						sortBy: pagination.sortBy,
 						limit: pagination.limit,
 						offset: pagination.offset,
-						visitorId: visitor.id,
+						visitorId: visitor?.id,
 					})
 				: {
 						totalCount: 0,
@@ -237,8 +266,8 @@ export class CommentsService {
 						viewerVoteMap: new Map<string, "up" | "down">(),
 					};
 		const pageFeedback =
-			thread && visitor && pageInteractive
-				? await this.repository.getViewerPageFeedback(thread.id, visitor.id)
+			thread && pageInteractive
+				? await this.repository.getViewerPageFeedback(thread.id, visitor?.id)
 				: {
 						liked: false,
 					};
@@ -268,7 +297,21 @@ export class CommentsService {
 		});
 
 		return {
-			capability: buildCapability(settings ?? undefined),
+			capability: buildCapability(
+				settings
+					? {
+							...settings,
+							supportsVote: engagement.commentVotes.enabled,
+						}
+					: {
+							commentsEnabled: true,
+							defaultStatus: "pending",
+							maxDepth: 3,
+							allowWebsite: true,
+							captchaMode: "threshold",
+							supportsVote: engagement.commentVotes.enabled,
+						},
+			),
 			commentForm: buildCommentForm({
 				allowWebsite: settings?.allowWebsite,
 				commentRequireJson: settings?.commentRequireJson,
@@ -299,10 +342,13 @@ export class CommentsService {
 					: {}),
 			},
 			pageMetrics: {
+				enabled: engagement.pageViews.enabled,
+				trustMode,
 				pageViewCount: refreshedThread?.pageViewCount ?? 0,
 			},
 			pageFeedback: {
-				supportsLike: settings?.allowPageLike ?? true,
+				supportsLike: engagement.pageLikes.enabled,
+				trustMode,
 				likeCount: refreshedThread?.pageLikeCount ?? 0,
 				liked: pageFeedback.liked,
 			},
@@ -327,32 +373,33 @@ export class CommentsService {
 			siteId: site.id,
 			pageKey: input.pageKey,
 		});
-		const visitor = thread
-			? await this.repository.getOrCreateVisitor({
-					siteId: site.id,
-					visitorKey: input.visitorKey,
-					ip: input.ip,
-					userAgent: input.userAgent,
-					pageKey: input.pageKey,
-					pageUrl: input.pageUrl,
-				})
-			: undefined;
-		const commentBundle =
-			thread && visitor
-				? await this.repository.listPublicComments({
-						pageThreadId: thread.id,
-						sortBy: pagination.sortBy,
-						limit: pagination.limit,
-						offset: pagination.offset,
-						visitorId: visitor.id,
-					})
-				: {
-						totalCount: 0,
-						rootCount: 0,
-						comments: [],
-						viewerVoteMap: new Map<string, "up" | "down">(),
-					};
 		const settings = await this.repository.getSiteSettings(site.id);
+		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const visitor =
+			thread && engagement.visitors.enabled
+				? await this.repository.getOrCreateVisitor({
+						siteId: site.id,
+						visitorKey: input.visitorKey,
+						ip: input.ip,
+						userAgent: input.userAgent,
+						pageKey: input.pageKey,
+						pageUrl: input.pageUrl,
+					})
+				: undefined;
+		const commentBundle = thread
+			? await this.repository.listPublicComments({
+					pageThreadId: thread.id,
+					sortBy: pagination.sortBy,
+					limit: pagination.limit,
+					offset: pagination.offset,
+					visitorId: visitor?.id,
+				})
+			: {
+					totalCount: 0,
+					rootCount: 0,
+					comments: [],
+					viewerVoteMap: new Map<string, "up" | "down">(),
+				};
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
 		);

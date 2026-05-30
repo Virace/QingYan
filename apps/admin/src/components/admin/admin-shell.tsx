@@ -31,7 +31,7 @@ import {
 	SiteSettingsPage,
 	SitesPage,
 	SystemSettingsPage,
-	UsersPage,
+	CommentersPage,
 	VisitorsPage,
 } from "./admin-pages";
 import { inputClass } from "./admin-ui";
@@ -41,7 +41,7 @@ export type AdminView =
 	| "overview"
 	| "comments"
 	| "pages"
-	| "users"
+	| "commenters"
 	| "visitors"
 	| "blacklist"
 	| "sites"
@@ -59,7 +59,7 @@ const navItems: Array<{
 	{ id: "overview", label: "概览", icon: BadgeCheckIcon },
 	{ id: "comments", label: "评论", icon: MessageSquareTextIcon },
 	{ id: "pages", label: "页面", icon: BookOpenIcon },
-	{ id: "users", label: "用户", icon: UsersIcon },
+	{ id: "commenters", label: "评论者", icon: UsersIcon },
 	{ id: "visitors", label: "访客", icon: BadgeCheckIcon },
 	{ id: "blacklist", label: "黑名单", icon: ShieldIcon },
 	{ id: "sites", label: "站点", icon: GlobeIcon },
@@ -126,9 +126,9 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return (
 					<PagesPage siteKey={activeSiteKey} openComments={openComments} />
 				);
-			case "users":
+			case "commenters":
 				return (
-					<UsersPage siteKey={activeSiteKey} openComments={openComments} />
+					<CommentersPage siteKey={activeSiteKey} openComments={openComments} />
 				);
 			case "visitors":
 				return (

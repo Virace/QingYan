@@ -114,6 +114,7 @@ describe("initial migration", () => {
 				"`auto_blacklist_ttl_sec` integer",
 			);
 			expect(combinedMigrationSql).toContain("`comment_metadata_json` text");
+			expect(combinedMigrationSql).toContain("`engagement_json` text");
 			expect(combinedMigrationSql).toContain("`staff_display_json` text");
 			expect(combinedMigrationSql).toContain("CREATE TABLE `system_settings`");
 			expect(combinedMigrationSql).toContain(
@@ -233,6 +234,7 @@ describe("initial migration", () => {
 					"auto_blacklist_scope",
 					"auto_blacklist_ttl_sec",
 					"comment_metadata_json",
+					"engagement_json",
 					"staff_display_json",
 				]),
 			);

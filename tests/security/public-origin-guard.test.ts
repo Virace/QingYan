@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import type { AppConfig } from "../../src/config/types";
 import { sitePageRegistry, siteSettings, sites } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -64,6 +65,18 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 		pageKey,
 		pageUrl: `/${pageKey}`,
 		status: "active",
+	});
+}
+
+async function enableTrustedPageLikes(fixture: TestFixture) {
+	await fixture.app.db.update(siteSettings).set({
+		allowPageLike: true,
+		engagementJson: serializeEngagementSettings({
+			visitors: { enabled: true },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: true },
+			commentVotes: { enabled: false },
+		}),
 	});
 }
 
@@ -218,6 +231,7 @@ describe("public origin guard", () => {
 			mutateConfig: allowMissingOrigin,
 		});
 		cleanups.push(fixture.cleanup);
+		await enableTrustedPageLikes(fixture);
 		await seedActivePage(fixture, "post:missing-origin-opt-out");
 
 		const response = await fixture.app.inject({
@@ -240,6 +254,7 @@ describe("public origin guard", () => {
 			mutateConfig: requireOrigin,
 		});
 		cleanups.push(fixture.cleanup);
+		await enableTrustedPageLikes(fixture);
 
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
 		await systemSettings.upsert("security", "publicOriginGuard.enabled", true);

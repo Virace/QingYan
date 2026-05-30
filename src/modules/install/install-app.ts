@@ -208,6 +208,20 @@ function renderInstallHtml(
 			allowedOrigins: resolveDefaultPublicBaseUrl(input),
 		},
 		siteSettings: {
+			engagement: {
+				visitors: {
+					enabled: true,
+				},
+				pageViews: {
+					enabled: false,
+				},
+				pageLikes: {
+					enabled: false,
+				},
+				commentVotes: {
+					enabled: false,
+				},
+			},
 			comments: {
 				verifiedAuthor: {
 					enabled: true,
@@ -340,6 +354,18 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <label>站点名称<input data-path="site.name" autocomplete="off" required><span class="hint" data-hint-for="site.name"></span></label>
 </div>
 <label>前端站点 Origin<input data-path="site.allowedOrigins" data-type="singleStringArray" autocomplete="url" required><span class="hint" data-hint-for="site.allowedOrigins">填写加载评论组件的前端站点 origin。一个 QingYan 站点只对应一个前端 Origin；若 QingYan 与内容站不是同一域名，请填写 FangYuan / x-item 的真实访问 origin。</span></label>
+</fieldset>
+<fieldset>
+<legend>访客与计数</legend>
+<div class="restore-note">可信统计模式：开启访客记录。QingYan 会记录访客 IP、UA 和访问页面，用于可信 PV、点赞、投票和后续访客画像。轻量模式：关闭访客记录。QingYan 不记录访客身份；已开启的计数只做低可信加 1。</div>
+<div class="grid">
+<label class="check"><input data-path="siteSettings.engagement.visitors.enabled" data-type="boolean" type="checkbox">开启访客记录<span class="hint" data-hint-for="siteSettings.engagement.visitors.enabled">关闭后 QingYan 不写 visitor cookie，不创建访客记录，也不提供访客画像。</span></label>
+<label class="check"><input data-path="siteSettings.engagement.pageViews.enabled" data-type="boolean" type="checkbox">启用 PV 统计<span class="hint" data-hint-for="siteSettings.engagement.pageViews.enabled">关闭后不记录 PV；访客记录关闭时只做低可信计数。</span></label>
+</div>
+<div class="grid">
+<label class="check"><input data-path="siteSettings.engagement.pageLikes.enabled" data-type="boolean" type="checkbox">启用页面点赞<span class="hint" data-hint-for="siteSettings.engagement.pageLikes.enabled">访客记录开启时可服务端去重；关闭时只做低可信加 1。</span></label>
+<label class="check"><input data-path="siteSettings.engagement.commentVotes.enabled" data-type="boolean" type="checkbox">启用评论投票<span class="hint" data-hint-for="siteSettings.engagement.commentVotes.enabled">访客记录开启时可服务端去重；关闭时只做低可信加 1。</span></label>
+</div>
 </fieldset>
 <fieldset>
 <legend>可信评论作者</legend>
@@ -780,6 +806,13 @@ function renderPlan(plan) {
 			" / " + verifiedAuthor.email +
 			" / " + verifiedAuthor.badgeLabel
 		: "";
+	const engagement = plan.siteSettings?.engagement;
+	const engagementText = engagement
+		? "<br>访客记录: " + (engagement.visitors.enabled ? "开启" : "关闭") +
+			"<br>PV 统计: " + (engagement.pageViews.enabled ? "开启" : "关闭") +
+			"<br>页面点赞: " + (engagement.pageLikes.enabled ? "开启" : "关闭") +
+			"<br>评论投票: " + (engagement.commentVotes.enabled ? "开启" : "关闭")
+		: "";
 const restoreText = plan.restore
 		? "<br>恢复来源: " + plan.restore.fileName +
 			"<br>恢复格式: QingYan 站点级 JSON" +
@@ -798,6 +831,7 @@ const restoreText = plan.restore
 		"管理员: " + plan.admin.username + (plan.admin.passwordGenerated ? "（将随机生成初始密码）" : "") + "<br>" +
 		"默认站点: " + plan.site.siteKey + " / " + plan.site.name + "<br>" +
 		verifiedAuthorText +
+		engagementText +
 		"安装值: " + renderList(valueItems) +
 		"系统设置写入: " + renderList(systemReview) +
 		"环境变量锁定: " + envFields +

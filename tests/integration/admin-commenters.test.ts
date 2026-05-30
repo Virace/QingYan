@@ -19,8 +19,8 @@ afterEach(async () => {
 	}
 });
 
-describe("admin users", () => {
-	it("aggregates users by email and collects multiple nicknames", async () => {
+describe("admin commenters", () => {
+	it("aggregates commenters by email and collects multiple nicknames", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -118,7 +118,7 @@ describe("admin users", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/admin/users?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/commenters?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -151,7 +151,7 @@ describe("admin users", () => {
 
 		const searchResponse = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/admin/users?siteKey=fangyuan&search=alice@example.com&limit=20&offset=0",
+			url: "/qingyan/api/admin/commenters?siteKey=fangyuan&search=alice@example.com&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -170,6 +170,22 @@ describe("admin users", () => {
 				totalCount: 1,
 			},
 		});
+	});
+
+	it("does not expose users as the canonical anonymous commenter endpoint", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/users?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(404);
 	});
 
 	it("adds and removes email blacklist rules by target", async () => {

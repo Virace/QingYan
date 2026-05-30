@@ -13,6 +13,7 @@ import {
 	updateSystemSettings,
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -282,6 +283,32 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			},
 		});
 	};
+	const updateEngagement = (
+		key: keyof AdminSettings["engagement"],
+		enabled: boolean,
+	) => {
+		const nextEngagement = {
+			...draft.engagement,
+			[key]: {
+				...draft.engagement[key],
+				enabled,
+			},
+		};
+		setDraft({
+			...draft,
+			engagement: nextEngagement,
+			pageFeedback:
+				key === "pageLikes"
+					? {
+							allowLike: enabled,
+						}
+					: draft.pageFeedback,
+		});
+	};
+	const countersEnabled =
+		draft.engagement.pageViews.enabled ||
+		draft.engagement.pageLikes.enabled ||
+		draft.engagement.commentVotes.enabled;
 
 	return (
 		<Card>
@@ -939,23 +966,78 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							</Field>
 						</div>
 					</SettingsSection>
-					<Field label="页面点赞">
-						<select
-							className={inputClass}
-							value={String(draft.pageFeedback.allowLike)}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									pageFeedback: {
-										allowLike: event.target.value === "true",
-									},
-								})
-							}
-						>
-							<option value="true">允许</option>
-							<option value="false">关闭</option>
-						</select>
-					</Field>
+					<SettingsSection
+						title="访客与计数"
+						description="访客记录决定 PV、点赞、投票是否能使用服务端可信去重。若需要可信统计，必须开启访客记录；若更重视隐私或轻量部署，可以关闭访客记录和相关计数。"
+					>
+						<div className="grid gap-4 md:grid-cols-2">
+							<Field label="访客记录">
+								<select
+									className={inputClass}
+									value={String(draft.engagement.visitors.enabled)}
+									onChange={(event) =>
+										updateEngagement("visitors", event.target.value === "true")
+									}
+								>
+									<option value="true">开启访客记录</option>
+									<option value="false">关闭访客记录</option>
+								</select>
+							</Field>
+							<div className="rounded-md border p-3 text-sm text-muted-foreground">
+								{draft.engagement.visitors.enabled
+									? "开启后 QingYan 会记录访客 IP、UA 和访问页面，用于服务端可信去重、PV、点赞、投票和后续访客画像；数据量会随访问增长。"
+									: "关闭后 QingYan 不记录访客身份，不提供访客画像；PV、点赞、投票如果开启，只是轻量低可信计数，不能防止重复刷新、重复点赞或重复投票。"}
+							</div>
+							<Field label="PV 统计">
+								<select
+									className={inputClass}
+									value={String(draft.engagement.pageViews.enabled)}
+									onChange={(event) =>
+										updateEngagement("pageViews", event.target.value === "true")
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="页面点赞">
+								<select
+									className={inputClass}
+									value={String(draft.engagement.pageLikes.enabled)}
+									onChange={(event) =>
+										updateEngagement("pageLikes", event.target.value === "true")
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							<Field label="评论投票">
+								<select
+									className={inputClass}
+									value={String(draft.engagement.commentVotes.enabled)}
+									onChange={(event) =>
+										updateEngagement(
+											"commentVotes",
+											event.target.value === "true",
+										)
+									}
+								>
+									<option value="true">启用</option>
+									<option value="false">关闭</option>
+								</select>
+							</Field>
+							{!draft.engagement.visitors.enabled && countersEnabled ? (
+								<div className="flex items-center gap-2 rounded-md border p-3 text-sm text-muted-foreground">
+									<Badge variant="outline">低可信</Badge>
+									<span>
+										访客记录关闭时，已开启的计数只做轻量加 1，不使用 visitorId
+										去重。
+									</span>
+								</div>
+							) : null}
+						</div>
+					</SettingsSection>
 					<Field label="邮件通知">
 						<select
 							className={inputClass}

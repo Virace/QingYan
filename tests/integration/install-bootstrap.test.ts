@@ -721,6 +721,45 @@ describe("install bootstrap", () => {
 		expect(existsSync(workspace.databaseFile)).toBe(false);
 	});
 
+	it("plans default engagement settings during install", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const app = buildInstallApp({ minimalConfig });
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const response = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install/plan",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload: installFormPayload(workspace.databaseFile),
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			siteSettings: {
+				engagement: {
+					visitors: { enabled: true },
+					pageViews: { enabled: false },
+					pageLikes: { enabled: false },
+					commentVotes: { enabled: false },
+				},
+			},
+			applyPayload: {
+				siteSettings: {
+					engagement: {
+						visitors: { enabled: true },
+						pageViews: { enabled: false },
+						pageLikes: { enabled: false },
+						commentVotes: { enabled: false },
+					},
+				},
+			},
+		});
+	});
+
 	it("rejects install when enabled verified author has no email", async () => {
 		const workspace = createWorkspace();
 		const minimalConfig = createMinimalConfig(workspace.configPath);
@@ -1368,6 +1407,12 @@ describe("install bootstrap", () => {
 				commentsEnabled: true,
 				rootLimit: 20,
 			});
+			expect(JSON.parse(settings?.engagementJson ?? "{}")).toMatchObject({
+				visitors: { enabled: true },
+				pageViews: { enabled: false },
+				pageLikes: { enabled: false },
+				commentVotes: { enabled: false },
+			});
 			const systemSettingRows = await db.select().from(systemSettings);
 			expect(systemSettingRows).toEqual(
 				expect.arrayContaining([
@@ -1429,6 +1474,56 @@ describe("install bootstrap", () => {
 				email: "owner@example.com",
 				website: "https://fangyuan.example.com/about",
 				badgeLabel: "楼主",
+			});
+		} finally {
+			sqlite.close();
+		}
+	});
+
+	it("applies lightweight engagement settings during install", async () => {
+		const workspace = createWorkspace();
+		const minimalConfig = createMinimalConfig(workspace.configPath);
+		const app = buildInstallApp({ minimalConfig });
+		cleanups.push(() => app.close());
+
+		const installCookie = await getInstallCookie(app);
+		const payload = {
+			...installFormPayload(workspace.databaseFile),
+			siteSettings: {
+				engagement: {
+					visitors: { enabled: false },
+					pageViews: { enabled: true },
+					pageLikes: { enabled: true },
+					commentVotes: { enabled: true },
+				},
+			},
+		};
+		const response = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install",
+			cookies: {
+				qingyan_install: installCookie?.value ?? "",
+			},
+			payload,
+		});
+
+		expect(response.statusCode).toBe(201);
+		const { db, sqlite } = createDatabaseClients(workspace.databaseFile);
+		try {
+			const [site] = await db
+				.select()
+				.from(sites)
+				.where(eq(sites.siteKey, "default"));
+			const [settings] = await db
+				.select()
+				.from(siteSettings)
+				.where(eq(siteSettings.siteId, site?.id ?? 0));
+			expect(settings?.allowPageLike).toBe(true);
+			expect(JSON.parse(settings?.engagementJson ?? "{}")).toMatchObject({
+				visitors: { enabled: false },
+				pageViews: { enabled: true },
+				pageLikes: { enabled: true },
+				commentVotes: { enabled: true },
 			});
 		} finally {
 			sqlite.close();

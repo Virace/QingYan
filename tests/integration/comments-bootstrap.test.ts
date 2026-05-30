@@ -7,6 +7,7 @@ import {
 	comments,
 	pageFeedbackRecords,
 	pageThreads,
+	pageViewSessions,
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
@@ -45,6 +46,152 @@ afterEach(async () => {
 });
 
 describe("GET /qingyan/api/comments/bootstrap", () => {
+	it("uses lightweight page views without visitor records when visitors are disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: false,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"posts/lightweight-bootstrap/",
+			"/posts/lightweight-bootstrap/",
+		);
+
+		const first = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Lightweight",
+			headers: {
+				referer: "http://localhost:4321/posts/lightweight-bootstrap/",
+				"user-agent": "lightweight-bootstrap-test",
+			},
+		});
+		const second = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Lightweight",
+			headers: {
+				referer: "http://localhost:4321/posts/lightweight-bootstrap/",
+				"user-agent": "lightweight-bootstrap-test",
+			},
+		});
+
+		expect(first.statusCode).toBe(200);
+		expect(second.statusCode).toBe(200);
+		expect(
+			first.cookies.find((cookie) => cookie.name === "qingyan_visitor"),
+		).toBeUndefined();
+		expect(
+			second.cookies.find((cookie) => cookie.name === "qingyan_visitor"),
+		).toBeUndefined();
+		expect(second.json()).toMatchObject({
+			capability: {
+				supportsVote: false,
+			},
+			pageMetrics: {
+				enabled: true,
+				trustMode: "lightweight",
+				pageViewCount: 2,
+			},
+			pageFeedback: {
+				supportsLike: false,
+				trustMode: "lightweight",
+				likeCount: 0,
+				liked: false,
+			},
+		});
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			pageKey: "posts/lightweight-bootstrap/",
+			pageViewCount: 2,
+		});
+	});
+
+	it("does not record page views when page view tracking is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: false,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"posts/no-page-views/",
+			"/posts/no-page-views/",
+		);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=No%20Page%20Views",
+			headers: {
+				referer: "http://localhost:4321/posts/no-page-views/",
+				"user-agent": "no-page-views-test",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			pageMetrics: {
+				enabled: false,
+				trustMode: "trusted",
+				pageViewCount: 0,
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
+	});
+
 	it("returns bootstrap payload with threaded comments, viewer vote and page feedback", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -56,6 +203,25 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
 		await seedActivePage(fixture, site.id, "post:welcome", "/posts/welcome/");
 
 		await fixture.app.db.insert(visitors).values({
@@ -292,6 +458,26 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 	it("records pending PV without creating page threads for unknown bootstrap pages", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
 
 		const response = await fixture.app.inject({
 			method: "GET",
@@ -351,6 +537,19 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "posts/registered-bootstrap/",
@@ -411,6 +610,19 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "posts/registered-dedupe/",

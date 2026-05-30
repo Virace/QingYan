@@ -113,7 +113,7 @@ export function buildSiteSummary(site: DevSiteSeed) {
 		},
 		pageCount: 0,
 		commentCount: 0,
-		userCount: 0,
+		commenterCount: 0,
 		visitorCount: 0,
 	};
 }

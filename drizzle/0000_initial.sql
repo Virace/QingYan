@@ -282,7 +282,7 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
 	`email_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `engagement_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_settings_site_id_idx` ON `site_settings` (`site_id`);--> statement-breakpoint

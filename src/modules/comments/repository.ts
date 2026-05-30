@@ -397,6 +397,44 @@ export class CommentsRepository {
 			.where(eq(pageThreads.id, input.pageThreadId));
 	}
 
+	public async recordLightweightPageView(input: { pageThreadId: number }) {
+		const nowIso = new Date().toISOString();
+		await this.db
+			.update(pageThreads)
+			.set({
+				pageViewCount: sql`${pageThreads.pageViewCount} + 1`,
+				updatedAt: nowIso,
+			})
+			.where(eq(pageThreads.id, input.pageThreadId));
+	}
+
+	public async recordLightweightPendingPageView(input: {
+		siteKey: string;
+		pageKey: string;
+		pageUrl: string;
+	}) {
+		const nowIso = new Date().toISOString();
+		await this.db
+			.insert(pendingPageCandidates)
+			.values({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				pageUrl: input.pageUrl,
+				hitCount: 1,
+				lastSeenAt: nowIso,
+				updatedAt: nowIso,
+			})
+			.onConflictDoUpdate({
+				target: [pendingPageCandidates.siteKey, pendingPageCandidates.pageKey],
+				set: {
+					pageUrl: input.pageUrl,
+					hitCount: sql`${pendingPageCandidates.hitCount} + 1`,
+					lastSeenAt: nowIso,
+					updatedAt: nowIso,
+				},
+			});
+	}
+
 	public async recordPendingPageView(input: {
 		siteKey: string;
 		pageKey: string;

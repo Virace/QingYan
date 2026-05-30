@@ -5,9 +5,11 @@ import {
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
+	siteSettings,
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
+import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -18,6 +20,19 @@ afterEach(async () => {
 		await cleanup();
 	}
 });
+
+async function enableTrustedPageViews(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+) {
+	await fixture.app.db.update(siteSettings).set({
+		engagementJson: serializeEngagementSettings({
+			visitors: { enabled: true },
+			pageViews: { enabled: true },
+			pageLikes: { enabled: false },
+			commentVotes: { enabled: false },
+		}),
+	});
+}
 
 describe("admin page registry", () => {
 	it("does not list registered pages as pending unknown pages", async () => {
@@ -79,6 +94,7 @@ describe("admin page registry", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const admin = await loginAsAdmin(fixture.app);
+		await enableTrustedPageViews(fixture);
 
 		await fixture.app.inject({
 			method: "GET",
@@ -197,6 +213,7 @@ describe("admin page registry", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const admin = await loginAsAdmin(fixture.app);
+		await enableTrustedPageViews(fixture);
 
 		await fixture.app.inject({
 			method: "GET",

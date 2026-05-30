@@ -27,7 +27,7 @@ export type AdminPageSortBy =
 	| "createdAt"
 	| "commentCount"
 	| "visitorCount"
-	| "userCount"
+	| "commenterCount"
 	| "pageLikeCount"
 	| "title"
 	| "pageKey";
@@ -110,7 +110,16 @@ export interface AdminPage {
 	titleRefreshStatusCode?: number | null;
 	titleRefreshError?: string | null;
 	visitorCount: number;
-	userCount: number;
+	commenterCount: number;
+	engagement?: AdminEngagementSummary;
+}
+
+export interface AdminEngagementSummary {
+	trustMode: "trusted" | "lightweight";
+	visitorsEnabled: boolean;
+	pageViewsEnabled: boolean;
+	pageLikesEnabled: boolean;
+	commentVotesEnabled: boolean;
 }
 
 export interface PendingPageCandidate {
@@ -169,7 +178,7 @@ export interface MaintenanceJob {
 	updatedAt: string;
 }
 
-export interface AdminUser {
+export interface AdminCommenter {
 	email: string;
 	emailVariants: string[];
 	names: string[];
@@ -207,6 +216,27 @@ export interface AdminVisitor {
 	};
 }
 
+export type AdminVisitorsPage = Page<AdminVisitor> & {
+	enabled: boolean;
+	trustMode: "trusted" | "lightweight";
+	message?: string;
+};
+
+export interface AdminEngagementSettings {
+	visitors: {
+		enabled: boolean;
+	};
+	pageViews: {
+		enabled: boolean;
+	};
+	pageLikes: {
+		enabled: boolean;
+	};
+	commentVotes: {
+		enabled: boolean;
+	};
+}
+
 export interface AdminBlacklistRule {
 	id: number;
 	siteId: number | null;
@@ -240,12 +270,13 @@ export interface AdminSite {
 	pageFeedback: {
 		allowLike: boolean;
 	};
+	engagement: AdminEngagementSettings & AdminEngagementSummary;
 	notifications: {
 		emailEnabled: boolean;
 	};
 	pageCount: number;
 	commentCount: number;
-	userCount: number;
+	commenterCount: number;
 	visitorCount: number;
 }
 
@@ -305,6 +336,7 @@ export interface AdminSettings {
 	pageFeedback: {
 		allowLike: boolean;
 	};
+	engagement: AdminEngagementSettings;
 	notifications: {
 		emailEnabled: boolean;
 	};
@@ -739,13 +771,15 @@ export function fetchPageRegistryMaintenanceJob(jobId: string) {
 	);
 }
 
-export function listUsers(input: {
+export function listCommenters(input: {
 	siteKey?: string;
 	search?: string;
 	limit?: number;
 	offset?: number;
 }) {
-	return requestJson<Page<AdminUser>>(`/api/admin/users?${queryString(input)}`);
+	return requestJson<Page<AdminCommenter>>(
+		`/api/admin/commenters?${queryString(input)}`,
+	);
 }
 
 export function listVisitors(input: {
@@ -754,7 +788,7 @@ export function listVisitors(input: {
 	limit?: number;
 	offset?: number;
 }) {
-	return requestJson<Page<AdminVisitor>>(
+	return requestJson<AdminVisitorsPage>(
 		`/api/admin/visitors?${queryString(input)}`,
 	);
 }

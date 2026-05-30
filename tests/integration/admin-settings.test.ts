@@ -73,6 +73,20 @@ describe("admin settings", () => {
 					},
 				},
 			},
+			engagement: {
+				visitors: {
+					enabled: true,
+				},
+				pageViews: {
+					enabled: false,
+				},
+				pageLikes: {
+					enabled: false,
+				},
+				commentVotes: {
+					enabled: false,
+				},
+			},
 		});
 
 		const updateResponse = await fixture.app.inject({
@@ -129,6 +143,20 @@ describe("admin settings", () => {
 				notifications: {
 					emailEnabled: true,
 				},
+				engagement: {
+					visitors: {
+						enabled: false,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				},
 			},
 		});
 		expect(updateResponse.statusCode).toBe(200);
@@ -178,10 +206,89 @@ describe("admin settings", () => {
 				},
 			},
 			pageFeedback: {
-				allowLike: false,
+				allowLike: true,
 			},
 			notifications: {
 				emailEnabled: true,
+			},
+			engagement: {
+				visitors: {
+					enabled: false,
+				},
+				pageViews: {
+					enabled: true,
+				},
+				pageLikes: {
+					enabled: true,
+				},
+				commentVotes: {
+					enabled: true,
+				},
+			},
+		});
+	});
+
+	it("updates one engagement switch without erasing sibling switches", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				engagement: {
+					visitors: {
+						enabled: false,
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json().engagement).toEqual({
+			visitors: {
+				enabled: false,
+			},
+			pageViews: {
+				enabled: false,
+			},
+			pageLikes: {
+				enabled: false,
+			},
+			commentVotes: {
+				enabled: false,
+			},
+		});
+
+		const secondUpdateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				engagement: {
+					pageViews: {
+						enabled: true,
+					},
+				},
+			},
+		});
+
+		expect(secondUpdateResponse.statusCode).toBe(200);
+		expect(secondUpdateResponse.json().engagement).toEqual({
+			visitors: {
+				enabled: false,
+			},
+			pageViews: {
+				enabled: true,
+			},
+			pageLikes: {
+				enabled: false,
+			},
+			commentVotes: {
+				enabled: false,
 			},
 		});
 	});

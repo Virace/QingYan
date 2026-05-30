@@ -13,7 +13,7 @@ import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
-import { adminUsersRoutes } from "./modules/admin/users-routes";
+import { adminCommentersRoutes } from "./modules/admin/commenters-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import type { AkismetClient } from "./modules/comments/akismet-client";
@@ -273,8 +273,8 @@ export async function buildApp(
 	await app.register(adminPageRegistryRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/page-registry"),
 	});
-	await app.register(adminUsersRoutes, {
-		prefix: joinPublicPath(publicPath, "/api/admin/users"),
+	await app.register(adminCommentersRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/commenters"),
 	});
 	await app.register(adminVisitorsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/visitors"),

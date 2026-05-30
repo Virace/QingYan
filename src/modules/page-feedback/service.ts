@@ -2,6 +2,10 @@ import type { SecurityToolkit } from "../../plugins/security";
 import type { CaptchaService } from "../comments/captcha-service";
 import type { CommentsRepository } from "../comments/repository";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import {
+	mergeEngagementSettings,
+	resolveEngagementTrustMode,
+} from "../shared/site-settings-defaults";
 import type { PageFeedbackRepository } from "./repository";
 
 function resolveIdentity(
@@ -42,41 +46,45 @@ export class PageFeedbackService {
 			pageKey: input.pageKey,
 		});
 
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-			pageKey: input.pageKey,
-			pageUrl: input.pageUrl,
-		});
+		const settings = await this.commentsRepository.getSiteSettings(site.id);
+		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const trustMode = resolveEngagementTrustMode(engagement);
+		if (!engagement.pageLikes.enabled) {
+			throw new AppError(403, "PAGE_FEEDBACK_DISABLED", "页面点赞功能未开启。");
+		}
+
+		const visitor = engagement.visitors.enabled
+			? await this.commentsRepository.getOrCreateVisitor({
+					siteId: site.id,
+					visitorKey: input.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl,
+				})
+			: undefined;
 		const thread = await this.commentsRepository.getOrCreatePageThread({
 			siteId: site.id,
 			pageKey: input.pageKey,
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 		});
-		const settings = await this.commentsRepository.getSiteSettings(site.id);
-		const supportsLike = settings?.allowPageLike ?? true;
-		if (!supportsLike) {
-			throw new AppError(403, "PAGE_FEEDBACK_DISABLED", "页面点赞功能未开启。");
-		}
 
 		await this.security.assertNotBlacklisted({
 			siteKey: input.siteKey,
-			visitorKey: visitor.visitorKey,
+			visitorKey: visitor?.visitorKey,
 			ip: input.ip,
 			requestScope: "write",
 			errorCode: "COMMENT_BLACKLISTED",
 			errorMessage: "当前请求已被拒绝。",
 		});
 		await this.security.consumeRateLimit({
-			key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:page_like`,
+			key: `public:${resolveIdentity(input.siteKey, visitor?.visitorKey ?? "", input.ip)}:page_like`,
 			rule: await this.security.getRateLimitRule("pageLike"),
 			errorCode: "VOTE_RATE_LIMITED",
 			errorMessage: "提交过于频繁，请稍后再试。",
 		});
-		if (input.captcha) {
+		if (visitor && input.captcha) {
 			await this.captchaService.consumeInlineCaptcha({
 				siteKey: input.siteKey,
 				pageKey: input.pageKey,
@@ -88,14 +96,47 @@ export class PageFeedbackService {
 				userAgent: input.userAgent,
 			});
 		}
-		await this.captchaService.ensureSatisfied({
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			action: "page_like",
-			visitorKey: visitor.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
+		if (visitor) {
+			await this.captchaService.ensureSatisfied({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				action: "page_like",
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
+		}
+
+		if (!visitor) {
+			const updatedThread = await this.pageFeedbackRepository.incrementPageLike(
+				thread.id,
+			);
+			if (!updatedThread) {
+				throw new ResourceNotFoundError("THREAD_NOT_FOUND", "页面线程不存在。");
+			}
+
+			await this.security.writeAudit({
+				siteKey: input.siteKey,
+				actorType: "visitor",
+				actorId: input.ip ?? "anonymous",
+				action: "page.like",
+				targetType: "page_thread",
+				targetId: String(thread.id),
+				payload: {
+					trustMode,
+				},
+			});
+
+			return {
+				visitorKey: undefined,
+				pageFeedback: {
+					supportsLike: true,
+					trustMode,
+					likeCount: updatedThread.pageLikeCount,
+					liked: true,
+				},
+			};
+		}
 
 		const existingLike = await this.pageFeedbackRepository.getLikeRecord(
 			thread.id,
@@ -130,6 +171,7 @@ export class PageFeedbackService {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 			pageFeedback: {
 				supportsLike: true,
+				trustMode,
 				likeCount: updatedThread.pageLikeCount,
 				liked: true,
 			},

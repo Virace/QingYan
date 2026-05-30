@@ -59,6 +59,12 @@ import {
 	type VerifiedAuthorSettings,
 } from "../comments/verified-author";
 import {
+	defaultEngagementSettings,
+	type EngagementSettings,
+	mergeEngagementSettings,
+	serializeEngagementSettings,
+} from "../shared/site-settings-defaults";
+import {
 	createSystemSettingsDefaults,
 	defaultAdminSessionTtlMinutes,
 	type SystemSettings,
@@ -114,6 +120,34 @@ const installVerifiedAuthorSchema = z
 		badgeLabel: value.badgeLabel.trim(),
 	}));
 
+const installEngagementSchema = z
+	.object({
+		visitors: z
+			.object({
+				enabled: z.boolean().optional(),
+			})
+			.optional(),
+		pageViews: z
+			.object({
+				enabled: z.boolean().optional(),
+			})
+			.optional(),
+		pageLikes: z
+			.object({
+				enabled: z.boolean().optional(),
+			})
+			.optional(),
+		commentVotes: z
+			.object({
+				enabled: z.boolean().optional(),
+			})
+			.optional(),
+	})
+	.optional()
+	.transform((value) =>
+		mergeEngagementSettings(value ?? defaultEngagementSettings),
+	);
+
 export const installApplySchema = z.object({
 	token: z.string().min(1).optional(),
 	server: z.object({
@@ -159,6 +193,7 @@ export const installApplySchema = z.object({
 					verifiedAuthor: installVerifiedAuthorSchema.optional(),
 				})
 				.optional(),
+			engagement: installEngagementSchema,
 		})
 		.optional(),
 	systemSettings: z.unknown().optional(),
@@ -177,9 +212,10 @@ type InstallRestoreOptions = {
 	site: InstallSiteInput;
 };
 type InstallSiteSettingsInput = {
-	comments: {
+	comments?: {
 		verifiedAuthor: VerifiedAuthorSettings;
 	};
+	engagement: EngagementSettings;
 };
 type NormalizedInstallInput = Omit<
 	InstallApplyInput,
@@ -380,13 +416,14 @@ function normalizeInstallInput(
 	const defaultedUsername = !input.admin.username;
 	const generatedPassword = !input.admin.password;
 	const restore = parseRestoreOptions(input.restore);
-	const siteSettingsInput = input.siteSettings?.comments?.verifiedAuthor
-		? {
-				comments: {
+	const siteSettingsInput: InstallSiteSettingsInput = {
+		comments: input.siteSettings?.comments?.verifiedAuthor
+			? {
 					verifiedAuthor: input.siteSettings.comments.verifiedAuthor,
-				},
-			}
-		: undefined;
+				}
+			: undefined,
+		engagement: input.siteSettings?.engagement ?? defaultEngagementSettings,
+	};
 	return {
 		...input,
 		site: restore?.site ?? input.site,
@@ -819,8 +856,14 @@ async function seedDatabase(input: {
 			await db
 				.update(siteSettings)
 				.set({
-					verifiedAuthorJson: serializeVerifiedAuthorSettings(
-						input.siteSettings.comments.verifiedAuthor,
+					verifiedAuthorJson: input.siteSettings.comments
+						? serializeVerifiedAuthorSettings(
+								input.siteSettings.comments.verifiedAuthor,
+							)
+						: undefined,
+					allowPageLike: input.siteSettings.engagement.pageLikes.enabled,
+					engagementJson: serializeEngagementSettings(
+						input.siteSettings.engagement,
 					),
 				})
 				.where(eq(siteSettings.siteId, registeredSite.id));
@@ -972,9 +1015,12 @@ export async function buildInstallPlan(input: {
 		},
 		siteSettings: resolved.siteSettings
 			? {
-					comments: {
-						verifiedAuthor: resolved.siteSettings.comments.verifiedAuthor,
-					},
+					comments: resolved.siteSettings.comments
+						? {
+								verifiedAuthor: resolved.siteSettings.comments.verifiedAuthor,
+							}
+						: undefined,
+					engagement: resolved.siteSettings.engagement,
 				}
 			: undefined,
 		restore:

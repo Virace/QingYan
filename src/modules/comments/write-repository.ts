@@ -325,6 +325,34 @@ export class CommentsWriteRepository {
 		return comment;
 	}
 
+	public async incrementCommentVote(input: {
+		commentId: string;
+		choice: "up" | "down";
+	}) {
+		await this.db
+			.update(comments)
+			.set({
+				voteUpCount:
+					input.choice === "up"
+						? sql`${comments.voteUpCount} + 1`
+						: sql`${comments.voteUpCount}`,
+				voteDownCount:
+					input.choice === "down"
+						? sql`${comments.voteDownCount} + 1`
+						: sql`${comments.voteDownCount}`,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(comments.id, input.commentId));
+
+		const [comment] = await this.db
+			.select()
+			.from(comments)
+			.where(eq(comments.id, input.commentId))
+			.limit(1);
+
+		return comment;
+	}
+
 	public async getVoteRecord(commentId: string, visitorId: number) {
 		const [voteRecord] = await this.db
 			.select()

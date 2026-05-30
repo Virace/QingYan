@@ -8,7 +8,13 @@ import {
 	sitePageRegistry,
 	siteSettings,
 	sites,
+	visitors,
+	voteRecords,
 } from "../../src/db/schema";
+import {
+	type EngagementSettings,
+	serializeEngagementSettings,
+} from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -34,6 +40,71 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 		pageKey,
 		pageUrl: `/${pageKey}`,
 		status: "active",
+	});
+}
+
+async function updateEngagement(
+	fixture: TestFixture,
+	engagement: EngagementSettings,
+) {
+	await fixture.app.db.update(siteSettings).set({
+		allowPageLike: engagement.pageLikes.enabled,
+		engagementJson: serializeEngagementSettings(engagement),
+	});
+}
+
+async function enableTrustedCommentVotes(fixture: TestFixture) {
+	await updateEngagement(fixture, {
+		visitors: { enabled: true },
+		pageViews: { enabled: false },
+		pageLikes: { enabled: false },
+		commentVotes: { enabled: true },
+	});
+}
+
+async function seedApprovedComment(
+	fixture: TestFixture,
+	input: {
+		pageKey: string;
+		commentId: string;
+	},
+) {
+	await seedActivePage(fixture, input.pageKey);
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+
+	await fixture.app.db.insert(pageThreads).values({
+		siteId: site.id,
+		pageKey: input.pageKey,
+		pageTitle: "Vote Post",
+	});
+	const [thread] = await fixture.app.db
+		.select()
+		.from(pageThreads)
+		.where(eq(pageThreads.pageKey, input.pageKey));
+	if (!thread) {
+		throw new Error("Expected thread to exist");
+	}
+
+	await fixture.app.db.insert(comments).values({
+		id: input.commentId,
+		siteId: site.id,
+		pageThreadId: thread.id,
+		parentId: null,
+		status: "approved",
+		authorName: "Alice",
+		contentRaw: "vote me",
+		contentHtml: "<p>vote me</p>",
+		replyCount: 0,
+		voteUpCount: 0,
+		voteDownCount: 0,
+		createdAt: "2026-04-17T10:00:00.000Z",
+		updatedAt: "2026-04-17T10:00:00.000Z",
 	});
 }
 
@@ -71,43 +142,10 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 	it("casts one vote and blocks duplicate votes from the same visitor", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await seedActivePage(fixture, "post:vote");
-
-		const [site] = await fixture.app.db
-			.select()
-			.from(sites)
-			.where(eq(sites.siteKey, "fangyuan"));
-		if (!site) {
-			throw new Error("Expected site to exist");
-		}
-
-		await fixture.app.db.insert(pageThreads).values({
-			siteId: site.id,
+		await enableTrustedCommentVotes(fixture);
+		await seedApprovedComment(fixture, {
 			pageKey: "post:vote",
-			pageTitle: "Vote Post",
-		});
-		const [thread] = await fixture.app.db
-			.select()
-			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:vote"));
-		if (!thread) {
-			throw new Error("Expected thread to exist");
-		}
-
-		await fixture.app.db.insert(comments).values({
-			id: "c_vote_target",
-			siteId: site.id,
-			pageThreadId: thread.id,
-			parentId: null,
-			status: "approved",
-			authorName: "Alice",
-			contentRaw: "vote me",
-			contentHtml: "<p>vote me</p>",
-			replyCount: 0,
-			voteUpCount: 0,
-			voteDownCount: 0,
-			createdAt: "2026-04-17T10:00:00.000Z",
-			updatedAt: "2026-04-17T10:00:00.000Z",
+			commentId: "c_vote_target",
 		});
 
 		const firstVote = await fixture.app.inject({
@@ -157,44 +195,16 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
+			engagementJson: serializeEngagementSettings({
+				visitors: { enabled: true },
+				pageViews: { enabled: false },
+				pageLikes: { enabled: false },
+				commentVotes: { enabled: true },
+			}),
 		});
-		await seedActivePage(fixture, "post:vote-captcha");
-
-		const [site] = await fixture.app.db
-			.select()
-			.from(sites)
-			.where(eq(sites.siteKey, "fangyuan"));
-		if (!site) {
-			throw new Error("Expected site to exist");
-		}
-
-		await fixture.app.db.insert(pageThreads).values({
-			siteId: site.id,
+		await seedApprovedComment(fixture, {
 			pageKey: "post:vote-captcha",
-			pageTitle: "Vote Captcha Post",
-		});
-		const [thread] = await fixture.app.db
-			.select()
-			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:vote-captcha"));
-		if (!thread) {
-			throw new Error("Expected thread to exist");
-		}
-
-		await fixture.app.db.insert(comments).values({
-			id: "c_vote_captcha",
-			siteId: site.id,
-			pageThreadId: thread.id,
-			parentId: null,
-			status: "approved",
-			authorName: "Alice",
-			contentRaw: "vote me",
-			contentHtml: "<p>vote me</p>",
-			replyCount: 0,
-			voteUpCount: 0,
-			voteDownCount: 0,
-			createdAt: "2026-04-17T10:00:00.000Z",
-			updatedAt: "2026-04-17T10:00:00.000Z",
+			commentId: "c_vote_captcha",
 		});
 
 		const blockedVote = await fixture.app.inject({
@@ -261,5 +271,86 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 			voteUp: 1,
 			viewerVote: "up",
 		});
+	});
+
+	it("rejects comment votes when commentVotes is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await updateEngagement(fixture, {
+			visitors: { enabled: true },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: false },
+			commentVotes: { enabled: false },
+		});
+		await seedApprovedComment(fixture, {
+			pageKey: "post:vote-disabled",
+			commentId: "c_vote_disabled",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments/c_vote_disabled/vote",
+			headers: refererFor("post:vote-disabled"),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:vote-disabled",
+				choice: "up",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "COMMENT_VOTE_DISABLED",
+			},
+		});
+	});
+
+	it("increments lightweight comment votes without visitor rows or vote records", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await updateEngagement(fixture, {
+			visitors: { enabled: false },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: false },
+			commentVotes: { enabled: true },
+		});
+		await seedApprovedComment(fixture, {
+			pageKey: "post:vote-lightweight",
+			commentId: "c_vote_lightweight",
+		});
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:vote-lightweight",
+			choice: "up",
+		};
+		const firstVote = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments/c_vote_lightweight/vote",
+			headers: refererFor("post:vote-lightweight"),
+			payload,
+		});
+		const secondVote = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments/c_vote_lightweight/vote",
+			headers: refererFor("post:vote-lightweight"),
+			payload,
+		});
+
+		expect(firstVote.statusCode).toBe(200);
+		expect(secondVote.statusCode).toBe(200);
+		expect(firstVote.cookies).not.toContainEqual(
+			expect.objectContaining({ name: "qingyan_visitor" }),
+		);
+		expect(secondVote.json()).toMatchObject({
+			commentId: "c_vote_lightweight",
+			voteUp: 2,
+			voteDown: 0,
+			viewerVote: "up",
+			trustMode: "lightweight",
+		});
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(voteRecords)).toEqual([]);
 	});
 });

@@ -7,7 +7,12 @@ import {
 	sitePageRegistry,
 	siteSettings,
 	sites,
+	visitors,
 } from "../../src/db/schema";
+import {
+	type EngagementSettings,
+	serializeEngagementSettings,
+} from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -27,6 +32,25 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 		pageKey,
 		pageUrl: `/${pageKey}`,
 		status: "active",
+	});
+}
+
+async function updateEngagement(
+	fixture: TestFixture,
+	engagement: EngagementSettings,
+) {
+	await fixture.app.db.update(siteSettings).set({
+		allowPageLike: engagement.pageLikes.enabled,
+		engagementJson: serializeEngagementSettings(engagement),
+	});
+}
+
+async function enableTrustedPageLikes(fixture: TestFixture) {
+	await updateEngagement(fixture, {
+		visitors: { enabled: true },
+		pageViews: { enabled: false },
+		pageLikes: { enabled: true },
+		commentVotes: { enabled: false },
 	});
 }
 
@@ -109,6 +133,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedActivePage(fixture, "post:like");
+		await enableTrustedPageLikes(fixture);
 
 		const firstLike = await fixture.app.inject({
 			method: "POST",
@@ -165,6 +190,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedActivePage(fixture, "lol_voice_collation.html");
+		await enableTrustedPageLikes(fixture);
 
 		const firstLike = await fixture.app.inject({
 			method: "POST",
@@ -197,6 +223,13 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
+			allowPageLike: true,
+			engagementJson: serializeEngagementSettings({
+				visitors: { enabled: true },
+				pageViews: { enabled: false },
+				pageLikes: { enabled: true },
+				commentVotes: { enabled: false },
+			}),
 		});
 		await seedActivePage(fixture, "post:like-threshold");
 
@@ -324,5 +357,133 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		expect(secondLike.statusCode).toBe(409);
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
+	});
+
+	it("rejects page likes when pageLikes is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:disabled-like");
+		await updateEngagement(fixture, {
+			visitors: { enabled: true },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: false },
+			commentVotes: { enabled: false },
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:disabled-like",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:disabled-like",
+				pageTitle: "Disabled Like",
+				pageUrl: "https://fangyuan.example.com/posts/disabled-like/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_FEEDBACK_DISABLED",
+			},
+		});
+	});
+
+	it("increments lightweight page likes without visitor rows or like records", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:lightweight-like");
+		await updateEngagement(fixture, {
+			visitors: { enabled: false },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: true },
+			commentVotes: { enabled: false },
+		});
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:lightweight-like",
+			pageTitle: "Lightweight Like",
+			pageUrl: "https://fangyuan.example.com/posts/lightweight-like/",
+		};
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:lightweight-like",
+			},
+			payload,
+		});
+		const secondLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:lightweight-like",
+			},
+			payload,
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+		expect(secondLike.statusCode).toBe(200);
+		expect(firstLike.cookies).not.toContainEqual(
+			expect.objectContaining({ name: "qingyan_visitor" }),
+		);
+		expect(secondLike.json()).toMatchObject({
+			pageFeedback: {
+				supportsLike: true,
+				trustMode: "lightweight",
+				likeCount: 2,
+				liked: true,
+			},
+		});
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
+	});
+
+	it("keeps trusted page likes deduped by visitor", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:trusted-like");
+		await enableTrustedPageLikes(fixture);
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:trusted-like",
+			pageTitle: "Trusted Like",
+			pageUrl: "https://fangyuan.example.com/posts/trusted-like/",
+		};
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:trusted-like",
+			},
+			payload,
+		});
+		const visitorCookie = firstLike.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		const secondLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			headers: {
+				referer: "http://localhost:4321/post:trusted-like",
+			},
+			payload,
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+		expect(secondLike.statusCode).toBe(409);
+		expect(secondLike.json()).toMatchObject({
+			error: {
+				code: "PAGE_FEEDBACK_ALREADY_LIKED",
+			},
+		});
 	});
 });

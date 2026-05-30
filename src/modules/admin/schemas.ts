@@ -56,6 +56,28 @@ const verifiedAuthorSchema = z
 const staffDisplaySchema = z.object({
 	nameMode: z.enum(["current_profile", "snapshot"]),
 });
+const engagementSettingsSchema = z.object({
+	visitors: z
+		.object({
+			enabled: z.boolean().optional(),
+		})
+		.optional(),
+	pageViews: z
+		.object({
+			enabled: z.boolean().optional(),
+		})
+		.optional(),
+	pageLikes: z
+		.object({
+			enabled: z.boolean().optional(),
+		})
+		.optional(),
+	commentVotes: z
+		.object({
+			enabled: z.boolean().optional(),
+		})
+		.optional(),
+});
 
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
@@ -95,7 +117,7 @@ const singleSiteOriginListSchema = z
 	.length(1, "每个站点只能配置一个前端 Origin。");
 
 export const adminPagesQuerySchema = adminCollectionQuerySchema;
-export const adminUsersQuerySchema = adminCollectionQuerySchema;
+export const adminCommentersQuerySchema = adminCollectionQuerySchema;
 export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
 
 export const pageRegistryStatusSchema = z.enum([
@@ -113,7 +135,7 @@ export const adminPageSortBySchema = z.enum([
 	"createdAt",
 	"commentCount",
 	"visitorCount",
-	"userCount",
+	"commenterCount",
 	"pageLikeCount",
 	"title",
 	"pageKey",
@@ -380,6 +402,7 @@ export const adminSettingsBodySchema = z
 				allowLike: z.boolean().optional(),
 			})
 			.optional(),
+		engagement: engagementSettingsSchema.optional(),
 		notifications: z
 			.object({
 				emailEnabled: z.boolean().optional(),

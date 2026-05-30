@@ -20,6 +20,10 @@ import {
 	isReservedVerifiedAuthorEmail,
 	mergeVerifiedAuthorSettings,
 } from "./verified-author";
+import {
+	mergeEngagementSettings,
+	resolveEngagementTrustMode,
+} from "../shared/site-settings-defaults";
 import type { CommentsWriteRepository } from "./write-repository";
 
 function resolveIdentity(
@@ -81,14 +85,6 @@ export class CommentsWriteService {
 			pageKey: input.pageKey,
 		});
 
-		const visitor = await this.readRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-			pageKey: input.pageKey,
-			pageUrl: input.pageUrl,
-		});
 		const thread = await this.readRepository.getOrCreatePageThread({
 			siteId: site.id,
 			pageKey: input.pageKey,
@@ -96,6 +92,17 @@ export class CommentsWriteService {
 			pageUrl: input.pageUrl,
 		});
 		const settings = await this.readRepository.getSiteSettings(site.id);
+		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const visitor = engagement.visitors.enabled
+			? await this.readRepository.getOrCreateVisitor({
+					siteId: site.id,
+					visitorKey: input.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl,
+				})
+			: undefined;
 		const commentsEnabled = settings?.commentsEnabled ?? true;
 		if (!commentsEnabled) {
 			throw new AppError(403, "COMMENTS_DISABLED", "评论功能未开启。");
@@ -153,7 +160,7 @@ export class CommentsWriteService {
 				requestId: input.requestId,
 				siteKey: input.siteKey,
 				pageKey: input.pageKey,
-				visitorKey: visitor.visitorKey,
+				visitorKey: visitor?.visitorKey,
 				email: authorEmail,
 				ip: input.ip,
 				requestScope: "write",
@@ -161,43 +168,45 @@ export class CommentsWriteService {
 				errorMessage: "当前请求已被拒绝。",
 			});
 			await this.security.consumeRateLimit({
-				key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:comment_create`,
+				key: `public:${resolveIdentity(input.siteKey, visitor?.visitorKey ?? "", input.ip)}:comment_create`,
 				rule: await this.security.getRateLimitRule("commentCreate"),
 				errorCode: "COMMENT_RATE_LIMITED",
 				errorMessage: "提交过于频繁，请稍后再试。",
 			});
-			await this.captchaService.markWriteAction({
-				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				pageTitle: input.pageTitle,
-				pageUrl: input.pageUrl,
-				action: "comment_create",
-				requestId: input.requestId,
-				visitorKey: visitor.visitorKey,
-				ip: input.ip,
-				userAgent: input.userAgent,
-			});
-			if (input.captcha) {
-				await this.captchaService.consumeInlineCaptcha({
+			if (visitor) {
+				await this.captchaService.markWriteAction({
 					siteKey: input.siteKey,
 					pageKey: input.pageKey,
-					challengeId: input.captcha.challengeId,
-					value: input.captcha.value,
+					pageTitle: input.pageTitle,
+					pageUrl: input.pageUrl,
 					action: "comment_create",
 					requestId: input.requestId,
 					visitorKey: visitor.visitorKey,
 					ip: input.ip,
 					userAgent: input.userAgent,
 				});
+				if (input.captcha) {
+					await this.captchaService.consumeInlineCaptcha({
+						siteKey: input.siteKey,
+						pageKey: input.pageKey,
+						challengeId: input.captcha.challengeId,
+						value: input.captcha.value,
+						action: "comment_create",
+						requestId: input.requestId,
+						visitorKey: visitor.visitorKey,
+						ip: input.ip,
+						userAgent: input.userAgent,
+					});
+				}
+				await this.captchaService.ensureSatisfied({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					action: "comment_create",
+					visitorKey: visitor.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+				});
 			}
-			await this.captchaService.ensureSatisfied({
-				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				action: "comment_create",
-				visitorKey: visitor.visitorKey,
-				ip: input.ip,
-				userAgent: input.userAgent,
-			});
 		}
 
 		if (input.parentCommentId) {
@@ -263,7 +272,7 @@ export class CommentsWriteService {
 			siteId: site.id,
 			pageThreadId: thread.id,
 			parentCommentId: input.parentCommentId,
-			visitorId: visitor.id,
+			visitorId: visitor?.id ?? null,
 			authorIdentity: shouldUseVerifiedAuthor ? "verified" : "visitor",
 			authorName: resolvedAuthorName,
 			authorEmail: resolvedAuthorEmail,
@@ -292,7 +301,9 @@ export class CommentsWriteService {
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
 			actorType: shouldUseVerifiedAuthor ? "admin" : "visitor",
-			actorId: shouldUseVerifiedAuthor ? "admin_session" : visitor.visitorKey,
+			actorId: shouldUseVerifiedAuthor
+				? "admin_session"
+				: (visitor?.visitorKey ?? input.ip ?? "anonymous"),
 			event: "comments.created",
 			message: status === "pending" ? "评论已提交待审核" : "评论已发布",
 			targetType: "comment",
@@ -322,7 +333,7 @@ export class CommentsWriteService {
 		}
 
 		return {
-			visitorKey: visitor.created ? visitor.visitorKey : undefined,
+			visitorKey: visitor?.created ? visitor.visitorKey : undefined,
 			createdComment,
 			comment: {
 				id: created.commentId,
@@ -362,13 +373,6 @@ export class CommentsWriteService {
 			pageKey: input.pageKey,
 		});
 
-		const visitor = await this.readRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-			pageKey: input.pageKey,
-		});
 		const thread = await this.readRepository.getOrCreatePageThread({
 			siteId: site.id,
 			pageKey: input.pageKey,
@@ -378,53 +382,103 @@ export class CommentsWriteService {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
 		}
 		const settings = await this.readRepository.getSiteSettings(site.id);
+		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const trustMode = resolveEngagementTrustMode(engagement);
+		if (!engagement.commentVotes.enabled) {
+			throw new AppError(403, "COMMENT_VOTE_DISABLED", "评论投票功能未开启。");
+		}
+		const visitor = engagement.visitors.enabled
+			? await this.readRepository.getOrCreateVisitor({
+					siteId: site.id,
+					visitorKey: input.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+					pageKey: input.pageKey,
+				})
+			: undefined;
 
 		await this.security.assertNotBlacklisted({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
-			visitorKey: visitor.visitorKey,
+			visitorKey: visitor?.visitorKey,
 			ip: input.ip,
 			requestScope: "write",
 			errorCode: "COMMENT_BLACKLISTED",
 			errorMessage: "当前请求已被拒绝。",
 		});
 		await this.security.consumeRateLimit({
-			key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:comment_vote`,
+			key: `public:${resolveIdentity(input.siteKey, visitor?.visitorKey ?? "", input.ip)}:comment_vote`,
 			rule: await this.security.getRateLimitRule("commentVote"),
 			errorCode: "VOTE_RATE_LIMITED",
 			errorMessage: "投票过于频繁，请稍后再试。",
 		});
-		await this.captchaService.markWriteAction({
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			action: "comment_vote",
-			requestId: input.requestId,
-			visitorKey: visitor.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
-		if (input.captcha) {
-			await this.captchaService.consumeInlineCaptcha({
+		if (visitor) {
+			await this.captchaService.markWriteAction({
 				siteKey: input.siteKey,
 				pageKey: input.pageKey,
-				challengeId: input.captcha.challengeId,
-				value: input.captcha.value,
 				action: "comment_vote",
 				requestId: input.requestId,
 				visitorKey: visitor.visitorKey,
 				ip: input.ip,
 				userAgent: input.userAgent,
 			});
+			if (input.captcha) {
+				await this.captchaService.consumeInlineCaptcha({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					challengeId: input.captcha.challengeId,
+					value: input.captcha.value,
+					action: "comment_vote",
+					requestId: input.requestId,
+					visitorKey: visitor.visitorKey,
+					ip: input.ip,
+					userAgent: input.userAgent,
+				});
+			}
+			await this.captchaService.ensureSatisfied({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				action: "comment_vote",
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
 		}
-		await this.captchaService.ensureSatisfied({
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			action: "comment_vote",
-			visitorKey: visitor.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
+
+		if (!visitor) {
+			const updatedComment = await this.writeRepository.incrementCommentVote({
+				commentId: input.commentId,
+				choice: input.choice,
+			});
+			if (!updatedComment) {
+				throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+			}
+
+			await this.security.writeAudit({
+				requestId: input.requestId,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				actorType: "visitor",
+				actorId: input.ip ?? "anonymous",
+				action: "comment.vote",
+				targetType: "comment",
+				targetId: input.commentId,
+				payload: {
+					choice: input.choice,
+					trustMode,
+				},
+			});
+
+			return {
+				visitorKey: undefined,
+				commentId: input.commentId,
+				voteUp: updatedComment.voteUpCount,
+				voteDown: updatedComment.voteDownCount,
+				viewerVote: input.choice,
+				trustMode,
+			};
+		}
 
 		const existingVote = await this.writeRepository.getVoteRecord(
 			input.commentId,
@@ -485,6 +539,7 @@ export class CommentsWriteService {
 			voteUp: updatedComment.voteUpCount,
 			voteDown: updatedComment.voteDownCount,
 			viewerVote: input.choice,
+			trustMode,
 		};
 	}
 }

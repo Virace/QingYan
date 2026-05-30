@@ -641,6 +641,9 @@ components:
           type:
             - string
             - 'null'
+    TrustMode:
+      type: string
+      enum: [trusted, lightweight]
     CommentForm:
       type: object
       required: [allow, require]
@@ -833,16 +836,22 @@ components:
             $ref: '#/components/schemas/PublicComment'
     PageMetrics:
       type: object
-      required: [pageViewCount]
+      required: [enabled, trustMode, pageViewCount]
       properties:
+        enabled:
+          type: boolean
+        trustMode:
+          $ref: '#/components/schemas/TrustMode'
         pageViewCount:
           type: integer
     PageFeedbackSummary:
       type: object
-      required: [supportsLike, likeCount, liked]
+      required: [supportsLike, trustMode, likeCount, liked]
       properties:
         supportsLike:
           type: boolean
+        trustMode:
+          $ref: '#/components/schemas/TrustMode'
         likeCount:
           type: integer
         liked:
@@ -1042,7 +1051,7 @@ components:
             - type: 'null'
     VoteCommentResponse:
       type: object
-      required: [commentId, voteUp, voteDown, viewerVote]
+      required: [commentId, voteUp, voteDown, viewerVote, trustMode]
       properties:
         commentId:
           type: string
@@ -1053,6 +1062,8 @@ components:
         viewerVote:
           type: string
           enum: [up, down]
+        trustMode:
+          $ref: '#/components/schemas/TrustMode'
     CaptchaVerifyRequest:
       type: object
       required: [siteKey, pageKey, challengeId, mode, value]

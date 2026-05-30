@@ -30,7 +30,11 @@ import type { CommentStatus } from "../comments/moderation-types";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { resolvePublicPageUrl } from "../shared/page-url";
-import { buildDefaultSiteSettings } from "../shared/site-settings-defaults";
+import {
+	buildDefaultSiteSettings,
+	type EngagementSettings,
+	mergeEngagementSettings,
+} from "../shared/site-settings-defaults";
 import type { SystemSettings } from "../system-settings/definitions";
 
 function parseStringArray(payload?: string | null): string[] {
@@ -71,7 +75,7 @@ type AdminPageSortBy =
 	| "createdAt"
 	| "commentCount"
 	| "visitorCount"
-	| "userCount"
+	| "commenterCount"
 	| "pageLikeCount"
 	| "title"
 	| "pageKey";
@@ -94,7 +98,32 @@ interface AdminPageItem {
 	titleRefreshStatusCode: number | null;
 	titleRefreshError: string | null;
 	visitorCount: number;
-	userCount: number;
+	commenterCount: number;
+	engagement?: AdminEngagementSummary;
+}
+
+export interface AdminEngagementSummary {
+	trustMode: "trusted" | "lightweight";
+	visitorsEnabled: boolean;
+	pageViewsEnabled: boolean;
+	pageLikesEnabled: boolean;
+	commentVotesEnabled: boolean;
+}
+
+export function buildAdminEngagementSummary(
+	engagement: EngagementSettings,
+): AdminEngagementSummary {
+	return {
+		trustMode: engagement.visitors.enabled ? "trusted" : "lightweight",
+		visitorsEnabled: engagement.visitors.enabled,
+		pageViewsEnabled: engagement.pageViews.enabled,
+		pageLikesEnabled: engagement.pageLikes.enabled,
+		commentVotesEnabled: engagement.commentVotes.enabled,
+	};
+}
+
+function parseEngagementSettings(payload?: string | null): EngagementSettings {
+	return mergeEngagementSettings(payload);
 }
 
 function comparePageSortValue(
@@ -131,7 +160,7 @@ export class AdminRepository {
 			pageTotal,
 			commentTotal,
 			pendingCommentTotal,
-			userTotal,
+			commenterTotal,
 			visitorTotal,
 			blacklistTotal,
 		] = await Promise.all([
@@ -180,7 +209,7 @@ export class AdminRepository {
 			pageCount: Number(pageTotal[0]?.value ?? 0),
 			commentCount: Number(commentTotal[0]?.value ?? 0),
 			pendingCommentCount: Number(pendingCommentTotal[0]?.value ?? 0),
-			userCount: Number(userTotal[0]?.value ?? 0),
+			commenterCount: Number(commenterTotal[0]?.value ?? 0),
 			visitorCount: Number(visitorTotal[0]?.value ?? 0),
 			blacklistRuleCount: Number(blacklistTotal[0]?.value ?? 0),
 		};
@@ -521,6 +550,7 @@ export class AdminRepository {
 				titleRefreshedAt: sitePageRegistry.titleRefreshedAt,
 				titleRefreshStatusCode: sitePageRegistry.titleRefreshStatusCode,
 				titleRefreshError: sitePageRegistry.titleRefreshError,
+				engagementJson: siteSettings.engagementJson,
 				trashedAt: sitePageRegistry.trashedAt,
 				deletedAt: sitePageRegistry.deletedAt,
 				createdAt: sitePageRegistry.createdAt,
@@ -533,6 +563,7 @@ export class AdminRepository {
 			})
 			.from(sitePageRegistry)
 			.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
+			.innerJoin(siteSettings, eq(siteSettings.siteId, sitePageRegistry.siteId))
 			.leftJoin(
 				pageThreads,
 				and(
@@ -580,7 +611,10 @@ export class AdminRepository {
 				titleRefreshStatusCode: row.titleRefreshStatusCode,
 				titleRefreshError: row.titleRefreshError,
 				visitorCount: 0,
-				userCount: 0,
+				commenterCount: 0,
+				engagement: buildAdminEngagementSummary(
+					parseEngagementSettings(row.engagementJson),
+				),
 			}));
 			const direction = input.sortOrder === "asc" ? 1 : -1;
 			const sortedItems = items.sort(
@@ -603,7 +637,7 @@ export class AdminRepository {
 				.where(inArray(pageViewSessions.pageThreadId, pageThreadIds))
 				.groupBy(pageViewSessions.pageThreadId),
 		);
-		const userCounts = toCountMap(
+		const commenterCounts = toCountMap(
 			await this.db
 				.select({
 					key: comments.pageThreadId,
@@ -644,8 +678,13 @@ export class AdminRepository {
 				row.pageThreadId === null
 					? 0
 					: (visitorCounts.get(row.pageThreadId) ?? 0),
-			userCount:
-				row.pageThreadId === null ? 0 : (userCounts.get(row.pageThreadId) ?? 0),
+			commenterCount:
+				row.pageThreadId === null
+					? 0
+					: (commenterCounts.get(row.pageThreadId) ?? 0),
+			engagement: buildAdminEngagementSummary(
+				parseEngagementSettings(row.engagementJson),
+			),
 		}));
 		const direction = input.sortOrder === "asc" ? 1 : -1;
 		const sortedItems = items.sort(
@@ -658,7 +697,7 @@ export class AdminRepository {
 		};
 	}
 
-	public async listUsers(input: {
+	public async listCommenters(input: {
 		siteId?: number;
 		search?: string;
 		limit: number;
@@ -905,6 +944,7 @@ export class AdminRepository {
 				captchaMode: siteSettings.captchaMode,
 				moderationJson: siteSettings.moderationJson,
 				allowPageLike: siteSettings.allowPageLike,
+				engagementJson: siteSettings.engagementJson,
 				emailNotificationsEnabled: siteSettings.emailNotificationsEnabled,
 			})
 			.from(sites)
@@ -938,7 +978,7 @@ export class AdminRepository {
 				)
 				.groupBy(comments.siteId),
 		);
-		const userCountMap = toCountMap(
+		const commenterCountMap = toCountMap(
 			await this.db
 				.select({
 					key: comments.siteId,
@@ -982,12 +1022,15 @@ export class AdminRepository {
 			pageFeedback: {
 				allowLike: row.allowPageLike,
 			},
+			engagement: buildAdminEngagementSummary(
+				parseEngagementSettings(row.engagementJson),
+			),
 			notifications: {
 				emailEnabled: row.emailNotificationsEnabled,
 			},
 			pageCount: pageCountMap.get(row.siteId) ?? 0,
 			commentCount: commentCountMap.get(row.siteId) ?? 0,
-			userCount: userCountMap.get(row.siteId) ?? 0,
+			commenterCount: commenterCountMap.get(row.siteId) ?? 0,
 			visitorCount: visitorCountMap.get(row.siteId) ?? 0,
 		}));
 	}
@@ -1385,6 +1428,7 @@ export class AdminRepository {
 			verifiedAuthorJson?: string;
 			staffDisplayJson?: string;
 			moderationJson?: string;
+			engagementJson?: string;
 			emailNotificationsEnabled?: boolean;
 		},
 	) {
@@ -1411,6 +1455,7 @@ export class AdminRepository {
 				verifiedAuthorJson: input.verifiedAuthorJson,
 				staffDisplayJson: input.staffDisplayJson,
 				moderationJson: input.moderationJson,
+				engagementJson: input.engagementJson,
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})

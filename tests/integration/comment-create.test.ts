@@ -8,8 +8,10 @@ import {
 	sitePageRegistry,
 	siteSettings,
 	sites,
+	visitors,
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -456,6 +458,75 @@ describe("POST /qingyan/api/comments", () => {
 		const publicBody = JSON.stringify(response.json());
 		expect(publicBody).not.toContain("203.0.113.8");
 		expect(publicBody).not.toContain("Mozilla/5.0 (Windows NT 10.0");
+	});
+
+	it("creates comments without visitor records when visitor tracking is disabled", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			engagementJson: serializeEngagementSettings({
+				visitors: { enabled: false },
+				pageViews: { enabled: false },
+				pageLikes: { enabled: false },
+				commentVotes: { enabled: false },
+			}),
+			commentMetadataJson: JSON.stringify({
+				device: {
+					display: {
+						enabled: true,
+					},
+				},
+			}),
+		});
+		await seedActivePage(fixture, "post:comment-lightweight-visitor");
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				...refererFor("post:comment-lightweight-visitor"),
+				"user-agent":
+					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				"x-forwarded-for": "203.0.113.12",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:comment-lightweight-visitor",
+				pageTitle: "Comment Without Visitor",
+				pageUrl:
+					"https://fangyuan.example.com/posts/comment-lightweight-visitor/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "comment without visitor",
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.cookies).not.toContainEqual(
+			expect.objectContaining({ name: "qingyan_visitor" }),
+		);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "comment without visitor"));
+		expect(comment?.visitorId).toBeNull();
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata?.authorIp).toBe("203.0.113.12");
+		expect(metadata?.authorUserAgent).toContain("Chrome/120.0.0.0");
 	});
 
 	it("honors raw request metadata collection switches", async () => {

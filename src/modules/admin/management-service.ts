@@ -27,6 +27,10 @@ import type { SiteRegistry } from "../shared/site-registry";
 import {
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
+	type EngagementSettingsPatch,
+	mergeEngagementSettings,
+	mergeEngagementSettingsPatch,
+	serializeEngagementSettings,
 } from "../shared/site-settings-defaults";
 import {
 	normalizeOriginList,
@@ -158,7 +162,7 @@ export class AdminManagementService {
 			| "createdAt"
 			| "commentCount"
 			| "visitorCount"
-			| "userCount"
+			| "commenterCount"
 			| "pageLikeCount"
 			| "title"
 			| "pageKey";
@@ -184,14 +188,14 @@ export class AdminManagementService {
 		});
 	}
 
-	public async listUsers(input: {
+	public async listCommenters(input: {
 		siteKey?: string;
 		search?: string;
 		limit: number;
 		offset: number;
 	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
-		const result = await this.repository.listUsers({
+		const result = await this.repository.listCommenters({
 			siteId,
 			search: input.search,
 			limit: input.limit,
@@ -212,6 +216,24 @@ export class AdminManagementService {
 		offset: number;
 	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
+		if (siteId !== undefined) {
+			const settings = await this.repository.getSiteSettings(siteId);
+			const engagement = mergeEngagementSettings(settings?.engagementJson);
+			if (!engagement.visitors.enabled) {
+				return {
+					enabled: false,
+					trustMode: "lightweight" as const,
+					items: [],
+					pagination: {
+						limit: input.limit,
+						offset: input.offset,
+						totalCount: 0,
+					},
+					message:
+						"访客记录未启用。QingYan 当前不记录访客身份，也不提供访客画像。",
+				};
+			}
+		}
 		const result = await this.repository.listVisitors({
 			siteId,
 			search: input.search,
@@ -219,11 +241,15 @@ export class AdminManagementService {
 			offset: input.offset,
 		});
 
-		return buildPaginationResult(result.items, {
-			limit: input.limit,
-			offset: input.offset,
-			totalCount: result.totalCount,
-		});
+		return {
+			enabled: true,
+			trustMode: "trusted" as const,
+			...buildPaginationResult(result.items, {
+				limit: input.limit,
+				offset: input.offset,
+				totalCount: result.totalCount,
+			}),
+		};
 	}
 
 	public async listSitesSummary() {
@@ -258,10 +284,11 @@ export class AdminManagementService {
 							),
 						},
 						pageFeedback: item.pageFeedback,
+						engagement: item.engagement,
 						notifications: item.notifications,
 						pageCount: item.pageCount,
 						commentCount: item.commentCount,
-						userCount: item.userCount,
+						commenterCount: item.commenterCount,
 						visitorCount: item.visitorCount,
 					},
 				];
@@ -842,6 +869,7 @@ export class AdminManagementService {
 			pageFeedback: {
 				allowLike: settings.allowPageLike,
 			},
+			engagement: mergeEngagementSettings(settings.engagementJson),
 			notifications: {
 				emailEnabled: settings.emailNotificationsEnabled,
 			},
@@ -883,6 +911,7 @@ export class AdminManagementService {
 			pageFeedback?: {
 				allowLike?: boolean;
 			};
+			engagement?: EngagementSettingsPatch;
 			notifications?: {
 				emailEnabled?: boolean;
 			};
@@ -890,6 +919,18 @@ export class AdminManagementService {
 		},
 	) {
 		const { registeredSite } = this.resolveSite(siteKey);
+		const existingSettings = await this.repository.getSiteSettings(
+			registeredSite.id,
+		);
+		if (!existingSettings) {
+			throw new ResourceNotFoundError("SETTINGS_NOT_FOUND", "站点设置不存在。");
+		}
+		const currentEngagement = mergeEngagementSettings(
+			existingSettings.engagementJson,
+		);
+		const nextEngagement = input.engagement
+			? mergeEngagementSettingsPatch(currentEngagement, input.engagement)
+			: undefined;
 
 		await this.repository.updateSiteSettings(registeredSite.id, {
 			commentsEnabled: input.comments?.enabled,
@@ -900,7 +941,8 @@ export class AdminManagementService {
 				? JSON.stringify(input.comments.identity.require)
 				: undefined,
 			allowWebsite: input.comments?.allowWebsite,
-			allowPageLike: input.pageFeedback?.allowLike,
+			allowPageLike:
+				nextEngagement?.pageLikes.enabled ?? input.pageFeedback?.allowLike,
 			captchaMode: input.comments?.captcha?.mode,
 			captchaThresholdWindowSec: input.comments?.captcha?.thresholdWindowSec,
 			captchaThresholdMaxActions: input.comments?.captcha?.thresholdMaxActions,
@@ -928,6 +970,9 @@ export class AdminManagementService {
 			moderationJson: input.comments?.moderation
 				? serializeSiteModerationSettings(input.comments.moderation)
 				: undefined,
+			engagementJson: nextEngagement
+				? serializeEngagementSettings(nextEngagement)
+				: undefined,
 			emailNotificationsEnabled: input.notifications?.emailEnabled,
 		});
 
@@ -942,6 +987,7 @@ export class AdminManagementService {
 			payload: {
 				comments: input.comments,
 				pageFeedback: input.pageFeedback,
+				engagement: input.engagement,
 				notifications: input.notifications,
 			},
 		});

@@ -24,6 +24,23 @@ export type CommentMetadataSettings = {
 	};
 };
 
+export type EngagementTrustMode = "trusted" | "lightweight";
+
+export type EngagementSettings = {
+	visitors: {
+		enabled: boolean;
+	};
+	pageViews: {
+		enabled: boolean;
+	};
+	pageLikes: {
+		enabled: boolean;
+	};
+	commentVotes: {
+		enabled: boolean;
+	};
+};
+
 export const defaultCommentRequire: Array<"nickname" | "email" | "website"> = [
 	"nickname",
 	"email",
@@ -44,6 +61,109 @@ export const defaultCommentMetadata: CommentMetadataSettings = {
 	},
 };
 
+export const defaultEngagementSettings: EngagementSettings = {
+	visitors: {
+		enabled: true,
+	},
+	pageViews: {
+		enabled: false,
+	},
+	pageLikes: {
+		enabled: false,
+	},
+	commentVotes: {
+		enabled: false,
+	},
+};
+
+export type EngagementSettingsPatch = {
+	visitors?: {
+		enabled?: boolean;
+	};
+	pageViews?: {
+		enabled?: boolean;
+	};
+	pageLikes?: {
+		enabled?: boolean;
+	};
+	commentVotes?: {
+		enabled?: boolean;
+	};
+};
+
+export function mergeEngagementSettings(
+	value?: string | EngagementSettingsPatch | null,
+): EngagementSettings {
+	let parsed: EngagementSettingsPatch = {};
+	if (typeof value === "string" && value.trim()) {
+		try {
+			parsed = JSON.parse(value) as EngagementSettingsPatch;
+		} catch {
+			parsed = {};
+		}
+	} else if (typeof value === "object" && value !== null) {
+		parsed = value;
+	}
+
+	return {
+		visitors: {
+			enabled:
+				parsed.visitors?.enabled ?? defaultEngagementSettings.visitors.enabled,
+		},
+		pageViews: {
+			enabled:
+				parsed.pageViews?.enabled ??
+				defaultEngagementSettings.pageViews.enabled,
+		},
+		pageLikes: {
+			enabled:
+				parsed.pageLikes?.enabled ??
+				defaultEngagementSettings.pageLikes.enabled,
+		},
+		commentVotes: {
+			enabled:
+				parsed.commentVotes?.enabled ??
+				defaultEngagementSettings.commentVotes.enabled,
+		},
+	};
+}
+
+export function mergeEngagementSettingsPatch(
+	current: EngagementSettings,
+	patch?: EngagementSettingsPatch,
+): EngagementSettings {
+	if (!patch) {
+		return current;
+	}
+
+	return {
+		visitors: {
+			enabled: patch.visitors?.enabled ?? current.visitors.enabled,
+		},
+		pageViews: {
+			enabled: patch.pageViews?.enabled ?? current.pageViews.enabled,
+		},
+		pageLikes: {
+			enabled: patch.pageLikes?.enabled ?? current.pageLikes.enabled,
+		},
+		commentVotes: {
+			enabled: patch.commentVotes?.enabled ?? current.commentVotes.enabled,
+		},
+	};
+}
+
+export function serializeEngagementSettings(
+	settings: EngagementSettings,
+): string {
+	return JSON.stringify(mergeEngagementSettings(settings));
+}
+
+export function resolveEngagementTrustMode(
+	settings: EngagementSettings,
+): EngagementTrustMode {
+	return settings.visitors.enabled ? "trusted" : "lightweight";
+}
+
 export function buildDefaultSiteSettings(siteId: number) {
 	return {
 		siteId,
@@ -53,7 +173,7 @@ export function buildDefaultSiteSettings(siteId: number) {
 		rootLimit: 20,
 		commentRequireJson: JSON.stringify(defaultCommentRequire),
 		allowWebsite: true,
-		allowPageLike: true,
+		allowPageLike: defaultEngagementSettings.pageLikes.enabled,
 		captchaMode: "threshold",
 		captchaThresholdWindowSec: 60,
 		captchaThresholdMaxActions: 3,
@@ -64,6 +184,7 @@ export function buildDefaultSiteSettings(siteId: number) {
 		autoBlacklistScope: "post",
 		autoBlacklistTtlSec: 1800,
 		commentMetadataJson: JSON.stringify(defaultCommentMetadata),
+		engagementJson: serializeEngagementSettings(defaultEngagementSettings),
 		verifiedAuthorJson: serializeVerifiedAuthorSettings(defaultVerifiedAuthor),
 		staffDisplayJson: serializeStaffDisplaySettings(
 			defaultStaffDisplaySettings,

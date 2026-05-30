@@ -31,7 +31,7 @@ export function OverviewPage() {
 								["页面", overviewQuery.data.stats.pageCount],
 								["评论", overviewQuery.data.stats.commentCount],
 								["待审", overviewQuery.data.stats.pendingCommentCount],
-								["用户", overviewQuery.data.stats.userCount],
+								["评论者", overviewQuery.data.stats.commenterCount],
 								["访客", overviewQuery.data.stats.visitorCount],
 								["黑名单", overviewQuery.data.stats.blacklistRuleCount],
 								["日志", overviewQuery.data.logging.level.toUpperCase()],

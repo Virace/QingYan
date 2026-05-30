@@ -7,9 +7,11 @@ import {
 	comments,
 	pageThreads,
 	pageViewSessions,
+	siteSettings,
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -22,6 +24,41 @@ afterEach(async () => {
 });
 
 describe("admin visitors", () => {
+	it("returns disabled metadata instead of visitor rows when visitor records are off", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		await fixture.app.db.update(siteSettings).set({
+			engagementJson: serializeEngagementSettings({
+				visitors: { enabled: false },
+				pageViews: { enabled: false },
+				pageLikes: { enabled: false },
+				commentVotes: { enabled: false },
+			}),
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/visitors?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			enabled: false,
+			trustMode: "lightweight",
+			items: [],
+			message: "访客记录未启用。QingYan 当前不记录访客身份，也不提供访客画像。",
+			pagination: {
+				limit: 20,
+				offset: 0,
+				totalCount: 0,
+			},
+		});
+	});
+
 	it("lists visitor aggregates and blacklist state", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

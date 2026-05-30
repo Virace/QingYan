@@ -121,7 +121,7 @@ describe("admin overview", () => {
 				pageCount: 1,
 				commentCount: 2,
 				pendingCommentCount: 1,
-				userCount: 2,
+				commenterCount: 2,
 				visitorCount: 1,
 				blacklistRuleCount: 1,
 			},

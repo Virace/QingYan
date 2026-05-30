@@ -686,7 +686,7 @@ export class DevMockService {
 					pageViewCount: pageState.pageViewCount,
 				},
 				pageFeedback: {
-					supportsLike: this.defaultSettings.allowPageLike,
+					supportsLike: true,
 					likeCount:
 						pageState.baseLikeCount +
 						[...pageState.visitorStates.values()].filter(
@@ -1080,7 +1080,7 @@ export class DevMockService {
 		return this.setVisitorCookieResult(
 			{
 				pageFeedback: {
-					supportsLike: this.defaultSettings.allowPageLike,
+					supportsLike: true,
 					likeCount:
 						pageState.baseLikeCount +
 						[...pageState.visitorStates.values()].filter(

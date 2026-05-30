@@ -12,7 +12,7 @@ export interface AdminOverview {
 		pageCount: number;
 		commentCount: number;
 		pendingCommentCount: number;
-		userCount: number;
+		commenterCount: number;
 		visitorCount: number;
 		blacklistRuleCount: number;
 	};

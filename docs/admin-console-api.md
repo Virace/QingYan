@@ -129,7 +129,7 @@
     pageCount: number;
     commentCount: number;
     pendingCommentCount: number;
-    userCount: number;
+    commenterCount: number;
     visitorCount: number;
     blacklistRuleCount: number;
   };
@@ -263,7 +263,7 @@ Query：
 
 若目标评论不存在，返回 `COMMENT_NOT_FOUND`；若该站点未启用可信评论作者，返回 `VERIFIED_AUTHOR_DISABLED`。
 
-## Pages, Users, Visitors
+## Pages, Commenters, Visitors
 
 以下三个列表接口共享分页 query：
 
@@ -319,7 +319,7 @@ Query：
   titleRefreshStatusCode: number | null;
   titleRefreshError: string | null;
   visitorCount: number;
-  userCount: number;
+  commenterCount: number;
 }
 ```
 
@@ -456,9 +456,9 @@ Query：
 }
 ```
 
-### `GET /api/admin/users`
+### `GET /api/admin/commenters`
 
-按邮箱聚合的用户视图。单项结构：
+按评论邮箱聚合的匿名评论者视图。该接口不是后台登录用户、账号或权限主体。单项结构：
 
 ```ts
 {
@@ -480,11 +480,45 @@ Query：
 }
 ```
 
-`email` 是 trim + lower-case 后的聚合键；`emailVariants` 保留该聚合组中出现过的原始邮箱写法。搜索邮箱时同样按归一化值匹配，因此 `Virace@aliyun.com` 和 `virace@aliyun.com` 会归到同一个用户视图。
+`email` 是 trim + lower-case 后的聚合键；`emailVariants` 保留该聚合组中出现过的原始邮箱写法。搜索邮箱时同样按归一化值匹配，因此 `Virace@aliyun.com` 和 `virace@aliyun.com` 会归到同一个评论者视图。`/api/admin/users` 命名空间保留给未来真正的后台用户或账号系统。
 
 ### `GET /api/admin/visitors`
 
-按 visitor key 聚合的访客视图。单项结构：
+按 visitor key 聚合的访客视图。访客记录关闭时返回禁用元信息和空列表。
+
+响应：
+
+```ts
+{
+  enabled: boolean;
+  trustMode: "trusted" | "lightweight";
+  items: AdminVisitor[];
+  pagination: {
+    limit: number;
+    offset: number;
+    totalCount: number;
+  };
+  message?: string;
+}
+```
+
+访客记录关闭时：
+
+```ts
+{
+  enabled: false;
+  trustMode: "lightweight";
+  items: [];
+  pagination: {
+    limit: number;
+    offset: number;
+    totalCount: 0;
+  };
+  message: "访客记录未启用。QingYan 当前不记录访客身份，也不提供访客画像。";
+}
+```
+
+`AdminVisitor`：
 
 ```ts
 {
@@ -663,7 +697,7 @@ Query：
   };
   pageCount: number;
   commentCount: number;
-  userCount: number;
+  commenterCount: number;
   visitorCount: number;
 }
 ```
@@ -725,7 +759,7 @@ AdminSettings
 
 ### `PUT /api/admin/sites/{siteKey}/settings`
 
-更新站点设置。请求至少包含 `comments`、`pageFeedback`、`notifications` 之一；其中内部字段均可局部提交。
+更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
 
 请求：
 
@@ -805,11 +839,33 @@ AdminSettings
   pageFeedback: {
     allowLike: boolean;
   };
+  engagement: {
+    visitors: {
+      enabled: boolean;
+    };
+    pageViews: {
+      enabled: boolean;
+    };
+    pageLikes: {
+      enabled: boolean;
+    };
+    commentVotes: {
+      enabled: boolean;
+    };
+  };
   notifications: {
     emailEnabled: boolean;
   };
 }
 ```
+
+Engagement 语义：
+
+- `visitors.enabled=true`：QingYan 记录访客 IP、UA 和访问页面，用 visitorId 对 PV、页面点赞、评论投票做服务端可信去重，后续可用于访客画像。
+- `visitors.enabled=false`：QingYan 不创建 visitor row，不设置新的 `qingyan_visitor` cookie，不写 visitorId 关联记录。PV、页面点赞、评论投票如开启，只做轻量低可信计数。
+- `pageViews.enabled=false`：不记录 PV，也不创建 pending page view session。
+- `pageLikes.enabled=false`：公开页面点赞接口返回 `PAGE_FEEDBACK_DISABLED`。
+- `commentVotes.enabled=false`：公开评论投票接口返回 `COMMENT_VOTE_DISABLED`。
 
 ## System Settings
 

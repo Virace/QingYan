@@ -355,6 +355,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			voteUp: result.voteUp,
 			voteDown: result.voteDown,
 			viewerVote: result.viewerVote,
+			trustMode: result.trustMode,
 		};
 	});
 

@@ -17,11 +17,11 @@ import {
 	deleteComment,
 	deletePage,
 	ignorePendingPage,
+	listCommenters,
 	listComments,
 	listPages,
 	listPendingPages,
 	listSites,
-	listUsers,
 	listVisitors,
 	type PageRegistryStatus,
 	refreshCommentMetadata,
@@ -84,7 +84,7 @@ const pageSortOptions: Array<{ value: AdminPageSortBy; label: string }> = [
 	{ value: "createdAt", label: "创建时间" },
 	{ value: "commentCount", label: "评论数" },
 	{ value: "visitorCount", label: "访客数" },
-	{ value: "userCount", label: "用户数" },
+	{ value: "commenterCount", label: "评论者数" },
 	{ value: "pageLikeCount", label: "点赞数" },
 	{ value: "title", label: "标题" },
 	{ value: "pageKey", label: "页面键" },
@@ -984,7 +984,7 @@ export function PagesPage({
 									</Badge>
 									<Badge variant="secondary">评论 {page.commentCount}</Badge>
 									<Badge variant="outline">访客 {page.visitorCount}</Badge>
-									<Badge variant="outline">用户 {page.userCount}</Badge>
+									<Badge variant="outline">评论者 {page.commenterCount}</Badge>
 									<Badge variant="outline">点赞 {page.pageLikeCount}</Badge>
 									<Button
 										type="button"
@@ -1058,7 +1058,7 @@ export function PagesPage({
 	);
 }
 
-export function UsersPage({
+export function CommentersPage({
 	siteKey,
 	openComments,
 }: {
@@ -1072,14 +1072,14 @@ export function UsersPage({
 	const query = useQuery({
 		queryKey: [
 			"admin",
-			"users",
+			"commenters",
 			siteKey,
 			search,
 			pagination.limit,
 			pagination.offset,
 		],
 		queryFn: () =>
-			listUsers({
+			listCommenters({
 				siteKey,
 				search,
 				limit: pagination.limit,
@@ -1094,7 +1094,7 @@ export function UsersPage({
 		mutationFn: deleteBlacklistTarget,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
 	});
-	const toggleUserBlacklist = (input: {
+	const toggleCommenterBlacklist = (input: {
 		targetValue: string;
 		isBlacklisted: boolean;
 	}) => {
@@ -1133,8 +1133,8 @@ export function UsersPage({
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="text-lg">用户</CardTitle>
-				<CardDescription>按邮箱聚合评论用户。</CardDescription>
+				<CardTitle className="text-lg">评论者</CardTitle>
+				<CardDescription>按评论邮箱聚合匿名评论者。</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<ResourceFilters
@@ -1165,24 +1165,24 @@ export function UsersPage({
 							</tr>
 						</thead>
 						<tbody>
-							{query.data?.items.map((user) => (
-								<tr key={user.email} className="border-t">
-									<td className="p-3">{user.email}</td>
+							{query.data?.items.map((commenter) => (
+								<tr key={commenter.email} className="border-t">
+									<td className="p-3">{commenter.email}</td>
 									<td className="p-3">
-										<p>{user.names.join(", ")}</p>
+										<p>{commenter.names.join(", ")}</p>
 										<p className="text-xs text-muted-foreground">
-											IP {user.ips.join(", ") || "-"}
+											IP {commenter.ips.join(", ") || "-"}
 										</p>
 										<p className="max-w-64 truncate text-xs text-muted-foreground">
-											UA {user.userAgents.join(" | ") || "-"}
+											UA {commenter.userAgents.join(" | ") || "-"}
 										</p>
 									</td>
 									<td className="p-3">
-										{user.commentCount}，待审 {user.pendingCount}
+										{commenter.commentCount}，待审 {commenter.pendingCount}
 									</td>
-									<td className="p-3">{user.pageCount}</td>
+									<td className="p-3">{commenter.pageCount}</td>
 									<td className="p-3">
-										{user.blacklist.email ? (
+										{commenter.blacklist.email ? (
 											<Badge variant="destructive">黑名单</Badge>
 										) : (
 											<Badge variant="secondary">正常</Badge>
@@ -1194,7 +1194,9 @@ export function UsersPage({
 												type="button"
 												size="sm"
 												variant="outline"
-												onClick={() => openComments({ search: user.email })}
+												onClick={() =>
+													openComments({ search: commenter.email })
+												}
 											>
 												查看评论
 											</Button>
@@ -1202,20 +1204,20 @@ export function UsersPage({
 												type="button"
 												size="sm"
 												variant={
-													user.blacklist.email ? "destructive" : "outline"
+													commenter.blacklist.email ? "destructive" : "outline"
 												}
 												disabled={
 													createBlacklistMutation.isPending ||
 													deleteBlacklistMutation.isPending
 												}
 												onClick={() =>
-													toggleUserBlacklist({
-														targetValue: user.email,
-														isBlacklisted: user.blacklist.email,
+													toggleCommenterBlacklist({
+														targetValue: commenter.email,
+														isBlacklisted: commenter.blacklist.email,
 													})
 												}
 											>
-												{user.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
+												{commenter.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
 											</Button>
 										</div>
 									</td>
@@ -1257,6 +1259,11 @@ export function VisitorsPage({
 				offset: pagination.offset,
 			}),
 	});
+	const visitorsDisabledMessage =
+		query.data?.enabled === false
+			? (query.data.message ??
+				"访客记录未启用。QingYan 当前不记录访客身份，也不提供访客画像。")
+			: null;
 	const createBlacklistMutation = useMutation({
 		mutationFn: createBlacklist,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
@@ -1315,6 +1322,9 @@ export function VisitorsPage({
 						pagination.resetPage();
 					}}
 				/>
+				{visitorsDisabledMessage ? (
+					<EmptyState text={visitorsDisabledMessage} />
+				) : null}
 				<PaginationControls
 					limit={pagination.limit}
 					pageIndex={pagination.pageIndex}
@@ -1324,77 +1334,82 @@ export function VisitorsPage({
 					setPageIndex={pagination.setPageIndex}
 				/>
 				<div className="grid gap-3">
-					{query.data?.items.map((visitor) => (
-						<div key={visitor.visitorKey} className="rounded-md border p-4">
-							<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-								<div className="min-w-0">
-									<p className="truncate font-medium">{visitor.visitorKey}</p>
-									<p className="text-xs text-muted-foreground">
-										{visitor.emails.join(", ") || "无邮箱"}
-									</p>
-									<p className="text-xs text-muted-foreground">
-										IP {visitor.ips.join(", ") || visitor.lastIp || "-"}
-									</p>
-									<p className="max-w-xl truncate text-xs text-muted-foreground">
-										UA{" "}
-										{visitor.userAgents.join(" | ") ||
-											visitor.lastUserAgent ||
-											"-"}
-									</p>
-									{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
-										<div className="mt-1 max-w-xl text-xs">
-											<p className="truncate text-muted-foreground">
-												最近页面 {visitor.lastSeenPageKey ?? "-"}
-											</p>
-											<ExternalLinkText
-												href={visitor.lastSeenPageUrl}
-												className="text-xs"
-											>
-												{visitor.lastSeenPageUrl ??
-													visitor.lastSeenPageKey ??
-													"-"}
-											</ExternalLinkText>
-										</div>
-									) : null}
-								</div>
-								<div className="flex flex-wrap gap-2">
-									<Badge variant="secondary">评论 {visitor.commentCount}</Badge>
-									<Badge variant="outline">页面 {visitor.pageCount}</Badge>
-									{visitor.blacklist.visitor ? (
-										<Badge variant="destructive">访客黑名单</Badge>
-									) : null}
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => openComments({ search: visitor.visitorKey })}
-									>
-										查看评论
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant={
-											visitor.blacklist.visitor ? "destructive" : "outline"
-										}
-										disabled={
-											createBlacklistMutation.isPending ||
-											deleteBlacklistMutation.isPending
-										}
-										onClick={() =>
-											toggleVisitorBlacklist({
-												targetValue: visitor.visitorKey,
-												isBlacklisted: visitor.blacklist.visitor,
-											})
-										}
-									>
-										{visitor.blacklist.visitor ? "解除访客" : "拉黑访客"}
-									</Button>
+					{query.data?.enabled !== false &&
+						query.data?.items.map((visitor) => (
+							<div key={visitor.visitorKey} className="rounded-md border p-4">
+								<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+									<div className="min-w-0">
+										<p className="truncate font-medium">{visitor.visitorKey}</p>
+										<p className="text-xs text-muted-foreground">
+											{visitor.emails.join(", ") || "无邮箱"}
+										</p>
+										<p className="text-xs text-muted-foreground">
+											IP {visitor.ips.join(", ") || visitor.lastIp || "-"}
+										</p>
+										<p className="max-w-xl truncate text-xs text-muted-foreground">
+											UA{" "}
+											{visitor.userAgents.join(" | ") ||
+												visitor.lastUserAgent ||
+												"-"}
+										</p>
+										{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
+											<div className="mt-1 max-w-xl text-xs">
+												<p className="truncate text-muted-foreground">
+													最近页面 {visitor.lastSeenPageKey ?? "-"}
+												</p>
+												<ExternalLinkText
+													href={visitor.lastSeenPageUrl}
+													className="text-xs"
+												>
+													{visitor.lastSeenPageUrl ??
+														visitor.lastSeenPageKey ??
+														"-"}
+												</ExternalLinkText>
+											</div>
+										) : null}
+									</div>
+									<div className="flex flex-wrap gap-2">
+										<Badge variant="secondary">
+											评论 {visitor.commentCount}
+										</Badge>
+										<Badge variant="outline">页面 {visitor.pageCount}</Badge>
+										{visitor.blacklist.visitor ? (
+											<Badge variant="destructive">访客黑名单</Badge>
+										) : null}
+										<Button
+											type="button"
+											size="sm"
+											variant="outline"
+											onClick={() =>
+												openComments({ search: visitor.visitorKey })
+											}
+										>
+											查看评论
+										</Button>
+										<Button
+											type="button"
+											size="sm"
+											variant={
+												visitor.blacklist.visitor ? "destructive" : "outline"
+											}
+											disabled={
+												createBlacklistMutation.isPending ||
+												deleteBlacklistMutation.isPending
+											}
+											onClick={() =>
+												toggleVisitorBlacklist({
+													targetValue: visitor.visitorKey,
+													isBlacklisted: visitor.blacklist.visitor,
+												})
+											}
+										>
+											{visitor.blacklist.visitor ? "解除访客" : "拉黑访客"}
+										</Button>
+									</div>
 								</div>
 							</div>
-						</div>
-					))}
-					{query.data?.items.length === 0 ? (
+						))}
+					{query.data?.enabled !== false && query.data?.items.length === 0 ? (
 						<EmptyState text="暂无访客" />
 					) : null}
 				</div>
@@ -1525,7 +1540,7 @@ export function SitesPage({
 								<div className="mt-3 flex flex-wrap gap-2">
 									<Badge variant="secondary">页面 {site.pageCount}</Badge>
 									<Badge variant="outline">评论 {site.commentCount}</Badge>
-									<Badge variant="outline">用户 {site.userCount}</Badge>
+									<Badge variant="outline">评论者 {site.commenterCount}</Badge>
 									<Badge variant="outline">访客 {site.visitorCount}</Badge>
 								</div>
 								<div className="mt-3 text-xs">
@@ -1554,9 +1569,9 @@ export function SitesPage({
 										type="button"
 										size="sm"
 										variant="outline"
-										onClick={() => openSite(site.siteKey, "users")}
+										onClick={() => openSite(site.siteKey, "commenters")}
 									>
-										用户
+										评论者
 									</Button>
 									<Button
 										type="button"

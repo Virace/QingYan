@@ -170,7 +170,7 @@ security:
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
 
-可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台用户聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
+可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台评论者聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
 
 已验证评论会同时保留评论行上的作者快照和当前站点人员资料。`comments.staffDisplay.nameMode=current_profile` 时，公开评论树对已验证评论展示当前 `comments.verifiedAuthor.displayName`；`snapshot` 时展示评论行保存的 `authorName`。普通访客评论始终展示评论行保存的名称，不会跟随任何邮箱资料。
 

@@ -8,6 +8,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -411,17 +412,56 @@ describe("admin sites", () => {
 						},
 					},
 					pageFeedback: {
-						allowLike: true,
+						allowLike: false,
+					},
+					engagement: {
+						trustMode: "trusted",
+						visitorsEnabled: true,
+						pageViewsEnabled: false,
+						pageLikesEnabled: false,
+						commentVotesEnabled: false,
 					},
 					notifications: {
 						emailEnabled: false,
 					},
 					pageCount: 1,
 					commentCount: 1,
-					userCount: 1,
+					commenterCount: 1,
 					visitorCount: 1,
 				},
 			],
+		});
+	});
+
+	it("marks site counters as lightweight when visitor records are disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		await fixture.app.db.update(siteSettings).set({
+			engagementJson: serializeEngagementSettings({
+				visitors: { enabled: false },
+				pageViews: { enabled: true },
+				pageLikes: { enabled: false },
+				commentVotes: { enabled: true },
+			}),
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().items[0].engagement).toMatchObject({
+			trustMode: "lightweight",
+			visitorsEnabled: false,
+			pageViewsEnabled: true,
+			pageLikesEnabled: false,
+			commentVotesEnabled: true,
 		});
 	});
 });
