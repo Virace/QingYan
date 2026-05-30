@@ -37,6 +37,7 @@ describe("initial migration", () => {
 					"sites",
 					"page_threads",
 					"visitors",
+					"visitor_request_metadata",
 					"page_view_sessions",
 					"comments",
 					"vote_records",
@@ -141,6 +142,12 @@ describe("initial migration", () => {
 			const commentRequestMetadataColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(comment_request_metadata)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const visitorRequestMetadataColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(visitor_request_metadata)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const visitorRequestMetadataIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(visitor_request_metadata)")
+				.all() as Array<{ name: string; unique: number }>;
 			const siteSettingsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(site_settings)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -219,6 +226,60 @@ describe("initial migration", () => {
 					"device_error",
 					"created_at",
 					"updated_at",
+				]),
+			);
+			expect(
+				visitorRequestMetadataColumns.map((column) => column.name),
+			).toEqual([
+				"id",
+				"site_id",
+				"visitor_id",
+				"ip",
+				"ip_hash",
+				"user_agent",
+				"user_agent_hash",
+				"ip_country",
+				"ip_region",
+				"ip_city",
+				"ip_isp",
+				"ip_location_raw",
+				"ip_location_source",
+				"ip_location_db_hash",
+				"ip_location_updated_at",
+				"ip_location_error",
+				"device_browser",
+				"device_browser_version",
+				"device_os",
+				"device_os_version",
+				"device_type",
+				"device_icon",
+				"device_source",
+				"device_parser_version",
+				"device_updated_at",
+				"device_error",
+				"first_seen_at",
+				"last_seen_at",
+				"seen_count",
+				"last_seen_page_key",
+				"last_seen_page_url",
+				"created_at",
+				"updated_at",
+			]);
+			expect(visitorRequestMetadataIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "visitor_request_metadata_identity_idx",
+						unique: 1,
+					}),
+					expect.objectContaining({
+						name: "visitor_request_metadata_visitor_id_idx",
+					}),
+					expect.objectContaining({
+						name: "visitor_request_metadata_site_id_idx",
+					}),
+					expect.objectContaining({
+						name: "visitor_request_metadata_last_seen_at_idx",
+					}),
 				]),
 			);
 			expect(siteSettingsColumns.map((column) => column.name)).toEqual(

@@ -52,6 +52,11 @@ import type { CommentActionId } from "./comment-actions";
 import { CommentsList } from "./comments-list";
 import { useAdminConfirmDialog } from "./confirm-dialog";
 import { ExternalLinkText } from "./external-link-text";
+import {
+	RawRequestMetaList,
+	RequestMetaAggregateBadges,
+	RequestMetaSummary,
+} from "./request-meta-summary";
 
 type PageStatusFilter = "all" | PageRegistryStatus;
 
@@ -1170,12 +1175,21 @@ export function CommentersPage({
 									<td className="p-3">{commenter.email}</td>
 									<td className="p-3">
 										<p>{commenter.names.join(", ")}</p>
-										<p className="text-xs text-muted-foreground">
-											IP {commenter.ips.join(", ") || "-"}
-										</p>
-										<p className="max-w-64 truncate text-xs text-muted-foreground">
-											UA {commenter.userAgents.join(" | ") || "-"}
-										</p>
+										<div className="mt-1 grid gap-1">
+											<RequestMetaAggregateBadges
+												items={commenter.ipLocations}
+												emptyText="地区 -"
+												showDistinctIpCount
+											/>
+											<RequestMetaAggregateBadges
+												items={commenter.devices}
+												emptyText="设备 -"
+											/>
+											<RawRequestMetaList
+												ips={commenter.ips}
+												userAgents={commenter.userAgents}
+											/>
+										</div>
 									</td>
 									<td className="p-3">
 										{commenter.commentCount}，待审 {commenter.pendingCount}
@@ -1343,15 +1357,29 @@ export function VisitorsPage({
 										<p className="text-xs text-muted-foreground">
 											{visitor.emails.join(", ") || "无邮箱"}
 										</p>
-										<p className="text-xs text-muted-foreground">
-											IP {visitor.ips.join(", ") || visitor.lastIp || "-"}
-										</p>
-										<p className="max-w-xl truncate text-xs text-muted-foreground">
-											UA{" "}
-											{visitor.userAgents.join(" | ") ||
-												visitor.lastUserAgent ||
-												"-"}
-										</p>
+										<RequestMetaSummary
+											meta={visitor.lastRequestMeta}
+											fallbackIp={visitor.lastIp}
+											fallbackUserAgent={visitor.lastUserAgent}
+											className="mt-1 max-w-xl"
+										/>
+										<div className="mt-2 grid gap-1">
+											<RequestMetaAggregateBadges
+												items={visitor.ipLocations}
+												emptyText="地区 -"
+												showDistinctIpCount
+											/>
+											<RequestMetaAggregateBadges
+												items={visitor.devices}
+												emptyText="设备 -"
+											/>
+											<RawRequestMetaList
+												ips={visitor.ips}
+												userAgents={visitor.userAgents}
+												fallbackIp={visitor.lastIp}
+												fallbackUserAgent={visitor.lastUserAgent}
+											/>
+										</div>
 										{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
 											<div className="mt-1 max-w-xl text-xs">
 												<p className="truncate text-muted-foreground">

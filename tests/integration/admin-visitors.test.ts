@@ -10,6 +10,7 @@ import {
 	siteSettings,
 	sites,
 	visitors,
+	visitorRequestMetadata,
 } from "../../src/db/schema";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin } from "../support/admin-login";
@@ -125,6 +126,52 @@ describe("admin visitors", () => {
 			authorIp: "203.0.113.30",
 			authorUserAgent: "QingYan Visitor Browser",
 		});
+		await fixture.app.db.insert(visitorRequestMetadata).values([
+			{
+				siteId: site.id,
+				visitorId: visitor.id,
+				ip: "203.0.113.30",
+				ipHash: "ip_hash_30",
+				userAgent: "Mozilla/5.0 Chrome/120.0.0.0 Windows",
+				userAgentHash: "ua_hash_chrome",
+				ipCountry: "中国",
+				ipRegion: "广东",
+				ipCity: "深圳",
+				ipIsp: "电信",
+				deviceBrowser: "chrome",
+				deviceBrowserVersion: "120.0.0.0",
+				deviceOs: "windows",
+				deviceOsVersion: "10",
+				deviceType: "desktop",
+				deviceIcon: "chrome",
+				lastSeenAt: "2026-04-17T10:00:00.000Z",
+				seenCount: 3,
+				lastSeenPageKey: "post:visitor-1",
+				lastSeenPageUrl: "/posts/visitor-1/",
+			},
+			{
+				siteId: site.id,
+				visitorId: visitor.id,
+				ip: "203.0.113.31",
+				ipHash: "ip_hash_31",
+				userAgent: "Mozilla/5.0 Safari/17.0 iOS",
+				userAgentHash: "ua_hash_safari",
+				ipCountry: "中国",
+				ipRegion: "广东",
+				ipCity: "深圳",
+				ipIsp: "联通",
+				deviceBrowser: "safari",
+				deviceBrowserVersion: "17.0",
+				deviceOs: "ios",
+				deviceOsVersion: "17",
+				deviceType: "mobile",
+				deviceIcon: "safari",
+				lastSeenAt: "2026-04-17T10:03:00.000Z",
+				seenCount: 1,
+				lastSeenPageKey: "post:visitor-1",
+				lastSeenPageUrl: "/posts/visitor-1/",
+			},
+		]);
 		await fixture.app.db.insert(blacklistRules).values({
 			siteId: site.id,
 			scope: "post",
@@ -153,6 +200,40 @@ describe("admin visitors", () => {
 					emails: ["alice@example.com"],
 					ips: ["203.0.113.30"],
 					userAgents: ["QingYan Visitor Browser"],
+					lastRequestMeta: {
+						ip: {
+							raw: "203.0.113.31",
+							location: {
+								label: "中国 / 广东 / 深圳",
+							},
+						},
+						userAgent: {
+							raw: "Mozilla/5.0 Safari/17.0 iOS",
+							device: {
+								label: "safari 17 / ios 17 / mobile",
+							},
+						},
+					},
+					ipLocations: [
+						{
+							key: "中国|广东|深圳",
+							label: "中国 / 广东 / 深圳",
+							count: 4,
+							distinctIpCount: 2,
+						},
+					],
+					devices: [
+						{
+							key: "chrome|windows|desktop",
+							label: "chrome 120 / windows 10 / desktop",
+							count: 3,
+						},
+						{
+							key: "safari|ios|mobile",
+							label: "safari 17 / ios 17 / mobile",
+							count: 1,
+						},
+					],
 					blacklist: {
 						visitor: true,
 					},
@@ -180,6 +261,17 @@ describe("admin visitors", () => {
 			},
 		});
 		expect(bootstrap.statusCode).toBe(200);
+		const metadataRows = await fixture.app.db
+			.select()
+			.from(visitorRequestMetadata);
+		expect(metadataRows).toHaveLength(1);
+		expect(metadataRows[0]).toMatchObject({
+			ip: "127.0.0.1",
+			userAgent: "QingYan Metadata Browser",
+			seenCount: 1,
+			lastSeenPageKey: "posts/visitor-metadata/",
+			lastSeenPageUrl: "/posts/visitor-metadata/",
+		});
 
 		const response = await fixture.app.inject({
 			method: "GET",
@@ -199,6 +291,16 @@ describe("admin visitors", () => {
 					userAgents: [],
 					lastIp: "127.0.0.1",
 					lastUserAgent: "QingYan Metadata Browser",
+					lastRequestMeta: {
+						ip: {
+							raw: "127.0.0.1",
+						},
+						userAgent: {
+							raw: "QingYan Metadata Browser",
+						},
+					},
+					ipLocations: expect.any(Array),
+					devices: expect.any(Array),
 					lastSeenPageKey: "posts/visitor-metadata/",
 					lastSeenPageUrl: "http://localhost:4321/posts/visitor-metadata/",
 				},

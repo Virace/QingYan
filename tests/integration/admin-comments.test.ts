@@ -281,6 +281,18 @@ describe("admin comments", () => {
 			commentId: "c_admin_1",
 			authorIp: "203.0.113.10",
 			authorUserAgent: "QingYan Test Browser",
+			ipCountry: "中国",
+			ipRegion: "广东",
+			ipCity: "深圳",
+			ipIsp: "电信",
+			ipLocationSource: "ip2region",
+			deviceBrowser: "chrome",
+			deviceBrowserVersion: "120.0.0.0",
+			deviceOs: "windows",
+			deviceOsVersion: "10",
+			deviceType: "desktop",
+			deviceIcon: "chrome",
+			deviceSource: "ua-parser-js",
 		});
 		await fixture.app.db.insert(blacklistRules).values([
 			{
@@ -317,6 +329,32 @@ describe("admin comments", () => {
 					authorEmail: "admin@example.com",
 					authorIp: "203.0.113.10",
 					authorUserAgent: "QingYan Test Browser",
+					requestMeta: {
+						ip: {
+							raw: "203.0.113.10",
+							location: {
+								label: "中国 / 广东 / 深圳",
+								country: "中国",
+								region: "广东",
+								city: "深圳",
+								isp: "电信",
+								source: "ip2region",
+							},
+						},
+						userAgent: {
+							raw: "QingYan Test Browser",
+							device: {
+								label: "chrome 120 / windows 10 / desktop",
+								browser: "chrome",
+								browserVersion: "120.0.0.0",
+								os: "windows",
+								osVersion: "10",
+								type: "desktop",
+								icon: "chrome",
+								source: "ua-parser-js",
+							},
+						},
+					},
 					blacklist: {
 						email: true,
 						ip: true,

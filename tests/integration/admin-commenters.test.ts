@@ -102,11 +102,53 @@ describe("admin commenters", () => {
 				updatedAt: "2026-04-17T10:02:00.000Z",
 			},
 		]);
-		await fixture.app.db.insert(commentRequestMetadata).values({
-			commentId: "c_user_1",
-			authorIp: "203.0.113.20",
-			authorUserAgent: "QingYan User Browser",
-		});
+		await fixture.app.db.insert(commentRequestMetadata).values([
+			{
+				commentId: "c_user_1",
+				authorIp: "203.0.113.20",
+				authorUserAgent: "Mozilla/5.0 Chrome/120.0.0.0 Windows",
+				ipCountry: "中国",
+				ipRegion: "广东",
+				ipCity: "深圳",
+				ipIsp: "电信",
+				deviceBrowser: "chrome",
+				deviceBrowserVersion: "120.0.0.0",
+				deviceOs: "windows",
+				deviceOsVersion: "10",
+				deviceType: "desktop",
+				deviceIcon: "chrome",
+			},
+			{
+				commentId: "c_user_2",
+				authorIp: "203.0.113.21",
+				authorUserAgent: "Mozilla/5.0 Chrome/120.0.0.0 Windows",
+				ipCountry: "中国",
+				ipRegion: "广东",
+				ipCity: "深圳",
+				ipIsp: "联通",
+				deviceBrowser: "chrome",
+				deviceBrowserVersion: "120.0.0.0",
+				deviceOs: "windows",
+				deviceOsVersion: "10",
+				deviceType: "desktop",
+				deviceIcon: "chrome",
+			},
+			{
+				commentId: "c_user_3",
+				authorIp: "203.0.113.22",
+				authorUserAgent: "Mozilla/5.0 Safari/17.0 iOS",
+				ipCountry: "中国",
+				ipRegion: "江苏",
+				ipCity: "南京",
+				ipIsp: "移动",
+				deviceBrowser: "safari",
+				deviceBrowserVersion: "17.0",
+				deviceOs: "ios",
+				deviceOsVersion: "17",
+				deviceType: "mobile",
+				deviceIcon: "safari",
+			},
+		]);
 		await fixture.app.db.insert(blacklistRules).values({
 			siteId: site.id,
 			scope: "post",
@@ -136,8 +178,37 @@ describe("admin commenters", () => {
 					approvedCount: 2,
 					pageCount: 2,
 					siteCount: 1,
-					ips: ["203.0.113.20"],
-					userAgents: ["QingYan User Browser"],
+					ips: ["203.0.113.20", "203.0.113.21", "203.0.113.22"],
+					userAgents: [
+						"Mozilla/5.0 Chrome/120.0.0.0 Windows",
+						"Mozilla/5.0 Safari/17.0 iOS",
+					],
+					ipLocations: [
+						{
+							key: "中国|广东|深圳",
+							label: "中国 / 广东 / 深圳",
+							count: 2,
+							distinctIpCount: 2,
+						},
+						{
+							key: "中国|江苏|南京",
+							label: "中国 / 江苏 / 南京",
+							count: 1,
+							distinctIpCount: 1,
+						},
+					],
+					devices: [
+						{
+							key: "chrome|windows|desktop",
+							label: "chrome 120 / windows 10 / desktop",
+							count: 2,
+						},
+						{
+							key: "safari|ios|mobile",
+							label: "safari 17 / ios 17 / mobile",
+							count: 1,
+						},
+					],
 					blacklist: {
 						email: true,
 					},

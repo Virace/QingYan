@@ -23,6 +23,7 @@ import {
 	sitePageRegistry,
 	siteSettings,
 	sites,
+	visitorRequestMetadata,
 	visitors,
 } from "../../db/schema";
 import { buildExternalAvatarUrl } from "../comments/gravatar";
@@ -68,6 +69,244 @@ function toCountMap<T extends number | null | undefined>(
 	}
 
 	return map;
+}
+
+function majorVersion(version?: string | null): string | null {
+	return version?.split(".")[0] || null;
+}
+
+function formatIpLocationLabel(input: {
+	country?: string | null;
+	region?: string | null;
+	city?: string | null;
+	error?: string | null;
+}): string {
+	if (input.error) {
+		return "解析失败";
+	}
+
+	return (
+		[input.country, input.region, input.city].filter(Boolean).join(" / ") ||
+		"未知地区"
+	);
+}
+
+function formatDeviceLabel(input: {
+	browser?: string | null;
+	browserVersion?: string | null;
+	os?: string | null;
+	osVersion?: string | null;
+	type?: string | null;
+	error?: string | null;
+}): string {
+	if (input.error) {
+		return "解析失败";
+	}
+
+	const browser =
+		input.browser && input.browser !== "unknown"
+			? [input.browser, majorVersion(input.browserVersion)]
+					.filter(Boolean)
+					.join(" ")
+			: null;
+	const os =
+		input.os && input.os !== "unknown"
+			? [input.os, majorVersion(input.osVersion)].filter(Boolean).join(" ")
+			: null;
+	const type = input.type && input.type !== "unknown" ? input.type : null;
+
+	return [browser, os, type].filter(Boolean).join(" / ") || "未知设备";
+}
+
+function buildRequestMeta(input: {
+	ip?: string | null;
+	userAgent?: string | null;
+	ipCountry?: string | null;
+	ipRegion?: string | null;
+	ipCity?: string | null;
+	ipIsp?: string | null;
+	ipLocationSource?: string | null;
+	ipLocationUpdatedAt?: string | null;
+	ipLocationError?: string | null;
+	deviceBrowser?: string | null;
+	deviceBrowserVersion?: string | null;
+	deviceOs?: string | null;
+	deviceOsVersion?: string | null;
+	deviceType?: string | null;
+	deviceIcon?: string | null;
+	deviceSource?: string | null;
+	deviceUpdatedAt?: string | null;
+	deviceError?: string | null;
+}) {
+	const hasLocation =
+		Boolean(input.ipCountry || input.ipRegion || input.ipCity || input.ipIsp) ||
+		Boolean(input.ipLocationError);
+	const hasDevice = Boolean(
+		input.deviceBrowser ||
+			input.deviceBrowserVersion ||
+			input.deviceOs ||
+			input.deviceOsVersion ||
+			input.deviceType ||
+			input.deviceIcon ||
+			input.deviceError,
+	);
+
+	return {
+		ip: {
+			raw: input.ip ?? null,
+			location: hasLocation
+				? {
+						label: formatIpLocationLabel({
+							country: input.ipCountry,
+							region: input.ipRegion,
+							city: input.ipCity,
+							error: input.ipLocationError,
+						}),
+						country: input.ipCountry ?? null,
+						region: input.ipRegion ?? null,
+						city: input.ipCity ?? null,
+						isp: input.ipIsp ?? null,
+						source: input.ipLocationSource ?? null,
+						updatedAt: input.ipLocationUpdatedAt ?? null,
+						error: input.ipLocationError ?? null,
+					}
+				: null,
+		},
+		userAgent: {
+			raw: input.userAgent ?? null,
+			device: hasDevice
+				? {
+						label: formatDeviceLabel({
+							browser: input.deviceBrowser,
+							browserVersion: input.deviceBrowserVersion,
+							os: input.deviceOs,
+							osVersion: input.deviceOsVersion,
+							type: input.deviceType,
+							error: input.deviceError,
+						}),
+						browser: input.deviceBrowser ?? "unknown",
+						browserVersion: input.deviceBrowserVersion ?? null,
+						os: input.deviceOs ?? "unknown",
+						osVersion: input.deviceOsVersion ?? null,
+						type: input.deviceType ?? "unknown",
+						icon: input.deviceIcon ?? null,
+						source: input.deviceSource ?? null,
+						updatedAt: input.deviceUpdatedAt ?? null,
+						error: input.deviceError ?? null,
+					}
+				: null,
+		},
+	};
+}
+
+type RequestMetaSource = Parameters<typeof buildRequestMeta>[0];
+type RequestMetaAggregateSource = RequestMetaSource & { count?: number };
+
+interface RequestMetaAggregate {
+	key: string;
+	label: string;
+	count: number;
+	distinctIpCount?: number;
+}
+
+function locationKey(input: RequestMetaSource): string {
+	return [input.ipCountry, input.ipRegion, input.ipCity]
+		.map((value) => value ?? "")
+		.join("|");
+}
+
+function deviceKey(input: RequestMetaSource): string {
+	return [input.deviceBrowser, input.deviceOs, input.deviceType]
+		.map((value) => value ?? "unknown")
+		.join("|");
+}
+
+function aggregateIpLocations(
+	rows: RequestMetaAggregateSource[],
+): RequestMetaAggregate[] {
+	const groups = new Map<
+		string,
+		{
+			input: RequestMetaSource;
+			count: number;
+			ips: Set<string>;
+		}
+	>();
+
+	for (const row of rows) {
+		const key = locationKey(row);
+		const rowCount = row.count ?? 1;
+		const group = groups.get(key) ?? {
+			input: row,
+			count: 0,
+			ips: new Set<string>(),
+		};
+		group.count += rowCount;
+		if (row.ip) {
+			group.ips.add(row.ip);
+		}
+		groups.set(key, group);
+	}
+
+	return [...groups.entries()]
+		.map(([key, group]) => ({
+			key,
+			label: formatIpLocationLabel({
+				country: group.input.ipCountry,
+				region: group.input.ipRegion,
+				city: group.input.ipCity,
+				error: group.input.ipLocationError,
+			}),
+			count: group.count,
+			distinctIpCount: group.ips.size,
+		}))
+		.sort(
+			(left, right) =>
+				right.count - left.count || left.key.localeCompare(right.key),
+		)
+		.slice(0, 3);
+}
+
+function aggregateDevices(
+	rows: RequestMetaAggregateSource[],
+): RequestMetaAggregate[] {
+	const groups = new Map<
+		string,
+		{
+			input: RequestMetaSource;
+			count: number;
+		}
+	>();
+
+	for (const row of rows) {
+		const key = deviceKey(row);
+		const rowCount = row.count ?? 1;
+		const group = groups.get(key) ?? {
+			input: row,
+			count: 0,
+		};
+		group.count += rowCount;
+		groups.set(key, group);
+	}
+
+	return [...groups.entries()]
+		.map(([key, group]) => ({
+			key,
+			label: formatDeviceLabel({
+				browser: group.input.deviceBrowser,
+				browserVersion: group.input.deviceBrowserVersion,
+				os: group.input.deviceOs,
+				osVersion: group.input.deviceOsVersion,
+				type: group.input.deviceType,
+				error: group.input.deviceError,
+			}),
+			count: group.count,
+		}))
+		.sort(
+			(left, right) =>
+				right.count - left.count || left.key.localeCompare(right.key),
+		)
+		.slice(0, 3);
 }
 
 type AdminPageSortBy =
@@ -405,6 +644,15 @@ export class AdminRepository {
 				ipLocationDbHash: commentRequestMetadata.ipLocationDbHash,
 				ipLocationUpdatedAt: commentRequestMetadata.ipLocationUpdatedAt,
 				ipLocationError: commentRequestMetadata.ipLocationError,
+				deviceBrowser: commentRequestMetadata.deviceBrowser,
+				deviceBrowserVersion: commentRequestMetadata.deviceBrowserVersion,
+				deviceOs: commentRequestMetadata.deviceOs,
+				deviceOsVersion: commentRequestMetadata.deviceOsVersion,
+				deviceType: commentRequestMetadata.deviceType,
+				deviceIcon: commentRequestMetadata.deviceIcon,
+				deviceSource: commentRequestMetadata.deviceSource,
+				deviceUpdatedAt: commentRequestMetadata.deviceUpdatedAt,
+				deviceError: commentRequestMetadata.deviceError,
 				contentRaw: comments.contentRaw,
 				isPinned: comments.isPinned,
 				isFolded: comments.isFolded,
@@ -483,6 +731,26 @@ export class AdminRepository {
 						}) ?? null,
 					authorIp: row.authorIp,
 					authorUserAgent: row.authorUserAgent,
+					requestMeta: buildRequestMeta({
+						ip: row.authorIp,
+						userAgent: row.authorUserAgent,
+						ipCountry: row.ipCountry,
+						ipRegion: row.ipRegion,
+						ipCity: row.ipCity,
+						ipIsp: row.ipIsp,
+						ipLocationSource: row.ipLocationSource,
+						ipLocationUpdatedAt: row.ipLocationUpdatedAt,
+						ipLocationError: row.ipLocationError,
+						deviceBrowser: row.deviceBrowser,
+						deviceBrowserVersion: row.deviceBrowserVersion,
+						deviceOs: row.deviceOs,
+						deviceOsVersion: row.deviceOsVersion,
+						deviceType: row.deviceType,
+						deviceIcon: row.deviceIcon,
+						deviceSource: row.deviceSource,
+						deviceUpdatedAt: row.deviceUpdatedAt,
+						deviceError: row.deviceError,
+					}),
 					authorIpLocation: {
 						country: row.ipCountry,
 						region: row.ipRegion,
@@ -779,9 +1047,83 @@ export class AdminRepository {
 			.sort((left, right) =>
 				(right.lastCommentAt ?? "").localeCompare(left.lastCommentAt ?? ""),
 			);
+		const pagedItems = items.slice(input.offset, input.offset + input.limit);
+		const pageEmails = pagedItems.map((item) => item.email);
+		const metadataByEmail = new Map<string, RequestMetaSource[]>();
+		if (pageEmails.length > 0) {
+			const metadataRows = await this.db
+				.select({
+					email: normalizedEmail,
+					ip: commentRequestMetadata.authorIp,
+					userAgent: commentRequestMetadata.authorUserAgent,
+					ipCountry: commentRequestMetadata.ipCountry,
+					ipRegion: commentRequestMetadata.ipRegion,
+					ipCity: commentRequestMetadata.ipCity,
+					ipIsp: commentRequestMetadata.ipIsp,
+					ipLocationSource: commentRequestMetadata.ipLocationSource,
+					ipLocationUpdatedAt: commentRequestMetadata.ipLocationUpdatedAt,
+					ipLocationError: commentRequestMetadata.ipLocationError,
+					deviceBrowser: commentRequestMetadata.deviceBrowser,
+					deviceBrowserVersion: commentRequestMetadata.deviceBrowserVersion,
+					deviceOs: commentRequestMetadata.deviceOs,
+					deviceOsVersion: commentRequestMetadata.deviceOsVersion,
+					deviceType: commentRequestMetadata.deviceType,
+					deviceIcon: commentRequestMetadata.deviceIcon,
+					deviceSource: commentRequestMetadata.deviceSource,
+					deviceUpdatedAt: commentRequestMetadata.deviceUpdatedAt,
+					deviceError: commentRequestMetadata.deviceError,
+				})
+				.from(comments)
+				.leftJoin(
+					commentRequestMetadata,
+					eq(commentRequestMetadata.commentId, comments.id),
+				)
+				.where(
+					and(
+						isNull(comments.deletedAt),
+						isNotNull(comments.authorEmail),
+						input.siteId ? eq(comments.siteId, input.siteId) : undefined,
+						inArray(normalizedEmail, pageEmails),
+					),
+				);
+			for (const row of metadataRows) {
+				if (!row.email) {
+					continue;
+				}
+				const records = metadataByEmail.get(row.email) ?? [];
+				records.push({
+					ip: row.ip,
+					userAgent: row.userAgent,
+					ipCountry: row.ipCountry,
+					ipRegion: row.ipRegion,
+					ipCity: row.ipCity,
+					ipIsp: row.ipIsp,
+					ipLocationSource: row.ipLocationSource,
+					ipLocationUpdatedAt: row.ipLocationUpdatedAt,
+					ipLocationError: row.ipLocationError,
+					deviceBrowser: row.deviceBrowser,
+					deviceBrowserVersion: row.deviceBrowserVersion,
+					deviceOs: row.deviceOs,
+					deviceOsVersion: row.deviceOsVersion,
+					deviceType: row.deviceType,
+					deviceIcon: row.deviceIcon,
+					deviceSource: row.deviceSource,
+					deviceUpdatedAt: row.deviceUpdatedAt,
+					deviceError: row.deviceError,
+				});
+				metadataByEmail.set(row.email, records);
+			}
+		}
 
 		return {
-			items: items.slice(input.offset, input.offset + input.limit),
+			items: pagedItems.map((item) => {
+				const metadataRows = metadataByEmail.get(item.email) ?? [];
+				return {
+					...item,
+					ipLocations: aggregateIpLocations(metadataRows),
+					devices: aggregateDevices(metadataRows),
+				};
+			}),
 			totalCount: items.length,
 		};
 	}
@@ -824,6 +1166,8 @@ export class AdminRepository {
 				totalCount: 0,
 			};
 		}
+		const pagedRows = rows.slice(input.offset, input.offset + input.limit);
+		const pagedVisitorIds = pagedRows.map((row) => row.id);
 
 		const commentStatsRows = await this.db
 			.select({
@@ -885,15 +1229,77 @@ export class AdminRepository {
 				userAgents: parseStringArray(row.userAgentsJson),
 			});
 		}
+		const metadataByVisitorId = new Map<number, RequestMetaAggregateSource[]>();
+		if (pagedVisitorIds.length > 0) {
+			const metadataRows = await this.db
+				.select({
+					visitorId: visitorRequestMetadata.visitorId,
+					ip: visitorRequestMetadata.ip,
+					userAgent: visitorRequestMetadata.userAgent,
+					ipCountry: visitorRequestMetadata.ipCountry,
+					ipRegion: visitorRequestMetadata.ipRegion,
+					ipCity: visitorRequestMetadata.ipCity,
+					ipIsp: visitorRequestMetadata.ipIsp,
+					ipLocationSource: visitorRequestMetadata.ipLocationSource,
+					ipLocationUpdatedAt: visitorRequestMetadata.ipLocationUpdatedAt,
+					ipLocationError: visitorRequestMetadata.ipLocationError,
+					deviceBrowser: visitorRequestMetadata.deviceBrowser,
+					deviceBrowserVersion: visitorRequestMetadata.deviceBrowserVersion,
+					deviceOs: visitorRequestMetadata.deviceOs,
+					deviceOsVersion: visitorRequestMetadata.deviceOsVersion,
+					deviceType: visitorRequestMetadata.deviceType,
+					deviceIcon: visitorRequestMetadata.deviceIcon,
+					deviceSource: visitorRequestMetadata.deviceSource,
+					deviceUpdatedAt: visitorRequestMetadata.deviceUpdatedAt,
+					deviceError: visitorRequestMetadata.deviceError,
+					lastSeenAt: visitorRequestMetadata.lastSeenAt,
+					seenCount: visitorRequestMetadata.seenCount,
+				})
+				.from(visitorRequestMetadata)
+				.where(inArray(visitorRequestMetadata.visitorId, pagedVisitorIds))
+				.orderBy(desc(visitorRequestMetadata.lastSeenAt));
+			for (const row of metadataRows) {
+				const records = metadataByVisitorId.get(row.visitorId) ?? [];
+				records.push({
+					ip: row.ip,
+					userAgent: row.userAgent,
+					ipCountry: row.ipCountry,
+					ipRegion: row.ipRegion,
+					ipCity: row.ipCity,
+					ipIsp: row.ipIsp,
+					ipLocationSource: row.ipLocationSource,
+					ipLocationUpdatedAt: row.ipLocationUpdatedAt,
+					ipLocationError: row.ipLocationError,
+					deviceBrowser: row.deviceBrowser,
+					deviceBrowserVersion: row.deviceBrowserVersion,
+					deviceOs: row.deviceOs,
+					deviceOsVersion: row.deviceOsVersion,
+					deviceType: row.deviceType,
+					deviceIcon: row.deviceIcon,
+					deviceSource: row.deviceSource,
+					deviceUpdatedAt: row.deviceUpdatedAt,
+					deviceError: row.deviceError,
+					count: Number(row.seenCount ?? 1),
+				});
+				metadataByVisitorId.set(row.visitorId, records);
+			}
+		}
 
 		const visitorRules = await this.listActiveBlacklistRules(
 			"visitor",
 			input.siteId,
 		);
 		return {
-			items: rows.slice(input.offset, input.offset + input.limit).map((row) => {
+			items: pagedRows.map((row) => {
 				const commentStats = commentStatsMap.get(row.id);
 				const ips = commentStats?.ips ?? [];
+				const metadataRows = metadataByVisitorId.get(row.id) ?? [];
+				const lastRequestMeta = buildRequestMeta(
+					metadataRows[0] ?? {
+						ip: row.lastIp,
+						userAgent: row.lastUserAgent,
+					},
+				);
 				return {
 					siteKey: row.siteKey,
 					visitorKey: row.visitorKey,
@@ -912,6 +1318,9 @@ export class AdminRepository {
 					emails: commentStats?.emails ?? [],
 					ips,
 					userAgents: commentStats?.userAgents ?? [],
+					lastRequestMeta,
+					ipLocations: aggregateIpLocations(metadataRows),
+					devices: aggregateDevices(metadataRows),
 					blacklist: {
 						visitor: visitorRules.some((rule) =>
 							matchBlacklistRule(

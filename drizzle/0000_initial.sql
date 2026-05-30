@@ -311,6 +311,47 @@ CREATE TABLE `visitors` (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `visitors_site_visitor_key_idx` ON `visitors` (`site_id`,`visitor_key`);--> statement-breakpoint
 CREATE INDEX `visitors_site_id_idx` ON `visitors` (`site_id`);--> statement-breakpoint
+CREATE TABLE `visitor_request_metadata` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_id` integer NOT NULL,
+	`visitor_id` integer NOT NULL,
+	`ip` text,
+	`ip_hash` text,
+	`user_agent` text,
+	`user_agent_hash` text,
+	`ip_country` text,
+	`ip_region` text,
+	`ip_city` text,
+	`ip_isp` text,
+	`ip_location_raw` text,
+	`ip_location_source` text,
+	`ip_location_db_hash` text,
+	`ip_location_updated_at` text,
+	`ip_location_error` text,
+	`device_browser` text,
+	`device_browser_version` text,
+	`device_os` text,
+	`device_os_version` text,
+	`device_type` text,
+	`device_icon` text,
+	`device_source` text,
+	`device_parser_version` text,
+	`device_updated_at` text,
+	`device_error` text,
+	`first_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`seen_count` integer DEFAULT 1 NOT NULL,
+	`last_seen_page_key` text,
+	`last_seen_page_url` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`visitor_id`) REFERENCES `visitors`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `visitor_request_metadata_site_id_idx` ON `visitor_request_metadata` (`site_id`);--> statement-breakpoint
+CREATE INDEX `visitor_request_metadata_visitor_id_idx` ON `visitor_request_metadata` (`visitor_id`);--> statement-breakpoint
+CREATE INDEX `visitor_request_metadata_last_seen_at_idx` ON `visitor_request_metadata` (`last_seen_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `visitor_request_metadata_identity_idx` ON `visitor_request_metadata` (`visitor_id`,`ip_hash`,`user_agent_hash`);--> statement-breakpoint
 CREATE TABLE `system_settings` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`category` text NOT NULL,

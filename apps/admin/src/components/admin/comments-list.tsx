@@ -10,6 +10,7 @@ import {
 } from "./comment-actions";
 import { CommentActionButton } from "./comment-row-actions";
 import { ExternalLinkText } from "./external-link-text";
+import { RequestMetaSummary } from "./request-meta-summary";
 import { formatAdminCommentTime } from "./time-format";
 
 function rowTone(status: CommentStatus) {
@@ -40,17 +41,6 @@ function statusLabel(status: CommentStatus) {
 
 function authorInitial(name: string) {
 	return name.trim().slice(0, 1).toUpperCase() || "?";
-}
-
-function formatIpLocation(location: AdminComment["authorIpLocation"]) {
-	if (location.error) {
-		return `地址 ${location.error}`;
-	}
-	return (
-		[location.country, location.region, location.city, location.isp]
-			.filter(Boolean)
-			.join(" / ") || "地址 -"
-	);
 }
 
 export interface CommentsListProps {
@@ -133,15 +123,11 @@ export function CommentsList(props: CommentsListProps) {
 									<p className="truncate text-xs text-muted-foreground">
 										{comment.authorEmail ?? "-"}
 									</p>
-									<p className="truncate text-xs text-muted-foreground">
-										IP {comment.authorIp ?? "-"}
-									</p>
-									<p className="truncate text-xs text-muted-foreground">
-										{formatIpLocation(comment.authorIpLocation)}
-									</p>
-									<p className="truncate text-xs text-muted-foreground">
-										UA {comment.authorUserAgent ?? "-"}
-									</p>
+									<RequestMetaSummary
+										meta={comment.requestMeta}
+										fallbackIp={comment.authorIp}
+										fallbackUserAgent={comment.authorUserAgent}
+									/>
 									<div className="mt-2 flex flex-wrap gap-1">
 										{comment.blacklist.email ? (
 											<Badge variant="destructive">邮箱黑名单</Badge>

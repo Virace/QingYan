@@ -55,6 +55,44 @@ export interface SiteModerationSettings {
 	};
 }
 
+export interface AdminRequestMetaDisplay {
+	ip: {
+		raw: string | null;
+		location: {
+			label: string;
+			country: string | null;
+			region: string | null;
+			city: string | null;
+			isp: string | null;
+			source: string | null;
+			updatedAt: string | null;
+			error: string | null;
+		} | null;
+	};
+	userAgent: {
+		raw: string | null;
+		device: {
+			label: string;
+			browser: string;
+			browserVersion: string | null;
+			os: string;
+			osVersion: string | null;
+			type: string;
+			icon: string | null;
+			source: string | null;
+			updatedAt: string | null;
+			error: string | null;
+		} | null;
+	};
+}
+
+export interface AdminRequestMetaAggregate {
+	key: string;
+	label: string;
+	count: number;
+	distinctIpCount?: number;
+}
+
 export interface AdminComment {
 	id: string;
 	parentId: string | null;
@@ -64,6 +102,7 @@ export interface AdminComment {
 	authorAvatarUrl: string | null;
 	authorIp: string | null;
 	authorUserAgent: string | null;
+	requestMeta: AdminRequestMetaDisplay;
 	authorIpLocation: {
 		country: string | null;
 		region: string | null;
@@ -190,6 +229,8 @@ export interface AdminCommenter {
 	siteCount: number;
 	ips: string[];
 	userAgents: string[];
+	ipLocations: AdminRequestMetaAggregate[];
+	devices: AdminRequestMetaAggregate[];
 	blacklist: {
 		email: boolean;
 	};
@@ -209,6 +250,9 @@ export interface AdminVisitor {
 	userAgents: string[];
 	lastIp: string | null;
 	lastUserAgent: string | null;
+	lastRequestMeta: AdminRequestMetaDisplay;
+	ipLocations: AdminRequestMetaAggregate[];
+	devices: AdminRequestMetaAggregate[];
 	lastSeenPageKey: string | null;
 	lastSeenPageUrl: string | null;
 	blacklist: {

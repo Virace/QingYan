@@ -13,6 +13,7 @@ import {
 	pendingPageViewSessions,
 	sitePageRegistry,
 	siteSettings,
+	visitorRequestMetadata,
 	visitors,
 	voteRecords,
 } from "../../db/schema";
@@ -180,6 +181,11 @@ export class CommentsRepository {
 					lastSeenAt: nowIso,
 				})
 				.where(eq(visitors.id, existingVisitor.id));
+			await this.upsertVisitorRequestMetadata({
+				...input,
+				visitorId: existingVisitor.id,
+				seenAt: nowIso,
+			});
 
 			return {
 				id: existingVisitor.id,
@@ -214,12 +220,64 @@ export class CommentsRepository {
 		if (!createdVisitor) {
 			throw new Error("Expected visitor row to exist after insertion");
 		}
+		await this.upsertVisitorRequestMetadata({
+			...input,
+			visitorId: createdVisitor.id,
+			seenAt: nowIso,
+		});
 
 		return {
 			id: createdVisitor.id,
 			visitorKey: createdVisitor.visitorKey,
 			created: true,
 		};
+	}
+
+	private async upsertVisitorRequestMetadata(input: {
+		siteId: number;
+		visitorId: number;
+		ip?: string;
+		userAgent?: string;
+		pageKey?: string;
+		pageUrl?: string;
+		seenAt: string;
+	}) {
+		if (!input.ip && !input.userAgent) {
+			return;
+		}
+
+		await this.db
+			.insert(visitorRequestMetadata)
+			.values({
+				siteId: input.siteId,
+				visitorId: input.visitorId,
+				ip: input.ip,
+				ipHash: hashOptionalValue(input.ip),
+				userAgent: input.userAgent,
+				userAgentHash: hashOptionalValue(input.userAgent),
+				firstSeenAt: input.seenAt,
+				lastSeenAt: input.seenAt,
+				seenCount: 1,
+				lastSeenPageKey: input.pageKey,
+				lastSeenPageUrl: input.pageUrl,
+				updatedAt: input.seenAt,
+			})
+			.onConflictDoUpdate({
+				target: [
+					visitorRequestMetadata.visitorId,
+					visitorRequestMetadata.ipHash,
+					visitorRequestMetadata.userAgentHash,
+				],
+				set: {
+					ip: input.ip,
+					userAgent: input.userAgent,
+					lastSeenAt: input.seenAt,
+					seenCount: sql`${visitorRequestMetadata.seenCount} + 1`,
+					lastSeenPageKey: input.pageKey,
+					lastSeenPageUrl: input.pageUrl,
+					updatedAt: input.seenAt,
+				},
+			});
 	}
 
 	public async getOrCreatePageThread(input: ThreadRecordInput) {
