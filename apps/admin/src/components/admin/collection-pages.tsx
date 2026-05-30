@@ -1247,7 +1247,6 @@ export function CommentersPage({
 
 export function VisitorsPage({
 	siteKey,
-	openComments,
 }: {
 	siteKey?: string;
 	openComments: (input: { pageKey?: string; search?: string }) => void;
@@ -1286,16 +1285,16 @@ export function VisitorsPage({
 		mutationFn: deleteBlacklistTarget,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin"] }),
 	});
-	const toggleVisitorBlacklist = (input: {
+	const toggleIpBlacklist = (input: {
 		targetValue: string;
 		isBlacklisted: boolean;
 	}) => {
 		if (input.isBlacklisted) {
 			void (async () => {
 				const confirmed = await confirm({
-					title: "解除访客黑名单",
+					title: "解除 IP 黑名单",
 					description:
-						"确认删除这条访客黑名单规则？删除后该访客会恢复评论或访问能力。",
+						"确认删除这条 IP 黑名单规则？删除后该 IP 会恢复评论或访问能力。",
 					confirmText: "解除黑名单",
 					destructive: true,
 				});
@@ -1304,7 +1303,7 @@ export function VisitorsPage({
 				}
 				deleteBlacklistMutation.mutate({
 					siteKey,
-					targetType: "visitor",
+					targetType: "ip",
 					matchMode: "exact",
 					targetValue: input.targetValue,
 				});
@@ -1314,7 +1313,7 @@ export function VisitorsPage({
 
 		createBlacklistMutation.mutate({
 			siteKey,
-			targetType: "visitor",
+			targetType: "ip",
 			matchMode: "exact",
 			targetValue: input.targetValue,
 			scope: "post",
@@ -1349,94 +1348,108 @@ export function VisitorsPage({
 				/>
 				<div className="grid gap-3">
 					{query.data?.enabled !== false &&
-						query.data?.items.map((visitor) => (
-							<div key={visitor.visitorKey} className="rounded-md border p-4">
-								<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-									<div className="min-w-0">
-										<p className="truncate font-medium">{visitor.visitorKey}</p>
-										<p className="text-xs text-muted-foreground">
-											{visitor.emails.join(", ") || "无邮箱"}
-										</p>
-										<RequestMetaSummary
-											meta={visitor.lastRequestMeta}
-											fallbackIp={visitor.lastIp}
-											fallbackUserAgent={visitor.lastUserAgent}
-											className="mt-1 max-w-xl"
-										/>
-										<div className="mt-2 grid gap-1">
-											<RequestMetaAggregateBadges
-												items={visitor.ipLocations}
-												emptyText="地区 -"
-												showDistinctIpCount
-											/>
-											<RequestMetaAggregateBadges
-												items={visitor.devices}
-												emptyText="设备 -"
-											/>
-											<RawRequestMetaList
-												ips={visitor.ips}
-												userAgents={visitor.userAgents}
+						query.data?.items.map((visitor) => {
+							const visitTarget =
+								visitor.lastSeenPageUrl ?? visitor.lastSeenPageKey ?? "-";
+							const showPageKey =
+								visitor.lastSeenPageKey &&
+								visitor.lastSeenPageKey !== visitor.lastSeenPageUrl;
+							const hasHistory =
+								(visitor.ipLocations?.length ?? 0) > 1 ||
+								(visitor.devices?.length ?? 0) > 1 ||
+								visitor.ips.length > 1 ||
+								visitor.userAgents.length > 1;
+
+							return (
+								<div key={visitor.visitorKey} className="rounded-md border p-4">
+									<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+										<div className="min-w-0">
+											<p className="truncate font-medium">
+												{visitor.visitorKey}
+											</p>
+											<p className="truncate text-xs text-muted-foreground">
+												IP {visitor.lastIp ?? "-"}
+											</p>
+											{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
+												<div className="mt-1 max-w-xl text-xs">
+													<ExternalLinkText
+														href={visitor.lastSeenPageUrl}
+														className="text-xs"
+													>
+														{visitTarget}
+													</ExternalLinkText>
+													{showPageKey ? (
+														<p className="truncate text-muted-foreground">
+															PageKey {visitor.lastSeenPageKey}
+														</p>
+													) : null}
+												</div>
+											) : null}
+											<RequestMetaSummary
+												meta={visitor.lastRequestMeta}
 												fallbackIp={visitor.lastIp}
 												fallbackUserAgent={visitor.lastUserAgent}
+												className="mt-1 max-w-xl"
 											/>
+											{hasHistory ? (
+												<details className="mt-2 text-xs text-muted-foreground">
+													<summary className="cursor-pointer select-none">
+														历史摘要
+													</summary>
+													<div className="mt-2 grid gap-2">
+														<RequestMetaAggregateBadges
+															items={visitor.ipLocations}
+															emptyText="地区 -"
+															showDistinctIpCount
+														/>
+														<RequestMetaAggregateBadges
+															items={visitor.devices}
+															emptyText="设备 -"
+														/>
+														<RawRequestMetaList
+															ips={visitor.ips}
+															userAgents={visitor.userAgents}
+															fallbackIp={visitor.lastIp}
+															fallbackUserAgent={visitor.lastUserAgent}
+														/>
+													</div>
+												</details>
+											) : null}
 										</div>
-										{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
-											<div className="mt-1 max-w-xl text-xs">
-												<p className="truncate text-muted-foreground">
-													最近页面 {visitor.lastSeenPageKey ?? "-"}
-												</p>
-												<ExternalLinkText
-													href={visitor.lastSeenPageUrl}
-													className="text-xs"
+										<div className="flex flex-wrap gap-2">
+											<Badge variant="secondary">
+												评论 {visitor.commentCount}
+											</Badge>
+											<Badge variant="outline">页面 {visitor.pageCount}</Badge>
+											{visitor.blacklist.ip ? (
+												<Badge variant="destructive">IP 黑名单</Badge>
+											) : null}
+											{visitor.lastIp ? (
+												<Button
+													type="button"
+													size="sm"
+													variant={
+														visitor.blacklist.ip ? "destructive" : "outline"
+													}
+													disabled={
+														createBlacklistMutation.isPending ||
+														deleteBlacklistMutation.isPending
+													}
+													onClick={() =>
+														toggleIpBlacklist({
+															targetValue: visitor.lastIp ?? "",
+															isBlacklisted: visitor.blacklist.ip,
+														})
+													}
 												>
-													{visitor.lastSeenPageUrl ??
-														visitor.lastSeenPageKey ??
-														"-"}
-												</ExternalLinkText>
-											</div>
-										) : null}
-									</div>
-									<div className="flex flex-wrap gap-2">
-										<Badge variant="secondary">
-											评论 {visitor.commentCount}
-										</Badge>
-										<Badge variant="outline">页面 {visitor.pageCount}</Badge>
-										{visitor.blacklist.visitor ? (
-											<Badge variant="destructive">访客黑名单</Badge>
-										) : null}
-										<Button
-											type="button"
-											size="sm"
-											variant="outline"
-											onClick={() =>
-												openComments({ search: visitor.visitorKey })
-											}
-										>
-											查看评论
-										</Button>
-										<Button
-											type="button"
-											size="sm"
-											variant={
-												visitor.blacklist.visitor ? "destructive" : "outline"
-											}
-											disabled={
-												createBlacklistMutation.isPending ||
-												deleteBlacklistMutation.isPending
-											}
-											onClick={() =>
-												toggleVisitorBlacklist({
-													targetValue: visitor.visitorKey,
-													isBlacklisted: visitor.blacklist.visitor,
-												})
-											}
-										>
-											{visitor.blacklist.visitor ? "解除访客" : "拉黑访客"}
-										</Button>
+													{visitor.blacklist.ip ? "解除 IP" : "拉黑 IP"}
+												</Button>
+											) : null}
+										</div>
 									</div>
 								</div>
-							</div>
-						))}
+							);
+						})}
 					{query.data?.enabled !== false && query.data?.items.length === 0 ? (
 						<EmptyState text="暂无访客" />
 					) : null}

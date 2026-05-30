@@ -6,18 +6,28 @@ import { CaptchaService } from "./captcha-service";
 import { CommentsWriteRepository } from "./write-repository";
 import { captchaCompleteBodySchema, captchaWidgetQuerySchema } from "./schemas";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { DefaultCommentMetadataResolver } from "./metadata/resolver";
 
 export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new CommentsRepository(fastify.db, fastify.siteRegistry);
+	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
+	const metadataResolver =
+		fastify.commentMetadataResolver ?? new DefaultCommentMetadataResolver();
+	if (!fastify.commentMetadataResolver) {
+		fastify.addHook("onClose", async () => {
+			metadataResolver.close?.();
+		});
+	}
 	const captchaService = new CaptchaService(
 		fastify.config,
 		fastify.security,
 		repository,
 		new CommentsWriteRepository(fastify.db),
 		{
-			getSettings: () =>
-				new RuntimeSystemSettingsService(fastify.db).getCaptchaSettings(),
+			getSettings: () => systemSettingsService.getCaptchaSettings(),
+			getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 		},
+		metadataResolver,
 	);
 
 	fastify.get("/comments/captcha/widget", async (request, reply) => {

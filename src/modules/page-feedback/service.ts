@@ -1,11 +1,14 @@
 import type { SecurityToolkit } from "../../plugins/security";
 import type { CaptchaService } from "../comments/captcha-service";
+import { resolveRequestMetadata } from "../comments/metadata/request-metadata";
+import type { CommentMetadataResolver } from "../comments/metadata/resolver";
 import type { CommentsRepository } from "../comments/repository";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import {
 	mergeEngagementSettings,
 	resolveEngagementTrustMode,
 } from "../shared/site-settings-defaults";
+import type { SystemSettings } from "../system-settings/definitions";
 import type { PageFeedbackRepository } from "./repository";
 
 function resolveIdentity(
@@ -22,6 +25,10 @@ export class PageFeedbackService {
 		private readonly commentsRepository: CommentsRepository,
 		private readonly captchaService: CaptchaService,
 		private readonly pageFeedbackRepository: PageFeedbackRepository,
+		private readonly metadataResolver?: CommentMetadataResolver,
+		private readonly loadIpRegionSettings?: () => Promise<
+			SystemSettings["ipRegion"]
+		>,
 	) {}
 
 	public async likePage(input: {
@@ -52,13 +59,26 @@ export class PageFeedbackService {
 		if (!engagement.pageLikes.enabled) {
 			throw new AppError(403, "PAGE_FEEDBACK_DISABLED", "页面点赞功能未开启。");
 		}
+		const metadataConfig = this.commentsRepository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: this.loadIpRegionSettings
+				? await this.loadIpRegionSettings()
+				: undefined,
+		});
 
 		const visitor = engagement.visitors.enabled
 			? await this.commentsRepository.getOrCreateVisitor({
 					siteId: site.id,
 					visitorKey: input.visitorKey,
-					ip: input.ip,
-					userAgent: input.userAgent,
+					ip: requestMetadata.ip,
+					userAgent: requestMetadata.userAgent,
+					metadata: requestMetadata.snapshot,
 					pageKey: input.pageKey,
 					pageUrl: input.pageUrl,
 				})

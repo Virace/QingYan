@@ -9,6 +9,7 @@ import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
 import { createDatabaseClients } from "../../src/db/client";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import type { CommentMetadataResolver } from "../../src/modules/comments/metadata/resolver";
 import type { ServiceControlController } from "../../src/modules/service-control/systemd-service";
 import {
 	createSiteRegistry,
@@ -156,6 +157,7 @@ export async function createTestApp(options?: {
 	devMode?: boolean;
 	devAdminToken?: string;
 	adminDistDirectory?: string;
+	commentMetadataResolver?: CommentMetadataResolver;
 	seedSite?: SiteSeed | false;
 	mutateConfig?: (config: AppConfig) => void;
 	pageSourceFetchText?: (
@@ -193,6 +195,7 @@ export async function createTestApp(options?: {
 	});
 	const app = await buildApp(resolved.config, resolved.runtimeOptions, {
 		adminDistDirectory: options?.adminDistDirectory,
+		commentMetadataResolver: options?.commentMetadataResolver,
 		pageSourceFetchText: options?.pageSourceFetchText,
 		pageTitleFetchHtml: options?.pageTitleFetchHtml,
 		serviceControl: options?.serviceControl,

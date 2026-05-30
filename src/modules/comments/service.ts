@@ -9,6 +9,8 @@ import {
 import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
+import { resolveRequestMetadata } from "./metadata/request-metadata";
+import type { CommentMetadataResolver } from "./metadata/resolver";
 import type { CommentsRepository } from "./repository";
 import {
 	mergeStaffDisplaySettings,
@@ -128,6 +130,10 @@ export class CommentsService {
 		private readonly loadPublicApiSettings?: () => Promise<
 			SystemSettings["publicApi"]
 		>,
+		private readonly metadataResolver?: CommentMetadataResolver,
+		private readonly loadIpRegionSettings?: () => Promise<
+			SystemSettings["ipRegion"]
+		>,
 	) {}
 
 	public getRepository(): CommentsRepository {
@@ -181,13 +187,27 @@ export class CommentsService {
 		const publicApiSettings = this.loadPublicApiSettings
 			? await this.loadPublicApiSettings()
 			: { advisoryFields: { enabled: false } };
+		const metadataConfig = this.repository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const ipRegionSettings = this.loadIpRegionSettings
+			? await this.loadIpRegionSettings()
+			: undefined;
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: ipRegionSettings,
+		});
 		const visitor =
 			pageInteractive && engagement.visitors.enabled
 				? await this.repository.getOrCreateVisitor({
 						siteId: site.id,
 						visitorKey: input.visitorKey,
-						ip: input.ip,
-						userAgent: input.userAgent,
+						ip: requestMetadata.ip,
+						userAgent: requestMetadata.userAgent,
+						metadata: requestMetadata.snapshot,
 						pageKey: input.pageKey,
 						pageUrl: input.pageUrl,
 					})
@@ -290,7 +310,7 @@ export class CommentsService {
 					};
 
 		const commentDisplay = buildCommentDisplayOptions({
-			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
+			metadata: metadataConfig,
 			avatar: avatarSettings,
 			verifiedAuthor,
 			staffDisplay,
@@ -375,13 +395,27 @@ export class CommentsService {
 		});
 		const settings = await this.repository.getSiteSettings(site.id);
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const metadataConfig = this.repository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const ipRegionSettings = this.loadIpRegionSettings
+			? await this.loadIpRegionSettings()
+			: undefined;
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: ipRegionSettings,
+		});
 		const visitor =
 			thread && engagement.visitors.enabled
 				? await this.repository.getOrCreateVisitor({
 						siteId: site.id,
 						visitorKey: input.visitorKey,
-						ip: input.ip,
-						userAgent: input.userAgent,
+						ip: requestMetadata.ip,
+						userAgent: requestMetadata.userAgent,
+						metadata: requestMetadata.snapshot,
 						pageKey: input.pageKey,
 						pageUrl: input.pageUrl,
 					})
@@ -423,7 +457,7 @@ export class CommentsService {
 			: { advisoryFields: { enabled: false } };
 
 		const commentDisplay = buildCommentDisplayOptions({
-			metadata: this.repository.resolveCommentMetadata(settings ?? undefined),
+			metadata: metadataConfig,
 			avatar: avatarSettings,
 			verifiedAuthor,
 			staffDisplay,

@@ -2,12 +2,10 @@ import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import { normalizeSafeHttpUrl } from "../shared/url-policy";
-import {
-	defaultSystemSettings,
-	type SystemSettings,
-} from "../system-settings/definitions";
+import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
+import { resolveRequestMetadata } from "./metadata/request-metadata";
 import type { CommentMetadataResolver } from "./metadata/resolver";
 import type { ModerationService } from "./moderation-service";
 import {
@@ -93,12 +91,26 @@ export class CommentsWriteService {
 		});
 		const settings = await this.readRepository.getSiteSettings(site.id);
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const metadataConfig = this.readRepository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const ipRegionSettings = this.loadIpRegionSettings
+			? await this.loadIpRegionSettings()
+			: undefined;
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: ipRegionSettings,
+		});
 		const visitor = engagement.visitors.enabled
 			? await this.readRepository.getOrCreateVisitor({
 					siteId: site.id,
 					visitorKey: input.visitorKey,
-					ip: input.ip,
-					userAgent: input.userAgent,
+					ip: requestMetadata.ip,
+					userAgent: requestMetadata.userAgent,
+					metadata: requestMetadata.snapshot,
 					pageKey: input.pageKey,
 					pageUrl: input.pageUrl,
 				})
@@ -252,22 +264,6 @@ export class CommentsWriteService {
 		const resolvedAuthorWebsite = shouldUseVerifiedAuthor
 			? verifiedAuthor.website || undefined
 			: authorWebsite;
-		const metadataConfig = this.readRepository.resolveCommentMetadata(
-			settings ?? undefined,
-		);
-		const ipRegionSettings = this.loadIpRegionSettings
-			? await this.loadIpRegionSettings()
-			: undefined;
-		const requestMetadata = this.metadataResolver
-			? await this.metadataResolver.resolve({
-					ip: metadataConfig.collectIp ? input.ip : undefined,
-					userAgent: metadataConfig.collectUserAgent
-						? input.userAgent
-						: undefined,
-					metadata: metadataConfig,
-					ipRegion: ipRegionSettings ?? defaultSystemSettings.ipRegion,
-				})
-			: undefined;
 		const created = await this.writeRepository.createComment({
 			siteId: site.id,
 			pageThreadId: thread.id,
@@ -280,11 +276,9 @@ export class CommentsWriteService {
 				shouldUseVerifiedAuthor || commentForm.allow.includes("website")
 					? resolvedAuthorWebsite
 					: undefined,
-			authorIp: metadataConfig.collectIp ? input.ip : undefined,
-			authorUserAgent: metadataConfig.collectUserAgent
-				? input.userAgent
-				: undefined,
-			metadata: requestMetadata,
+			authorIp: requestMetadata.ip,
+			authorUserAgent: requestMetadata.userAgent,
+			metadata: requestMetadata.snapshot,
 			contentRaw: input.contentRaw,
 			status,
 			moderation,
@@ -387,12 +381,26 @@ export class CommentsWriteService {
 		if (!engagement.commentVotes.enabled) {
 			throw new AppError(403, "COMMENT_VOTE_DISABLED", "评论投票功能未开启。");
 		}
+		const metadataConfig = this.readRepository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const ipRegionSettings = this.loadIpRegionSettings
+			? await this.loadIpRegionSettings()
+			: undefined;
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: ipRegionSettings,
+		});
 		const visitor = engagement.visitors.enabled
 			? await this.readRepository.getOrCreateVisitor({
 					siteId: site.id,
 					visitorKey: input.visitorKey,
-					ip: input.ip,
-					userAgent: input.userAgent,
+					ip: requestMetadata.ip,
+					userAgent: requestMetadata.userAgent,
+					metadata: requestMetadata.snapshot,
 					pageKey: input.pageKey,
 				})
 			: undefined;

@@ -34,6 +34,8 @@ import {
 	renderTurnstileWidgetHtml,
 	verifyTurnstileToken,
 } from "./providers/turnstile-provider";
+import { resolveRequestMetadata } from "./metadata/request-metadata";
+import type { CommentMetadataResolver } from "./metadata/resolver";
 import type { CommentsRepository } from "./repository";
 import type {
 	CaptchaAction,
@@ -87,6 +89,7 @@ function resolveStateMode(
 
 export interface CaptchaSettingsProvider {
 	getSettings(): Promise<SystemSettings["captcha"]>;
+	getIpRegionSettings?(): Promise<SystemSettings["ipRegion"]>;
 }
 
 export class CaptchaService {
@@ -96,6 +99,7 @@ export class CaptchaService {
 		private readonly commentsRepository: CommentsRepository,
 		private readonly writeRepository: CommentsWriteRepository,
 		private readonly settingsProvider: CaptchaSettingsProvider,
+		private readonly metadataResolver?: CommentMetadataResolver,
 	) {}
 
 	private async getCaptchaSettings() {
@@ -308,12 +312,26 @@ export class CaptchaService {
 			siteId: site.id,
 			pageKey: input.pageKey,
 		});
+		const settings = await this.commentsRepository.getSiteSettings(site.id);
+		const metadataConfig = this.commentsRepository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: this.settingsProvider.getIpRegionSettings
+				? await this.settingsProvider.getIpRegionSettings()
+				: undefined,
+		});
 
 		const visitor = await this.commentsRepository.getOrCreateVisitor({
 			siteId: site.id,
 			visitorKey: input.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
+			ip: requestMetadata.ip,
+			userAgent: requestMetadata.userAgent,
+			metadata: requestMetadata.snapshot,
 			pageKey: input.pageKey,
 			pageUrl: input.pageUrl,
 		});

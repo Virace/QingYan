@@ -256,6 +256,7 @@ export interface AdminVisitor {
 	lastSeenPageKey: string | null;
 	lastSeenPageUrl: string | null;
 	blacklist: {
+		ip: boolean;
 		visitor: boolean;
 	};
 }

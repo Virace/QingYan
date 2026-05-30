@@ -33,6 +33,7 @@ export function registerDatabaseDevRoutes(
 	app.decorate("devMockService", devMockService);
 
 	const commentsRepository = new CommentsRepository(app.db, app.siteRegistry);
+	const systemSettingsService = new RuntimeSystemSettingsService(app.db);
 	const adminSessionService = new AdminSessionService(
 		app.config,
 		app.security,
@@ -49,9 +50,10 @@ export function registerDatabaseDevRoutes(
 			commentsRepository,
 			new CommentsWriteRepository(app.db),
 			{
-				getSettings: () =>
-					new RuntimeSystemSettingsService(app.db).getCaptchaSettings(),
+				getSettings: () => systemSettingsService.getCaptchaSettings(),
+				getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 			},
+			app.commentMetadataResolver,
 		),
 		adminSessionService,
 	);

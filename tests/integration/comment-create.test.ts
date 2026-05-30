@@ -460,6 +460,66 @@ describe("POST /qingyan/api/comments", () => {
 		expect(publicBody).not.toContain("Mozilla/5.0 (Windows NT 10.0");
 	});
 
+	it("does not write device metadata when comment user-agent is missing", async () => {
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.server.trustProxy = true;
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			commentMetadataJson: JSON.stringify({
+				device: {
+					display: {
+						enabled: true,
+					},
+				},
+			}),
+		});
+		await seedActivePage(fixture, "post:missing-ua-comment");
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				...refererFor("post:missing-ua-comment"),
+				"user-agent": "",
+				"x-forwarded-for": "203.0.113.33",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:missing-ua-comment",
+				pageTitle: "Missing UA Comment",
+				pageUrl: "https://fangyuan.example.com/posts/missing-ua-comment/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "missing ua comment",
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [comment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "missing ua comment"));
+		const [metadata] = await fixture.app.db
+			.select()
+			.from(commentRequestMetadata)
+			.where(eq(commentRequestMetadata.commentId, comment?.id ?? ""));
+		expect(metadata?.authorIp).toBe("203.0.113.33");
+		expect(metadata?.authorUserAgent ?? null).toBeNull();
+		expect(metadata?.deviceBrowser ?? null).toBeNull();
+		expect(metadata?.deviceOs ?? null).toBeNull();
+		expect(metadata?.deviceType ?? null).toBeNull();
+		expect(metadata?.deviceSource ?? null).toBeNull();
+	});
+
 	it("creates comments without visitor records when visitor tracking is disabled", async () => {
 		const fixture = await createTestApp({
 			mutateConfig(config) {

@@ -259,6 +259,104 @@ describe("admin commenters", () => {
 		expect(response.statusCode).toBe(404);
 	});
 
+	it("does not aggregate missing or unparsed user agents as unknown devices", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:commenter-empty-ua",
+			pageTitle: "Commenter Empty UA",
+		});
+		const [thread] = await fixture.app.db.select().from(pageThreads);
+		if (!thread) {
+			throw new Error("Expected thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_empty_ua_1",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "Alice",
+				authorEmail: "alice@example.com",
+				contentRaw: "parsed ua",
+				contentHtml: "<p>parsed ua</p>",
+			},
+			{
+				id: "c_empty_ua_2",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "Alice",
+				authorEmail: "alice@example.com",
+				contentRaw: "missing ua",
+				contentHtml: "<p>missing ua</p>",
+			},
+			{
+				id: "c_empty_ua_3",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				parentId: null,
+				status: "approved",
+				authorName: "Alice",
+				authorEmail: "alice@example.com",
+				contentRaw: "old unparsed ua",
+				contentHtml: "<p>old unparsed ua</p>",
+			},
+		]);
+		await fixture.app.db.insert(commentRequestMetadata).values([
+			{
+				commentId: "c_empty_ua_1",
+				authorUserAgent: "Mozilla/5.0 Chrome/120.0.0.0 Windows",
+				deviceBrowser: "chrome",
+				deviceBrowserVersion: "120.0.0.0",
+				deviceOs: "windows",
+				deviceOsVersion: "10",
+				deviceType: "desktop",
+			},
+			{
+				commentId: "c_empty_ua_2",
+				authorUserAgent: null,
+			},
+			{
+				commentId: "c_empty_ua_3",
+				authorUserAgent: "Legacy UA without parsed snapshot",
+			},
+		]);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/commenters?siteKey=fangyuan&limit=20&offset=0",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [item] = response.json().items;
+		expect(item.devices).toEqual([
+			expect.objectContaining({
+				key: "chrome|windows|desktop",
+				label: "chrome 120 / windows 10 / desktop",
+				count: 1,
+			}),
+		]);
+		expect(JSON.stringify(item.devices)).not.toContain("未知设备");
+	});
+
 	it("adds and removes email blacklist rules by target", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

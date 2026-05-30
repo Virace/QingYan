@@ -140,6 +140,7 @@ function buildRequestMeta(input: {
 }) {
 	const hasLocation =
 		Boolean(input.ipCountry || input.ipRegion || input.ipCity || input.ipIsp) ||
+		Boolean(input.ipLocationSource || input.ipLocationUpdatedAt) ||
 		Boolean(input.ipLocationError);
 	const hasDevice = Boolean(
 		input.deviceBrowser ||
@@ -148,6 +149,8 @@ function buildRequestMeta(input: {
 			input.deviceOsVersion ||
 			input.deviceType ||
 			input.deviceIcon ||
+			input.deviceSource ||
+			input.deviceUpdatedAt ||
 			input.deviceError,
 	);
 
@@ -221,6 +224,32 @@ function deviceKey(input: RequestMetaSource): string {
 		.join("|");
 }
 
+function hasLocationSnapshot(input: RequestMetaSource): boolean {
+	return Boolean(
+		input.ipCountry ||
+			input.ipRegion ||
+			input.ipCity ||
+			input.ipIsp ||
+			input.ipLocationSource ||
+			input.ipLocationUpdatedAt ||
+			input.ipLocationError,
+	);
+}
+
+function hasDeviceSnapshot(input: RequestMetaSource): boolean {
+	return Boolean(
+		input.deviceBrowser ||
+			input.deviceBrowserVersion ||
+			input.deviceOs ||
+			input.deviceOsVersion ||
+			input.deviceType ||
+			input.deviceIcon ||
+			input.deviceSource ||
+			input.deviceUpdatedAt ||
+			input.deviceError,
+	);
+}
+
 function aggregateIpLocations(
 	rows: RequestMetaAggregateSource[],
 ): RequestMetaAggregate[] {
@@ -234,6 +263,9 @@ function aggregateIpLocations(
 	>();
 
 	for (const row of rows) {
+		if (!hasLocationSnapshot(row)) {
+			continue;
+		}
 		const key = locationKey(row);
 		const rowCount = row.count ?? 1;
 		const group = groups.get(key) ?? {
@@ -279,6 +311,9 @@ function aggregateDevices(
 	>();
 
 	for (const row of rows) {
+		if (!hasDeviceSnapshot(row)) {
+			continue;
+		}
 		const key = deviceKey(row);
 		const rowCount = row.count ?? 1;
 		const group = groups.get(key) ?? {
@@ -1289,6 +1324,7 @@ export class AdminRepository {
 			"visitor",
 			input.siteId,
 		);
+		const ipRules = await this.listActiveBlacklistRules("ip", input.siteId);
 		return {
 			items: pagedRows.map((row) => {
 				const commentStats = commentStatsMap.get(row.id);
@@ -1300,10 +1336,11 @@ export class AdminRepository {
 						userAgent: row.lastUserAgent,
 					},
 				);
+				const lastIp = row.lastIp ?? metadataRows[0]?.ip ?? null;
 				return {
 					siteKey: row.siteKey,
 					visitorKey: row.visitorKey,
-					lastIp: row.lastIp,
+					lastIp,
 					lastUserAgent: row.lastUserAgent,
 					lastSeenPageKey: row.lastSeenPageKey,
 					lastSeenPageUrl: resolvePublicPageUrl(
@@ -1322,6 +1359,16 @@ export class AdminRepository {
 					ipLocations: aggregateIpLocations(metadataRows),
 					devices: aggregateDevices(metadataRows),
 					blacklist: {
+						ip: ipRules.some((rule) =>
+							matchBlacklistRule(
+								{
+									targetType: rule.targetType,
+									targetValue: rule.targetValue,
+									matchMode: rule.matchMode,
+								},
+								{ ip: lastIp ?? undefined },
+							),
+						),
 						visitor: visitorRules.some((rule) =>
 							matchBlacklistRule(
 								{

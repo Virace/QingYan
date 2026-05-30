@@ -46,14 +46,13 @@ export function RequestMetaSummary({
 }) {
 	const ip = meta?.ip.raw ?? fallbackIp ?? null;
 	const userAgent = meta?.userAgent.raw ?? fallbackUserAgent ?? null;
-	const locationLabel = meta?.ip.location?.label ?? (ip ? "未知地区" : "-");
-	const deviceLabel =
-		meta?.userAgent.device?.label ?? (userAgent ? "未知设备" : "-");
+	const locationLabel = meta?.ip.location?.label ?? null;
+	const deviceLabel = meta?.userAgent.device?.label ?? null;
 
 	return (
 		<div className={cn("grid gap-1 text-xs text-muted-foreground", className)}>
-			<p className="truncate">地区 {locationLabel}</p>
-			<p className="truncate">设备 {deviceLabel}</p>
+			{locationLabel ? <p className="truncate">地区 {locationLabel}</p> : null}
+			{deviceLabel ? <p className="truncate">设备 {deviceLabel}</p> : null}
 			<RawRequestMeta ip={ip} userAgent={userAgent} />
 		</div>
 	);

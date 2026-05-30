@@ -5,6 +5,7 @@ import type { LoggerManager } from "../logging/logger-manager";
 import type { AdminBootstrap } from "../modules/admin/bootstrap-service";
 import type { DevMockService } from "../modules/dev/mock-service";
 import type { AkismetClient } from "../modules/comments/akismet-client";
+import type { CommentMetadataResolver } from "../modules/comments/metadata/resolver";
 import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
 import type { ServiceControlController } from "../modules/service-control/systemd-service";
@@ -40,6 +41,7 @@ declare module "fastify" {
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
 		akismetClient?: Pick<AkismetClient, "commentCheck">;
+		commentMetadataResolver?: CommentMetadataResolver;
 		pageSourceFetchText?: (
 			url: string,
 			options: { timeoutMs?: number; maxBytes?: number },

@@ -27,6 +27,7 @@ import {
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
 } from "../shared/site-settings-defaults";
+import type { CommentMetadataSnapshot } from "./metadata/resolver";
 
 export interface VisitorRecord {
 	id: number;
@@ -152,6 +153,7 @@ export class CommentsRepository {
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
+		metadata?: CommentMetadataSnapshot;
 		pageKey?: string;
 		pageUrl?: string;
 	}): Promise<VisitorRecord> {
@@ -238,6 +240,7 @@ export class CommentsRepository {
 		visitorId: number;
 		ip?: string;
 		userAgent?: string;
+		metadata?: CommentMetadataSnapshot;
 		pageKey?: string;
 		pageUrl?: string;
 		seenAt: string;
@@ -255,6 +258,25 @@ export class CommentsRepository {
 				ipHash: hashOptionalValue(input.ip),
 				userAgent: input.userAgent,
 				userAgentHash: hashOptionalValue(input.userAgent),
+				ipCountry: input.metadata?.authorIpCountry,
+				ipRegion: input.metadata?.authorIpRegion,
+				ipCity: input.metadata?.authorIpCity,
+				ipIsp: input.metadata?.authorIpIsp,
+				ipLocationRaw: input.metadata?.authorIpLocationRaw,
+				ipLocationSource: input.metadata?.authorIpLocationSource,
+				ipLocationDbHash: input.metadata?.authorIpLocationDbHash,
+				ipLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
+				ipLocationError: input.metadata?.authorIpLocationError,
+				deviceBrowser: input.metadata?.authorDeviceBrowser,
+				deviceBrowserVersion: input.metadata?.authorDeviceBrowserVersion,
+				deviceOs: input.metadata?.authorDeviceOs,
+				deviceOsVersion: input.metadata?.authorDeviceOsVersion,
+				deviceType: input.metadata?.authorDeviceType,
+				deviceIcon: input.metadata?.authorDeviceIcon,
+				deviceSource: input.metadata?.authorDeviceSource,
+				deviceParserVersion: input.metadata?.authorDeviceParserVersion,
+				deviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
+				deviceError: input.metadata?.authorDeviceError,
 				firstSeenAt: input.seenAt,
 				lastSeenAt: input.seenAt,
 				seenCount: 1,
@@ -271,6 +293,25 @@ export class CommentsRepository {
 				set: {
 					ip: input.ip,
 					userAgent: input.userAgent,
+					ipCountry: input.metadata?.authorIpCountry,
+					ipRegion: input.metadata?.authorIpRegion,
+					ipCity: input.metadata?.authorIpCity,
+					ipIsp: input.metadata?.authorIpIsp,
+					ipLocationRaw: input.metadata?.authorIpLocationRaw,
+					ipLocationSource: input.metadata?.authorIpLocationSource,
+					ipLocationDbHash: input.metadata?.authorIpLocationDbHash,
+					ipLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
+					ipLocationError: input.metadata?.authorIpLocationError,
+					deviceBrowser: input.metadata?.authorDeviceBrowser,
+					deviceBrowserVersion: input.metadata?.authorDeviceBrowserVersion,
+					deviceOs: input.metadata?.authorDeviceOs,
+					deviceOsVersion: input.metadata?.authorDeviceOsVersion,
+					deviceType: input.metadata?.authorDeviceType,
+					deviceIcon: input.metadata?.authorDeviceIcon,
+					deviceSource: input.metadata?.authorDeviceSource,
+					deviceParserVersion: input.metadata?.authorDeviceParserVersion,
+					deviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
+					deviceError: input.metadata?.authorDeviceError,
 					lastSeenAt: input.seenAt,
 					seenCount: sql`${visitorRequestMetadata.seenCount} + 1`,
 					lastSeenPageKey: input.pageKey,

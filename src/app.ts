@@ -18,6 +18,7 @@ import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import type { AkismetClient } from "./modules/comments/akismet-client";
 import { captchaWidgetRoutes } from "./modules/comments/captcha-widget-routes";
+import type { CommentMetadataResolver } from "./modules/comments/metadata/resolver";
 import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { createDevMemoryRoutes } from "./modules/dev/memory-routes";
 import { DevMockService } from "./modules/dev/mock-service";
@@ -41,6 +42,7 @@ type OpenApiDocument = Awaited<ReturnType<typeof loadOpenApiDocument>>;
 interface BuildAppOptions {
 	adminDistDirectory?: string;
 	akismetClient?: Pick<AkismetClient, "commentCheck">;
+	commentMetadataResolver?: CommentMetadataResolver;
 	pageSourceFetchText?: typeof fetchPageSourceText;
 	pageTitleFetchHtml?: (
 		url: string,
@@ -121,6 +123,9 @@ export async function buildApp(
 	app.decorate("siteRegistry", createSiteRegistry());
 	if (options.akismetClient) {
 		app.decorate("akismetClient", options.akismetClient);
+	}
+	if (options.commentMetadataResolver) {
+		app.decorate("commentMetadataResolver", options.commentMetadataResolver);
 	}
 	if (options.pageSourceFetchText) {
 		app.decorate("pageSourceFetchText", options.pageSourceFetchText);

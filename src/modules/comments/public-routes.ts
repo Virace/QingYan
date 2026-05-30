@@ -65,6 +65,9 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.adminBootstrap,
 		fastify.siteRegistry,
 	);
+	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
+	const metadataResolver =
+		fastify.commentMetadataResolver ?? new DefaultCommentMetadataResolver();
 	const writeRepository = new CommentsWriteRepository(fastify.db);
 	const captchaService = new CaptchaService(
 		fastify.config,
@@ -72,24 +75,27 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		readRepository,
 		writeRepository,
 		{
-			getSettings: () =>
-				new RuntimeSystemSettingsService(fastify.db).getCaptchaSettings(),
+			getSettings: () => systemSettingsService.getCaptchaSettings(),
+			getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 		},
+		metadataResolver,
 	);
-	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
-	const metadataResolver = new DefaultCommentMetadataResolver();
 	const moderationService = new ModerationService({
 		akismetClient: fastify.akismetClient ?? new AkismetClient(),
 		loadSystemSettings: () => systemSettingsService.getSettings(),
 	});
-	fastify.addHook("onClose", async () => {
-		metadataResolver.close();
-	});
+	if (!fastify.commentMetadataResolver) {
+		fastify.addHook("onClose", async () => {
+			metadataResolver.close?.();
+		});
+	}
 	const readService = new CommentsService(
 		readRepository,
 		captchaService,
 		() => systemSettingsService.getAvatarSettings(),
 		() => systemSettingsService.getPublicApiSettings(),
+		metadataResolver,
+		() => systemSettingsService.getIpRegionSettings(),
 	);
 	const writeService = new CommentsWriteService(
 		fastify.config,
