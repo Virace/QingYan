@@ -31,7 +31,7 @@ describe("site settings defaults", () => {
 		});
 
 		expect(settings.visitors.enabled).toBe(true);
-		expect(settings.pageViews.enabled).toBe(false);
+		expect(settings.pageViews.enabled).toBe(true);
 	});
 
 	it("serializes canonical boolean engagement settings", () => {

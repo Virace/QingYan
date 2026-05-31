@@ -66,13 +66,13 @@ export const defaultEngagementSettings: EngagementSettings = {
 		enabled: true,
 	},
 	pageViews: {
-		enabled: false,
+		enabled: true,
 	},
 	pageLikes: {
-		enabled: false,
+		enabled: true,
 	},
 	commentVotes: {
-		enabled: false,
+		enabled: true,
 	},
 };
 

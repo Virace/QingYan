@@ -32,6 +32,7 @@ export default defineConfig({
 				QINGYAN_DEV_ADMIN_USERNAME: "admin",
 				QINGYAN_DEV_ADMIN_PASSWORD: "admin",
 				QINGYAN_TEST_CAPTCHA_ANSWER: "2468",
+				QINGYAN_SQLITE_FILE: ".temp/playwright/qingyan-e2e.db",
 			},
 		},
 		{

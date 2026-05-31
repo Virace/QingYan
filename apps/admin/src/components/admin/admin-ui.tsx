@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+
 export const inputClass =
 	"border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
 export const textareaClass =
@@ -16,9 +19,16 @@ export function Field({
 	error?: string;
 	children: ReactNode;
 }) {
+	const hasDescription = Boolean(description);
+
 	return (
-		<div className="flex flex-col gap-2.5">
-			<div className="grid gap-1">
+		<div className="flex flex-col gap-2" data-field-label={label}>
+			<div
+				className={cn(
+					"grid min-h-[2.375rem]",
+					hasDescription ? "content-start gap-1" : "content-end",
+				)}
+			>
 				<span className="text-sm font-semibold leading-none">{label}</span>
 				{description ? (
 					<span className="text-xs leading-5 text-muted-foreground">
@@ -51,17 +61,16 @@ export function BooleanField({
 }) {
 	return (
 		<Field label={label} description={description} error={error}>
-			<label className="flex min-h-9 items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm">
-				<input
-					type="checkbox"
-					role="switch"
+			<div className="flex min-h-9 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+				<span className="text-muted-foreground">
+					{checked ? "开启" : "关闭"}
+				</span>
+				<Switch
 					aria-label={label}
-					aria-checked={checked}
 					checked={checked}
-					onChange={(event) => onCheckedChange(event.target.checked)}
+					onCheckedChange={onCheckedChange}
 				/>
-				<span>{checked ? "开启" : "关闭"}</span>
-			</label>
+			</div>
 		</Field>
 	);
 }
@@ -86,6 +95,69 @@ export function SettingsSection({
 				) : null}
 			</header>
 			{children}
+		</section>
+	);
+}
+
+export function SettingsToggleGroup({
+	title,
+	description,
+	checked,
+	onCheckedChange,
+	switchLabel,
+	disabledSummary,
+	error,
+	children,
+	testId,
+}: {
+	title: string;
+	description?: string;
+	checked: boolean;
+	onCheckedChange: (checked: boolean) => void;
+	switchLabel?: string;
+	disabledSummary: ReactNode;
+	error?: string;
+	children: ReactNode;
+	testId?: string;
+}) {
+	const label = switchLabel ?? title;
+	return (
+		<section
+			data-testid={testId}
+			className="flex flex-col gap-4 rounded-md border bg-muted/20 p-4 md:col-span-2"
+		>
+			<header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+				<div className="grid gap-1">
+					<h2 className="text-base font-semibold leading-none">{title}</h2>
+					{description ? (
+						<p className="text-sm leading-6 text-muted-foreground">
+							{description}
+						</p>
+					) : null}
+				</div>
+				<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm md:min-w-36">
+					<span className="text-muted-foreground">
+						{checked ? "开启" : "关闭"}
+					</span>
+					<Switch
+						aria-label={label}
+						checked={checked}
+						onCheckedChange={onCheckedChange}
+					/>
+				</div>
+			</header>
+			{error ? (
+				<p className="text-xs font-medium leading-5 text-destructive">
+					{error}
+				</p>
+			) : null}
+			{checked ? (
+				children
+			) : (
+				<div className="rounded-md border bg-background p-3 text-sm leading-6 text-muted-foreground">
+					{disabledSummary}
+				</div>
+			)}
 		</section>
 	);
 }

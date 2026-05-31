@@ -742,18 +742,18 @@ describe("install bootstrap", () => {
 			siteSettings: {
 				engagement: {
 					visitors: { enabled: true },
-					pageViews: { enabled: false },
-					pageLikes: { enabled: false },
-					commentVotes: { enabled: false },
+					pageViews: { enabled: true },
+					pageLikes: { enabled: true },
+					commentVotes: { enabled: true },
 				},
 			},
 			applyPayload: {
 				siteSettings: {
 					engagement: {
 						visitors: { enabled: true },
-						pageViews: { enabled: false },
-						pageLikes: { enabled: false },
-						commentVotes: { enabled: false },
+						pageViews: { enabled: true },
+						pageLikes: { enabled: true },
+						commentVotes: { enabled: true },
 					},
 				},
 			},
@@ -1409,9 +1409,9 @@ describe("install bootstrap", () => {
 			});
 			expect(JSON.parse(settings?.engagementJson ?? "{}")).toMatchObject({
 				visitors: { enabled: true },
-				pageViews: { enabled: false },
-				pageLikes: { enabled: false },
-				commentVotes: { enabled: false },
+				pageViews: { enabled: true },
+				pageLikes: { enabled: true },
+				commentVotes: { enabled: true },
 			});
 			const systemSettingRows = await db.select().from(systemSettings);
 			expect(systemSettingRows).toEqual(

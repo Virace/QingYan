@@ -31,6 +31,7 @@ import {
 	Field,
 	SettingsSection,
 	SettingsSubsection,
+	SettingsToggleGroup,
 	inputClass,
 	textareaClass,
 } from "./admin-ui";
@@ -369,8 +370,8 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="站点设置保存失败" />
-					<BooleanField
-						label="评论"
+					<SettingsToggleGroup
+						title="评论"
 						description="控制当前站点是否提供评论提交、评论列表和评论相关互动。"
 						checked={draft.comments.enabled}
 						error={firstFieldError(saveError, "comments.enabled")}
@@ -383,9 +384,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 								},
 							})
 						}
-					/>
-					{draft.comments.enabled ? (
-						<>
+						disabledSummary="评论已关闭。已保存的审核、验证码、回复、表单和展示配置会保留，再次开启后继续使用。"
+						testId="settings-group-comments"
+					>
+						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="默认状态">
 								<select
 									className={inputClass}
@@ -579,6 +581,13 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 											</span>
 											<input
 												type="checkbox"
+												aria-label={
+													field === "nickname"
+														? "昵称"
+														: field === "email"
+															? "邮箱"
+															: "站点"
+												}
 												checked={commentRequire.includes(field)}
 												disabled={
 													field === "website" && !draft.comments.allowWebsite
@@ -964,12 +973,8 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									/>
 								</div>
 							</SettingsSection>
-						</>
-					) : (
-						<div className="md:col-span-2 rounded-md border p-3 text-sm text-muted-foreground">
-							评论已关闭。已保存的审核、验证码、回复、表单和展示配置会保留，再次开启后继续使用。
 						</div>
-					)}
+					</SettingsToggleGroup>
 					<SettingsSection
 						title="访客与计数"
 						description="访客记录决定 PV、点赞、投票是否能使用服务端可信去重。若需要可信统计，必须开启访客记录；若更重视隐私或轻量部署，可以关闭访客记录和相关计数。"

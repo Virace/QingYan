@@ -245,7 +245,10 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 						</Button>
 					</div>
 				</header>
-				<section className="flex flex-1 flex-col gap-4 p-4 md:p-6">
+				<section
+					data-testid="admin-content"
+					className="mx-auto flex w-full max-w-screen-2xl flex-1 flex-col gap-4 p-4 md:p-6"
+				>
 					{renderView()}
 				</section>
 			</main>
