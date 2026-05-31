@@ -185,6 +185,15 @@ docker compose exec qingyan qyctl admin repass
 
 Docker 镜像内同时提供 `qyctl` 和 `qingyanctl` 两个等价入口。它们用于服务器运维、备份、恢复、升级和重置后台信息；首次安装的 Web 生命周期不依赖这些 CLI 存在。
 
+可以用以下命令确认容器内 CLI wrapper 存在并查看可用子命令：
+
+```bash
+docker compose exec qingyan qyctl help
+docker compose exec qingyan qingyanctl --version
+```
+
+容器生命周期仍由 Docker Compose 管理；不要把 `qyctl start/stop/restart` 当作 Compose 容器启停入口。
+
 ### 4. FangYuan / x-item 集成
 
 在 FangYuan / x-item 测试配置中把评论 API 指向 QingYan 测试域名后，至少验证。若与 x-item 同域部署，推荐配置 `qingyanConfig.apiBase: /qingyan/api`，一条 `/qingyan/` 反代即可接入 QingYan：

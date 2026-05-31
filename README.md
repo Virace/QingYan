@@ -125,8 +125,8 @@ admin.password=...
 构建后会提供两个等价入口：
 
 ```bash
-qingyanctl
-qyctl
+qingyanctl help
+qyctl help
 ```
 
 Docker 镜像内同样提供 `qyctl` 和 `qingyanctl`。它们用于运维、备份、恢复、升级和重置后台信息；首次安装完成后的 Web 切换不依赖 CLI 存在。

@@ -347,6 +347,8 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 常用命令：
 
 ```bash
+qyctl help
+qyctl --version
 qyctl info
 qyctl admin repass
 qyctl admin entrance
@@ -362,6 +364,8 @@ qyctl start
 qyctl stop
 qyctl restart
 ```
+
+裸运行 `qyctl` 或 `qingyanctl` 会显示帮助信息。`qyctl status/start/stop/restart` 面向 systemd 直接部署；Docker Compose 部署应使用 `docker compose ps/restart/logs` 管理容器生命周期。
 
 `qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；当前仓库尚未发布首个 Release 时会显示“尚未发布 Release”。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
 

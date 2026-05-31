@@ -108,6 +108,30 @@ function createRuntimeFixture() {
 }
 
 describe("qingyanctl core commands", () => {
+	it("prints help for empty and explicit help commands", async () => {
+		for (const args of [[], ["--help"], ["-h"], ["help"]]) {
+			const result = await runCli(args);
+
+			expect(result.exitCode).toBe(0);
+			expect(result.output.stderr).toEqual([]);
+			expect(result.output.stdout.join("\n")).toContain(
+				"Usage: qyctl <command> [options]",
+			);
+			expect(result.output.stdout.join("\n")).toContain("qyctl info");
+			expect(result.output.stdout.join("\n")).toContain("qyctl update plan");
+		}
+	});
+
+	it("prints the package version", async () => {
+		for (const args of [["--version"], ["version"]]) {
+			const result = await runCli(args);
+
+			expect(result.exitCode).toBe(0);
+			expect(result.output.stderr).toEqual([]);
+			expect(result.output.stdout).toEqual(["QingYan 0.1.0"]);
+		}
+	});
+
 	it("prints user-facing info without password", async () => {
 		const fixture = createRuntimeFixture();
 		try {

@@ -55,13 +55,21 @@ function parseArgs(args: string[]): ParsedArgs {
 	const flags = new Map<string, string | boolean>();
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index] ?? "";
+		if (arg === "-h") {
+			flags.set("help", true);
+			continue;
+		}
 		if (!arg.startsWith("--")) {
 			positionals.push(arg);
 			continue;
 		}
 		const name = arg.slice(2);
-		if (name === "yes" || name === "dry-run") {
+		if (name === "yes" || name === "dry-run" || name === "help") {
 			flags.set(name, true);
+			continue;
+		}
+		if (name === "version") {
+			flags.set("version", true);
 			continue;
 		}
 		const value = args[index + 1];
@@ -109,6 +117,48 @@ function fullExportInclude() {
 		pageFeedbackRecords: true,
 		blacklistRules: true,
 	};
+}
+
+function cliUsage(): string[] {
+	return [
+		"Usage: qyctl <command> [options]",
+		"",
+		"Commands:",
+		"  qyctl help",
+		"  qyctl version",
+		"  qyctl info",
+		"  qyctl admin repass [password]",
+		"  qyctl admin entrance [path]",
+		"  qyctl export <site-key> <file>",
+		"  qyctl import <site-key> <file> [--dry-run] [--yes]",
+		"  qyctl backup <file> --yes",
+		"  qyctl restore <file> --dry-run",
+		"  qyctl upgrade [--dry-run] [--yes]",
+		"  qyctl update check",
+		"  qyctl update plan",
+		"  qyctl page-registry reconcile-pending [--site-key <key>] [--page-key <key>] [--yes]",
+		"  qyctl status",
+		"  qyctl start",
+		"  qyctl stop",
+		"  qyctl restart",
+		"",
+		"Options:",
+		"  --config <file>   Use a specific QingYan config file",
+		"  --dry-run         Preview without writing changes",
+		"  --yes             Confirm write operations",
+		"  -h, --help        Show this help",
+		"  --version         Show the QingYan version",
+	];
+}
+
+function commandHelp(deps: Required<CliDeps>): number {
+	deps.output.stdout.push(...cliUsage());
+	return 0;
+}
+
+function commandVersion(deps: Required<CliDeps>): number {
+	deps.output.stdout.push(`QingYan ${readPackageVersion()}`);
+	return 0;
 }
 
 async function withRuntime<T>(
@@ -546,7 +596,11 @@ export async function runCli(
 		const parsed = parseArgs(args);
 		const command = parsed.positionals[0];
 		let exitCode: number;
-		if (command === "info") {
+		if (command === "version" || hasFlag(parsed, "version")) {
+			exitCode = commandVersion(fullDeps);
+		} else if (!command || command === "help" || hasFlag(parsed, "help")) {
+			exitCode = commandHelp(fullDeps);
+		} else if (command === "info") {
 			exitCode = await commandInfo(parsed, fullDeps);
 		} else if (command === "admin") {
 			exitCode = await commandAdmin(parsed, fullDeps);
