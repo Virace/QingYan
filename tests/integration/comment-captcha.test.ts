@@ -92,8 +92,8 @@ describe("comment captcha", () => {
 			required: false,
 			verified: false,
 			mode: "inline_value",
-			challenge: null,
 		});
+		expect(response.json()).not.toHaveProperty("challenge");
 	});
 
 	it("creates a challenge, rejects invalid values and accepts the right answer", async () => {

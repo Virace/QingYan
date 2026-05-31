@@ -151,12 +151,15 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 
 		expect(firstLike.statusCode).toBe(200);
 		expect(firstLike.json()).toMatchObject({
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: 1,
+			pageLikes: {
+				count: 1,
 				liked: true,
 			},
 		});
+		expect(Object.keys(firstLike.json()).sort()).toEqual(["pageLikes"]);
+		expect(firstLike.json()).not.toHaveProperty("pageFeedback");
+		expect(JSON.stringify(firstLike.json())).not.toContain("trustMode");
+		expect(JSON.stringify(firstLike.json())).not.toContain("supportsLike");
 
 		const visitorCookie = firstLike.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -302,9 +305,8 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 
 		expect(like.statusCode).toBe(200);
 		expect(like.json()).toMatchObject({
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: 1,
+			pageLikes: {
+				count: 1,
 				liked: true,
 			},
 		});
@@ -330,9 +332,8 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 
 		expect(firstLike.statusCode).toBe(200);
 		expect(firstLike.json()).toMatchObject({
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: 1,
+			pageLikes: {
+				count: 1,
 				liked: true,
 			},
 		});
@@ -432,13 +433,13 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			expect.objectContaining({ name: "qingyan_visitor" }),
 		);
 		expect(secondLike.json()).toMatchObject({
-			pageFeedback: {
-				supportsLike: true,
-				trustMode: "lightweight",
-				likeCount: 2,
+			pageLikes: {
+				count: 2,
 				liked: true,
 			},
 		});
+		expect(secondLike.json()).not.toHaveProperty("pageFeedback");
+		expect(JSON.stringify(secondLike.json())).not.toContain("trustMode");
 		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
 		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
 	});

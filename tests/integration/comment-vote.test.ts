@@ -161,10 +161,16 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		expect(firstVote.statusCode).toBe(200);
 		expect(firstVote.json()).toMatchObject({
 			commentId: "c_vote_target",
-			voteUp: 1,
-			voteDown: 0,
-			viewerVote: "up",
+			vote: {
+				up: 1,
+				down: 0,
+				viewer: "up",
+			},
 		});
+		expect(firstVote.json()).not.toHaveProperty("voteUp");
+		expect(firstVote.json()).not.toHaveProperty("voteDown");
+		expect(firstVote.json()).not.toHaveProperty("viewerVote");
+		expect(firstVote.json()).not.toHaveProperty("trustMode");
 
 		const visitorCookie = firstVote.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -268,9 +274,12 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		expect(vote.statusCode).toBe(200);
 		expect(vote.json()).toMatchObject({
 			commentId: "c_vote_captcha",
-			voteUp: 1,
-			viewerVote: "up",
+			vote: {
+				up: 1,
+				viewer: "up",
+			},
 		});
+		expect(vote.json()).not.toHaveProperty("viewerVote");
 	});
 
 	it("rejects comment votes when commentVotes is disabled", async () => {
@@ -345,11 +354,13 @@ describe("POST /qingyan/api/comments/:commentId/vote", () => {
 		);
 		expect(secondVote.json()).toMatchObject({
 			commentId: "c_vote_lightweight",
-			voteUp: 2,
-			voteDown: 0,
-			viewerVote: "up",
-			trustMode: "lightweight",
+			vote: {
+				up: 2,
+				down: 0,
+				viewer: "up",
+			},
 		});
+		expect(secondVote.json()).not.toHaveProperty("trustMode");
 		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
 		expect(await fixture.app.db.select().from(voteRecords)).toEqual([]);
 	});

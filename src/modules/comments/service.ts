@@ -1,16 +1,16 @@
-import { ResourceNotFoundError } from "../shared/errors";
+import { AppError, ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
 import {
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
 	mergeEngagementSettings,
-	resolveEngagementTrustMode,
 } from "../shared/site-settings-defaults";
 import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import { resolveRequestMetadata } from "./metadata/request-metadata";
 import type { CommentMetadataResolver } from "./metadata/resolver";
+import { buildPublicFeatures } from "./public-contract";
 import type { CommentsRepository } from "./repository";
 import {
 	mergeStaffDisplaySettings,
@@ -19,26 +19,6 @@ import {
 	toPublicVerifiedAuthorViewer,
 	type VerifiedAuthorSettings,
 } from "./verified-author";
-
-function buildCapability(settings?: {
-	commentsEnabled: boolean;
-	defaultStatus: string;
-	maxDepth: number;
-	allowWebsite: boolean;
-	captchaMode: string;
-	supportsVote?: boolean;
-}) {
-	const supportsCaptcha = (settings?.captchaMode ?? "threshold") !== "never";
-
-	return {
-		enabled: settings?.commentsEnabled ?? true,
-		supportsReply: (settings?.maxDepth ?? 3) > 1,
-		supportsVote: settings?.supportsVote ?? false,
-		supportsCaptcha,
-		defaultStatus: settings?.defaultStatus ?? "pending",
-		message: null,
-	};
-}
 
 export function buildCommentDisplayOptions(input: {
 	metadata?: CommentMetadataSettings;
@@ -162,7 +142,6 @@ export class CommentsService {
 		const pageRegistered = Boolean(registryPage);
 		const settings = await this.repository.getSiteSettings(site.id);
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
-		const trustMode = resolveEngagementTrustMode(engagement);
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
 		);
@@ -317,22 +296,24 @@ export class CommentsService {
 		});
 
 		return {
-			capability: buildCapability(
-				settings
-					? {
-							...settings,
-							supportsVote: engagement.commentVotes.enabled,
-						}
-					: {
-							commentsEnabled: true,
-							defaultStatus: "pending",
-							maxDepth: 3,
-							allowWebsite: true,
-							captchaMode: "threshold",
-							supportsVote: engagement.commentVotes.enabled,
-						},
-			),
-			commentForm: buildCommentForm({
+			site: {
+				siteKey: site.siteKey,
+			},
+			page: {
+				pageKey: input.pageKey,
+				status: pageInteractive ? "active" : (registryPage?.status ?? "active"),
+			},
+			features: buildPublicFeatures({
+				pageInteractive,
+				commentsEnabled: settings?.commentsEnabled ?? true,
+				maxDepth: settings?.maxDepth ?? 3,
+				captchaMode: (settings?.captchaMode ?? "threshold") as
+					| "never"
+					| "always"
+					| "threshold",
+				engagement,
+			}),
+			form: buildCommentForm({
 				allowWebsite: settings?.allowWebsite,
 				commentRequireJson: settings?.commentRequireJson,
 			}),
@@ -352,8 +333,8 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay,
-			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay, {
+			displayOptions: commentDisplay,
+			display: buildPublicCommentDisplay(commentDisplay, {
 				includeAdvisoryFields: publicApiSettings.advisoryFields.enabled,
 			}),
 			viewer: {
@@ -361,22 +342,15 @@ export class CommentsService {
 					? { verifiedAuthor: publicVerifiedAuthor }
 					: {}),
 			},
-			pageMetrics: {
-				enabled: engagement.pageViews.enabled,
-				trustMode,
-				pageViewCount: refreshedThread?.pageViewCount ?? 0,
-			},
-			pageFeedback: {
-				supportsLike: engagement.pageLikes.enabled,
-				trustMode,
-				likeCount: refreshedThread?.pageLikeCount ?? 0,
+			pageLikes: {
+				count: refreshedThread?.pageLikeCount ?? 0,
 				liked: pageFeedback.liked,
 			},
 			captcha: {
 				required: captcha.required,
 				verified: captcha.verified,
 				mode: captcha.mode,
-				challenge: captcha.challenge,
+				...(captcha.challenge ? { challenge: captcha.challenge } : {}),
 			},
 			visitorKey: visitor?.created ? visitor.visitorKey : undefined,
 		};
@@ -394,6 +368,20 @@ export class CommentsService {
 			pageKey: input.pageKey,
 		});
 		const settings = await this.repository.getSiteSettings(site.id);
+		if (!(settings?.commentsEnabled ?? true)) {
+			throw new AppError(403, "COMMENTS_DISABLED", "评论功能未开启。");
+		}
+		const registryPage = await this.repository.getPageRegistryEntry({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
+		if (
+			registryPage?.status === "trash" ||
+			registryPage?.status === "deleted" ||
+			registryPage?.status === "ignored"
+		) {
+			throw new AppError(403, "PAGE_INACTIVE", "页面当前不可用。");
+		}
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
 		const metadataConfig = this.repository.resolveCommentMetadata(
 			settings ?? undefined,
@@ -480,8 +468,9 @@ export class CommentsService {
 				rootCount: commentBundle.rootCount,
 			},
 			commentBundle,
-			commentDisplay,
-			publicCommentDisplay: buildPublicCommentDisplay(commentDisplay, {
+			displayOptions: commentDisplay,
+			commentVotesEnabled: engagement.commentVotes.enabled,
+			display: buildPublicCommentDisplay(commentDisplay, {
 				includeAdvisoryFields: publicApiSettings.advisoryFields.enabled,
 			}),
 			visitorKey: visitor?.created ? visitor.visitorKey : undefined,

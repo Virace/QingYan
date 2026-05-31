@@ -104,12 +104,17 @@ describe("dev memory mode", () => {
 		});
 		expect(bootstrap.statusCode).toBe(200);
 		expect(bootstrap.json()).toMatchObject({
-			pagination: {
-				totalCount: 2,
-				rootCount: 1,
-			},
-			pageFeedback: {
-				likeCount: 1,
+			schemaVersion: "2026-05-31",
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 2,
+						rootCount: 1,
+					},
+				},
+				pageLikes: {
+					count: 1,
+				},
 			},
 		});
 
@@ -131,8 +136,8 @@ describe("dev memory mode", () => {
 		});
 		expect(like.statusCode).toBe(200);
 		expect(like.json()).toMatchObject({
-			pageFeedback: {
-				likeCount: 2,
+			pageLikes: {
+				count: 2,
 				liked: true,
 			},
 		});
@@ -177,21 +182,26 @@ describe("dev memory mode", () => {
 			expect(bootstrap.statusCode).toBe(200);
 			const bootstrapBody = bootstrap.json();
 			expect(bootstrapBody).toMatchObject({
-				pagination: {
-					totalCount: 9,
-					rootCount: 6,
-					limit: 5,
-					offset: 0,
+				schemaVersion: "2026-05-31",
+				data: {
+					comments: {
+						pagination: {
+							totalCount: 9,
+							rootCount: 6,
+							limit: 5,
+							offset: 0,
+						},
+					},
 				},
 			});
-			expect(bootstrapBody.comments).toHaveLength(5);
+			expect(bootstrapBody.data.comments.items).toHaveLength(5);
 
 			const visitorCookie = bootstrap.cookies.find(
 				(cookie) => cookie.name === "qingyan_visitor",
 			);
 			const captchaCommentId = "dev_post_default-seeded_root_1";
 			const blacklistCommentId = "dev_post_default-seeded_root_2";
-			const nestedRoot = bootstrapBody.comments.find(
+			const nestedRoot = bootstrapBody.data.comments.items.find(
 				(comment: { id: string }) => comment.id === captchaCommentId,
 			);
 			expect(nestedRoot).toMatchObject({
@@ -219,9 +229,9 @@ describe("dev memory mode", () => {
 					offset: 5,
 				},
 			});
-			expect(secondPage.json().comments).toHaveLength(1);
+			expect(secondPage.json().items).toHaveLength(1);
 
-			const comments = JSON.stringify(bootstrapBody.comments);
+			const comments = JSON.stringify(bootstrapBody.data.comments.items);
 			expect(comments).toContain(captchaCommentId);
 			expect(comments).toContain(blacklistCommentId);
 
@@ -289,7 +299,9 @@ describe("dev memory mode", () => {
 			expect(votedAfterCaptcha.statusCode).toBe(200);
 			expect(votedAfterCaptcha.json()).toMatchObject({
 				commentId: captchaCommentId,
-				viewerVote: "up",
+				vote: {
+					viewer: "up",
+				},
 			});
 
 			const blacklistVote = await app.inject({

@@ -168,8 +168,8 @@ describe("comment captcha providers", () => {
 			required: true,
 			verified: true,
 			mode: "iframe_widget",
-			challenge: null,
 		});
+		expect(verifiedState.json()).not.toHaveProperty("challenge");
 	});
 
 	it("serves an iframe challenge and completes hcaptcha verification", async () => {

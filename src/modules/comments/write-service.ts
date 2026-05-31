@@ -481,10 +481,11 @@ export class CommentsWriteService {
 			return {
 				visitorKey: undefined,
 				commentId: input.commentId,
-				voteUp: updatedComment.voteUpCount,
-				voteDown: updatedComment.voteDownCount,
-				viewerVote: input.choice,
-				trustMode,
+				vote: {
+					up: updatedComment.voteUpCount,
+					down: updatedComment.voteDownCount,
+					viewer: input.choice,
+				},
 			};
 		}
 
@@ -544,10 +545,11 @@ export class CommentsWriteService {
 		return {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
 			commentId: input.commentId,
-			voteUp: updatedComment.voteUpCount,
-			voteDown: updatedComment.voteDownCount,
-			viewerVote: input.choice,
-			trustMode,
+			vote: {
+				up: updatedComment.voteUpCount,
+				down: updatedComment.voteDownCount,
+				viewer: input.choice,
+			},
 		};
 	}
 }

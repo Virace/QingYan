@@ -76,6 +76,8 @@ export const defaultEngagementSettings: EngagementSettings = {
 	},
 };
 
+type LegacyBoolean = boolean | 0 | 1;
+
 export type EngagementSettingsPatch = {
 	visitors?: {
 		enabled?: boolean;
@@ -91,39 +93,75 @@ export type EngagementSettingsPatch = {
 	};
 };
 
+type LegacyEngagementSettingsPatch = {
+	visitors?: {
+		enabled?: LegacyBoolean;
+	};
+	pageViews?: {
+		enabled?: LegacyBoolean;
+	};
+	pageLikes?: {
+		enabled?: LegacyBoolean;
+	};
+	commentVotes?: {
+		enabled?: LegacyBoolean;
+	};
+};
+
+export function readPersistedBoolean(
+	value: unknown,
+	fallback: boolean,
+): boolean {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	if (value === 0) {
+		return false;
+	}
+	if (value === 1) {
+		return true;
+	}
+	return fallback;
+}
+
 export function mergeEngagementSettings(
 	value?: string | EngagementSettingsPatch | null,
 ): EngagementSettings {
-	let parsed: EngagementSettingsPatch = {};
+	let parsed: LegacyEngagementSettingsPatch = {};
 	if (typeof value === "string" && value.trim()) {
 		try {
-			parsed = JSON.parse(value) as EngagementSettingsPatch;
+			parsed = JSON.parse(value) as LegacyEngagementSettingsPatch;
 		} catch {
 			parsed = {};
 		}
 	} else if (typeof value === "object" && value !== null) {
-		parsed = value;
+		parsed = value as LegacyEngagementSettingsPatch;
 	}
 
 	return {
 		visitors: {
-			enabled:
-				parsed.visitors?.enabled ?? defaultEngagementSettings.visitors.enabled,
+			enabled: readPersistedBoolean(
+				parsed.visitors?.enabled,
+				defaultEngagementSettings.visitors.enabled,
+			),
 		},
 		pageViews: {
-			enabled:
-				parsed.pageViews?.enabled ??
+			enabled: readPersistedBoolean(
+				parsed.pageViews?.enabled,
 				defaultEngagementSettings.pageViews.enabled,
+			),
 		},
 		pageLikes: {
-			enabled:
-				parsed.pageLikes?.enabled ??
+			enabled: readPersistedBoolean(
+				parsed.pageLikes?.enabled,
 				defaultEngagementSettings.pageLikes.enabled,
+			),
 		},
 		commentVotes: {
-			enabled:
-				parsed.commentVotes?.enabled ??
+			enabled: readPersistedBoolean(
+				parsed.commentVotes?.enabled,
 				defaultEngagementSettings.commentVotes.enabled,
+			),
 		},
 	};
 }

@@ -254,7 +254,7 @@ describe("admin sites", () => {
 		expect(response.statusCode).toBe(400);
 		expect(response.json()).toMatchObject({
 			error: {
-				code: "INVALID_REQUEST",
+				code: "VALIDATION_FAILED",
 			},
 		});
 	});

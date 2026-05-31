@@ -132,20 +132,32 @@ describe("dev control routes", () => {
 		});
 		expect(bootstrap.statusCode).toBe(200);
 		expect(bootstrap.json()).toMatchObject({
-			captcha: {
-				required: true,
-				verified: false,
+			schemaVersion: "2026-05-31",
+			features: {
+				commentCaptcha: {
+					enabled: true,
+				},
 			},
-			commentDisplay: {
-				avatar: {
-					external: {
-						enabled: false,
+			data: {
+				comments: {
+					captcha: {
+						required: true,
+						verified: false,
+					},
+					display: {
+						avatar: {
+							external: {
+								enabled: false,
+							},
+						},
 					},
 				},
 			},
-			viewer: {},
 		});
-		expect(bootstrap.json().commentDisplay.avatar.display).toBeUndefined();
+		expect(bootstrap.json()).not.toHaveProperty("viewer");
+		expect(
+			bootstrap.json().data.comments.display.avatar.display,
+		).toBeUndefined();
 
 		expect(await fixture.app.db.select().from(sites)).toEqual([
 			expect.objectContaining({
@@ -267,24 +279,31 @@ describe("dev control routes", () => {
 
 		expect(bootstrap.statusCode).toBe(200);
 		expect(bootstrap.json()).toMatchObject({
-			pagination: {
-				totalCount: 2,
-				rootCount: 1,
-			},
-			pageFeedback: {
-				likeCount: 1,
-			},
-			commentDisplay: {
-				avatar: {
-					external: {
-						enabled: false,
+			schemaVersion: "2026-05-31",
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 2,
+						rootCount: 1,
+					},
+					display: {
+						avatar: {
+							external: {
+								enabled: false,
+							},
+						},
 					},
 				},
+				pageLikes: {
+					count: 1,
+				},
 			},
-			viewer: {},
 		});
 		expect(bootstrap.json().thread).toBeUndefined();
-		expect(bootstrap.json().commentDisplay.avatar.display).toBeUndefined();
+		expect(bootstrap.json()).not.toHaveProperty("viewer");
+		expect(
+			bootstrap.json().data.comments.display.avatar.display,
+		).toBeUndefined();
 
 		const thread = await fixture.app.inject({
 			method: "GET",
@@ -292,7 +311,7 @@ describe("dev control routes", () => {
 		});
 		expect(thread.statusCode).toBe(200);
 		expect(thread.json()).toMatchObject({
-			commentDisplay: {
+			display: {
 				avatar: {
 					external: {
 						enabled: false,
@@ -301,7 +320,7 @@ describe("dev control routes", () => {
 			},
 		});
 		expect(thread.json().thread).toBeUndefined();
-		expect(thread.json().commentDisplay.avatar.display).toBeUndefined();
+		expect(thread.json().display.avatar.display).toBeUndefined();
 
 		const commentRows = await fixture.app.db.select().from(comments);
 		expect(commentRows).toHaveLength(0);

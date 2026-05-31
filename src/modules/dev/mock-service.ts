@@ -368,18 +368,12 @@ export class DevMockService {
 					updatedAt: comment.updatedAt ?? comment.createdAt,
 				})),
 				this.buildViewerVoteMap(input.visitor),
+				{
+					commentVotes: {
+						enabled: true,
+					},
+				},
 			),
-		};
-	}
-
-	private buildCapability() {
-		return {
-			enabled: this.defaultSettings.commentsEnabled,
-			supportsReply: this.defaultSettings.maxDepth > 1,
-			supportsVote: true,
-			supportsCaptcha: this.defaultSettings.captchaMode !== "never",
-			defaultStatus: defaultCommentStatus(),
-			message: null,
 		};
 	}
 
@@ -390,6 +384,15 @@ export class DevMockService {
 					enabled: defaultSystemSettings.avatar.external.enabled,
 				},
 			},
+		};
+	}
+
+	private buildCaptchaData(captcha: RuntimeCaptchaState) {
+		return {
+			required: captcha.required,
+			verified: captcha.verified,
+			mode: captcha.mode,
+			...(captcha.challenge ? { challenge: captcha.challenge } : {}),
 		};
 	}
 
@@ -674,27 +677,58 @@ export class DevMockService {
 
 		return this.setVisitorCookieResult(
 			{
-				capability: this.buildCapability(),
-				commentForm: buildCommentForm({
-					allowWebsite: this.defaultSettings.allowWebsite,
-					commentRequireJson: JSON.stringify(defaultCommentRequire),
-				}),
-				...threadBody,
-				commentDisplay: this.buildCommentDisplay(),
-				viewer: {},
-				pageMetrics: {
-					pageViewCount: pageState.pageViewCount,
+				schemaVersion: "2026-05-31",
+				site: {
+					siteKey: input.siteKey,
 				},
-				pageFeedback: {
-					supportsLike: true,
-					likeCount:
-						pageState.baseLikeCount +
-						[...pageState.visitorStates.values()].filter(
-							(state) => state.likedPage,
-						).length,
-					liked: visitorResult.visitor.likedPage,
+				page: {
+					pageKey: input.pageKey,
+					status: "active",
 				},
-				captcha,
+				features: {
+					comments: { enabled: true },
+					commentReplies: {
+						enabled: this.defaultSettings.maxDepth > 1,
+						...(this.defaultSettings.maxDepth > 1
+							? { maxDepth: this.defaultSettings.maxDepth }
+							: { reason: "feature_disabled" }),
+					},
+					commentVotes: { enabled: true },
+					commentCaptcha: {
+						enabled: this.defaultSettings.captchaMode !== "never",
+						...(this.defaultSettings.captchaMode !== "never"
+							? { mode: this.defaultSettings.captchaMode }
+							: { reason: "feature_disabled" }),
+					},
+					pageViews: { enabled: true },
+					pageLikes: { enabled: true },
+					visitors: { enabled: true },
+				},
+				data: {
+					comments: {
+						form: buildCommentForm({
+							allowWebsite: this.defaultSettings.allowWebsite,
+							commentRequireJson: JSON.stringify(defaultCommentRequire),
+						}),
+						display: this.buildCommentDisplay(),
+						pagination: threadBody.pagination,
+						items: threadBody.comments,
+						...(this.defaultSettings.captchaMode !== "never"
+							? { captcha: this.buildCaptchaData(captcha) }
+							: {}),
+					},
+					pageViews: {
+						count: pageState.pageViewCount,
+					},
+					pageLikes: {
+						count:
+							pageState.baseLikeCount +
+							[...pageState.visitorStates.values()].filter(
+								(state) => state.likedPage,
+							).length,
+						liked: visitorResult.visitor.likedPage,
+					},
+				},
 			},
 			visitorResult.created,
 			visitorResult.visitorKey,
@@ -713,16 +747,18 @@ export class DevMockService {
 	}) {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
+		const threadBody = this.buildThreadBody({
+			pageState,
+			visitor: visitorResult.visitor,
+			sortBy: input.sortBy,
+			limit: input.limit,
+			offset: input.offset,
+		});
 		return this.setVisitorCookieResult(
 			{
-				...this.buildThreadBody({
-					pageState,
-					visitor: visitorResult.visitor,
-					sortBy: input.sortBy,
-					limit: input.limit,
-					offset: input.offset,
-				}),
-				commentDisplay: this.buildCommentDisplay(),
+				display: this.buildCommentDisplay(),
+				pagination: threadBody.pagination,
+				items: threadBody.comments,
 			},
 			visitorResult.created,
 			visitorResult.visitorKey,
@@ -766,10 +802,12 @@ export class DevMockService {
 		const pageState = this.ensurePageState(input);
 		const visitorResult = this.ensureVisitorState(pageState, input.visitorKey);
 		return this.setVisitorCookieResult(
-			this.getCaptchaStateForVisitor(
-				pageState,
-				visitorResult.visitor,
-				input.refresh,
+			this.buildCaptchaData(
+				this.getCaptchaStateForVisitor(
+					pageState,
+					visitorResult.visitor,
+					input.refresh,
+				),
 			),
 			visitorResult.created,
 			visitorResult.visitorKey,
@@ -1033,9 +1071,11 @@ export class DevMockService {
 		return this.setVisitorCookieResult(
 			{
 				commentId: input.commentId,
-				voteUp: comment.voteUpCount,
-				voteDown: comment.voteDownCount,
-				viewerVote: input.choice,
+				vote: {
+					up: comment.voteUpCount,
+					down: comment.voteDownCount,
+					viewer: input.choice,
+				},
 			},
 			visitorResult.created,
 			visitorResult.visitorKey,
@@ -1079,9 +1119,8 @@ export class DevMockService {
 		visitor.likedPage = true;
 		return this.setVisitorCookieResult(
 			{
-				pageFeedback: {
-					supportsLike: true,
-					likeCount:
+				pageLikes: {
+					count:
 						pageState.baseLikeCount +
 						[...pageState.visitorStates.values()].filter(
 							(state) => state.likedPage,

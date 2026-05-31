@@ -149,10 +149,8 @@ export class PageFeedbackService {
 
 			return {
 				visitorKey: undefined,
-				pageFeedback: {
-					supportsLike: true,
-					trustMode,
-					likeCount: updatedThread.pageLikeCount,
+				pageLikes: {
+					count: updatedThread.pageLikeCount,
 					liked: true,
 				},
 			};
@@ -189,10 +187,8 @@ export class PageFeedbackService {
 
 		return {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
-			pageFeedback: {
-				supportsLike: true,
-				trustMode,
-				likeCount: updatedThread.pageLikeCount,
+			pageLikes: {
+				count: updatedThread.pageLikeCount,
 				liked: true,
 			},
 		};

@@ -30,6 +30,7 @@ import {
 	type EngagementSettingsPatch,
 	mergeEngagementSettings,
 	mergeEngagementSettingsPatch,
+	readPersistedBoolean,
 	serializeEngagementSettings,
 } from "../shared/site-settings-defaults";
 import {
@@ -40,16 +41,16 @@ import { RuntimeSystemSettingsService } from "../system-settings/service";
 import type { AdminRepository } from "./repository";
 
 type CommentMetadataPatch = {
-	collectIp?: boolean;
-	collectUserAgent?: boolean;
+	collectIp?: boolean | 0 | 1;
+	collectUserAgent?: boolean | 0 | 1;
 	ipRegion?: {
-		enabled?: boolean;
+		enabled?: boolean | 0 | 1;
 		precision?: "country" | "province" | "city";
 	};
 	device?: {
-		enabled?: boolean;
+		enabled?: boolean | 0 | 1;
 		display?: {
-			enabled?: boolean;
+			enabled?: boolean | 0 | 1;
 		};
 	};
 };
@@ -66,16 +67,36 @@ function mergeCommentMetadata(
 		return {
 			...defaultCommentMetadata,
 			...parsed,
+			collectIp: readPersistedBoolean(
+				parsed.collectIp,
+				defaultCommentMetadata.collectIp,
+			),
+			collectUserAgent: readPersistedBoolean(
+				parsed.collectUserAgent,
+				defaultCommentMetadata.collectUserAgent,
+			),
 			ipRegion: {
 				...defaultCommentMetadata.ipRegion,
 				...parsed.ipRegion,
+				enabled: readPersistedBoolean(
+					parsed.ipRegion?.enabled,
+					defaultCommentMetadata.ipRegion.enabled,
+				),
 			},
 			device: {
 				...defaultCommentMetadata.device,
 				...parsed.device,
+				enabled: readPersistedBoolean(
+					parsed.device?.enabled,
+					defaultCommentMetadata.device.enabled,
+				),
 				display: {
 					...defaultCommentMetadata.device.display,
 					...parsed.device?.display,
+					enabled: readPersistedBoolean(
+						parsed.device?.display?.enabled,
+						defaultCommentMetadata.device.display.enabled,
+					),
 				},
 			},
 		};

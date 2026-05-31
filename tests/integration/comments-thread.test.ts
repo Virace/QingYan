@@ -29,6 +29,38 @@ afterEach(async () => {
 });
 
 describe("GET /qingyan/api/comments/thread", () => {
+	it("rejects thread reads when comments are disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({ commentsEnabled: false })
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:thread-disabled",
+			headers: {
+				...refererFor("post:thread-disabled"),
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "COMMENTS_DISABLED",
+				message: "评论功能未开启。",
+			},
+		});
+	});
+
 	it("returns thread-only payload and sets a visitor cookie for new viewers", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -99,11 +131,12 @@ describe("GET /qingyan/api/comments/thread", () => {
 		expect(response.json().thread).toBeUndefined();
 		expect(response.json()).not.toHaveProperty("pageMetrics");
 		expect(response.json()).not.toHaveProperty("pageFeedback");
-		expect(response.json().comments).toHaveLength(1);
-		expect(response.json().comments[0]).toMatchObject({
+		expect(response.json().items).toHaveLength(1);
+		expect(response.json().items[0]).toMatchObject({
 			id: "c_thread_only",
-			viewerVote: null,
 		});
+		expect(response.json().items[0]).not.toHaveProperty("viewerVote");
+		expect(response.json().items[0]).not.toHaveProperty("vote");
 	});
 
 	it("returns external avatar URL from thread API when enabled", async () => {
@@ -190,18 +223,18 @@ describe("GET /qingyan/api/comments/thread", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().comments[0].author.avatarUrl).toBe(
+		expect(response.json().items[0].author.avatarUrl).toBe(
 			`https://cravatar.cn/avatar/${aliceMd5}?s=120&d=retro&r=pg`,
 		);
-		expect(response.json().comments[0].author.gravatarUrl).toBeUndefined();
-		expect(response.json().commentDisplay).toMatchObject({
+		expect(response.json().items[0].author.gravatarUrl).toBeUndefined();
+		expect(response.json().display).toMatchObject({
 			avatar: {
 				external: {
 					enabled: true,
 				},
 			},
 		});
-		expect(response.json().commentDisplay.avatar.display).toBeUndefined();
+		expect(response.json().display.avatar.display).toBeUndefined();
 	});
 
 	it("returns normalized display metadata from thread API without raw request metadata or icon", async () => {
@@ -282,7 +315,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().comments[0]).toMatchObject({
+		expect(response.json().items[0]).toMatchObject({
 			displayMeta: {
 				location: {
 					label: "广东",
@@ -297,7 +330,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 				},
 			},
 		});
-		expect(response.json().comments[0].displayMeta.device).not.toHaveProperty(
+		expect(response.json().items[0].displayMeta.device).not.toHaveProperty(
 			"icon",
 		);
 		const publicBody = JSON.stringify(response.json());

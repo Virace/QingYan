@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
+import { siteSettings, sites } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -399,5 +401,110 @@ describe("admin settings", () => {
 		});
 
 		expect(response.statusCode).toBe(404);
+	});
+
+	it("normalizes legacy numeric booleans on settings read", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commentMetadataJson: JSON.stringify({
+					collectIp: 0,
+					collectUserAgent: 1,
+					ipRegion: {
+						enabled: 1,
+						precision: "city",
+					},
+					device: {
+						enabled: 0,
+						display: {
+							enabled: 1,
+						},
+					},
+				}),
+				engagementJson: JSON.stringify({
+					visitors: { enabled: 1 },
+					pageViews: { enabled: 0 },
+					pageLikes: { enabled: 1 },
+					commentVotes: { enabled: 0 },
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comments.metadata).toMatchObject({
+			collectIp: false,
+			collectUserAgent: true,
+			ipRegion: {
+				enabled: true,
+				precision: "city",
+			},
+			device: {
+				enabled: false,
+				display: {
+					enabled: true,
+				},
+			},
+		});
+		expect(response.json().engagement).toEqual({
+			visitors: { enabled: true },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: true },
+			commentVotes: { enabled: false },
+		});
+	});
+
+	it("rejects numeric booleans in settings writes with field errors", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				engagement: {
+					commentVotes: {
+						enabled: 1,
+					},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+				message: "请求参数无效。",
+				fields: [
+					{
+						path: "engagement.commentVotes.enabled",
+						code: "invalid_type",
+						expected: "boolean",
+						received: "number",
+						message: "必须是 JSON boolean，不能使用 0/1。",
+					},
+				],
+			},
+		});
+		expect(response.json().error).toHaveProperty("requestId");
 	});
 });

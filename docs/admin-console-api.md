@@ -867,6 +867,29 @@ Engagement 语义：
 - `pageLikes.enabled=false`：公开页面点赞接口返回 `PAGE_FEEDBACK_DISABLED`。
 - `commentVotes.enabled=false`：公开评论投票接口返回 `COMMENT_VOTE_DISABLED`。
 
+Settings API 的双状态字段必须使用 JSON boolean。GET 会归一化历史持久化配置中的 `0` / `1`，响应永远返回 `true` / `false`；PUT 不接受数字布尔、字符串布尔或 `0` / `1`。数字布尔请求会返回字段级错误：
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "请求参数无效。",
+    "requestId": "req_xxx",
+    "fields": [
+      {
+        "path": "engagement.commentVotes.enabled",
+        "code": "invalid_type",
+        "expected": "boolean",
+        "received": "number",
+        "message": "必须是 JSON boolean，不能使用 0/1。"
+      }
+    ]
+  }
+}
+```
+
+公开 bootstrap 会把这些开关映射到 `features`：`comments.enabled=false` 时返回 `features.comments.enabled=false` 并省略 `data.comments`；`engagement.pageViews.enabled=false` 时省略 `data.pageViews`；`engagement.pageLikes.enabled=false` 时省略 `data.pageLikes`；`engagement.commentVotes.enabled=false` 时评论项不输出 `vote`。
+
 ## System Settings
 
 ### `GET /api/admin/system-settings`

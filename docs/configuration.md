@@ -234,7 +234,7 @@ Admin Console API 会返回 logging、mail、captcha、ipRegion、avatar 和 pub
 
 启用后，公开评论作者结构可能包含 `author.avatarUrl`。该字段只表示第三方头像图片地址；QingYan 不托管、不上传、不代理、不缓存头像文件，也不保证远端头像文件一定存在。没有该字段、外部头像图片 404 或图片加载失败时，前端应继续使用名称首字母或文字 fallback。使用 `d=404` 时，前端需要接受一次图片请求返回 404；QingYan 不会额外代理或探测头像是否存在。
 
-公开评论 bootstrap/thread 响应还会返回 `commentDisplay.avatar.external.enabled`，表示当前是否可能返回 `author.avatarUrl`。默认不返回头像形状、显示尺寸这类前端展示建议；只有 `publicApi.advisoryFields.enabled=true` 时才会额外返回 `commentDisplay.avatar.display.shape` 和 `commentDisplay.avatar.display.sizePx`。头像请求尺寸仍由 `avatar.external.query` 自行决定，前端展示尺寸由前端自己的布局决定；后端建议字段只用于需要后端集中下发展示建议的集成场景。
+公开评论 bootstrap 响应会在 `data.comments.display.avatar.external.enabled` 返回当前是否可能输出 `author.avatarUrl`；thread 响应使用 `display.avatar.external.enabled`。默认不返回头像形状、显示尺寸这类前端展示建议；只有 `publicApi.advisoryFields.enabled=true` 时才会额外返回 `data.comments.display.avatar.display.shape` / `display.avatar.display.shape` 和对应 `sizePx`。头像请求尺寸仍由 `avatar.external.query` 自行决定，前端展示尺寸由前端自己的布局决定；后端建议字段只用于需要后端集中下发展示建议的集成场景。
 
 常见配置示例：
 
@@ -264,7 +264,7 @@ QingYan 不要求为普通访客建立用户模型。若内容站点希望避免
 
 - 存储位置：主站前端的 `localStorage`，而不是 QingYan 后端设置的可读 cookie。
 - 作用范围：按 QingYan `siteKey` 隔离，例如 `qingyan:commenter-profile:v1:<siteKey>`。
-- 保存字段：`nickname | email | website` 中当前 `commentForm.allow` 允许的字段。
+- 保存字段：`nickname | email | website` 中当前 `data.comments.form.allow` 允许的字段。
 - 过期时间：默认 90 天；每次普通评论成功后刷新过期时间。
 - 表单行为：可以默认勾选“记住我”，允许访客取消；取消后应清除当前 `siteKey` 的本地资料。
 

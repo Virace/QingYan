@@ -53,6 +53,9 @@ interface PresenterOptions {
 		badgeLabel: string;
 	};
 	staffDisplay?: StaffDisplaySettings;
+	commentVotes?: {
+		enabled: boolean;
+	};
 }
 
 function toPublicTimestamp(value: string | null): string | null {
@@ -149,6 +152,7 @@ export function presentComments(
 	options?: PresenterOptions,
 ) {
 	const nodes = new Map<string, Record<string, unknown>>();
+	const childBuckets = new Map<string, Array<Record<string, unknown>>>();
 	const rootNodes: Array<Record<string, unknown>> = [];
 
 	for (const comment of comments) {
@@ -182,7 +186,6 @@ export function presentComments(
 		}
 		const node: Record<string, unknown> = {
 			id: comment.id,
-			parentId: comment.parentId,
 			author,
 			content: {
 				raw: comment.contentRaw,
@@ -192,13 +195,20 @@ export function presentComments(
 			isPinned: comment.isPinned,
 			isFolded: comment.isFolded,
 			replyCount: comment.replyCount,
-			voteUp: comment.voteUpCount,
-			voteDown: comment.voteDownCount,
-			viewerVote: viewerVoteMap.get(comment.id) ?? null,
 			createdAt: toPublicTimestamp(comment.createdAt),
 			updatedAt: toPublicTimestamp(comment.updatedAt),
-			children: [],
 		};
+		if (comment.parentId) {
+			node.parentId = comment.parentId;
+		}
+		if (options?.commentVotes?.enabled) {
+			const viewerVote = viewerVoteMap.get(comment.id);
+			node.vote = {
+				up: comment.voteUpCount,
+				down: comment.voteDownCount,
+				...(viewerVote ? { viewer: viewerVote } : {}),
+			};
+		}
 		const displayMeta = buildDisplayMeta(comment, options);
 		if (displayMeta) {
 			node.displayMeta = displayMeta;
@@ -213,16 +223,32 @@ export function presentComments(
 		}
 
 		if (comment.parentId) {
-			const parentNode = nodes.get(comment.parentId);
-			const children = parentNode?.children;
-			if (Array.isArray(children)) {
-				children.push(node);
-			}
+			const children = childBuckets.get(comment.parentId) ?? [];
+			children.push(node);
+			childBuckets.set(comment.parentId, children);
 			continue;
 		}
 
 		rootNodes.push(node);
 	}
 
+	for (const root of rootNodes) {
+		attachChildren(root, childBuckets);
+	}
+
 	return rootNodes;
+}
+
+function attachChildren(
+	node: Record<string, unknown>,
+	childBuckets: Map<string, Array<Record<string, unknown>>>,
+) {
+	const children = childBuckets.get(String(node.id));
+	if (!children || children.length === 0) {
+		return;
+	}
+	for (const child of children) {
+		attachChildren(child, childBuckets);
+	}
+	node.children = children;
 }

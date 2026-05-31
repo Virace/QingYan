@@ -290,12 +290,13 @@ POST /api/dev/scenario
 ### 前端正式调用顺序
 
 1. `GET /api/comments/bootstrap`
-2. 读取 `captcha.required`
-3. 如果 `required === true` 且 `challenge !== null`
+2. 读取 `features.commentCaptcha.enabled`
+3. 如果 `features.commentCaptcha.enabled === true`，再读取 `data.comments.captcha`
+4. 如果 `data.comments.captcha.required === true` 且存在 `data.comments.captcha.challenge`
    - 直接展示验证码 UI
-   - `<img src={challenge.imageData}>`
-4. 用户输入答案后，调用 `POST /api/comments/captcha/verify`
-5. 校验成功后，再调用：
+   - `<img src={data.comments.captcha.challenge.imageData}>`
+5. 用户输入答案后，调用 `POST /api/comments/captcha/verify`
+6. 校验成功后，再调用：
    - `POST /api/comments`
    - 或 `POST /api/comments/:commentId/vote`
    - 或 `POST /api/page-feedback/like`
@@ -417,11 +418,11 @@ GET /api/comments/bootstrap
 前端里建议分两个层次：
 
 - **业务状态**
-  - bootstrap 结果
-  - comments 列表
-  - captcha 状态
+  - `bootstrap.features`
+  - `bootstrap.data.comments.items`
+  - `bootstrap.data.comments.captcha` 或 `GET /api/comments/captcha/state`
   - pending draft
-  - page feedback
+  - `bootstrap.data.pageLikes` / `POST /api/page-feedback/like` 返回值
 
 - **dev 控制状态**
   - 当前是否处于 dev mode
@@ -537,10 +538,10 @@ GET  /api/comments/bootstrap
 
 - `/api/dev/session` 可创建正常后台会话
 - `/api/admin/session/me` 与 `/api/admin/sites` 在 dev mode 下只返回 `default`
-- `comments-captcha-always` 能通过真实 `bootstrap` 返回 challenge
+- `comments-captcha-always` 能通过真实 `bootstrap.data.comments.captcha.challenge` 返回 challenge
 - `comments-threshold-next-write` 在“先 bootstrap 拿 visitor cookie”后，会在第一次写操作时报 `COMMENT_CAPTCHA_REQUIRED`
 - `visitorKey` 传给 `/api/dev/state` 后，能观察目标 public visitor 的真实验证码状态
-- `comments-seeded-thread` 能通过真实 `bootstrap` 读到 seeded 评论树和页面点赞
+- `comments-seeded-thread` 能通过真实 `bootstrap.data.comments.items` 读到 seeded 评论树，并通过 `bootstrap.data.pageLikes` 读到页面点赞状态
 
 ## 结论
 

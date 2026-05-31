@@ -313,14 +313,14 @@ describe("POST /qingyan/api/comments", () => {
 				author: {
 					name: "Alice",
 				},
-				viewerVote: null,
-				children: [],
 			},
 			thread: {
 				commentCount: 1,
 				rootCommentCount: 1,
 			},
 		});
+		expect(response.json().comment).not.toHaveProperty("viewerVote");
+		expect(response.json().comment).not.toHaveProperty("children");
 
 		const [comment] = await fixture.app.db.select().from(comments);
 		expect(comment?.contentRaw).toBe("hello qingyan");

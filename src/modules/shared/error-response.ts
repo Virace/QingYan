@@ -2,6 +2,14 @@ import { AppError } from "./errors";
 
 export function buildErrorResponse(error: unknown, requestId?: string) {
 	if (error instanceof AppError) {
+		const fields =
+			error.code === "VALIDATION_FAILED" && Array.isArray(error.details?.fields)
+				? { fields: error.details.fields }
+				: {};
+		const details =
+			error.details && error.code !== "VALIDATION_FAILED"
+				? { details: error.details }
+				: {};
 		return {
 			statusCode: error.statusCode,
 			body: {
@@ -9,7 +17,8 @@ export function buildErrorResponse(error: unknown, requestId?: string) {
 					code: error.code,
 					message: error.message,
 					requestId,
-					details: error.details ?? null,
+					...fields,
+					...details,
 				},
 			},
 		};
@@ -21,7 +30,6 @@ export function buildErrorResponse(error: unknown, requestId?: string) {
 				code: "INTERNAL_ERROR",
 				message: "服务器内部错误。",
 				requestId,
-				details: null,
 			},
 		},
 	};

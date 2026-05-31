@@ -71,6 +71,56 @@ describe("openapi docs", () => {
 		expect(
 			JSON.stringify(spec.components.schemas.CommentAvatarDisplay),
 		).not.toContain("gravatar");
+		expect(spec.components.schemas.BootstrapResponse.required).toEqual([
+			"schemaVersion",
+			"site",
+			"page",
+			"features",
+			"data",
+		]);
+		expect(
+			spec.components.schemas.BootstrapResponse.properties.features.$ref,
+		).toBe("#/components/schemas/PublicFeatures");
+		expect(spec.components.schemas.BootstrapResponse.properties.data.$ref).toBe(
+			"#/components/schemas/BootstrapData",
+		);
+		expect(
+			JSON.stringify(spec.components.schemas.BootstrapResponse),
+		).not.toContain("pageMetrics");
+		expect(
+			JSON.stringify(spec.components.schemas.BootstrapResponse),
+		).not.toContain("pageFeedback");
+		expect(
+			JSON.stringify(spec.components.schemas.BootstrapResponse),
+		).not.toContain("commentForm");
+		expect(spec.components.schemas.PublicFeatures.required).toEqual([
+			"comments",
+			"commentReplies",
+			"commentVotes",
+			"commentCaptcha",
+			"pageViews",
+			"pageLikes",
+			"visitors",
+		]);
+		expect(spec.components.schemas.FeatureFlag.required).toEqual(["enabled"]);
+		expect(JSON.stringify(spec.components.schemas.PublicComment)).not.toContain(
+			"viewerVote",
+		);
+		expect(JSON.stringify(spec.components.schemas.PublicComment)).not.toContain(
+			"voteUp",
+		);
+		expect(spec.components.schemas.ThreadResponse.required).toEqual([
+			"display",
+			"pagination",
+			"items",
+		]);
+		expect(spec.components.schemas.VoteCommentResponse.required).toEqual([
+			"commentId",
+			"vote",
+		]);
+		expect(spec.components.schemas.PageLikeResponse.required).toEqual([
+			"pageLikes",
+		]);
 
 		expect(docs.statusCode).toBe(200);
 		expect(docs.headers["content-type"]).toContain("text/html");

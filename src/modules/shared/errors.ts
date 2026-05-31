@@ -22,6 +22,20 @@ export class InvalidRequestError extends AppError {
 	}
 }
 
+export type ValidationFieldError = {
+	path: string;
+	code: string;
+	expected?: string;
+	received?: string;
+	message: string;
+};
+
+export class ValidationFailedError extends AppError {
+	public constructor(fields: ValidationFieldError[]) {
+		super(400, "VALIDATION_FAILED", "请求参数无效。", { fields });
+	}
+}
+
 export class ResourceNotFoundError extends AppError {
 	public constructor(code: string, message: string) {
 		super(404, code, message);

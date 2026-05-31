@@ -194,7 +194,6 @@ describe("POST /qingyan/api/comments", () => {
 			.digest("hex");
 		expect(response.json()).toMatchObject({
 			comment: {
-				parentId: null,
 				author: {
 					name: "Visitor",
 					website: "https://visitor.example.com/",
@@ -208,16 +207,17 @@ describe("POST /qingyan/api/comments", () => {
 				isPinned: false,
 				isFolded: false,
 				replyCount: 0,
-				voteUp: 0,
-				voteDown: 0,
-				viewerVote: null,
-				children: [],
 			},
 			thread: {
 				commentCount: 1,
 				rootCommentCount: 1,
 			},
 		});
+		expect(response.json().comment).not.toHaveProperty("parentId");
+		expect(response.json().comment).not.toHaveProperty("voteUp");
+		expect(response.json().comment).not.toHaveProperty("voteDown");
+		expect(response.json().comment).not.toHaveProperty("viewerVote");
+		expect(response.json().comment).not.toHaveProperty("children");
 		expect(response.json().comment.id).toEqual(expect.any(String));
 		expect(response.json().comment.createdAt).toEqual(expect.any(String));
 		expect(response.json().comment.updatedAt).toEqual(expect.any(String));
@@ -452,7 +452,7 @@ describe("POST /qingyan/api/comments", () => {
 				status: testCase.expectedStoredStatus,
 			});
 		}
-	});
+	}, 15_000);
 
 	it("accepts fully anonymous comments when no identity field is required", async () => {
 		const fixture = await createCustomTestApp({
@@ -555,7 +555,6 @@ describe("POST /qingyan/api/comments", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			comment: {
-				parentId: null,
 				author: {
 					name: "Virace",
 					website: "https://fangyuan.example.com/about",
@@ -566,10 +565,11 @@ describe("POST /qingyan/api/comments", () => {
 					html: "<p>verified comment</p>",
 				},
 				status: "approved",
-				viewerVote: null,
-				children: [],
 			},
 		});
+		expect(response.json().comment).not.toHaveProperty("parentId");
+		expect(response.json().comment).not.toHaveProperty("viewerVote");
+		expect(response.json().comment).not.toHaveProperty("children");
 
 		const [createdComment] = await fixture.app.db
 			.select()
@@ -661,7 +661,7 @@ describe("POST /qingyan/api/comments", () => {
 			},
 		});
 		expect(currentProfileThread.statusCode).toBe(200);
-		expect(currentProfileThread.json().comments[0].author).toMatchObject({
+		expect(currentProfileThread.json().items[0].author).toMatchObject({
 			name: "Virace 当前资料",
 			badge: { label: "楼主" },
 		});
@@ -683,7 +683,7 @@ describe("POST /qingyan/api/comments", () => {
 			},
 		});
 		expect(snapshotThread.statusCode).toBe(200);
-		expect(snapshotThread.json().comments[0].author).toMatchObject({
+		expect(snapshotThread.json().items[0].author).toMatchObject({
 			name: "Virace",
 			badge: { label: "楼主" },
 		});

@@ -109,21 +109,37 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			second.cookies.find((cookie) => cookie.name === "qingyan_visitor"),
 		).toBeUndefined();
 		expect(second.json()).toMatchObject({
-			capability: {
-				supportsVote: false,
+			schemaVersion: "2026-05-31",
+			features: {
+				commentVotes: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+				pageViews: {
+					enabled: true,
+				},
+				pageLikes: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+				visitors: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
 			},
-			pageMetrics: {
-				enabled: true,
-				trustMode: "lightweight",
-				pageViewCount: 2,
-			},
-			pageFeedback: {
-				supportsLike: false,
-				trustMode: "lightweight",
-				likeCount: 0,
-				liked: false,
+			data: {
+				comments: {
+					items: [],
+				},
+				pageViews: {
+					count: 2,
+				},
 			},
 		});
+		expect(second.json()).not.toHaveProperty("capability");
+		expect(second.json()).not.toHaveProperty("pageMetrics");
+		expect(second.json()).not.toHaveProperty("pageFeedback");
+		expect(second.json().data).not.toHaveProperty("pageLikes");
 		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
 		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
 		const threads = await fixture.app.db.select().from(pageThreads);
@@ -182,12 +198,19 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			pageMetrics: {
-				enabled: false,
-				trustMode: "trusted",
-				pageViewCount: 0,
+			features: {
+				pageViews: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+			},
+			data: {
+				comments: {
+					items: [],
+				},
 			},
 		});
+		expect(response.json().data).not.toHaveProperty("pageViews");
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
 	});
@@ -312,54 +335,68 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			capability: {
-				enabled: true,
-				supportsReply: true,
-				supportsVote: true,
-				supportsCaptcha: true,
-				defaultStatus: "pending",
+			features: {
+				comments: { enabled: true },
+				commentReplies: { enabled: true, maxDepth: 3 },
+				commentVotes: { enabled: true },
+				commentCaptcha: { enabled: true, mode: "threshold" },
+				pageViews: { enabled: true },
+				pageLikes: { enabled: true },
+				visitors: { enabled: true },
 			},
-			commentForm: {
-				allow: ["nickname", "email", "website"],
-				require: ["nickname", "email"],
-			},
-			pagination: {
-				sortBy: "newest",
-				limit: 20,
-				offset: 0,
-				totalCount: 2,
-				rootCount: 1,
-			},
-			pageMetrics: {
-				pageViewCount: 6,
-			},
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: 1,
-				liked: true,
-			},
-			captcha: {
-				required: false,
-				verified: false,
-				mode: "inline_value",
-				challenge: null,
+			data: {
+				comments: {
+					form: {
+						allow: ["nickname", "email", "website"],
+						require: ["nickname", "email"],
+					},
+					pagination: {
+						sortBy: "newest",
+						limit: 20,
+						offset: 0,
+						totalCount: 2,
+						rootCount: 1,
+					},
+					captcha: {
+						required: false,
+						verified: false,
+						mode: "inline_value",
+					},
+				},
+				pageViews: {
+					count: 6,
+				},
+				pageLikes: {
+					count: 1,
+					liked: true,
+				},
 			},
 		});
-		expect(response.json().capability.requiredAuthorFields).toBeUndefined();
-		expect(response.json().capability.optionalAuthorFields).toBeUndefined();
+		expect(response.json()).not.toHaveProperty("capability");
+		expect(response.json()).not.toHaveProperty("commentForm");
+		expect(response.json()).not.toHaveProperty("pagination");
+		expect(response.json()).not.toHaveProperty("pageMetrics");
+		expect(response.json()).not.toHaveProperty("pageFeedback");
+		expect(response.json()).not.toHaveProperty("captcha");
+		expect(response.json().data.comments.captcha).not.toHaveProperty(
+			"challenge",
+		);
 		expect(response.json().thread).toBeUndefined();
 
 		const payload = response.json();
-		expect(payload.comments).toHaveLength(1);
-		expect(payload.comments[0]).toMatchObject({
+		expect(payload.data.comments.items).toHaveLength(1);
+		expect(payload.data.comments.items[0]).toMatchObject({
 			id: "c_root",
-			viewerVote: "up",
+			vote: {
+				viewer: "up",
+			},
 		});
-		expect(payload.comments[0].author.gravatarUrl).toBeUndefined();
-		expect(payload.comments[0].author.avatarUrl).toBeUndefined();
-		expect(payload.comments[0].displayMeta).toBeUndefined();
-		expect(payload.comments[0].children).toHaveLength(1);
-		expect(payload.comments[0].children[0]).toMatchObject({
+		expect(payload.data.comments.items[0]).not.toHaveProperty("viewerVote");
+		expect(payload.data.comments.items[0].author.gravatarUrl).toBeUndefined();
+		expect(payload.data.comments.items[0].author.avatarUrl).toBeUndefined();
+		expect(payload.data.comments.items[0].displayMeta).toBeUndefined();
+		expect(payload.data.comments.items[0].children).toHaveLength(1);
+		expect(payload.data.comments.items[0].children[0]).toMatchObject({
 			id: "c_child",
 			parentId: "c_root",
 		});
@@ -438,14 +475,18 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			pagination: {
-				totalCount: 1,
-				rootCount: 1,
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 1,
+						rootCount: 1,
+					},
+				},
 			},
 		});
 		expect(response.json().thread).toBeUndefined();
-		expect(response.json().comments).toHaveLength(1);
-		expect(response.json().comments[0]).toMatchObject({
+		expect(response.json().data.comments.items).toHaveLength(1);
+		expect(response.json().data.comments.items[0]).toMatchObject({
 			id: "c_html_import",
 		});
 
@@ -489,20 +530,22 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			pagination: {
-				totalCount: 0,
-				rootCount: 0,
-			},
-			pageMetrics: {
-				pageViewCount: 0,
-			},
-			pageFeedback: {
-				likeCount: 0,
-				liked: false,
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 0,
+						rootCount: 0,
+					},
+					items: [],
+				},
+				pageViews: {
+					count: 0,
+				},
 			},
 		});
+		expect(response.json().data).not.toHaveProperty("pageLikes");
 		expect(response.json().thread).toBeUndefined();
-		expect(response.json().comments).toEqual([]);
+		expect(response.json().data.comments.items).toEqual([]);
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 		const candidates = await fixture.app.db
 			.select()
@@ -568,20 +611,22 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			pagination: {
-				totalCount: 0,
-				rootCount: 0,
-			},
-			pageMetrics: {
-				pageViewCount: 1,
-			},
-			pageFeedback: {
-				likeCount: 0,
-				liked: false,
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 0,
+						rootCount: 0,
+					},
+					items: [],
+				},
+				pageViews: {
+					count: 1,
+				},
 			},
 		});
+		expect(response.json().data).not.toHaveProperty("pageLikes");
 		expect(response.json().thread).toBeUndefined();
-		expect(response.json().comments).toEqual([]);
+		expect(response.json().data.comments.items).toEqual([]);
 		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
 			[],
 		);
@@ -642,7 +687,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			(cookie) => cookie.name === "qingyan_visitor",
 		);
 		expect(first.statusCode).toBe(200);
-		expect(first.json().pageMetrics.pageViewCount).toBe(1);
+		expect(first.json().data.pageViews.count).toBe(1);
 
 		const second = await fixture.app.inject({
 			method: "GET",
@@ -657,7 +702,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 
 		expect(second.statusCode).toBe(200);
-		expect(second.json().pageMetrics.pageViewCount).toBe(1);
+		expect(second.json().data.pageViews.count).toBe(1);
 		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
 			[],
 		);
@@ -698,13 +743,17 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			pagination: {
-				totalCount: 0,
-				rootCount: 0,
+			features: {
+				comments: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				pageViews: {
+					enabled: false,
+					reason: "page_inactive",
+				},
 			},
-			pageMetrics: {
-				pageViewCount: 0,
-			},
+			data: {},
 		});
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
@@ -859,7 +908,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		const payload = response.json();
-		expect(payload.comments[0]).toMatchObject({
+		expect(payload.data.comments.items[0]).toMatchObject({
 			id: "c_metadata",
 			displayMeta: {
 				location: {
@@ -875,7 +924,9 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				},
 			},
 		});
-		expect(payload.comments[0].displayMeta.device).not.toHaveProperty("icon");
+		expect(
+			payload.data.comments.items[0].displayMeta.device,
+		).not.toHaveProperty("icon");
 		const publicBody = JSON.stringify(payload);
 		expect(publicBody).not.toContain("203.0.113.8");
 		expect(publicBody).not.toContain("Mozilla/5.0 metadata-test");
@@ -969,19 +1020,23 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().comments[0].author).toMatchObject({
+		expect(response.json().data.comments.items[0].author).toMatchObject({
 			name: "Alice",
 			avatarUrl: `https://cravatar.cn/avatar/${aliceMd5}?s=160&d=identicon&f=y`,
 		});
-		expect(response.json().comments[0].author.gravatarUrl).toBeUndefined();
-		expect(response.json().commentDisplay).toMatchObject({
+		expect(
+			response.json().data.comments.items[0].author.gravatarUrl,
+		).toBeUndefined();
+		expect(response.json().data.comments.display).toMatchObject({
 			avatar: {
 				external: {
 					enabled: true,
 				},
 			},
 		});
-		expect(response.json().commentDisplay.avatar.display).toBeUndefined();
+		expect(
+			response.json().data.comments.display.avatar.display,
+		).toBeUndefined();
 	});
 
 	it("returns configured avatar display hints only when advisory fields are enabled", async () => {
@@ -1010,7 +1065,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().commentDisplay).toMatchObject({
+		expect(response.json().data.comments.display).toMatchObject({
 			avatar: {
 				external: {
 					enabled: false,
@@ -1109,7 +1164,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().comments[0].author.badge).toEqual({
+		expect(response.json().data.comments.items[0].author.badge).toEqual({
 			label: "楼主",
 		});
 
@@ -1138,7 +1193,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 
 		expect(updatedResponse.statusCode).toBe(200);
-		expect(updatedResponse.json().comments[0].author.badge).toEqual({
+		expect(updatedResponse.json().data.comments.items[0].author.badge).toEqual({
 			label: "博主",
 		});
 	});
@@ -1176,7 +1231,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			},
 		});
 		expect(publicResponse.statusCode).toBe(200);
-		expect(publicResponse.json().viewer).toEqual({});
+		expect(publicResponse.json()).not.toHaveProperty("viewer");
 
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const adminResponse = await fixture.app.inject({
@@ -1230,13 +1285,25 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			captcha: {
-				required: true,
-				verified: false,
-				mode: "inline_value",
+			features: {
+				commentCaptcha: {
+					enabled: true,
+					mode: "always",
+				},
+			},
+			data: {
+				comments: {
+					captcha: {
+						required: true,
+						verified: false,
+						mode: "inline_value",
+					},
+				},
 			},
 		});
-		expect(response.json().captcha.challenge.challengeId).toMatch(/^cap_/);
+		expect(response.json().data.comments.captcha.challenge.challengeId).toMatch(
+			/^cap_/,
+		);
 	});
 
 	it("ignores explicit path-only pageUrl in bootstrap requests without storing unknown pages", async () => {

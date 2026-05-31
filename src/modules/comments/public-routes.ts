@@ -6,6 +6,7 @@ import {
 	ResourceNotFoundError,
 } from "../shared/errors";
 import { presentComments } from "./presenter";
+import { omitEmptyObject } from "./public-contract";
 import { CommentsRepository } from "./repository";
 import {
 	bootstrapQuerySchema,
@@ -49,6 +50,20 @@ function requireDevPageUrl(pageUrl?: string): string {
 	}
 
 	return pageUrl;
+}
+
+function presentCaptchaState(result: {
+	required: boolean;
+	verified: boolean;
+	mode: string;
+	challenge?: unknown;
+}) {
+	return {
+		required: result.required,
+		verified: result.verified,
+		mode: result.mode,
+		...(result.challenge ? { challenge: result.challenge } : {}),
+	};
 }
 
 export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
@@ -151,20 +166,48 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			path: visitorCookiePath,
 		});
 
+		const commentsData = result.features.comments.enabled
+			? {
+					form: result.form,
+					display: result.display,
+					pagination: result.pagination,
+					items: presentComments(
+						result.commentBundle.comments,
+						result.commentBundle.viewerVoteMap,
+						{
+							...result.displayOptions,
+							commentVotes: {
+								enabled: result.features.commentVotes.enabled,
+							},
+						},
+					),
+					...(result.features.commentCaptcha.enabled
+						? { captcha: result.captcha }
+						: {}),
+				}
+			: undefined;
+		const viewer = omitEmptyObject(result.viewer);
+
 		return {
-			capability: result.capability,
-			commentForm: result.commentForm,
-			pagination: result.pagination,
-			comments: presentComments(
-				result.commentBundle.comments,
-				result.commentBundle.viewerVoteMap,
-				result.commentDisplay,
-			),
-			commentDisplay: result.publicCommentDisplay,
-			viewer: result.viewer,
-			pageMetrics: result.pageMetrics,
-			pageFeedback: result.pageFeedback,
-			captcha: result.captcha,
+			schemaVersion: "2026-05-31",
+			site: result.site,
+			page: result.page,
+			features: result.features,
+			data: {
+				...(commentsData ? { comments: commentsData } : {}),
+				...(result.features.pageViews.enabled
+					? { pageViews: { count: result.thread.pageViewCount } }
+					: {}),
+				...(result.features.pageLikes.enabled
+					? {
+							pageLikes: {
+								count: result.thread.pageLikeCount,
+								liked: result.pageLikes.liked,
+							},
+						}
+					: {}),
+			},
+			...(viewer ? { viewer } : {}),
 		};
 	});
 
@@ -211,13 +254,18 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		});
 
 		return {
+			display: result.display,
 			pagination: result.pagination,
-			comments: presentComments(
+			items: presentComments(
 				result.commentBundle.comments,
 				result.commentBundle.viewerVoteMap,
-				result.commentDisplay,
+				{
+					...result.displayOptions,
+					commentVotes: {
+						enabled: result.commentVotesEnabled,
+					},
+				},
 			),
-			commentDisplay: result.publicCommentDisplay,
 		};
 	});
 
@@ -358,10 +406,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 
 		return {
 			commentId: result.commentId,
-			voteUp: result.voteUp,
-			voteDown: result.voteDown,
-			viewerVote: result.viewerVote,
-			trustMode: result.trustMode,
+			vote: result.vote,
 		};
 	});
 
@@ -407,12 +452,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			path: visitorCookiePath,
 		});
 
-		return {
-			required: result.required,
-			verified: result.verified,
-			mode: result.mode,
-			challenge: result.challenge,
-		};
+		return presentCaptchaState(result);
 	});
 
 	fastify.post("/comments/captcha/refresh", async (request, reply) => {
@@ -457,12 +497,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			path: visitorCookiePath,
 		});
 
-		return {
-			required: result.required,
-			verified: result.verified,
-			mode: result.mode,
-			challenge: result.challenge,
-		};
+		return presentCaptchaState(result);
 	});
 
 	fastify.post("/comments/captcha/verify", async (request) => {

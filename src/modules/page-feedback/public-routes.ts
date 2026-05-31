@@ -105,6 +105,8 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			path: visitorCookiePath,
 		});
 
-		return result;
+		return {
+			pageLikes: result.pageLikes,
+		};
 	});
 };

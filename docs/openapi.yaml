@@ -616,34 +616,6 @@ components:
                 type: string
         restartRequired:
           type: boolean
-    CommentCapability:
-      type: object
-      required:
-        - enabled
-        - supportsReply
-        - supportsVote
-        - supportsCaptcha
-        - defaultStatus
-        - message
-      properties:
-        enabled:
-          type: boolean
-        supportsReply:
-          type: boolean
-        supportsVote:
-          type: boolean
-        supportsCaptcha:
-          type: boolean
-        defaultStatus:
-          type: string
-          enum: [pending, approved]
-        message:
-          type:
-            - string
-            - 'null'
-    TrustMode:
-      type: string
-      enum: [trusted, lightweight]
     CommentForm:
       type: object
       required: [allow, require]
@@ -775,19 +747,14 @@ components:
       type: object
       required:
         - id
-        - parentId
         - author
         - content
         - status
         - isPinned
         - isFolded
         - replyCount
-        - voteUp
-        - voteDown
-        - viewerVote
         - createdAt
         - updatedAt
-        - children
       properties:
         id:
           type: string
@@ -811,15 +778,8 @@ components:
           type: boolean
         replyCount:
           type: integer
-        voteUp:
-          type: integer
-        voteDown:
-          type: integer
-        viewerVote:
-          type:
-            - string
-            - 'null'
-          enum: [up, down, null]
+        vote:
+          $ref: '#/components/schemas/CommentVote'
         createdAt:
           type:
             - string
@@ -834,25 +794,119 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicComment'
-    PageMetrics:
+    CommentVote:
       type: object
-      required: [enabled, trustMode, pageViewCount]
+      required: [up, down]
+      properties:
+        up:
+          type: integer
+        down:
+          type: integer
+        viewer:
+          type: string
+          enum: [up, down]
+    FeatureDisabledReason:
+      type: string
+      enum:
+        - site_disabled
+        - page_inactive
+        - comments_disabled
+        - feature_disabled
+        - unsupported
+    FeatureFlag:
+      type: object
+      required: [enabled]
       properties:
         enabled:
           type: boolean
-        trustMode:
-          $ref: '#/components/schemas/TrustMode'
-        pageViewCount:
-          type: integer
-    PageFeedbackSummary:
+        reason:
+          $ref: '#/components/schemas/FeatureDisabledReason'
+    PublicFeatures:
       type: object
-      required: [supportsLike, trustMode, likeCount, liked]
+      required:
+        - comments
+        - commentReplies
+        - commentVotes
+        - commentCaptcha
+        - pageViews
+        - pageLikes
+        - visitors
       properties:
-        supportsLike:
-          type: boolean
-        trustMode:
-          $ref: '#/components/schemas/TrustMode'
-        likeCount:
+        comments:
+          $ref: '#/components/schemas/FeatureFlag'
+        commentReplies:
+          allOf:
+            - $ref: '#/components/schemas/FeatureFlag'
+            - type: object
+              properties:
+                maxDepth:
+                  type: integer
+        commentVotes:
+          $ref: '#/components/schemas/FeatureFlag'
+        commentCaptcha:
+          allOf:
+            - $ref: '#/components/schemas/FeatureFlag'
+            - type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [never, always, threshold]
+        pageViews:
+          $ref: '#/components/schemas/FeatureFlag'
+        pageLikes:
+          $ref: '#/components/schemas/FeatureFlag'
+        visitors:
+          $ref: '#/components/schemas/FeatureFlag'
+    BootstrapSite:
+      type: object
+      required: [siteKey]
+      properties:
+        siteKey:
+          type: string
+    BootstrapPage:
+      type: object
+      required: [pageKey, status]
+      properties:
+        pageKey:
+          type: string
+        status:
+          type: string
+    BootstrapData:
+      type: object
+      properties:
+        comments:
+          $ref: '#/components/schemas/BootstrapCommentsData'
+        pageViews:
+          $ref: '#/components/schemas/BootstrapPageViewsData'
+        pageLikes:
+          $ref: '#/components/schemas/BootstrapPageLikesData'
+    BootstrapCommentsData:
+      type: object
+      required: [form, display, pagination, items]
+      properties:
+        form:
+          $ref: '#/components/schemas/CommentForm'
+        display:
+          $ref: '#/components/schemas/CommentDisplay'
+        pagination:
+          $ref: '#/components/schemas/CommentPagination'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicComment'
+        captcha:
+          $ref: '#/components/schemas/CaptchaStateResponse'
+    BootstrapPageViewsData:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+    BootstrapPageLikesData:
+      type: object
+      required: [count, liked]
+      properties:
+        count:
           type: integer
         liked:
           type: boolean
@@ -889,7 +943,7 @@ components:
         - $ref: '#/components/schemas/IframeWidgetCaptchaChallenge'
     CaptchaStateResponse:
       type: object
-      required: [required, verified, mode, challenge]
+      required: [required, verified, mode]
       properties:
         required:
           type: boolean
@@ -899,9 +953,7 @@ components:
           type: string
           enum: [inline_value, iframe_widget]
         challenge:
-          oneOf:
-            - $ref: '#/components/schemas/CaptchaChallenge'
-            - type: 'null'
+          $ref: '#/components/schemas/CaptchaChallenge'
     CaptchaVerifyResponse:
       type: object
       required: [required, verified]
@@ -921,50 +973,41 @@ components:
               type: string
             badgeLabel:
               type: string
-          description: Minimal verified author state for the current admin session. Anonymous visitors receive an empty viewer object.
+          description: Minimal verified author state for the current admin session. Anonymous visitors omit the viewer object.
     BootstrapResponse:
       type: object
       required:
-        - capability
-        - commentForm
-        - pagination
-        - comments
-        - pageMetrics
-        - pageFeedback
-        - captcha
+        - schemaVersion
+        - site
+        - page
+        - features
+        - data
       properties:
-        capability:
-          $ref: '#/components/schemas/CommentCapability'
-        commentForm:
-          $ref: '#/components/schemas/CommentForm'
-        pagination:
-          $ref: '#/components/schemas/CommentPagination'
-        comments:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublicComment'
-        commentDisplay:
-          $ref: '#/components/schemas/CommentDisplay'
-        pageMetrics:
-          $ref: '#/components/schemas/PageMetrics'
-        pageFeedback:
-          $ref: '#/components/schemas/PageFeedbackSummary'
-        captcha:
-          $ref: '#/components/schemas/CaptchaStateResponse'
+        schemaVersion:
+          type: string
+          const: '2026-05-31'
+        site:
+          $ref: '#/components/schemas/BootstrapSite'
+        page:
+          $ref: '#/components/schemas/BootstrapPage'
+        features:
+          $ref: '#/components/schemas/PublicFeatures'
+        data:
+          $ref: '#/components/schemas/BootstrapData'
         viewer:
           $ref: '#/components/schemas/BootstrapViewer'
     ThreadResponse:
       type: object
-      required: [pagination, comments]
+      required: [display, pagination, items]
       properties:
+        display:
+          $ref: '#/components/schemas/CommentDisplay'
         pagination:
           $ref: '#/components/schemas/CommentPagination'
-        comments:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/PublicComment'
-        commentDisplay:
-          $ref: '#/components/schemas/CommentDisplay'
     CreateCommentRequest:
       type: object
       required:
@@ -1051,19 +1094,12 @@ components:
             - type: 'null'
     VoteCommentResponse:
       type: object
-      required: [commentId, voteUp, voteDown, viewerVote, trustMode]
+      required: [commentId, vote]
       properties:
         commentId:
           type: string
-        voteUp:
-          type: integer
-        voteDown:
-          type: integer
-        viewerVote:
-          type: string
-          enum: [up, down]
-        trustMode:
-          $ref: '#/components/schemas/TrustMode'
+        vote:
+          $ref: '#/components/schemas/CommentVote'
     CaptchaVerifyRequest:
       type: object
       required: [siteKey, pageKey, challengeId, mode, value]
@@ -1147,7 +1183,7 @@ components:
             - type: 'null'
     PageLikeResponse:
       type: object
-      required: [pageFeedback]
+      required: [pageLikes]
       properties:
-        pageFeedback:
-          $ref: '#/components/schemas/PageFeedbackSummary'
+        pageLikes:
+          $ref: '#/components/schemas/BootstrapPageLikesData'

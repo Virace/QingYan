@@ -1137,7 +1137,7 @@ describe("admin comments", () => {
 			},
 		});
 		expect(publicThread.statusCode).toBe(200);
-		expect(publicThread.json().comments).toEqual([]);
+		expect(publicThread.json().items).toEqual([]);
 	});
 
 	it("creates a verified reply from admin comments API", async () => {
