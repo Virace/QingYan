@@ -761,6 +761,18 @@ AdminSettings
 
 更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
 
+Admin Settings API 的 canonical 开关路径：
+
+- 评论：`comments.enabled`
+- 评论验证码策略：`comments.captcha.mode`
+- 评论投票：`engagement.commentVotes.enabled`
+- 页面浏览量：`engagement.pageViews.enabled`
+- 页面点赞：`engagement.pageLikes.enabled`
+- 访客记录：`engagement.visitors.enabled`
+- 当前站点邮件通知：`notifications.emailEnabled`
+
+`pageFeedback.allowLike` 是过渡同步字段；新 UI 和新调用代码应以 `engagement.pageLikes.enabled` 为页面点赞 canonical 开关。
+
 请求：
 
 ```ts
@@ -890,6 +902,8 @@ Settings API 的双状态字段必须使用 JSON boolean。GET 会归一化历�
 
 公开 bootstrap 会把这些开关映射到 `features`：`comments.enabled=false` 时返回 `features.comments.enabled=false` 并省略 `data.comments`；`engagement.pageViews.enabled=false` 时省略 `data.pageViews`；`engagement.pageLikes.enabled=false` 时省略 `data.pageLikes`；`engagement.commentVotes.enabled=false` 时评论项不输出 `vote`。
 
+Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错误的 `path` 使用 Admin Settings API canonical path，不使用公开 bootstrap 的 `features.*` path。
+
 ## System Settings
 
 ### `GET /api/admin/system-settings`
@@ -905,6 +919,31 @@ AdminSystemSettings
 ### `PUT /api/admin/system-settings`
 
 更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
+
+`mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。`notifications.emailEnabled` 是 site owner，只控制当前站点是否发送通知。
+
+`avatar.external.enabled` 控制外部头像 URL 生成。`avatar.display.*` 和 `publicApi.advisoryFields.enabled` 控制可选公开展示建议字段，不能简单视为 `avatar.external.enabled` 的子设置。
+
+System Settings validation failure 同样返回 `VALIDATION_FAILED + fields[]`：
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "请求参数无效。",
+    "requestId": "req_xxx",
+    "fields": [
+      {
+        "path": "mail.enabled",
+        "code": "invalid_type",
+        "expected": "boolean",
+        "received": "number",
+        "message": "必须是 JSON boolean，不能使用 0/1。"
+      }
+    ]
+  }
+}
+```
 
 响应：
 

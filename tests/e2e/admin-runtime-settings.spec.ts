@@ -39,7 +39,7 @@ test("site settings page renders editable controls", async ({ page }) => {
 	await page.getByRole("button", { name: "站点设置" }).click();
 	await expect(page.getByRole("heading", { name: "站点设置" })).toBeVisible();
 	await expect(page.getByText("请选择站点")).toHaveCount(0);
-	await expect(page.getByText("评论开关")).toBeVisible();
+	await expect(page.getByText("评论").first()).toBeVisible();
 	await expect(page.getByText("验证码模式")).toBeVisible();
 	await expect(page.getByText("请求元数据")).toBeVisible();
 	await expect(page.getByText("IPv4 下载源")).toHaveCount(0);
@@ -57,13 +57,18 @@ test("system settings page renders database-owned install settings", async ({
 
 	await page.getByRole("button", { name: "系统设置" }).click();
 	await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
-	await expect(page.getByText("SMTP Host")).toBeVisible();
-	await expect(page.getByText("SMTP 密码")).toBeVisible();
-	await expect(page.getByText("启用外部头像 URL")).toBeVisible();
-	await expect(page.getByText("头像接口地址")).toBeVisible();
-	await expect(page.getByText("邮箱哈希算法")).toBeVisible();
-	await expect(page.getByText("头像 URL 参数")).toBeVisible();
-	await expect(page.getByText("验证码类型 Provider")).toBeVisible();
+	await expect(page.getByRole("heading", { name: "系统邮件" })).toBeVisible();
+	await expect(page.getByText("SMTP Host")).toHaveCount(0);
+	await expect(page.getByText("已保存的 SMTP 配置会保留")).toBeVisible();
+	await expect(page.getByRole("heading", { name: "外部头像" })).toBeVisible();
+	await expect(
+		page.getByRole("switch", { name: "外部头像 URL" }),
+	).toBeVisible();
+	await expect(page.getByText("头像接口地址")).toHaveCount(0);
+	await expect(page.getByText("邮箱哈希算法")).toHaveCount(0);
+	await expect(page.getByText("头像 URL 参数")).toHaveCount(0);
+	await expect(page.getByText("已保存的 base URL")).toBeVisible();
+	await expect(page.getByRole("heading", { name: "验证码服务" })).toBeVisible();
 	await expect(page.getByText("图片宽度")).toBeVisible();
 	await expect(page.getByText("Turnstile Site Key")).toHaveCount(0);
 	await expect(page.getByText("IPv4 下载源")).toBeVisible();
@@ -80,10 +85,7 @@ test("system settings captcha provider shows only matching fields", async ({
 	}
 
 	await page.getByRole("button", { name: "系统设置" }).click();
-	const provider = page
-		.getByText("验证码类型 Provider")
-		.locator("..")
-		.locator("select");
+	const provider = page.getByLabel("验证码服务");
 	await expect(provider).toBeVisible();
 	await expect(page.getByText("图片宽度")).toBeVisible();
 	await expect(page.getByText("Turnstile Site Key")).toHaveCount(0);
@@ -109,6 +111,80 @@ test("system settings captcha provider shows only matching fields", async ({
 	await expect(page.getByText("reCAPTCHA API Key")).toHaveCount(0);
 });
 
+test("site settings save failure shows request id and field errors", async ({
+	page,
+}) => {
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	await page.route("**/api/admin/sites/*/settings", async (route) => {
+		if (route.request().method() === "PUT") {
+			await route.fulfill({
+				status: 400,
+				contentType: "application/json",
+				body: JSON.stringify({
+					error: {
+						code: "VALIDATION_FAILED",
+						message: "请求参数无效。",
+						requestId: "req_settings_visible",
+						fields: [
+							{
+								path: "engagement.commentVotes.enabled",
+								code: "invalid_type",
+								expected: "boolean",
+								received: "number",
+								message: "必须是 JSON boolean，不能使用 0/1。",
+							},
+						],
+					},
+				}),
+			});
+			return;
+		}
+		await route.fallback();
+	});
+
+	await page.getByRole("button", { name: "站点设置" }).click();
+	await page.getByRole("button", { name: "保存站点设置" }).click();
+	await expect(page.getByText("站点设置保存失败")).toBeVisible();
+	await expect(page.getByText("req_settings_visible")).toBeVisible();
+	await expect(page.getByText("engagement.commentVotes.enabled")).toBeVisible();
+	await expect(
+		page.getByText("必须是 JSON boolean，不能使用 0/1。").first(),
+	).toBeVisible();
+});
+
+test("site settings keeps independent counters visible when visitors are off", async ({
+	page,
+}) => {
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	await page.getByRole("button", { name: "站点设置" }).click();
+	await expect(page.getByRole("switch", { name: "访客记录" })).toBeVisible();
+	await expect(page.getByRole("switch", { name: "页面浏览量" })).toBeVisible();
+	await expect(page.getByRole("switch", { name: "页面点赞" })).toBeVisible();
+	await expect(page.getByRole("switch", { name: "评论投票" })).toBeVisible();
+});
+
+test("system mail disabled hides smtp details without removing site notification control", async ({
+	page,
+}) => {
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	await page.getByRole("button", { name: "系统设置" }).click();
+	await expect(page.getByRole("heading", { name: "系统邮件" })).toBeVisible();
+	await expect(page.getByText("SMTP Host")).toHaveCount(0);
+	await expect(page.getByText("已保存的 SMTP 配置会保留")).toBeVisible();
+
+	await page.getByRole("button", { name: "站点设置" }).click();
+	await expect(page.getByText("当前站点邮件通知")).toBeVisible();
+});
+
 test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 	await page.route("**/api/admin/ops/update/check", async (route) => {
 		await route.fulfill({
@@ -126,6 +202,36 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 				message:
 					"更新规则已配置，但当前仓库尚未发布首个 Release，暂时没有可安装更新。",
 				checkedAt: "2026-05-07T00:00:00.000Z",
+			}),
+		});
+	});
+	await page.route("**/api/admin/ops/update/plan", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				kind: "program-update",
+				executor: "qingyan.service",
+				description: "使用服务动作执行程序更新。",
+				estimatedRestartSeconds: {
+					min: 30,
+					max: 60,
+				},
+				steps: ["创建整站备份", "执行 qyctl upgrade"],
+				manualCommands: ["qyctl status"],
+			}),
+		});
+	});
+	await page.route("**/api/admin/ops/upgrade/dry-run", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				state: "normal_current",
+				plan: null,
+				manualCommands: [
+					"systemctl status qingyan.service",
+					"journalctl -u qingyan.service -n 120 --no-pager",
+					"qyctl status",
+				],
 			}),
 		});
 	});
@@ -162,6 +268,6 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 	).toBeVisible();
 	await expect(page.getByText('"state": "normal_current"')).toBeVisible();
 	await expect(
-		page.getByText("systemctl status qingyan.service"),
+		page.getByText("systemctl status qingyan.service", { exact: true }),
 	).toBeVisible();
 });

@@ -8,10 +8,12 @@ export const textareaClass =
 export function Field({
 	label,
 	description,
+	error,
 	children,
 }: {
 	label: string;
 	description?: string;
+	error?: string;
 	children: ReactNode;
 }) {
 	return (
@@ -25,7 +27,42 @@ export function Field({
 				) : null}
 			</div>
 			{children}
+			{error ? (
+				<p className="text-xs font-medium leading-5 text-destructive">
+					{error}
+				</p>
+			) : null}
 		</div>
+	);
+}
+
+export function BooleanField({
+	label,
+	description,
+	checked,
+	onCheckedChange,
+	error,
+}: {
+	label: string;
+	description?: string;
+	checked: boolean;
+	onCheckedChange: (checked: boolean) => void;
+	error?: string;
+}) {
+	return (
+		<Field label={label} description={description} error={error}>
+			<label className="flex min-h-9 items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+				<input
+					type="checkbox"
+					role="switch"
+					aria-label={label}
+					aria-checked={checked}
+					checked={checked}
+					onChange={(event) => onCheckedChange(event.target.checked)}
+				/>
+				<span>{checked ? "开启" : "关闭"}</span>
+			</label>
+		</Field>
 	);
 }
 

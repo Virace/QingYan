@@ -13,6 +13,7 @@ import {
 	updateSystemSettings,
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 import {
+	BooleanField,
 	EmptyState,
 	Field,
 	SettingsSection,
@@ -44,6 +46,48 @@ import {
 	scopeLabels,
 } from "./display-labels";
 import { PaginationControls } from "./admin-pagination";
+import {
+	buildSettingsErrorModel,
+	firstFieldError,
+} from "./settings-error-model";
+import {
+	showCaptchaThresholdDetails,
+	showExternalAvatarDetails,
+	showLowTrustCounterHint,
+	showMailDetails,
+} from "./settings-visibility";
+
+function SettingsSaveError({
+	model,
+	fallback,
+}: {
+	model: ReturnType<typeof buildSettingsErrorModel>;
+	fallback: string;
+}) {
+	if (!model) {
+		return null;
+	}
+	return (
+		<Alert variant="destructive" className="md:col-span-2">
+			<AlertTitle>{fallback}</AlertTitle>
+			<AlertDescription>
+				<p>
+					{model.message}
+					{model.requestId ? ` requestId: ${model.requestId}` : ""}
+				</p>
+				{model.fields.length > 0 ? (
+					<ul className="mt-2 list-disc pl-5">
+						{model.fields.map((field) => (
+							<li key={`${field.path}:${field.message}`}>
+								{field.path}: {field.message}
+							</li>
+						))}
+					</ul>
+				) : null}
+			</AlertDescription>
+		</Alert>
+	);
+}
 
 export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
@@ -305,10 +349,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 					: draft.pageFeedback,
 		});
 	};
-	const countersEnabled =
-		draft.engagement.pageViews.enabled ||
-		draft.engagement.pageLikes.enabled ||
-		draft.engagement.commentVotes.enabled;
+	const saveError = buildSettingsErrorModel(
+		mutation.error,
+		"站点设置保存失败。",
+	);
 
 	return (
 		<Card>
@@ -324,710 +368,663 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 						mutation.mutate(draft);
 					}}
 				>
-					<Field label="评论开关">
-						<select
-							className={inputClass}
-							value={String(draft.comments.enabled)}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										enabled: event.target.value === "true",
-									},
-								})
-							}
-						>
-							<option value="true">启用</option>
-							<option value="false">关闭</option>
-						</select>
-					</Field>
-					<Field label="默认状态">
-						<select
-							className={inputClass}
-							value={draft.comments.defaultStatus}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										defaultStatus: event.target.value as "pending" | "approved",
-									},
-								})
-							}
-						>
-							<option value="pending">待审</option>
-							<option value="approved">直接通过</option>
-						</select>
-					</Field>
-					<SettingsSection
-						title="评论审核"
-						description="审核模式属于当前站点；Akismet 会自动使用站点前端 Origin 作为 Blog URL。"
-					>
-						<div className="grid gap-4 md:grid-cols-2">
-							<Field
-								label="审核模式"
-								description="纯手动只进入待审；Akismet 自动审核可直接通过正常评论并拦截垃圾评论。"
-							>
+					<SettingsSaveError model={saveError} fallback="站点设置保存失败" />
+					<BooleanField
+						label="评论"
+						description="控制当前站点是否提供评论提交、评论列表和评论相关互动。"
+						checked={draft.comments.enabled}
+						error={firstFieldError(saveError, "comments.enabled")}
+						onCheckedChange={(enabled) =>
+							setDraft({
+								...draft,
+								comments: {
+									...draft.comments,
+									enabled,
+								},
+							})
+						}
+					/>
+					{draft.comments.enabled ? (
+						<>
+							<Field label="默认状态">
 								<select
 									className={inputClass}
-									value={draft.comments.moderation.mode}
-									onChange={(event) => {
-										const mode = event.target
-											.value as AdminSettings["comments"]["moderation"]["mode"];
+									value={draft.comments.defaultStatus}
+									onChange={(event) =>
 										setDraft({
 											...draft,
 											comments: {
 												...draft.comments,
-												moderation: {
-													...draft.comments.moderation,
-													mode,
-													provider:
-														mode === "akismet_auto" ||
-														mode === "manual_with_akismet"
-															? "akismet"
-															: "none",
-												},
+												defaultStatus: event.target.value as
+													| "pending"
+													| "approved",
 											},
-										});
-									}}
+										})
+									}
 								>
-									<option value="manual">纯手动审核</option>
-									<option value="none">不审核，直接通过</option>
-									<option value="akismet_auto">Akismet 自动审核</option>
-									<option value="manual_with_akismet">
-										手动审核 + Akismet 辅助
-									</option>
+									<option value="pending">待审</option>
+									<option value="approved">直接通过</option>
 								</select>
 							</Field>
-						</div>
-					</SettingsSection>
-					<Field label="验证码模式">
-						<select
-							className={inputClass}
-							value={draft.comments.captcha.mode}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										captcha: {
-											...draft.comments.captcha,
-											mode: event.target.value as
-												| "never"
-												| "always"
-												| "threshold",
-										},
-									},
-								})
-							}
-						>
-							<option value="never">从不</option>
-							<option value="always">总是</option>
-							<option value="threshold">阈值</option>
-						</select>
-					</Field>
-					<Field label="阈值动作次数">
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.captcha.thresholdMaxActions}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										captcha: {
-											...draft.comments.captcha,
-											thresholdMaxActions: Number(event.target.value),
-										},
-									},
-								})
-							}
-						/>
-					</Field>
-					<Field label="阈值窗口（秒）">
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.captcha.thresholdWindowSec}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										captcha: {
-											...draft.comments.captcha,
-											thresholdWindowSec: Number(event.target.value),
-										},
-									},
-								})
-							}
-						/>
-					</Field>
-					<Field label="评论最大深度">
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.maxDepth}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										maxDepth: Number(event.target.value),
-									},
-								})
-							}
-						/>
-					</Field>
-					<Field label="根评论分页">
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.rootLimit}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										rootLimit: Number(event.target.value),
-									},
-								})
-							}
-						/>
-					</Field>
-					<Field label="允许作者站点">
-						<select
-							className={inputClass}
-							value={String(draft.comments.allowWebsite)}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										allowWebsite: event.target.value === "true",
-									},
-								})
-							}
-						>
-							<option value="true">允许</option>
-							<option value="false">关闭</option>
-						</select>
-					</Field>
-					<SettingsSection
-						title="评论身份必填项"
-						description="控制普通访客提交评论时必须提供哪些身份字段。"
-					>
-						<div className="grid gap-2 md:grid-cols-3">
-							{(["nickname", "email", "website"] as const).map((field) => (
-								<label
-									key={field}
-									className="flex items-center justify-between rounded-md border p-3 text-sm"
+							<SettingsSection
+								title="评论审核"
+								description="审核模式属于当前站点；Akismet 会自动使用站点前端 Origin 作为 Blog URL。"
+							>
+								<div className="grid gap-4 md:grid-cols-2">
+									<Field
+										label="审核模式"
+										description="纯手动只进入待审；Akismet 自动审核可直接通过正常评论并拦截垃圾评论。"
+									>
+										<select
+											className={inputClass}
+											value={draft.comments.moderation.mode}
+											onChange={(event) => {
+												const mode = event.target
+													.value as AdminSettings["comments"]["moderation"]["mode"];
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														moderation: {
+															...draft.comments.moderation,
+															mode,
+															provider:
+																mode === "akismet_auto" ||
+																mode === "manual_with_akismet"
+																	? "akismet"
+																	: "none",
+														},
+													},
+												});
+											}}
+										>
+											<option value="manual">纯手动审核</option>
+											<option value="none">不审核，直接通过</option>
+											<option value="akismet_auto">Akismet 自动审核</option>
+											<option value="manual_with_akismet">
+												手动审核 + Akismet 辅助
+											</option>
+										</select>
+									</Field>
+								</div>
+							</SettingsSection>
+							<Field label="验证码模式">
+								<select
+									className={inputClass}
+									value={draft.comments.captcha.mode}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												captcha: {
+													...draft.comments.captcha,
+													mode: event.target.value as
+														| "never"
+														| "always"
+														| "threshold",
+												},
+											},
+										})
+									}
 								>
-									<span>
-										{field === "nickname"
-											? "昵称"
-											: field === "email"
-												? "邮箱"
-												: "站点"}
-									</span>
-									<input
-										type="checkbox"
-										checked={commentRequire.includes(field)}
-										disabled={
-											field === "website" && !draft.comments.allowWebsite
-										}
-										onChange={(event) =>
-											updateRequire(field, event.target.checked)
+									<option value="never">从不</option>
+									<option value="always">总是</option>
+									<option value="threshold">阈值</option>
+								</select>
+							</Field>
+							{showCaptchaThresholdDetails(draft) ? (
+								<>
+									<Field label="阈值动作次数">
+										<Input
+											type="number"
+											min={1}
+											value={draft.comments.captcha.thresholdMaxActions}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														captcha: {
+															...draft.comments.captcha,
+															thresholdMaxActions: Number(event.target.value),
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="阈值窗口（秒）">
+										<Input
+											type="number"
+											min={1}
+											value={draft.comments.captcha.thresholdWindowSec}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														captcha: {
+															...draft.comments.captcha,
+															thresholdWindowSec: Number(event.target.value),
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+								</>
+							) : null}
+							<Field label="评论最大深度">
+								<Input
+									type="number"
+									min={1}
+									value={draft.comments.maxDepth}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												maxDepth: Number(event.target.value),
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field label="根评论分页">
+								<Input
+									type="number"
+									min={1}
+									value={draft.comments.rootLimit}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												rootLimit: Number(event.target.value),
+											},
+										})
+									}
+								/>
+							</Field>
+							<BooleanField
+								label="允许作者站点"
+								checked={draft.comments.allowWebsite}
+								onCheckedChange={(allowWebsite) =>
+									setDraft({
+										...draft,
+										comments: {
+											...draft.comments,
+											allowWebsite,
+										},
+									})
+								}
+							/>
+							<SettingsSection
+								title="评论身份必填项"
+								description="控制普通访客提交评论时必须提供哪些身份字段。"
+							>
+								<div className="grid gap-2 md:grid-cols-3">
+									{(["nickname", "email", "website"] as const).map((field) => (
+										<label
+											key={field}
+											className="flex items-center justify-between rounded-md border p-3 text-sm"
+										>
+											<span>
+												{field === "nickname"
+													? "昵称"
+													: field === "email"
+														? "邮箱"
+														: "站点"}
+											</span>
+											<input
+												type="checkbox"
+												checked={commentRequire.includes(field)}
+												disabled={
+													field === "website" && !draft.comments.allowWebsite
+												}
+												onChange={(event) =>
+													updateRequire(field, event.target.checked)
+												}
+											/>
+										</label>
+									))}
+								</div>
+							</SettingsSection>
+							<SettingsSection
+								title="可信评论作者"
+								description="管理员登录后可作为站点人员回复；公开展示会按这里的 badge 和显示名策略处理。"
+							>
+								<div className="grid gap-4 md:grid-cols-2">
+									<BooleanField
+										label="启用可信作者"
+										checked={draft.comments.verifiedAuthor.enabled}
+										onCheckedChange={(enabled) =>
+											setDraft({
+												...draft,
+												comments: {
+													...draft.comments,
+													verifiedAuthor: {
+														...draft.comments.verifiedAuthor,
+														enabled,
+													},
+												},
+											})
 										}
 									/>
-								</label>
-							))}
-						</div>
-					</SettingsSection>
-					<SettingsSection
-						title="可信评论作者"
-						description="管理员登录后可作为站点人员回复；公开展示会按这里的 badge 和显示名策略处理。"
-					>
-						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="启用可信作者">
-								<select
-									className={inputClass}
-									value={String(draft.comments.verifiedAuthor.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												verifiedAuthor: {
-													...draft.comments.verifiedAuthor,
-													enabled: event.target.value === "true",
-												},
+									<Field label="显示名称">
+										<Input
+											value={draft.comments.verifiedAuthor.displayName}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														verifiedAuthor: {
+															...draft.comments.verifiedAuthor,
+															displayName: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="邮箱">
+										<Input
+											type="email"
+											value={draft.comments.verifiedAuthor.email}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														verifiedAuthor: {
+															...draft.comments.verifiedAuthor,
+															email: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="作者主页 URL">
+										<Input
+											value={draft.comments.verifiedAuthor.website}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														verifiedAuthor: {
+															...draft.comments.verifiedAuthor,
+															website: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="Badge 文案">
+										<Input
+											value={draft.comments.verifiedAuthor.badgeLabel}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														verifiedAuthor: {
+															...draft.comments.verifiedAuthor,
+															badgeLabel: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="站点人员显示名">
+										<select
+											className={inputClass}
+											value={draft.comments.staffDisplay.nameMode}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														staffDisplay: {
+															nameMode: event.target
+																.value as AdminSettings["comments"]["staffDisplay"]["nameMode"],
+														},
+													},
+												})
+											}
+										>
+											<option value="current_profile">跟随当前资料</option>
+											<option value="snapshot">保留评论快照</option>
+										</select>
+									</Field>
+								</div>
+							</SettingsSection>
+							<BooleanField
+								label="滥用防护"
+								checked={draft.comments.abuseGuard.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										comments: {
+											...draft.comments,
+											abuseGuard: {
+												...draft.comments.abuseGuard,
+												enabled,
 											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="显示名称">
+										},
+									})
+								}
+							/>
+							<Field
+								label="滥用检测窗口（秒）"
+								description="统计同一 IP 的公开写操作时长窗口。"
+							>
 								<Input
-									value={draft.comments.verifiedAuthor.displayName}
+									type="number"
+									min={1}
+									value={draft.comments.abuseGuard.windowSec}
 									onChange={(event) =>
 										setDraft({
 											...draft,
 											comments: {
 												...draft.comments,
-												verifiedAuthor: {
-													...draft.comments.verifiedAuthor,
-													displayName: event.target.value,
+												abuseGuard: {
+													...draft.comments.abuseGuard,
+													windowSec: Number(event.target.value),
 												},
 											},
 										})
 									}
 								/>
-							</Field>
-							<Field label="邮箱">
-								<Input
-									type="email"
-									value={draft.comments.verifiedAuthor.email}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												verifiedAuthor: {
-													...draft.comments.verifiedAuthor,
-													email: event.target.value,
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="作者主页 URL">
-								<Input
-									value={draft.comments.verifiedAuthor.website}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												verifiedAuthor: {
-													...draft.comments.verifiedAuthor,
-													website: event.target.value,
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="Badge 文案">
-								<Input
-									value={draft.comments.verifiedAuthor.badgeLabel}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												verifiedAuthor: {
-													...draft.comments.verifiedAuthor,
-													badgeLabel: event.target.value,
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="站点人员显示名">
-								<select
-									className={inputClass}
-									value={draft.comments.staffDisplay.nameMode}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												staffDisplay: {
-													nameMode: event.target
-														.value as AdminSettings["comments"]["staffDisplay"]["nameMode"],
-												},
-											},
-										})
-									}
-								>
-									<option value="current_profile">跟随当前资料</option>
-									<option value="snapshot">保留评论快照</option>
-								</select>
-							</Field>
-						</div>
-					</SettingsSection>
-					<Field label="滥用防护">
-						<select
-							className={inputClass}
-							value={String(draft.comments.abuseGuard.enabled)}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										abuseGuard: {
-											...draft.comments.abuseGuard,
-											enabled: event.target.value === "true",
-										},
-									},
-								})
-							}
-						>
-							<option value="true">启用</option>
-							<option value="false">关闭</option>
-						</select>
-					</Field>
-					<Field
-						label="滥用检测窗口（秒）"
-						description="统计同一 IP 的公开写操作时长窗口。"
-					>
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.abuseGuard.windowSec}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										abuseGuard: {
-											...draft.comments.abuseGuard,
-											windowSec: Number(event.target.value),
-										},
-									},
-								})
-							}
-						/>
-					</Field>
-					<Field
-						label="窗口内最大写操作次数"
-						description="单位是次数；评论提交、评论投票等公开写操作都会计入。"
-					>
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.abuseGuard.maxWriteActions}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										abuseGuard: {
-											...draft.comments.abuseGuard,
-											maxWriteActions: Number(event.target.value),
-										},
-									},
-								})
-							}
-						/>
-					</Field>
-					<Field label="自动拉黑">
-						<select
-							className={inputClass}
-							value={String(draft.comments.abuseGuard.autoBlacklist.enabled)}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										abuseGuard: {
-											...draft.comments.abuseGuard,
-											autoBlacklist: {
-												...draft.comments.abuseGuard.autoBlacklist,
-												enabled: event.target.value === "true",
-											},
-										},
-									},
-								})
-							}
-						>
-							<option value="true">启用</option>
-							<option value="false">关闭</option>
-						</select>
-					</Field>
-					<Field label="自动拉黑作用域">
-						<select
-							className={inputClass}
-							value={draft.comments.abuseGuard.autoBlacklist.scope}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										abuseGuard: {
-											...draft.comments.abuseGuard,
-											autoBlacklist: {
-												...draft.comments.abuseGuard.autoBlacklist,
-												scope: event.target.value as "post" | "all",
-											},
-										},
-									},
-								})
-							}
-						>
-							<option value="post">当前页面</option>
-							<option value="all">全局</option>
-						</select>
-					</Field>
-					<Field label="自动拉黑 TTL（秒）">
-						<Input
-							type="number"
-							min={1}
-							value={draft.comments.abuseGuard.autoBlacklist.ttlSec}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									comments: {
-										...draft.comments,
-										abuseGuard: {
-											...draft.comments.abuseGuard,
-											autoBlacklist: {
-												...draft.comments.abuseGuard.autoBlacklist,
-												ttlSec: Number(event.target.value),
-											},
-										},
-									},
-								})
-							}
-						/>
-					</Field>
-					<SettingsSection
-						title="请求元数据"
-						description="原始 IP 和 User-Agent 只用于后台记录、反滥用和解析；公开接口只返回按开关整理后的地区和设备信息。"
-					>
-						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="记录 IP" description="关闭后不保存原始请求 IP。">
-								<select
-									className={inputClass}
-									value={String(draft.comments.metadata.collectIp)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													collectIp: event.target.value === "true",
-												},
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
 							</Field>
 							<Field
-								label="记录 User-Agent"
-								description="关闭后不保存原始浏览器 User-Agent，也不解析设备信息。"
+								label="窗口内最大写操作次数"
+								description="单位是次数；评论提交、评论投票等公开写操作都会计入。"
 							>
-								<select
-									className={inputClass}
-									value={String(draft.comments.metadata.collectUserAgent)}
+								<Input
+									type="number"
+									min={1}
+									value={draft.comments.abuseGuard.maxWriteActions}
 									onChange={(event) =>
 										setDraft({
 											...draft,
 											comments: {
 												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													collectUserAgent: event.target.value === "true",
+												abuseGuard: {
+													...draft.comments.abuseGuard,
+													maxWriteActions: Number(event.target.value),
 												},
 											},
 										})
 									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
+								/>
 							</Field>
-							<Field
-								label="IP 地域解析"
-								description="公开展示还需要系统设置中的 IP 数据库总开关开启。"
-							>
+							<BooleanField
+								label="自动拉黑"
+								checked={draft.comments.abuseGuard.autoBlacklist.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										comments: {
+											...draft.comments,
+											abuseGuard: {
+												...draft.comments.abuseGuard,
+												autoBlacklist: {
+													...draft.comments.abuseGuard.autoBlacklist,
+													enabled,
+												},
+											},
+										},
+									})
+								}
+							/>
+							<Field label="自动拉黑作用域">
 								<select
 									className={inputClass}
-									value={String(draft.comments.metadata.ipRegion.enabled)}
+									value={draft.comments.abuseGuard.autoBlacklist.scope}
 									onChange={(event) =>
 										setDraft({
 											...draft,
 											comments: {
 												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														enabled: event.target.value === "true",
+												abuseGuard: {
+													...draft.comments.abuseGuard,
+													autoBlacklist: {
+														...draft.comments.abuseGuard.autoBlacklist,
+														scope: event.target.value as "post" | "all",
 													},
 												},
 											},
 										})
 									}
 								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
+									<option value="post">当前页面</option>
+									<option value="all">全局</option>
 								</select>
 							</Field>
-							<Field
-								label="地域精度"
-								description="控制公开 location.label 的粒度。"
-							>
-								<select
-									className={inputClass}
-									value={draft.comments.metadata.ipRegion.precision}
+							<Field label="自动拉黑 TTL（秒）">
+								<Input
+									type="number"
+									min={1}
+									value={draft.comments.abuseGuard.autoBlacklist.ttlSec}
 									onChange={(event) =>
 										setDraft({
 											...draft,
 											comments: {
 												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													ipRegion: {
-														...draft.comments.metadata.ipRegion,
-														precision: event.target.value as
-															| "country"
-															| "province"
-															| "city",
+												abuseGuard: {
+													...draft.comments.abuseGuard,
+													autoBlacklist: {
+														...draft.comments.abuseGuard.autoBlacklist,
+														ttlSec: Number(event.target.value),
 													},
 												},
 											},
 										})
 									}
-								>
-									<option value="country">国家</option>
-									<option value="province">省份</option>
-									<option value="city">城市</option>
-								</select>
+								/>
 							</Field>
-							<Field
-								label="设备解析"
-								description="解析为浏览器、系统、设备类型等结构化字段。"
+							<SettingsSection
+								title="请求元数据"
+								description="原始 IP 和 User-Agent 只用于后台记录、反滥用和解析；公开接口只返回按开关整理后的地区和设备信息。"
 							>
-								<select
-									className={inputClass}
-									value={String(draft.comments.metadata.device.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													device: {
-														...draft.comments.metadata.device,
-														enabled: event.target.value === "true",
+								<div className="grid gap-4 md:grid-cols-2">
+									<BooleanField
+										label="记录 IP"
+										description="关闭后不保存原始请求 IP。"
+										checked={draft.comments.metadata.collectIp}
+										onCheckedChange={(collectIp) =>
+											setDraft({
+												...draft,
+												comments: {
+													...draft.comments,
+													metadata: {
+														...draft.comments.metadata,
+														collectIp,
 													},
 												},
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field
-								label="前台显示设备信息"
-								description="公开接口返回结构化设备字段，图标由前端自行适配。"
-							>
-								<select
-									className={inputClass}
-									value={String(draft.comments.metadata.device.display.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											comments: {
-												...draft.comments,
-												metadata: {
-													...draft.comments.metadata,
-													device: {
-														...draft.comments.metadata.device,
-														display: {
-															...draft.comments.metadata.device.display,
-															enabled: event.target.value === "true",
+											})
+										}
+									/>
+									<BooleanField
+										label="记录 User-Agent"
+										description="关闭后不保存原始浏览器 User-Agent，也不解析设备信息。"
+										checked={draft.comments.metadata.collectUserAgent}
+										onCheckedChange={(collectUserAgent) =>
+											setDraft({
+												...draft,
+												comments: {
+													...draft.comments,
+													metadata: {
+														...draft.comments.metadata,
+														collectUserAgent,
+													},
+												},
+											})
+										}
+									/>
+									<BooleanField
+										label="IP 地域解析"
+										description="公开展示还需要系统设置中的 IP 数据库总开关开启。"
+										checked={draft.comments.metadata.ipRegion.enabled}
+										onCheckedChange={(enabled) =>
+											setDraft({
+												...draft,
+												comments: {
+													...draft.comments,
+													metadata: {
+														...draft.comments.metadata,
+														ipRegion: {
+															...draft.comments.metadata.ipRegion,
+															enabled,
 														},
 													},
 												},
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
+											})
+										}
+									/>
+									<Field
+										label="地域精度"
+										description="控制公开 location.label 的粒度。"
+									>
+										<select
+											className={inputClass}
+											value={draft.comments.metadata.ipRegion.precision}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													comments: {
+														...draft.comments,
+														metadata: {
+															...draft.comments.metadata,
+															ipRegion: {
+																...draft.comments.metadata.ipRegion,
+																precision: event.target.value as
+																	| "country"
+																	| "province"
+																	| "city",
+															},
+														},
+													},
+												})
+											}
+										>
+											<option value="country">国家</option>
+											<option value="province">省份</option>
+											<option value="city">城市</option>
+										</select>
+									</Field>
+									<BooleanField
+										label="设备解析"
+										description="解析为浏览器、系统、设备类型等结构化字段。"
+										checked={draft.comments.metadata.device.enabled}
+										onCheckedChange={(enabled) =>
+											setDraft({
+												...draft,
+												comments: {
+													...draft.comments,
+													metadata: {
+														...draft.comments.metadata,
+														device: {
+															...draft.comments.metadata.device,
+															enabled,
+														},
+													},
+												},
+											})
+										}
+									/>
+									<BooleanField
+										label="前台显示设备信息"
+										description="公开接口返回结构化设备字段，图标由前端自行适配。"
+										checked={draft.comments.metadata.device.display.enabled}
+										onCheckedChange={(enabled) =>
+											setDraft({
+												...draft,
+												comments: {
+													...draft.comments,
+													metadata: {
+														...draft.comments.metadata,
+														device: {
+															...draft.comments.metadata.device,
+															display: {
+																...draft.comments.metadata.device.display,
+																enabled,
+															},
+														},
+													},
+												},
+											})
+										}
+									/>
+								</div>
+							</SettingsSection>
+						</>
+					) : (
+						<div className="md:col-span-2 rounded-md border p-3 text-sm text-muted-foreground">
+							评论已关闭。已保存的审核、验证码、回复、表单和展示配置会保留，再次开启后继续使用。
 						</div>
-					</SettingsSection>
+					)}
 					<SettingsSection
 						title="访客与计数"
 						description="访客记录决定 PV、点赞、投票是否能使用服务端可信去重。若需要可信统计，必须开启访客记录；若更重视隐私或轻量部署，可以关闭访客记录和相关计数。"
 					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="访客记录">
-								<select
-									className={inputClass}
-									value={String(draft.engagement.visitors.enabled)}
-									onChange={(event) =>
-										updateEngagement("visitors", event.target.value === "true")
-									}
-								>
-									<option value="true">开启访客记录</option>
-									<option value="false">关闭访客记录</option>
-								</select>
-							</Field>
+							<BooleanField
+								label="访客记录"
+								checked={draft.engagement.visitors.enabled}
+								error={firstFieldError(
+									saveError,
+									"engagement.visitors.enabled",
+								)}
+								onCheckedChange={(enabled) =>
+									updateEngagement("visitors", enabled)
+								}
+							/>
 							<div className="rounded-md border p-3 text-sm text-muted-foreground">
 								{draft.engagement.visitors.enabled
 									? "开启后 QingYan 会记录访客 IP、UA 和访问页面，用于服务端可信去重、PV、点赞、投票和后续访客画像；数据量会随访问增长。"
 									: "关闭后 QingYan 不记录访客身份，不提供访客画像；PV、点赞、投票如果开启，只是轻量低可信计数，不能防止重复刷新、重复点赞或重复投票。"}
 							</div>
-							<Field label="PV 统计">
-								<select
-									className={inputClass}
-									value={String(draft.engagement.pageViews.enabled)}
-									onChange={(event) =>
-										updateEngagement("pageViews", event.target.value === "true")
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="页面点赞">
-								<select
-									className={inputClass}
-									value={String(draft.engagement.pageLikes.enabled)}
-									onChange={(event) =>
-										updateEngagement("pageLikes", event.target.value === "true")
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="评论投票">
-								<select
-									className={inputClass}
-									value={String(draft.engagement.commentVotes.enabled)}
-									onChange={(event) =>
-										updateEngagement(
-											"commentVotes",
-											event.target.value === "true",
-										)
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							{!draft.engagement.visitors.enabled && countersEnabled ? (
+							<BooleanField
+								label="页面浏览量"
+								checked={draft.engagement.pageViews.enabled}
+								error={firstFieldError(
+									saveError,
+									"engagement.pageViews.enabled",
+								)}
+								onCheckedChange={(enabled) =>
+									updateEngagement("pageViews", enabled)
+								}
+							/>
+							<BooleanField
+								label="页面点赞"
+								checked={draft.engagement.pageLikes.enabled}
+								error={firstFieldError(
+									saveError,
+									"engagement.pageLikes.enabled",
+								)}
+								onCheckedChange={(enabled) =>
+									updateEngagement("pageLikes", enabled)
+								}
+							/>
+							<BooleanField
+								label="评论投票"
+								checked={draft.engagement.commentVotes.enabled}
+								error={firstFieldError(
+									saveError,
+									"engagement.commentVotes.enabled",
+								)}
+								onCheckedChange={(enabled) =>
+									updateEngagement("commentVotes", enabled)
+								}
+							/>
+							{showLowTrustCounterHint(draft) ? (
 								<div className="flex items-center gap-2 rounded-md border p-3 text-sm text-muted-foreground">
 									<Badge variant="outline">低可信</Badge>
 									<span>
@@ -1038,23 +1035,20 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							) : null}
 						</div>
 					</SettingsSection>
-					<Field label="邮件通知">
-						<select
-							className={inputClass}
-							value={String(draft.notifications.emailEnabled)}
-							onChange={(event) =>
-								setDraft({
-									...draft,
-									notifications: {
-										emailEnabled: event.target.value === "true",
-									},
-								})
-							}
-						>
-							<option value="true">启用</option>
-							<option value="false">关闭</option>
-						</select>
-					</Field>
+					<BooleanField
+						label="当前站点邮件通知"
+						description="只控制当前站点是否发送通知；实例级 SMTP 在系统设置中维护。"
+						checked={draft.notifications.emailEnabled}
+						error={firstFieldError(saveError, "notifications.emailEnabled")}
+						onCheckedChange={(emailEnabled) =>
+							setDraft({
+								...draft,
+								notifications: {
+									emailEnabled,
+								},
+							})
+						}
+					/>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
 							保存站点设置
@@ -1131,6 +1125,10 @@ export function SystemSettingsPage() {
 			...draft,
 			publicApi,
 		});
+	const saveError = buildSettingsErrorModel(
+		mutation.error,
+		"系统设置保存失败。",
+	);
 
 	return (
 		<Card>
@@ -1146,6 +1144,7 @@ export function SystemSettingsPage() {
 						mutation.mutate(withoutEmptySecrets(draft));
 					}}
 				>
+					<SettingsSaveError model={saveError} fallback="系统设置保存失败" />
 					<Field label="日志等级">
 						<select
 							className={inputClass}
@@ -1220,50 +1219,38 @@ export function SystemSettingsPage() {
 						description="保存后立即影响运行中的请求校验；修改后台来源限制前，请确认当前管理后台 Origin 已包含在允许列表内。"
 					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="启用后台 Origin Guard">
-								<select
-									className={inputClass}
-									value={String(draft.security.adminOriginGuard.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											security: {
-												...draft.security,
-												adminOriginGuard: {
-													...draft.security.adminOriginGuard,
-													enabled: event.target.value === "true",
-												},
+							<BooleanField
+								label="启用后台 Origin Guard"
+								checked={draft.security.adminOriginGuard.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										security: {
+											...draft.security,
+											adminOriginGuard: {
+												...draft.security.adminOriginGuard,
+												enabled,
 											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="允许后台请求缺失 Origin">
-								<select
-									className={inputClass}
-									value={String(
-										draft.security.adminOriginGuard.allowMissingOrigin,
-									)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											security: {
-												...draft.security,
-												adminOriginGuard: {
-													...draft.security.adminOriginGuard,
-													allowMissingOrigin: event.target.value === "true",
-												},
+										},
+									})
+								}
+							/>
+							<BooleanField
+								label="允许后台请求缺失 Origin"
+								checked={draft.security.adminOriginGuard.allowMissingOrigin}
+								onCheckedChange={(allowMissingOrigin) =>
+									setDraft({
+										...draft,
+										security: {
+											...draft.security,
+											adminOriginGuard: {
+												...draft.security.adminOriginGuard,
+												allowMissingOrigin,
 											},
-										})
-									}
-								>
-									<option value="false">关闭</option>
-									<option value="true">允许</option>
-								</select>
-							</Field>
+										},
+									})
+								}
+							/>
 							<Field
 								label="后台允许 Origin"
 								description="每行一个纯 Origin，例如 https://admin.example.com。留空时默认只允许 QingYan publicBaseUrl 的 origin。"
@@ -1291,74 +1278,55 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-							<Field
+							<BooleanField
 								label="启用公开 Origin Guard"
 								description="公开写接口会校验请求 Origin 是否匹配站点配置的前端 Origin。"
-							>
-								<select
-									className={inputClass}
-									value={String(draft.security.publicOriginGuard.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											security: {
-												...draft.security,
-												publicOriginGuard: {
-													...draft.security.publicOriginGuard,
-													enabled: event.target.value === "true",
-												},
+								checked={draft.security.publicOriginGuard.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										security: {
+											...draft.security,
+											publicOriginGuard: {
+												...draft.security.publicOriginGuard,
+												enabled,
 											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="允许公开写请求缺失 Origin">
-								<select
-									className={inputClass}
-									value={String(
-										draft.security.publicOriginGuard.allowMissingOrigin,
-									)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											security: {
-												...draft.security,
-												publicOriginGuard: {
-													...draft.security.publicOriginGuard,
-													allowMissingOrigin: event.target.value === "true",
-												},
+										},
+									})
+								}
+							/>
+							<BooleanField
+								label="允许公开写请求缺失 Origin"
+								checked={draft.security.publicOriginGuard.allowMissingOrigin}
+								onCheckedChange={(allowMissingOrigin) =>
+									setDraft({
+										...draft,
+										security: {
+											...draft.security,
+											publicOriginGuard: {
+												...draft.security.publicOriginGuard,
+												allowMissingOrigin,
 											},
-										})
-									}
-								>
-									<option value="false">关闭</option>
-									<option value="true">允许</option>
-								</select>
-							</Field>
-							<Field label="启用全局 Flood Guard">
-								<select
-									className={inputClass}
-									value={String(draft.security.globalFloodGuard.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											security: {
-												...draft.security,
-												globalFloodGuard: {
-													...draft.security.globalFloodGuard,
-													enabled: event.target.value === "true",
-												},
+										},
+									})
+								}
+							/>
+							<BooleanField
+								label="启用全局 Flood Guard"
+								checked={draft.security.globalFloodGuard.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										security: {
+											...draft.security,
+											globalFloodGuard: {
+												...draft.security.globalFloodGuard,
+												enabled,
 											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
+										},
+									})
+								}
+							/>
 							<Field label="Flood 窗口秒">
 								<Input
 									type="number"
@@ -1651,78 +1619,83 @@ export function SystemSettingsPage() {
 						description="后端只返回 author.avatarUrl，不托管、不代理、不缓存头像图片。图片 404 或加载失败时由前端继续显示名称首字母或文字 fallback。"
 					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="启用外部头像 URL">
-								<select
-									className={inputClass}
-									value={String(draft.avatar.external.enabled)}
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											external: {
-												...draft.avatar.external,
-												enabled: event.target.value === "true",
-											},
-										})
-									}
-								>
-									<option value="false">关闭</option>
-									<option value="true">开启</option>
-								</select>
-							</Field>
-							<Field
-								label="头像接口地址"
-								description="例如 https://gravatar.com/avatar 或 https://cravatar.cn/avatar。"
-							>
-								<Input
-									value={draft.avatar.external.baseUrl}
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											external: {
-												...draft.avatar.external,
-												baseUrl: event.target.value,
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="邮箱哈希算法">
-								<select
-									className={inputClass}
-									value={draft.avatar.external.hashAlgorithm}
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											external: {
-												...draft.avatar.external,
-												hashAlgorithm: event.target
-													.value as AdminSystemSettings["avatar"]["external"]["hashAlgorithm"],
-											},
-										})
-									}
-								>
-									<option value="sha256">SHA-256</option>
-									<option value="md5">MD5</option>
-								</select>
-							</Field>
-							<Field
-								label="头像 URL 参数"
-								description="参数不包含开头的 ?，多个参数用 & 分隔。Gravatar 常用 SHA-256 和 s=80&d=404&r=g；Cravatar 当前文档使用 MD5。"
-							>
-								<Input
-									value={draft.avatar.external.query}
-									placeholder="s=80&d=404&r=g"
-									onChange={(event) =>
-										updateAvatar({
-											...draft.avatar,
-											external: {
-												...draft.avatar.external,
-												query: event.target.value,
-											},
-										})
-									}
-								/>
-							</Field>
+							<BooleanField
+								label="外部头像 URL"
+								checked={draft.avatar.external.enabled}
+								error={firstFieldError(saveError, "avatar.external.enabled")}
+								onCheckedChange={(enabled) =>
+									updateAvatar({
+										...draft.avatar,
+										external: {
+											...draft.avatar.external,
+											enabled,
+										},
+									})
+								}
+							/>
+							{showExternalAvatarDetails(draft) ? (
+								<>
+									<Field
+										label="头像接口地址"
+										description="例如 https://gravatar.com/avatar 或 https://cravatar.cn/avatar。"
+									>
+										<Input
+											value={draft.avatar.external.baseUrl}
+											onChange={(event) =>
+												updateAvatar({
+													...draft.avatar,
+													external: {
+														...draft.avatar.external,
+														baseUrl: event.target.value,
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="邮箱哈希算法">
+										<select
+											className={inputClass}
+											value={draft.avatar.external.hashAlgorithm}
+											onChange={(event) =>
+												updateAvatar({
+													...draft.avatar,
+													external: {
+														...draft.avatar.external,
+														hashAlgorithm: event.target
+															.value as AdminSystemSettings["avatar"]["external"]["hashAlgorithm"],
+													},
+												})
+											}
+										>
+											<option value="sha256">SHA-256</option>
+											<option value="md5">MD5</option>
+										</select>
+									</Field>
+									<Field
+										label="头像 URL 参数"
+										description="参数不包含开头的 ?，多个参数用 & 分隔。Gravatar 常用 SHA-256 和 s=80&d=404&r=g；Cravatar 当前文档使用 MD5。"
+									>
+										<Input
+											value={draft.avatar.external.query}
+											placeholder="s=80&d=404&r=g"
+											onChange={(event) =>
+												updateAvatar({
+													...draft.avatar,
+													external: {
+														...draft.avatar.external,
+														query: event.target.value,
+													},
+												})
+											}
+										/>
+									</Field>
+								</>
+							) : (
+								<div className="md:col-span-2 rounded-md border p-3 text-sm text-muted-foreground">
+									外部头像 URL 已关闭。已保存的 base URL、hash 算法和 query
+									参数会保留。
+								</div>
+							)}
 							<Field label="头像形状">
 								<select
 									className={inputClass}
@@ -1770,165 +1743,162 @@ export function SystemSettingsPage() {
 						description="控制公开评论接口是否返回非必要的展示建议字段。"
 					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field
+							<BooleanField
 								label="返回建议字段"
 								description="关闭时公开评论接口不返回头像形状、显示尺寸等前端展示建议。"
-							>
-								<select
-									className={inputClass}
-									value={String(draft.publicApi.advisoryFields.enabled)}
-									onChange={(event) =>
-										updatePublicApi({
-											...draft.publicApi,
-											advisoryFields: {
-												...draft.publicApi.advisoryFields,
-												enabled: event.target.value === "true",
-											},
-										})
-									}
-								>
-									<option value="false">关闭</option>
-									<option value="true">开启</option>
-								</select>
-							</Field>
+								checked={draft.publicApi.advisoryFields.enabled}
+								error={firstFieldError(
+									saveError,
+									"publicApi.advisoryFields.enabled",
+								)}
+								onCheckedChange={(enabled) =>
+									updatePublicApi({
+										...draft.publicApi,
+										advisoryFields: {
+											...draft.publicApi.advisoryFields,
+											enabled,
+										},
+									})
+								}
+							/>
 						</div>
 					</SettingsSection>
 					<SettingsSection
-						title="邮件通知"
-						description="配置 SMTP 后可用于后续评论通知能力；密码留空时保留已有密钥。"
+						title="系统邮件"
+						description="系统级邮件发送能力；当前站点是否发送通知由站点设置单独控制。密码留空时保留已有密钥。"
 					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="启用邮件通知">
-								<select
-									className={inputClass}
-									value={String(draft.mail.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												enabled: event.target.value === "true",
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="SMTP Host">
-								<Input
-									value={draft.mail.smtp.host}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												smtp: {
-													...draft.mail.smtp,
-													host: event.target.value,
+							<BooleanField
+								label="系统邮件"
+								description="控制实例级邮件发送能力；站点是否发送通知由站点设置单独控制。"
+								checked={draft.mail.enabled}
+								error={firstFieldError(saveError, "mail.enabled")}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										mail: {
+											...draft.mail,
+											enabled,
+										},
+									})
+								}
+							/>
+							{showMailDetails(draft) ? (
+								<>
+									<Field label="SMTP Host">
+										<Input
+											value={draft.mail.smtp.host}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													mail: {
+														...draft.mail,
+														smtp: {
+															...draft.mail.smtp,
+															host: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="SMTP Port">
+										<Input
+											type="number"
+											min={1}
+											value={draft.mail.smtp.port}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													mail: {
+														...draft.mail,
+														smtp: {
+															...draft.mail.smtp,
+															port: Number(event.target.value),
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<BooleanField
+										label="SMTP 加密连接 Secure"
+										checked={draft.mail.smtp.secure}
+										onCheckedChange={(secure) =>
+											setDraft({
+												...draft,
+												mail: {
+													...draft.mail,
+													smtp: {
+														...draft.mail.smtp,
+														secure,
+													},
 												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="SMTP Port">
-								<Input
-									type="number"
-									min={1}
-									value={draft.mail.smtp.port}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												smtp: {
-													...draft.mail.smtp,
-													port: Number(event.target.value),
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="SMTP 加密连接 Secure">
-								<select
-									className={inputClass}
-									value={String(draft.mail.smtp.secure)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												smtp: {
-													...draft.mail.smtp,
-													secure: event.target.value === "true",
-												},
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
-							<Field label="SMTP 用户名">
-								<Input
-									value={draft.mail.smtp.username}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												smtp: {
-													...draft.mail.smtp,
-													username: event.target.value,
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="发件人">
-								<Input
-									value={draft.mail.smtp.from}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												smtp: {
-													...draft.mail.smtp,
-													from: event.target.value,
-												},
-											},
-										})
-									}
-								/>
-							</Field>
-							<Field label="SMTP 密码">
-								<Input
-									type="password"
-									autoComplete="new-password"
-									placeholder={secretPlaceholder(
-										draft.mail.smtp.passwordConfigured,
-									)}
-									value={draft.mail.smtp.password ?? ""}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											mail: {
-												...draft.mail,
-												smtp: {
-													...draft.mail.smtp,
-													password: event.target.value,
-												},
-											},
-										})
-									}
-								/>
-							</Field>
+											})
+										}
+									/>
+									<Field label="SMTP 用户名">
+										<Input
+											value={draft.mail.smtp.username}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													mail: {
+														...draft.mail,
+														smtp: {
+															...draft.mail.smtp,
+															username: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="发件人">
+										<Input
+											value={draft.mail.smtp.from}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													mail: {
+														...draft.mail,
+														smtp: {
+															...draft.mail.smtp,
+															from: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+									<Field label="SMTP 密码">
+										<Input
+											type="password"
+											autoComplete="new-password"
+											placeholder={secretPlaceholder(
+												draft.mail.smtp.passwordConfigured,
+											)}
+											value={draft.mail.smtp.password ?? ""}
+											onChange={(event) =>
+												setDraft({
+													...draft,
+													mail: {
+														...draft.mail,
+														smtp: {
+															...draft.mail.smtp,
+															password: event.target.value,
+														},
+													},
+												})
+											}
+										/>
+									</Field>
+								</>
+							) : (
+								<div className="md:col-span-2 rounded-md border p-3 text-sm text-muted-foreground">
+									系统邮件已关闭。已保存的 SMTP 配置会保留，再次开启后继续使用。
+								</div>
+							)}
 						</div>
 					</SettingsSection>
 					<SettingsSection
@@ -1938,6 +1908,7 @@ export function SystemSettingsPage() {
 						<div className="grid gap-4 md:grid-cols-2">
 							<Field label="验证码服务">
 								<select
+									aria-label="验证码服务"
 									className={inputClass}
 									value={draft.captcha.provider}
 									onChange={(event) =>
@@ -2396,24 +2367,19 @@ export function SystemSettingsPage() {
 						description="系统总开关控制是否允许解析 IP 地域；站点设置仍决定具体站点是否公开展示整理后的地区。"
 					>
 						<div className="grid gap-4 md:grid-cols-2">
-							<Field label="IP 地域解析">
-								<select
-									className={inputClass}
-									value={String(draft.ipRegion.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											ipRegion: {
-												...draft.ipRegion,
-												enabled: event.target.value === "true",
-											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
+							<BooleanField
+								label="IP 地域解析"
+								checked={draft.ipRegion.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										ipRegion: {
+											...draft.ipRegion,
+											enabled,
+										},
+									})
+								}
+							/>
 							<Field label="加载方式">
 								<select
 									className={inputClass}
@@ -2462,27 +2428,22 @@ export function SystemSettingsPage() {
 									<option value="city">城市</option>
 								</select>
 							</Field>
-							<Field label="每月自动更新">
-								<select
-									className={inputClass}
-									value={String(draft.ipRegion.autoUpdate.enabled)}
-									onChange={(event) =>
-										setDraft({
-											...draft,
-											ipRegion: {
-												...draft.ipRegion,
-												autoUpdate: {
-													...draft.ipRegion.autoUpdate,
-													enabled: event.target.value === "true",
-												},
+							<BooleanField
+								label="每月自动更新"
+								checked={draft.ipRegion.autoUpdate.enabled}
+								onCheckedChange={(enabled) =>
+									setDraft({
+										...draft,
+										ipRegion: {
+											...draft.ipRegion,
+											autoUpdate: {
+												...draft.ipRegion.autoUpdate,
+												enabled,
 											},
-										})
-									}
-								>
-									<option value="true">启用</option>
-									<option value="false">关闭</option>
-								</select>
-							</Field>
+										},
+									})
+								}
+							/>
 							<Field label="IPv4 数据库路径">
 								<Input
 									value={draft.ipRegion.ipv4.dbPath}

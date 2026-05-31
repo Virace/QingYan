@@ -156,6 +156,8 @@ security:
 
 每个站点的行为由 `site_settings` 持久化，并通过 QingYan 自带 Admin Console 维护。对应的 `${server.publicPath}/api/admin/*` 路径不纳入公开 OpenAPI；开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`。
 
+Admin Console 中的站点设置和系统设置按 owner 分离：站点级开关只影响当前站点，系统级 mail/captcha/avatar/publicApi/antiSpam 设置影响整个 QingYan 实例。
+
 站点设置包含：
 
 - 评论开关、默认审核状态、最大嵌套深度、分页上限。

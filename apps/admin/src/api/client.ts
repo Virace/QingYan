@@ -1,8 +1,17 @@
+export type ApiFieldError = {
+	path: string;
+	code?: string;
+	expected?: string;
+	received?: string;
+	message: string;
+};
+
 export interface ApiErrorPayload {
 	error?: {
 		code?: string;
 		message?: string;
 		requestId?: string;
+		fields?: ApiFieldError[];
 		details?: unknown;
 	};
 }
@@ -24,6 +33,10 @@ type AdminRuntimeGlobal = typeof globalThis & {
 };
 
 export class ApiError extends Error {
+	public readonly requestId?: string;
+	public readonly fields: ApiFieldError[];
+	public readonly details?: unknown;
+
 	public constructor(
 		message: string,
 		public readonly statusCode: number,
@@ -31,6 +44,10 @@ export class ApiError extends Error {
 		public readonly payload?: unknown,
 	) {
 		super(message);
+		const errorPayload = payload as ApiErrorPayload | undefined;
+		this.requestId = errorPayload?.error?.requestId;
+		this.fields = errorPayload?.error?.fields ?? [];
+		this.details = errorPayload?.error?.details;
 	}
 }
 

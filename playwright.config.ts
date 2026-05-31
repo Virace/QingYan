@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const apiPort = Number(process.env.QINGYAN_E2E_API_PORT ?? 4401);
 const adminPort = Number(process.env.QINGYAN_E2E_ADMIN_PORT ?? 5173);
+const publicPath = process.env.QINGYAN_PUBLIC_PATH ?? "/qingyan";
 
 export default defineConfig({
 	testDir: "./tests/e2e",
@@ -22,10 +23,11 @@ export default defineConfig({
 	webServer: [
 		{
 			command: `pnpm exec tsx src/server.ts`,
-			url: `http://127.0.0.1:${apiPort}/api/admin/session/captcha`,
+			url: `http://127.0.0.1:${apiPort}${publicPath}/api/admin/session/captcha`,
 			reuseExistingServer: !process.env.CI,
 			timeout: 30_000,
 			env: {
+				QINGYAN_SERVER_PORT: String(apiPort),
 				QINGYAN_DEV_MODE: "true",
 				QINGYAN_DEV_ADMIN_USERNAME: "admin",
 				QINGYAN_DEV_ADMIN_PASSWORD: "admin",
@@ -34,12 +36,14 @@ export default defineConfig({
 		},
 		{
 			command: `pnpm exec vite --config apps/admin/vite.config.ts --host 127.0.0.1 --port ${adminPort}`,
-			url: `http://127.0.0.1:${adminPort}/admin/`,
+			url: `http://127.0.0.1:${adminPort}${publicPath}/admin/`,
 			reuseExistingServer: !process.env.CI,
 			timeout: 30_000,
 			env: {
-				QINGYAN_ADMIN_BASE: "/admin/",
-				QINGYAN_DEV_API_ORIGIN: `http://127.0.0.1:${apiPort}`,
+				QINGYAN_ADMIN_BASE: `${publicPath}/admin/`,
+				QINGYAN_ADMIN_DEV_PATHS: `${publicPath}/admin,/admin`,
+				QINGYAN_DEV_API_ORIGIN: `http://127.0.0.1:${apiPort}${publicPath}`,
+				QINGYAN_DEV_API_BASE: `${publicPath}/api`,
 			},
 		},
 	],

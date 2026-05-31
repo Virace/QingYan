@@ -179,6 +179,56 @@ describe("admin system settings", () => {
 		});
 	});
 
+	it("rejects invalid system setting booleans with field errors", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				mail: {
+					enabled: 1,
+					smtp: {
+						host: "",
+						port: 587,
+						secure: false,
+						username: "",
+						from: "",
+					},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+				message: "请求参数无效。",
+				fields: [
+					{
+						path: "mail.enabled",
+						code: "invalid_type",
+						expected: "boolean",
+						received: "number",
+						message: "必须是 JSON boolean，不能使用 0/1。",
+					},
+				],
+			},
+		});
+		expect(response.json().error).toHaveProperty("requestId");
+	});
+
 	it("updates runtime security settings without rewriting startup config", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -707,7 +757,7 @@ describe("admin system settings", () => {
 		expect(invalidResponse.statusCode).toBe(400);
 		expect(invalidResponse.json()).toMatchObject({
 			error: {
-				code: "INVALID_REQUEST",
+				code: "VALIDATION_FAILED",
 			},
 		});
 	});

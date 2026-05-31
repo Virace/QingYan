@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { InvalidRequestError } from "../shared/errors";
+import { ValidationFailedError } from "../shared/errors";
 import { adminSystemSettingsBodySchema } from "./schemas";
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
@@ -9,6 +9,7 @@ import {
 	AdminSystemSettingsService,
 	createAdminSystemSettingsDefaults,
 } from "./system-settings-service";
+import { toValidationFields } from "./validation-fields";
 
 export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 	fastify,
@@ -34,9 +35,9 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 		await sessionService.requireSession(request);
 		const parsed = adminSystemSettingsBodySchema.safeParse(request.body);
 		if (!parsed.success) {
-			throw new InvalidRequestError({
-				issues: parsed.error.issues,
-			});
+			throw new ValidationFailedError(
+				toValidationFields(parsed.error.issues, request.body),
+			);
 		}
 
 		return service.updateSettings({
