@@ -16,7 +16,11 @@ import {
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
 
 type AdminSystemSettingsInput = {
-	admin?: SystemSettings["admin"];
+	admin?: {
+		session?: SystemSettings["admin"]["session"];
+		emailVerification?: SystemSettings["admin"]["emailVerification"];
+		deletion?: SystemSettings["admin"]["deletion"];
+	};
 	security?: SystemSettings["security"];
 	logging: SystemSettings["logging"];
 	mail?: {
@@ -57,6 +61,7 @@ type AdminSystemSettingsInput = {
 		akismet: Omit<SystemSettings["antiSpam"]["akismet"], "apiKeyConfigured">;
 	};
 	requestId?: string;
+	actorUserId?: number;
 };
 
 export class AdminSystemSettingsService {
@@ -84,7 +89,12 @@ export class AdminSystemSettingsService {
 		const current = readSystemSettingsRows(rows, this.defaults);
 		const patch: SystemSettings = {
 			...current,
-			admin: input.admin ?? current.admin,
+			admin: input.admin
+				? {
+						...current.admin,
+						...input.admin,
+					}
+				: current.admin,
 			security: input.security ?? current.security,
 			logging: input.logging,
 			mail: input.mail
@@ -158,7 +168,27 @@ export class AdminSystemSettingsService {
 			event: "system.logging.updated",
 			requestId: input.requestId,
 			message: "系统设置已更新",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			data: input.logging,
+		});
+		await this.repository.writeAudit({
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+			action: "system.settings.updated",
+			targetType: "system_settings",
+			targetId: "global",
+			payload: {
+				admin: input.admin,
+				security: input.security,
+				logging: input.logging,
+				mail: input.mail,
+				captcha: input.captcha,
+				ipRegion: input.ipRegion,
+				avatar: input.avatar,
+				publicApi: input.publicApi,
+				antiSpam: input.antiSpam,
+			},
 		});
 
 		return this.getSettings();

@@ -60,6 +60,33 @@ describe("classifyWordPressAuthorMatch", () => {
 		});
 	});
 
+	it("suggests an existing backend user when the comment email matches admin_users", () => {
+		expect(
+			classifyWordPressAuthorMatch(
+				comment({ commentUserId: "0", authorEmail: " owner@example.com " }),
+				authors,
+				[
+					{
+						id: 42,
+						email: "Owner@Example.com",
+						displayName: "站点作者",
+						username: "owner",
+						status: "active",
+					},
+				],
+			),
+		).toEqual({
+			kind: "staff_existing_user",
+			email: "owner@example.com",
+			adminUser: {
+				id: 42,
+				displayName: "站点作者",
+				username: "owner",
+				status: "active",
+			},
+		});
+	});
+
 	it("marks non-zero unknown user ids as registered unknown", () => {
 		expect(
 			classifyWordPressAuthorMatch(
@@ -96,12 +123,21 @@ describe("summarizeWordPressAuthorMatches", () => {
 					comment({ commentUserId: "0", authorEmail: "virace@aliyun.com" }),
 					comment({ commentUserId: "9", authorEmail: "other@example.com" }),
 					comment({ commentUserId: "0", authorEmail: "visitor@example.com" }),
+					comment({ commentUserId: "0", authorEmail: "owner@example.com" }),
 				],
 				authors,
+				[
+					{
+						id: 42,
+						email: "owner@example.com",
+						displayName: "Owner",
+					},
+				],
 			),
 		).toMatchObject({
 			totalAuthors: 1,
 			staffStrong: 1,
+			staffExistingUser: 1,
 			staffEmailCandidate: 1,
 			registeredUnknown: 1,
 			visitor: 1,

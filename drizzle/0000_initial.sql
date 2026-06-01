@@ -21,6 +21,7 @@ CREATE TABLE `comments` (
 	`page_thread_id` integer NOT NULL,
 	`parent_id` text,
 	`visitor_id` integer,
+	`author_user_id` integer,
 	`author_identity` text DEFAULT 'visitor' NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`author_name` text NOT NULL,
@@ -40,7 +41,8 @@ CREATE TABLE `comments` (
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`page_thread_id`) REFERENCES `page_threads`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`parent_id`) REFERENCES `comments`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`visitor_id`) REFERENCES `visitors`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`visitor_id`) REFERENCES `visitors`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`author_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE INDEX `comments_thread_idx` ON `comments` (`page_thread_id`);--> statement-breakpoint
 CREATE INDEX `comments_parent_idx` ON `comments` (`parent_id`);--> statement-breakpoint
@@ -222,16 +224,119 @@ CREATE TABLE `pending_page_view_sessions` (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `pending_page_view_sessions_page_fingerprint_idx` ON `pending_page_view_sessions` (`site_key`,`page_key`,`fingerprint`);--> statement-breakpoint
 CREATE INDEX `pending_page_view_sessions_site_page_idx` ON `pending_page_view_sessions` (`site_key`,`page_key`);--> statement-breakpoint
+CREATE TABLE `admin_users` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`username` text NOT NULL,
+	`email` text NOT NULL,
+	`password_hash` text NOT NULL,
+	`display_name` text NOT NULL,
+	`website` text,
+	`avatar_url` text,
+	`status` text DEFAULT 'active' NOT NULL,
+	`is_initial_admin` integer DEFAULT false NOT NULL,
+	`password_change_required` integer DEFAULT false NOT NULL,
+	`login_blocked_until` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`password_rotated_at` text,
+	`last_login_at` text,
+	`deleted_at` text
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_users_username_idx` ON `admin_users` (`username`);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_users_email_idx` ON `admin_users` (`email`);--> statement-breakpoint
+CREATE INDEX `admin_users_status_idx` ON `admin_users` (`status`);--> statement-breakpoint
+CREATE TABLE `admin_groups` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`key` text NOT NULL,
+	`name` text NOT NULL,
+	`description` text,
+	`kind` text DEFAULT 'system' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_groups_key_idx` ON `admin_groups` (`key`);--> statement-breakpoint
+CREATE TABLE `admin_user_groups` (
+	`user_id` integer NOT NULL,
+	`group_id` integer NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_by_user_id` integer,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`group_id`) REFERENCES `admin_groups`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_user_groups_user_idx` ON `admin_user_groups` (`user_id`);--> statement-breakpoint
+CREATE INDEX `admin_user_groups_group_idx` ON `admin_user_groups` (`group_id`);--> statement-breakpoint
+CREATE TABLE `admin_group_permissions` (
+	`group_id` integer NOT NULL,
+	`permission_key` text NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_by_user_id` integer,
+	FOREIGN KEY (`group_id`) REFERENCES `admin_groups`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_group_permissions_group_permission_idx` ON `admin_group_permissions` (`group_id`,`permission_key`);--> statement-breakpoint
+CREATE TABLE `admin_user_site_access` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_id` integer NOT NULL,
+	`site_id` integer NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_by_user_id` integer,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_user_site_access_user_site_idx` ON `admin_user_site_access` (`user_id`,`site_id`);--> statement-breakpoint
+CREATE INDEX `admin_user_site_access_site_idx` ON `admin_user_site_access` (`site_id`);--> statement-breakpoint
+CREATE TABLE `email_verification_tokens` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_id` integer NOT NULL,
+	`new_email` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`consumed_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `email_verification_tokens_user_id_idx` ON `email_verification_tokens` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `email_verification_tokens_token_hash_idx` ON `email_verification_tokens` (`token_hash`);--> statement-breakpoint
+CREATE TABLE `delayed_deletions` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`resource_type` text NOT NULL,
+	`resource_id` text NOT NULL,
+	`site_id` integer,
+	`requested_by_user_id` integer,
+	`requested_at` text NOT NULL,
+	`hard_delete_after` text NOT NULL,
+	`restored_by_user_id` integer,
+	`restored_at` text,
+	`hard_deleted_at` text,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`metadata_json` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`requested_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`restored_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `delayed_deletions_status_due_idx` ON `delayed_deletions` (`status`,`hard_delete_after`);--> statement-breakpoint
+CREATE INDEX `delayed_deletions_site_id_idx` ON `delayed_deletions` (`site_id`);--> statement-breakpoint
+CREATE INDEX `delayed_deletions_resource_idx` ON `delayed_deletions` (`resource_type`,`resource_id`);--> statement-breakpoint
 CREATE TABLE `admin_sessions` (
 	`id` text PRIMARY KEY NOT NULL,
+	`user_id` integer,
 	`token_hash` text NOT NULL,
 	`csrf_token_hash` text,
 	`csrf_issued_at` text,
 	`ip` text,
 	`user_agent` text,
 	`expires_at` text NOT NULL,
+	`revoked_at` text,
+	`revoked_by_user_id` integer,
+	`revocation_reason` text,
 	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`revoked_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE INDEX `admin_sessions_expires_at_idx` ON `admin_sessions` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `audit_logs` (

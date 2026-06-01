@@ -14,6 +14,8 @@ import {
 	ListChecksIcon,
 	TerminalSquareIcon,
 	UsersIcon,
+	UserCogIcon,
+	UserRoundIcon,
 	type LucideIcon,
 } from "lucide-react";
 
@@ -33,6 +35,8 @@ import {
 	SystemSettingsPage,
 	CommentersPage,
 	VisitorsPage,
+	UsersPage,
+	ProfilePage,
 } from "./admin-pages";
 import { inputClass } from "./admin-ui";
 import { TasksPage } from "./tasks-page";
@@ -48,6 +52,8 @@ export type AdminView =
 	| "data"
 	| "tasks"
 	| "ops"
+	| "users"
+	| "profile"
 	| "settings"
 	| "system";
 
@@ -55,20 +61,73 @@ const navItems: Array<{
 	id: AdminView;
 	label: string;
 	icon: LucideIcon;
+	permission?: string;
 }> = [
-	{ id: "overview", label: "概览", icon: BadgeCheckIcon },
-	{ id: "comments", label: "评论", icon: MessageSquareTextIcon },
-	{ id: "pages", label: "页面", icon: BookOpenIcon },
-	{ id: "commenters", label: "评论者", icon: UsersIcon },
-	{ id: "visitors", label: "访客", icon: BadgeCheckIcon },
-	{ id: "blacklist", label: "黑名单", icon: ShieldIcon },
-	{ id: "sites", label: "站点", icon: GlobeIcon },
-	{ id: "data", label: "数据", icon: DatabaseIcon },
-	{ id: "tasks", label: "任务", icon: ListChecksIcon },
-	{ id: "ops", label: "运维", icon: TerminalSquareIcon },
-	{ id: "settings", label: "站点设置", icon: FlagIcon },
-	{ id: "system", label: "系统设置", icon: SettingsIcon },
+	{
+		id: "overview",
+		label: "概览",
+		icon: BadgeCheckIcon,
+		permission: "sites.read",
+	},
+	{
+		id: "comments",
+		label: "评论",
+		icon: MessageSquareTextIcon,
+		permission: "comments.read",
+	},
+	{ id: "pages", label: "页面", icon: BookOpenIcon, permission: "pages.read" },
+	{
+		id: "commenters",
+		label: "评论者",
+		icon: UsersIcon,
+		permission: "commenters.read",
+	},
+	{
+		id: "visitors",
+		label: "访客",
+		icon: BadgeCheckIcon,
+		permission: "visitors.read",
+	},
+	{
+		id: "blacklist",
+		label: "黑名单",
+		icon: ShieldIcon,
+		permission: "blacklist.read",
+	},
+	{ id: "sites", label: "站点", icon: GlobeIcon, permission: "sites.read" },
+	{ id: "users", label: "用户", icon: UserCogIcon, permission: "users.read" },
+	{ id: "data", label: "数据", icon: DatabaseIcon, permission: "data.export" },
+	{
+		id: "tasks",
+		label: "任务",
+		icon: ListChecksIcon,
+		permission: "tasks.read",
+	},
+	{
+		id: "ops",
+		label: "运维",
+		icon: TerminalSquareIcon,
+		permission: "ops.read",
+	},
+	{
+		id: "settings",
+		label: "站点设置",
+		icon: FlagIcon,
+		permission: "site_settings.read",
+	},
+	{
+		id: "system",
+		label: "系统设置",
+		icon: SettingsIcon,
+		permission: "system_settings.read",
+	},
 ];
+
+const profileNavItem = {
+	id: "profile" as const,
+	label: "个人中心",
+	icon: UserRoundIcon,
+};
 
 export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	const queryClient = useQueryClient();
@@ -96,6 +155,14 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	const activeSite = meQuery.data?.sites.find(
 		(site) => site.siteKey === selectedSiteKey,
 	);
+	const permissions = meQuery.data?.permissions ?? [];
+	const visibleNavItems = navItems.filter(
+		(item) => !item.permission || permissions.includes(item.permission),
+	);
+	const allVisibleNavItems = [...visibleNavItems, profileNavItem];
+	const activeView = allVisibleNavItems.some((item) => item.id === view)
+		? view
+		: (visibleNavItems[0]?.id ?? "overview");
 	const activeSiteKey =
 		selectedSiteKey || meQuery.data?.sites[0]?.siteKey || "";
 	const openComments = (input: { pageKey?: string; search?: string }) => {
@@ -109,7 +176,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	};
 
 	function renderView() {
-		switch (view) {
+		switch (activeView) {
 			case "overview":
 				return <OverviewPage />;
 			case "comments":
@@ -154,6 +221,14 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return <TasksPage siteKey={activeSiteKey} />;
 			case "ops":
 				return <OpsPage />;
+			case "users":
+				return (
+					<UsersPage
+						isInitialAdmin={Boolean(meQuery.data?.user.isInitialAdmin)}
+					/>
+				);
+			case "profile":
+				return <ProfilePage />;
 			case "settings":
 				return <SiteSettingsPage siteKey={activeSiteKey} />;
 			case "system":
@@ -172,13 +247,13 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				</div>
 				<Separator />
 				<nav className="flex flex-1 flex-col gap-1 p-3">
-					{navItems.map((item) => {
+					{visibleNavItems.map((item) => {
 						const Icon = item.icon;
 						return (
 							<Button
 								key={item.id}
 								type="button"
-								variant={view === item.id ? "secondary" : "ghost"}
+								variant={activeView === item.id ? "secondary" : "ghost"}
 								className="justify-start"
 								onClick={() => setView(item.id)}
 							>
@@ -193,7 +268,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				<header className="flex h-16 items-center justify-between border-b bg-background px-4 md:px-6">
 					<div className="min-w-0">
 						<h1 className="truncate text-base font-semibold">
-							{navItems.find((item) => item.id === view)?.label ?? "管理台"}
+							{allVisibleNavItems.find((item) => item.id === activeView)
+								?.label ?? "管理台"}
 						</h1>
 						<p className="truncate text-sm text-muted-foreground">
 							{activeSite
@@ -208,12 +284,22 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 							onChange={(event) => setView(event.target.value as AdminView)}
 							aria-label="管理模块"
 						>
-							{navItems.map((item) => (
+							{allVisibleNavItems.map((item) => (
 								<option key={item.id} value={item.id}>
 									{item.label}
 								</option>
 							))}
 						</select>
+						<Button
+							type="button"
+							variant={activeView === "profile" ? "secondary" : "outline"}
+							onClick={() => setView("profile")}
+						>
+							<UserRoundIcon data-icon="inline-start" />
+							<span className="hidden sm:inline">
+								{meQuery.data?.user.displayName ?? "个人中心"}
+							</span>
+						</Button>
 						<select
 							className={inputClass}
 							value={activeSiteKey}

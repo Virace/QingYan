@@ -86,6 +86,97 @@ export const adminLoginBodySchema = z.object({
 	captchaValue: z.string().min(1).optional(),
 });
 
+export const adminUserGroupKeySchema = z.enum([
+	"admin",
+	"site_admin",
+	"site_moderator",
+]);
+
+export const adminUsersQuerySchema = z.object({
+	search: z.string().min(1).optional(),
+	limit: z.coerce.number().int().positive().max(100).default(50),
+	offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const adminUserParamsSchema = z.object({
+	userId: z.coerce.number().int().positive(),
+});
+
+export const adminUserCreateBodySchema = z.object({
+	username: z.string().trim().min(1),
+	email: z.string().trim().email(),
+	displayName: z.string().trim().min(1),
+	password: z.string().min(8),
+	groupKey: adminUserGroupKeySchema,
+	siteKeys: z.array(z.string().min(1)).default([]),
+	passwordChangeRequired: z.boolean().default(false),
+});
+
+export const adminUserPatchBodySchema = z
+	.object({
+		email: z.string().trim().email().optional(),
+		displayName: z.string().trim().min(1).optional(),
+		groupKey: adminUserGroupKeySchema.optional(),
+		siteKeys: z.array(z.string().min(1)).optional(),
+		status: z.enum(["active", "disabled", "deleted"]).optional(),
+		passwordChangeRequired: z.boolean().optional(),
+	})
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminUserResetPasswordBodySchema = z.object({
+	password: z.string().min(8),
+	passwordChangeRequired: z.boolean().default(true),
+});
+
+export const adminUserRevokeSessionsBodySchema = z
+	.object({
+		loginBlockPreset: z
+			.enum(["none", "1h", "1d", "7d", "custom"])
+			.default("none"),
+		loginBlockedUntil: z.string().datetime().optional(),
+		reason: z.string().trim().max(500).optional(),
+	})
+	.superRefine((value, context) => {
+		if (value.loginBlockPreset === "custom" && !value.loginBlockedUntil) {
+			context.addIssue({
+				code: "custom",
+				path: ["loginBlockedUntil"],
+				message: "自定义禁止登录时间不能为空。",
+			});
+		}
+	});
+
+export const adminProfilePatchBodySchema = z
+	.object({
+		displayName: z.string().trim().min(1).optional(),
+		website: z.string().trim().url().or(z.literal("")).optional(),
+		avatarUrl: z.string().trim().url().or(z.literal("")).optional(),
+	})
+	.passthrough()
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminProfilePasswordBodySchema = z.object({
+	currentPassword: z.string().min(1),
+	nextPassword: z.string().min(8),
+});
+
+export const adminProfileEmailChangeBodySchema = z.object({
+	newEmail: z
+		.string()
+		.trim()
+		.email()
+		.transform((value) => value.toLowerCase()),
+	currentPassword: z.string().min(1).optional(),
+});
+
+export const adminProfileEmailChangeConfirmBodySchema = z.object({
+	token: z.string().min(1),
+});
+
 export const adminCommentsQuerySchema = z.object({
 	siteKey: z.string().min(1).optional(),
 	pageKey: z.string().min(1).optional(),
@@ -416,9 +507,21 @@ export const adminSettingsBodySchema = z
 export const adminSystemSettingsBodySchema = z.object({
 	admin: z
 		.object({
-			session: z.object({
-				ttlMinutes: z.number().int().positive(),
-			}),
+			session: z
+				.object({
+					ttlMinutes: z.number().int().positive(),
+				})
+				.optional(),
+			emailVerification: z
+				.object({
+					selfServiceRequired: z.boolean(),
+				})
+				.optional(),
+			deletion: z
+				.object({
+					retentionDays: z.number().int().min(0).max(3650),
+				})
+				.optional(),
 		})
 		.optional(),
 	security: securitySettingsSchema.optional(),

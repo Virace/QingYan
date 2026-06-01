@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type { AppConfig } from "./types";
 
+const DEFAULT_ADMIN_DEV_ORIGIN = "http://localhost:5173";
+
 export interface DevSiteSeed {
 	siteKey: "default";
 	name: string;
@@ -13,6 +15,7 @@ export interface AppRuntimeOptions {
 		enabled: boolean;
 		adminUsername?: string;
 		adminPassword?: string;
+		adminOrigin?: string;
 		adminToken?: string;
 		tokenSource?: "env" | "generated";
 		seed?: {
@@ -54,13 +57,22 @@ export function resolveRuntimeOptions(
 		environment.QINGYAN_DEV_ALLOWED_ORIGIN ?? "http://localhost:4321";
 	const adminToken =
 		environment.QINGYAN_DEV_ADMIN_TOKEN ?? `qy_dev_${randomUUID()}`;
+	const adminOrigin =
+		environment.QINGYAN_DEV_ADMIN_ORIGIN ?? DEFAULT_ADMIN_DEV_ORIGIN;
 	const tokenSource = environment.QINGYAN_DEV_ADMIN_TOKEN ? "env" : "generated";
+	const devConfig = structuredClone(config);
+	const allowedAdminOrigins =
+		devConfig.security.adminOriginGuard.allowedOrigins;
+	if (!allowedAdminOrigins.includes(adminOrigin)) {
+		allowedAdminOrigins.push(adminOrigin);
+	}
 	const devMode: AppRuntimeOptions["devMode"] = {
 		enabled: true,
 		adminUsername:
 			environment.QINGYAN_DEV_ADMIN_USERNAME ?? DEFAULT_DEV_ADMIN_USERNAME,
 		adminPassword:
 			environment.QINGYAN_DEV_ADMIN_PASSWORD ?? DEFAULT_DEV_ADMIN_PASSWORD,
+		adminOrigin,
 		adminToken,
 		tokenSource,
 		seed: {
@@ -72,7 +84,7 @@ export function resolveRuntimeOptions(
 	}
 
 	return {
-		config,
+		config: devConfig,
 		runtimeOptions: {
 			devMode,
 		},

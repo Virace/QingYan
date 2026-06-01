@@ -21,6 +21,7 @@ export interface MigrationReportSummary {
 
 export type MigrationReportAuthorMatchKind =
 	| "staff_strong"
+	| "staff_existing_user"
 	| "staff_email_candidate"
 	| "registered_unknown"
 	| "visitor";
@@ -29,11 +30,18 @@ export interface MigrationReportAuthorMatch {
 	kind: MigrationReportAuthorMatchKind;
 	wpAuthorId?: string;
 	email?: string;
+	adminUser?: {
+		id: number;
+		displayName: string;
+		username?: string;
+		status?: string;
+	};
 }
 
 export interface MigrationReportAuthorSummary {
 	totalAuthors: number;
 	staffStrong: number;
+	staffExistingUser?: number;
 	staffEmailCandidate: number;
 	registeredUnknown: number;
 	visitor: number;

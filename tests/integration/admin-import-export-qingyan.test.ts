@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
-import { comments, siteSettings } from "../../src/db/schema";
+import { adminUsers, comments, siteSettings } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -219,13 +220,16 @@ describe("admin import/export QingYan routes", () => {
 		fixture.app.sqlite
 			.prepare(
 				`INSERT INTO comments (
-					id, site_id, page_thread_id, status, author_name, author_email, content_raw
-				) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+					id, site_id, page_thread_id, author_user_id, author_identity,
+					status, author_name, author_email, content_raw
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				"c_exported",
 				1,
 				thread.id,
+				1,
+				"staff",
 				"approved",
 				"Alice",
 				"alice@example.com",
@@ -394,6 +398,13 @@ describe("admin import/export QingYan routes", () => {
 		expect(response.json().data.adminSessions).toBeUndefined();
 		expect(response.json().data.captchaSessions).toBeUndefined();
 		expect(response.json().data.adminBootstrapState).toBeUndefined();
+		expect(response.json().data.adminUsers).toBeUndefined();
+		const serialized = JSON.stringify(response.json());
+		expect(serialized).not.toContain("author_user_id");
+		expect(serialized).not.toContain("authorUserId");
+		expect(serialized).not.toContain("password_hash");
+		expect(serialized).not.toContain("passwordHash");
+		expect(serialized).not.toContain("admin_users");
 	});
 
 	it("dry-runs and applies a qingyan.export.v2 JSON data-only import", async () => {
@@ -788,5 +799,63 @@ describe("admin import/export QingYan routes", () => {
 			},
 		});
 		expect(response.json().error.details.message).toContain("formatVersion");
+	});
+
+	it("imports comments without granting staff identity from exported snapshots", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const payload = qingyanExportPayload();
+		payload.data.comments[0].author = {
+			name: "Exported Staff Snapshot",
+			email: "admin@localhost.invalid",
+			website: "https://example.com",
+		};
+
+		const dryRunResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/import-export/qingyan/dry-run",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "qingyan-export.json",
+				payload,
+				existingStrategy: "fail_on_existing",
+				importMode: "data_only",
+			},
+		});
+
+		expect(dryRunResponse.statusCode).toBe(200);
+
+		const applyResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/qingyan/jobs/${dryRunResponse.json().job.id}/apply`,
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				existingStrategy: "fail_on_existing",
+				importMode: "data_only",
+			},
+		});
+
+		expect(applyResponse.statusCode).toBe(200);
+
+		const [importedComment] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.contentRaw, "hello from export"))
+			.limit(1);
+		expect(importedComment).toMatchObject({
+			authorIdentity: "visitor",
+			authorUserId: null,
+			authorEmail: "admin@localhost.invalid",
+		});
+
+		const users = await fixture.app.db.select().from(adminUsers);
+		expect(users).toHaveLength(1);
 	});
 });

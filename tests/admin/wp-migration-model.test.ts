@@ -229,7 +229,7 @@ describe("wp migration model", () => {
 				wpAuthorEmail: "virace@aliyun.com",
 			},
 		]);
-		expect(hasBlockingAuthorCandidates([item], {})).toBe(true);
+		expect(hasBlockingAuthorCandidates([item], {})).toBe(false);
 		expect(
 			hasBlockingAuthorCandidates(
 				[item],

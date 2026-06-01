@@ -580,7 +580,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 								<CardTitle className="text-lg">站点人员候选确认</CardTitle>
 								<CardDescription>
 									这些评论未登录 WordPress 用户，但邮箱匹配 WXR
-									作者。导入前需要确认身份。
+									作者。未选择时会按访客导入。
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="flex flex-col gap-3">
@@ -655,6 +655,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 															onChange={(event) => {
 																const value = event.target.value;
 																if (
+																	value === "staff" ||
 																	value === "verified" ||
 																	value === "visitor"
 																) {
@@ -668,7 +669,7 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 																}
 															}}
 														>
-															<option value="">待确认</option>
+															<option value="">默认保留访客</option>
 															<option value="verified">作为站点人员</option>
 															<option value="visitor">保留访客</option>
 														</select>

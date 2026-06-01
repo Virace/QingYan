@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
+import { adminUsers, auditLogs } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -17,6 +19,13 @@ describe("admin system settings", () => {
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!adminUser) {
+			throw new Error("Expected admin user to exist");
+		}
 
 		const getResponse = await fixture.app.inject({
 			method: "GET",
@@ -94,6 +103,12 @@ describe("admin system settings", () => {
 				session: {
 					ttlMinutes: 4320,
 				},
+				emailVerification: {
+					selfServiceRequired: true,
+				},
+				deletion: {
+					retentionDays: 15,
+				},
 			},
 		});
 
@@ -124,6 +139,18 @@ describe("admin system settings", () => {
 			level: "debug",
 			retentionDays: 14,
 		});
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "system.settings.updated",
+					targetType: "system_settings",
+					targetId: "global",
+				}),
+			]),
+		);
 	});
 
 	it("updates public API advisory field settings", async () => {
@@ -729,6 +756,131 @@ describe("admin system settings", () => {
 				session: {
 					ttlMinutes: 10080,
 				},
+			},
+		});
+	});
+
+	it("updates admin email verification settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					session: {
+						ttlMinutes: 4320,
+					},
+					emailVerification: {
+						selfServiceRequired: false,
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json()).toMatchObject({
+			admin: {
+				emailVerification: {
+					selfServiceRequired: false,
+				},
+			},
+		});
+
+		const getResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(getResponse.statusCode).toBe(200);
+		expect(getResponse.json()).toMatchObject({
+			admin: {
+				emailVerification: {
+					selfServiceRequired: false,
+				},
+			},
+		});
+	});
+
+	it("updates admin deletion retention settings and allows immediate delete mode", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					session: {
+						ttlMinutes: 4320,
+					},
+					emailVerification: {
+						selfServiceRequired: true,
+					},
+					deletion: {
+						retentionDays: 0,
+					},
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json()).toMatchObject({
+			admin: {
+				deletion: {
+					retentionDays: 0,
+				},
+			},
+		});
+
+		const invalidResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					deletion: {
+						retentionDays: -1,
+					},
+				},
+			},
+		});
+
+		expect(invalidResponse.statusCode).toBe(400);
+		expect(invalidResponse.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
 			},
 		});
 	});

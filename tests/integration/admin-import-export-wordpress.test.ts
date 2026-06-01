@@ -2,6 +2,9 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+	adminGroups,
+	adminUserGroups,
+	adminUsers,
 	commentRequestMetadata,
 	pageThreads,
 	sites,
@@ -730,7 +733,7 @@ describe("admin import/export WordPress routes", () => {
 		});
 	});
 
-	it("requires a plan-time decision for WordPress author email candidates", async () => {
+	it("defaults unresolved WordPress author email candidates to visitor and accepts explicit staff decisions", async () => {
 		const fixture = await createTestApp();
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
 
@@ -763,16 +766,14 @@ describe("admin import/export WordPress routes", () => {
 		});
 		const jobId = analyzeResponse.json().job.id as string;
 
-		const unresolvedPlan = await fixture.app.inject({
+		const defaultPlan = await fixture.app.inject({
 			method: "POST",
 			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
-		expect(unresolvedPlan.statusCode).toBe(400);
-		expect(unresolvedPlan.json()).toMatchObject({
-			error: {
-				code: "INVALID_REQUEST",
-			},
+		expect(defaultPlan.statusCode).toBe(200);
+		expect(defaultPlan.json().plan.items[0].comments[0]).toMatchObject({
+			authorIdentity: "visitor",
 		});
 
 		const resolvedPlan = await fixture.app.inject({
@@ -788,6 +789,115 @@ describe("admin import/export WordPress routes", () => {
 		expect(resolvedPlan.statusCode).toBe(200);
 		expect(resolvedPlan.json().plan.items[0].comments[0]).toMatchObject({
 			authorIdentity: "verified",
+		});
+	});
+
+	it("creates a disabled staff user for explicit WordPress staff email candidate decisions", async () => {
+		const fixture = await createTestApp();
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const analyzeResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/import-export/wordpress/analyze",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				siteKey: "fangyuan",
+				fileName: "wordpress.xml",
+				xml: wxrStaffEmailCandidateFixture(),
+				sourceBasePath: "/",
+				mapping: {
+					items: [
+						{
+							wpPostId: "9",
+							decision: "map",
+							target: {
+								pageKey: "admin-comment.html",
+								pageUrl: "/admin-comment.html",
+							},
+						},
+					],
+				},
+			},
+		});
+		expect(analyzeResponse.statusCode).toBe(200);
+		const jobId = analyzeResponse.json().job.id as string;
+
+		const planResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/wordpress/jobs/${jobId}/plan`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				authorDecisions: {
+					"900": "staff",
+				},
+			},
+		});
+		expect(planResponse.statusCode).toBe(200);
+		expect(planResponse.json().plan.items[0].comments[0]).toMatchObject({
+			authorIdentity: "staff",
+		});
+		expect(
+			planResponse.json().plan.items[0].comments[0].authorUserId,
+		).toBeUndefined();
+
+		const dryRunResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/dry-run`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				existingStrategy: "fail_on_existing",
+			},
+		});
+		expect(dryRunResponse.statusCode).toBe(200);
+
+		const applyResponse = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/import-export/jobs/${jobId}/apply`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				existingStrategy: "fail_on_existing",
+			},
+		});
+		expect(applyResponse.statusCode).toBe(200);
+
+		const [staffUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.email, "Virace@aliyun.com"));
+		expect(staffUser).toMatchObject({
+			displayName: "管理员",
+			status: "disabled",
+			isInitialAdmin: false,
+			passwordChangeRequired: true,
+		});
+		expect(staffUser?.username).toMatch(/^wp_staff_/);
+
+		const [staffGroup] = await fixture.app.db
+			.select({
+				key: adminGroups.key,
+			})
+			.from(adminUserGroups)
+			.innerJoin(adminGroups, eq(adminGroups.id, adminUserGroups.groupId))
+			.where(eq(adminUserGroups.userId, staffUser?.id ?? 0));
+		expect(staffGroup).toEqual({
+			key: "site_moderator",
+		});
+
+		const comment = fixture.app.sqlite
+			.prepare(
+				"SELECT author_identity, author_user_id, author_name, author_email FROM comments WHERE content_raw = ?",
+			)
+			.get("admin hello") as {
+			author_identity: string;
+			author_user_id: number;
+			author_name: string;
+			author_email: string;
+		};
+		expect(comment).toEqual({
+			author_identity: "staff",
+			author_user_id: staffUser?.id,
+			author_name: "管理员",
+			author_email: "Virace@aliyun.com",
 		});
 	});
 

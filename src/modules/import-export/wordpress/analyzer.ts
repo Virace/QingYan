@@ -14,6 +14,7 @@ import {
 } from "./page-key";
 import {
 	classifyWordPressAuthorMatch,
+	type WordPressAdminUserAuthorCandidate,
 	summarizeWordPressAuthorMatches,
 } from "./author-mapping";
 import {
@@ -35,6 +36,7 @@ export interface AnalyzeWordPressCommentsInput {
 	pagePathTemplate?: string;
 	mapping?: ExplicitMapping;
 	existingPages?: ExistingPageCandidate[];
+	adminUsers?: WordPressAdminUserAuthorCandidate[];
 	now?: Date;
 }
 
@@ -281,6 +283,7 @@ function buildReportItem(
 	input: AnalyzeWordPressCommentsInput,
 	commentTree: CommentTreeResult,
 	authors: ReturnType<typeof parseWxr>["authors"],
+	adminUsers: WordPressAdminUserAuthorCandidate[],
 ): MigrationReportItem {
 	const pageKey = resolvePageKey({
 		wpPostId: item.wpPostId,
@@ -341,7 +344,7 @@ function buildReportItem(
 			return {
 				...comment,
 				authorMatch: sourceComment
-					? classifyWordPressAuthorMatch(sourceComment, authors)
+					? classifyWordPressAuthorMatch(sourceComment, authors, adminUsers)
 					: undefined,
 			};
 		}),
@@ -379,7 +382,14 @@ export function analyzeWordPressComments(
 			continue;
 		}
 		items.push(
-			buildReportItem(item, sourcePath, input, commentTree, wxr.authors),
+			buildReportItem(
+				item,
+				sourcePath,
+				input,
+				commentTree,
+				wxr.authors,
+				input.adminUsers ?? [],
+			),
 		);
 	}
 
@@ -412,7 +422,11 @@ export function analyzeWordPressComments(
 		sourceBasePath,
 		createdAt: (input.now ?? new Date()).toISOString(),
 		wxr: wxr.metadata,
-		authorSummary: summarizeWordPressAuthorMatches(allComments, wxr.authors),
+		authorSummary: summarizeWordPressAuthorMatches(
+			allComments,
+			wxr.authors,
+			input.adminUsers ?? [],
+		),
 		htmlContentSummary: summarizeHtmlContent(allComments),
 		sourcePathExamples,
 		items,

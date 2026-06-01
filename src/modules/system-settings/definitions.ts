@@ -108,6 +108,12 @@ export const systemSettingsSchema = z.object({
 		session: z.object({
 			ttlMinutes: z.number().int().positive(),
 		}),
+		emailVerification: z.object({
+			selfServiceRequired: z.boolean(),
+		}),
+		deletion: z.object({
+			retentionDays: z.number().int().min(0).max(3650),
+		}),
 	}),
 	security: securitySettingsSchema,
 	logging: z.object({
@@ -200,6 +206,12 @@ export const defaultSystemSettings: SystemSettings = {
 	admin: {
 		session: {
 			ttlMinutes: defaultAdminSessionTtlMinutes,
+		},
+		emailVerification: {
+			selfServiceRequired: true,
+		},
+		deletion: {
+			retentionDays: 15,
 		},
 	},
 	security: {

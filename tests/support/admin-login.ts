@@ -8,6 +8,7 @@ import {
 export async function loginAsAdmin(
 	app: FastifyInstance,
 	options?: {
+		username?: string;
 		password?: string;
 		apiBase?: string;
 	},
@@ -35,7 +36,7 @@ export async function loginAsAdmin(
 			method: "POST",
 			url: `${apiBase}/admin/session/login`,
 			payload: {
-				username: "admin",
+				username: options?.username ?? "admin",
 				password: options?.password ?? "replace-me",
 				challengeId: challenge.challengeId,
 				captchaValue: getForcedTestCaptchaAnswer(),

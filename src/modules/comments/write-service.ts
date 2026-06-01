@@ -72,7 +72,13 @@ export class CommentsWriteService {
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
-		verifiedAuthorSession?: { type: "admin" };
+		verifiedAuthorSession?: {
+			type: "admin";
+			userId?: number;
+			displayName?: string;
+			email?: string;
+			website?: string | null;
+		};
 	}) {
 		const site = this.readRepository.getRegisteredSite(input.siteKey);
 		if (!site) {
@@ -256,20 +262,25 @@ export class CommentsWriteService {
 			? "approved"
 			: (moderation?.status ?? legacyStatus);
 		const resolvedAuthorName = shouldUseVerifiedAuthor
-			? verifiedAuthor.displayName
+			? (input.verifiedAuthorSession?.displayName ?? verifiedAuthor.displayName)
 			: authorName;
 		const resolvedAuthorEmail = shouldUseVerifiedAuthor
-			? verifiedAuthor.email || undefined
+			? input.verifiedAuthorSession?.email || verifiedAuthor.email || undefined
 			: authorEmail;
 		const resolvedAuthorWebsite = shouldUseVerifiedAuthor
-			? verifiedAuthor.website || undefined
+			? input.verifiedAuthorSession
+				? (input.verifiedAuthorSession.website ?? undefined)
+				: verifiedAuthor.website || undefined
 			: authorWebsite;
 		const created = await this.writeRepository.createComment({
 			siteId: site.id,
 			pageThreadId: thread.id,
 			parentCommentId: input.parentCommentId,
 			visitorId: visitor?.id ?? null,
-			authorIdentity: shouldUseVerifiedAuthor ? "verified" : "visitor",
+			authorUserId: shouldUseVerifiedAuthor
+				? input.verifiedAuthorSession?.userId
+				: null,
+			authorIdentity: shouldUseVerifiedAuthor ? "staff" : "visitor",
 			authorName: resolvedAuthorName,
 			authorEmail: resolvedAuthorEmail,
 			authorWebsite:
@@ -294,9 +305,9 @@ export class CommentsWriteService {
 			requestId: input.requestId,
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
-			actorType: shouldUseVerifiedAuthor ? "admin" : "visitor",
+			actorType: shouldUseVerifiedAuthor ? "admin_user" : "visitor",
 			actorId: shouldUseVerifiedAuthor
-				? "admin_session"
+				? String(input.verifiedAuthorSession?.userId ?? "admin_session")
 				: (visitor?.visitorKey ?? input.ip ?? "anonymous"),
 			event: "comments.created",
 			message: status === "pending" ? "评论已提交待审核" : "评论已发布",

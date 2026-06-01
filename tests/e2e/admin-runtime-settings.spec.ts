@@ -43,10 +43,10 @@ async function ensureSwitchState(
 	const control = page.getByRole("switch", { name, exact: true });
 	await expect(control).toBeVisible();
 	const currentChecked = await control.evaluate((element) => {
-		if (element instanceof HTMLInputElement) {
-			return element.checked;
-		}
-		return element.getAttribute("aria-checked") === "true";
+		const maybeInput = element as { checked?: unknown };
+		return typeof maybeInput.checked === "boolean"
+			? maybeInput.checked
+			: element.getAttribute("aria-checked") === "true";
 	});
 	if (currentChecked !== checked) {
 		await control.click();
@@ -99,9 +99,9 @@ async function expectFieldControlGap(
 	if (!labelBounds || !controlBounds) {
 		throw new Error(`Expected ${label} label and control to have bounds.`);
 	}
-	expect(controlBounds.y - (labelBounds.y + labelBounds.height)).toBeLessThanOrEqual(
-		maxGap,
-	);
+	expect(
+		controlBounds.y - (labelBounds.y + labelBounds.height),
+	).toBeLessThanOrEqual(maxGap);
 }
 
 async function expectFieldControlsNearlyAligned(
@@ -189,7 +189,11 @@ test("system settings mixed description fields keep switch controls aligned", as
 	await ensureSwitchState(page, "外部头像 URL", true);
 	await expect(page.getByText("头像接口地址")).toBeVisible();
 	await expectFieldRowsAligned(page, ["外部头像 URL", "头像接口地址"]);
-	await expectFieldControlsNearlyAligned(page, ["外部头像 URL", "头像接口地址"], 3);
+	await expectFieldControlsNearlyAligned(
+		page,
+		["外部头像 URL", "头像接口地址"],
+		3,
+	);
 	await expectFieldControlGap(page, "外部头像 URL", 14);
 
 	await ensureSwitchState(page, "系统邮件", true);
@@ -402,7 +406,9 @@ test("site settings visual states render without overlay on desktop and mobile",
 
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.reload();
-	await page.getByRole("combobox", { name: "管理模块" }).selectOption("settings");
+	await page
+		.getByRole("combobox", { name: "管理模块" })
+		.selectOption("settings");
 	await expect(page.getByRole("heading", { name: "站点设置" })).toBeVisible();
 	await expect(
 		page.getByRole("switch", { name: "评论", exact: true }),

@@ -575,6 +575,7 @@ export class AdminRepository {
 
 	public async createAdminSession(input: {
 		id: string;
+		userId?: number;
 		tokenHash: string;
 		csrfTokenHash?: string;
 		csrfIssuedAt?: string;
@@ -1501,6 +1502,16 @@ export class AdminRepository {
 		return comment;
 	}
 
+	public async listCommentsByIds(commentIds: string[]) {
+		if (commentIds.length === 0) {
+			return [];
+		}
+		return this.db
+			.select()
+			.from(comments)
+			.where(inArray(comments.id, commentIds));
+	}
+
 	public async getCommentRequestMetadata(commentId: string) {
 		const [metadata] = await this.db
 			.select()
@@ -1811,6 +1822,15 @@ export class AdminRepository {
 		return rule;
 	}
 
+	public async getBlacklistRule(ruleId: number) {
+		const [rule] = await this.db
+			.select()
+			.from(blacklistRules)
+			.where(eq(blacklistRules.id, ruleId))
+			.limit(1);
+		return rule;
+	}
+
 	public async deleteBlacklistRulesByTarget(input: {
 		siteId?: number;
 		targetType: "ip" | "email" | "visitor";
@@ -1828,10 +1848,7 @@ export class AdminRepository {
 				and(
 					input.siteId === undefined
 						? isNull(blacklistRules.siteId)
-						: or(
-								isNull(blacklistRules.siteId),
-								eq(blacklistRules.siteId, input.siteId),
-							),
+						: eq(blacklistRules.siteId, input.siteId),
 					eq(blacklistRules.targetType, input.targetType),
 					eq(blacklistRules.targetValue, targetValue),
 					eq(blacklistRules.matchMode, input.matchMode),

@@ -8,6 +8,7 @@ import { adminOpsRoutes } from "./modules/admin/ops-routes";
 import { adminOverviewRoutes } from "./modules/admin/overview-routes";
 import { adminPageRegistryRoutes } from "./modules/admin/page-registry-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
+import { adminProfileRoutes } from "./modules/admin/profile-routes";
 import { createPasswordHash } from "./modules/admin/password-hash";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
@@ -15,6 +16,7 @@ import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-route
 import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminCommentersRoutes } from "./modules/admin/commenters-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
+import { adminUsersRoutes } from "./modules/admin/admin-users-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import type { AkismetClient } from "./modules/comments/akismet-client";
 import { captchaWidgetRoutes } from "./modules/comments/captcha-widget-routes";
@@ -207,14 +209,15 @@ export async function buildApp(
 		const devMockService = new DevMockService(devSeedSite);
 		app.decorate("devMockService", devMockService);
 		app.decorate("loggerManager", createMemoryLoggerManager(config));
-		app.decorate("adminBootstrap", {
+		const adminBootstrap = {
 			consolePath: config.admin.console.path ?? "/admin",
 			username: runtimeOptions.devMode.adminUsername ?? "admin",
 			passwordHash: createPasswordHash(
 				runtimeOptions.devMode.adminPassword ?? "admin",
 			),
 			generatedPassword: runtimeOptions.devMode.adminPassword ?? "admin",
-		});
+		};
+		app.decorate("adminBootstrap", adminBootstrap);
 		await app.register(requestContextPlugin);
 		registerBaseRoutes(app, openApi, publicPath);
 		await app.register(adminUiRoutes, {
@@ -292,6 +295,12 @@ export async function buildApp(
 	});
 	await app.register(adminSystemSettingsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/system-settings"),
+	});
+	await app.register(adminUsersRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin"),
+	});
+	await app.register(adminProfileRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/profile"),
 	});
 	await app.register(adminImportExportRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/import-export"),

@@ -63,11 +63,18 @@ export interface MigrationReportItem {
 		authorMatch?: {
 			kind:
 				| "staff_strong"
+				| "staff_existing_user"
 				| "staff_email_candidate"
 				| "registered_unknown"
 				| "visitor";
 			wpAuthorId?: string;
 			email?: string;
+			adminUser?: {
+				id: number;
+				displayName: string;
+				username?: string;
+				status?: string;
+			};
 		};
 	}>;
 	warnings: string[];
@@ -91,6 +98,7 @@ export interface MigrationReport {
 	authorSummary?: {
 		totalAuthors: number;
 		staffStrong: number;
+		staffExistingUser?: number;
 		staffEmailCandidate: number;
 		registeredUnknown: number;
 		visitor: number;
@@ -335,7 +343,9 @@ export function analyzeWordPressMigration(input: WordPressAnalyzePayload) {
 
 export function convertWordPressJobToPlan(
 	jobId: string,
-	input?: { authorDecisions?: Record<string, "verified" | "visitor"> },
+	input?: {
+		authorDecisions?: Record<string, "staff" | "verified" | "visitor">;
+	},
 ) {
 	return requestJson<WordPressPlanResult>(
 		`/api/admin/import-export/wordpress/jobs/${encodeURIComponent(jobId)}/plan`,

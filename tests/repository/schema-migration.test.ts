@@ -4,6 +4,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
+import { applyDatabaseMigrations } from "../../src/db/migrations";
 import { applyInitialMigration } from "../support/test-fixtures";
 
 function createMigratedDatabase() {
@@ -55,6 +56,8 @@ describe("initial migration", () => {
 					"site_page_registry",
 					"pending_page_candidates",
 					"pending_page_view_sessions",
+					"email_verification_tokens",
+					"delayed_deletions",
 				]),
 			);
 		} finally {
@@ -139,6 +142,9 @@ describe("initial migration", () => {
 			const commentsColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(comments)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const commentForeignKeys = fixture.sqlite
+				.prepare("PRAGMA foreign_key_list(comments)")
+				.all() as Array<{ from: string; table: string; to: string }>;
 			const commentRequestMetadataColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(comment_request_metadata)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -189,6 +195,18 @@ describe("initial migration", () => {
 			const pendingViewSessionColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(pending_page_view_sessions)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const emailVerificationColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(email_verification_tokens)")
+				.all() as Array<{ name: string }>;
+			const emailVerificationIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(email_verification_tokens)")
+				.all() as Array<{ name: string; unique: number }>;
+			const delayedDeletionColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(delayed_deletions)")
+				.all() as Array<{ name: string }>;
+			const delayedDeletionIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(delayed_deletions)")
+				.all() as Array<{ name: string; unique: number }>;
 
 			expect(commentsColumns.map((column) => column.name)).not.toEqual(
 				expect.arrayContaining([
@@ -196,6 +214,18 @@ describe("initial migration", () => {
 					"author_user_agent",
 					"author_ip_country",
 					"author_device_browser",
+				]),
+			);
+			expect(commentsColumns.map((column) => column.name)).toContain(
+				"author_user_id",
+			);
+			expect(commentForeignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						from: "author_user_id",
+						table: "admin_users",
+						to: "id",
+					}),
 				]),
 			);
 			expect(
@@ -459,6 +489,59 @@ describe("initial migration", () => {
 					"updated_at",
 				]),
 			);
+			expect(emailVerificationColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"user_id",
+					"new_email",
+					"token_hash",
+					"expires_at",
+					"consumed_at",
+					"created_at",
+				]),
+			);
+			expect(emailVerificationIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "email_verification_tokens_user_id_idx",
+					}),
+					expect.objectContaining({
+						name: "email_verification_tokens_token_hash_idx",
+						unique: 1,
+					}),
+				]),
+			);
+			expect(delayedDeletionColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"resource_type",
+					"resource_id",
+					"site_id",
+					"requested_by_user_id",
+					"requested_at",
+					"hard_delete_after",
+					"restored_by_user_id",
+					"restored_at",
+					"hard_deleted_at",
+					"status",
+					"metadata_json",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(delayedDeletionIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "delayed_deletions_status_due_idx",
+					}),
+					expect.objectContaining({
+						name: "delayed_deletions_site_id_idx",
+					}),
+					expect.objectContaining({
+						name: "delayed_deletions_resource_idx",
+					}),
+				]),
+			);
 		} finally {
 			fixture.cleanup();
 		}
@@ -525,5 +608,150 @@ describe("initial migration", () => {
 			.sort();
 
 		expect(migrationFiles).toEqual(["0000_initial.sql"]);
+	});
+
+	it("backfills unreleased multi-user admin schema into an existing dev database", () => {
+		const directory = mkdtempSync(
+			path.join(tmpdir(), "qingyan-schema-legacy-"),
+		);
+		const databaseFile = path.join(directory, "schema.db");
+		const sqlite = new Database(databaseFile);
+
+		try {
+			sqlite.exec(`
+				CREATE TABLE sites (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_key text NOT NULL,
+					name text NOT NULL,
+					allowed_origins_json text NOT NULL
+				);
+				CREATE TABLE admin_bootstrap_state (
+					id integer PRIMARY KEY NOT NULL,
+					console_path text DEFAULT '/admin' NOT NULL,
+					username text NOT NULL,
+					password_hash text NOT NULL,
+					generated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					password_rotated_at text
+				);
+				CREATE TABLE admin_sessions (
+					id text PRIMARY KEY NOT NULL,
+					token_hash text NOT NULL,
+					csrf_token_hash text,
+					csrf_issued_at text,
+					ip text,
+					user_agent text,
+					expires_at text NOT NULL,
+					last_seen_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE site_settings (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_id integer NOT NULL,
+					comments_enabled integer DEFAULT true NOT NULL,
+					default_status text DEFAULT 'pending' NOT NULL,
+					max_depth integer DEFAULT 3 NOT NULL,
+					root_limit integer DEFAULT 20 NOT NULL,
+					allow_page_like integer DEFAULT true NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE maintenance_jobs (
+					id text PRIMARY KEY NOT NULL,
+					type text NOT NULL,
+					status text NOT NULL,
+					scope_json text NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE site_page_registry (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_id integer NOT NULL,
+					page_key text NOT NULL,
+					page_url text NOT NULL,
+					status text DEFAULT 'active' NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE site_page_registry_sources (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_id integer NOT NULL,
+					source_type text NOT NULL,
+					source_url text NOT NULL,
+					enabled integer DEFAULT true NOT NULL,
+					mode text DEFAULT 'append' NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE __qingyan_migrations (
+					name text PRIMARY KEY NOT NULL,
+					applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				INSERT INTO __qingyan_migrations (name) VALUES ('0000_initial.sql');
+			`);
+
+			applyDatabaseMigrations(sqlite);
+
+			const tables = sqlite
+				.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+				.all() as Array<{ name: string }>;
+			const adminSessionColumns = sqlite
+				.prepare("PRAGMA table_info(admin_sessions)")
+				.all() as Array<{ name: string }>;
+			const siteSettingsColumns = sqlite
+				.prepare("PRAGMA table_info(site_settings)")
+				.all() as Array<{ name: string }>;
+			const maintenanceJobColumns = sqlite
+				.prepare("PRAGMA table_info(maintenance_jobs)")
+				.all() as Array<{ name: string }>;
+			const visitorRequestMetadataColumns = sqlite
+				.prepare("PRAGMA table_info(visitor_request_metadata)")
+				.all() as Array<{ name: string }>;
+
+			expect(tables.map((table) => table.name)).toEqual(
+				expect.arrayContaining([
+					"admin_users",
+					"admin_groups",
+					"admin_user_groups",
+					"admin_group_permissions",
+					"admin_user_site_access",
+					"comment_request_metadata",
+					"visitor_request_metadata",
+					"ip_region_database_state",
+					"ip_region_update_runs",
+					"site_page_registry_source_pages",
+					"pending_page_candidates",
+					"pending_page_view_sessions",
+					"email_verification_tokens",
+					"delayed_deletions",
+				]),
+			);
+			expect(adminSessionColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"user_id",
+					"revoked_at",
+					"revoked_by_user_id",
+					"revocation_reason",
+				]),
+			);
+			expect(siteSettingsColumns.map((column) => column.name)).toContain(
+				"engagement_json",
+			);
+			expect(maintenanceJobColumns.map((column) => column.name)).toContain(
+				"priority",
+			);
+			expect(
+				visitorRequestMetadataColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"visitor_id",
+					"ip_hash",
+					"user_agent_hash",
+					"last_seen_at",
+				]),
+			);
+		} finally {
+			sqlite.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
 	});
 });

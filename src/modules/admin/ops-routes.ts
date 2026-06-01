@@ -22,10 +22,13 @@ import { OpsStatusService } from "../ops/ops-status-service";
 import { defaultTaskQueueSettings } from "../ops/task-settings";
 import { UpdateCheckService } from "../ops/update-check-service";
 import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
+import { PageRegistryService } from "../page-registry/service";
 import { AppError } from "../shared/errors";
 import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { UpgradeService } from "../upgrade/upgrade-service";
+import { requirePermission, requireSiteAccess } from "./authorization";
+import { DeletionPolicyService } from "./deletion-policy-service";
 
 const ipVersionSchema = z.enum(["v4", "v6"]);
 const ipRegionUpdateBodySchema = z.object({
@@ -73,6 +76,21 @@ const pageTitleRefreshTaskBodySchema = z.object({
 	runAfter: z.string().datetime().nullable().optional(),
 	maxAttempts: z.number().int().min(1).max(10).optional(),
 	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
+});
+const delayedDeletionsQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	status: z
+		.enum(["pending", "restored", "hard_deleted"])
+		.optional()
+		.default("pending"),
+	limit: z.coerce.number().int().positive().max(100).default(20),
+	offset: z.coerce.number().int().min(0).default(0),
+});
+const delayedDeletionParamsSchema = z.object({
+	deletionId: z.coerce.number().int().positive(),
+});
+const delayedDeletionCleanupBodySchema = z.object({
+	now: z.string().datetime().optional(),
 });
 
 function readPackageVersion(): string {
@@ -132,6 +150,8 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		injected: fastify.serviceControl,
 	});
 	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
+	const pageRegistryService = new PageRegistryService(fastify.db);
+	const deletionPolicyService = new DeletionPolicyService(fastify.db);
 	const titleRefresh = new PageMetadataRefreshService(
 		fastify.db,
 		maintenanceJobs,
@@ -170,33 +190,114 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		},
 	);
 
+	async function hardDeleteDelayedRecord(record: {
+		resourceType: string;
+		resourceId: string;
+		siteId: number | null;
+		metadataJson?: string | null;
+	}) {
+		if (record.resourceType === "page") {
+			return pageRegistryService.hardDeletePage({
+				pageKey: record.resourceId,
+				siteId: record.siteId,
+			});
+		}
+		if (record.resourceType === "page_trash") {
+			return pageRegistryService.hardDeletePages({
+				pageKeys: readDelayedDeletionPageKeys(record.metadataJson),
+				siteId: record.siteId,
+			});
+		}
+		throw new AppError(
+			409,
+			"DELAYED_DELETION_RESOURCE_UNSUPPORTED",
+			"延迟删除资源类型暂不支持清理。",
+		);
+	}
+
+	async function restoreDelayedRecord(record: {
+		resourceType: string;
+		resourceId: string;
+		siteId: number | null;
+		metadataJson?: string | null;
+	}) {
+		if (record.resourceType === "page") {
+			return pageRegistryService.restoreDeletedPage({
+				pageKey: record.resourceId,
+				siteId: record.siteId,
+			});
+		}
+		if (record.resourceType === "page_trash") {
+			const restoredCount = await pageRegistryService.restoreDeletedPages({
+				pageKeys: readDelayedDeletionPageKeys(record.metadataJson),
+				siteId: record.siteId,
+			});
+			return {
+				resourceType: record.resourceType,
+				resourceId: record.resourceId,
+				restoredCount,
+			};
+		}
+		throw new AppError(
+			409,
+			"DELAYED_DELETION_RESOURCE_UNSUPPORTED",
+			"延迟删除资源类型暂不支持恢复。",
+		);
+	}
+
+	function readDelayedDeletionPageKeys(metadataJson?: string | null) {
+		if (!metadataJson) {
+			return [];
+		}
+		try {
+			const metadata = JSON.parse(metadataJson) as {
+				pages?: Array<{ pageKey?: unknown }>;
+			};
+			return (
+				metadata.pages
+					?.map((page) => page.pageKey)
+					.filter(
+						(pageKey): pageKey is string => typeof pageKey === "string",
+					) ?? []
+			);
+		} catch {
+			return [];
+		}
+	}
+
 	fastify.get("/status", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.read");
 		return ops.getStatus();
 	});
 
 	fastify.post("/upgrade/dry-run", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.upgrade");
 		return upgradeService.publicState();
 	});
 
 	fastify.post("/update/plan", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.update_check");
 		return ops.getUpdatePlan();
 	});
 
 	fastify.post("/update/check", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.update_check");
 		return ops.checkForUpdates();
 	});
 
 	fastify.get("/service-control", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.service_control");
 		return getServiceControlStatus(serviceControl);
 	});
 
 	fastify.post("/service-control/restart", async (request) => {
 		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.service_control");
 		const parsed = serviceRestartBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -206,8 +307,8 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		if (!serviceControl.controller) {
 			await fastify.security.writeAudit({
 				requestId: request.context?.requestId,
-				actorType: "admin",
-				actorId: session.id,
+				actorType: "admin_user",
+				actorId: String(session.user.id),
 				event: "ops.service_restart.rejected",
 				level: "warn",
 				message: "服务重启请求被拒绝：服务控制未启用",
@@ -222,8 +323,8 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 
 		await fastify.security.writeAudit({
 			requestId: request.context?.requestId,
-			actorType: "admin",
-			actorId: session.id,
+			actorType: "admin_user",
+			actorId: String(session.user.id),
 			event: "ops.service_restart.requested",
 			level: "warn",
 			message: "管理员请求重启 QingYan 服务",
@@ -241,12 +342,14 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.get("/ip-region", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.read");
 		return ipMaintenance.getStatus();
 	});
 
 	fastify.post("/ip-region/update", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ip_region_settings.update");
 		const parsed = ipRegionUpdateBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -259,20 +362,27 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/comment-ip/refresh", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "tasks.run");
 		const parsed = commentIpRefreshBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
 				issues: parsed.error.issues,
 			});
 		}
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.data.siteKey,
+		});
 		const job = await ipMaintenance.createCommentIpRefreshJob(parsed.data);
 		void ipMaintenance.runNextQueuedJob();
 		return { job };
 	});
 
 	fastify.get("/maintenance-jobs/:jobId", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "tasks.read");
 		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -285,13 +395,19 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.get("/tasks", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "tasks.read");
 		const parsed = maintenanceTasksQuerySchema.safeParse(request.query);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
 				issues: parsed.error.issues,
 			});
 		}
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.data.siteKey,
+		});
 		const { items, totalCount } = await maintenanceJobs.listForTaskCenter({
 			siteKey: parsed.data.siteKey,
 			type: parsed.data.type as MaintenanceJobType | undefined,
@@ -316,8 +432,107 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		};
 	});
 
+	fastify.get("/delayed-deletions", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.read");
+		const parsed = delayedDeletionsQuerySchema.safeParse(request.query);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.data.siteKey,
+		});
+		const site = parsed.data.siteKey
+			? await repository.getSiteByKey(parsed.data.siteKey)
+			: undefined;
+		return deletionPolicyService.listDelayedDeletions({
+			siteId: site?.id,
+			status: parsed.data.status,
+			limit: parsed.data.limit,
+			offset: parsed.data.offset,
+		});
+	});
+
+	fastify.post("/delayed-deletions/:deletionId/restore", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "ops.restore");
+		const parsed = delayedDeletionParamsSchema.safeParse(request.params);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		let restoredCount = 0;
+		const deletion = await deletionPolicyService.restoreDeletion({
+			id: parsed.data.deletionId,
+			actorUserId: session.user.id,
+			restore: async (record) => {
+				const resource = await restoreDelayedRecord(record);
+				restoredCount = resource.restoredCount;
+				return restoredCount;
+			},
+		});
+		await fastify.security.writeAudit({
+			requestId: request.context?.requestId,
+			actorType: "admin_user",
+			actorId: String(session.user.id),
+			action: "delayed_deletion.restored",
+			targetType: deletion.resourceType,
+			targetId: deletion.resourceId,
+			payload: {
+				id: deletion.id,
+				siteId: deletion.siteId,
+				resourceType: deletion.resourceType,
+				resourceId: deletion.resourceId,
+				requestedByUserId: deletion.requestedByUserId,
+				requestedAt: deletion.requestedAt,
+				restoredByUserId: deletion.restoredByUserId,
+				restoredAt: deletion.restoredAt,
+				restoredCount,
+			},
+		});
+		return {
+			deletion,
+			resource: {
+				resourceType: deletion.resourceType,
+				resourceId: deletion.resourceId,
+				restoredCount,
+			},
+		};
+	});
+
+	fastify.post("/delayed-deletions/cleanup", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "tasks.run");
+		const parsed = delayedDeletionCleanupBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const result = await deletionPolicyService.runDueHardDeletes({
+			now: parsed.data.now ? new Date(parsed.data.now) : undefined,
+			hardDelete: hardDeleteDelayedRecord,
+		});
+		await fastify.security.writeAudit({
+			requestId: request.context?.requestId,
+			actorType: "admin_user",
+			actorId: String(session.user.id),
+			action: "delayed_deletion.cleanup",
+			targetType: "delayed_deletions",
+			targetId: "cleanup",
+			payload: result,
+		});
+		return result;
+	});
+
 	fastify.post("/tasks/:jobId/run-now", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "tasks.run");
 		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -330,7 +545,8 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/tasks/:jobId/prioritize", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "tasks.run");
 		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -343,13 +559,19 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/tasks/page-title-refresh", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = pageTitleRefreshTaskBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
 				issues: parsed.error.issues,
 			});
 		}
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.data.siteKey,
+			permission: "tasks.run",
+		});
 		return {
 			job: await titleRefresh.createRefreshJob({
 				siteKey: parsed.data.siteKey,

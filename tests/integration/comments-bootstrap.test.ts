@@ -516,6 +516,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 					pageViews: {
 						enabled: true,
 					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
 				}),
 			})
 			.where(eq(siteSettings.siteId, site.id));
@@ -589,6 +595,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 					},
 					pageViews: {
 						enabled: true,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
 					},
 				}),
 			})

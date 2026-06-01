@@ -2,6 +2,11 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	adminGroups,
+	adminUserGroups,
+	adminUserSiteAccess,
+	adminUsers,
+	maintenanceJobs,
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
@@ -9,6 +14,8 @@ import {
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { AdminRepository } from "../../src/modules/admin/repository";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -32,6 +39,65 @@ async function enableTrustedPageViews(
 			commentVotes: { enabled: false },
 		}),
 	});
+}
+
+async function createSecondSite(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+) {
+	const repository = new AdminRepository(fixture.app.db);
+	await repository.createSite({
+		siteKey: "qingyan",
+		name: "QingYan",
+		allowedOrigins: ["http://localhost:4322"],
+	});
+	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
+}
+
+async function createSiteAdmin(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	input: {
+		username: string;
+		siteKeys: string[];
+	},
+) {
+	const [group] = await fixture.app.db
+		.select()
+		.from(adminGroups)
+		.where(eq(adminGroups.key, "site_admin"));
+	if (!group) {
+		throw new Error("Expected site_admin group");
+	}
+	await fixture.app.db.insert(adminUsers).values({
+		username: input.username,
+		email: `${input.username}@example.test`,
+		passwordHash: createPasswordHash("replace-me"),
+		displayName: input.username,
+		status: "active",
+	});
+	const [user] = await fixture.app.db
+		.select()
+		.from(adminUsers)
+		.where(eq(adminUsers.username, input.username));
+	if (!user) {
+		throw new Error(`Expected user ${input.username}`);
+	}
+	await fixture.app.db.insert(adminUserGroups).values({
+		userId: user.id,
+		groupId: group.id,
+	});
+	for (const siteKey of input.siteKeys) {
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, siteKey));
+		if (!site) {
+			throw new Error(`Expected site ${siteKey}`);
+		}
+		await fixture.app.db.insert(adminUserSiteAccess).values({
+			userId: user.id,
+			siteId: site.id,
+		});
+	}
 }
 
 describe("admin page registry", () => {
@@ -267,6 +333,75 @@ describe("admin page registry", () => {
 			.where(eq(pendingPageCandidates.pageKey, "posts/pending-approval/"));
 		expect(candidate).toMatchObject({
 			status: "approved",
+		});
+	});
+
+	it("scopes page registry maintenance job reads to granted sites", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createSecondSite(fixture);
+		await createSiteAdmin(fixture, {
+			username: "page-registry-site-admin",
+			siteKeys: ["fangyuan"],
+		});
+		await fixture.app.db.insert(maintenanceJobs).values([
+			{
+				id: "maintenance_registry_granted",
+				type: "page_source_refresh",
+				status: "queued",
+				siteKey: "fangyuan",
+				scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
+				runAfter: null,
+				attempts: 0,
+				maxAttempts: 1,
+				retryDelaySec: 0,
+				concurrencyKey: "page-source:fangyuan",
+			},
+			{
+				id: "maintenance_registry_denied",
+				type: "page_source_refresh",
+				status: "queued",
+				siteKey: "qingyan",
+				scopeJson: JSON.stringify({ siteKey: "qingyan" }),
+				runAfter: null,
+				attempts: 0,
+				maxAttempts: 1,
+				retryDelaySec: 0,
+				concurrencyKey: "page-source:qingyan",
+			},
+		]);
+		const admin = await loginAsAdmin(fixture.app, {
+			username: "page-registry-site-admin",
+			password: "replace-me",
+		});
+
+		const granted = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/page-registry/maintenance-jobs/maintenance_registry_granted",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+		expect(granted.statusCode).toBe(200);
+		expect(granted.json()).toMatchObject({
+			job: {
+				id: "maintenance_registry_granted",
+				siteKey: "fangyuan",
+			},
+		});
+
+		const denied = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/page-registry/maintenance-jobs/maintenance_registry_denied",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+		expect(denied.statusCode).toBe(403);
+		expect(denied.json()).toMatchObject({
+			error: {
+				code: "ADMIN_SITE_ACCESS_REQUIRED",
+			},
 		});
 	});
 });

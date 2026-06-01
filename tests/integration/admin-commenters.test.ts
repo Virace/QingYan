@@ -243,20 +243,26 @@ describe("admin commenters", () => {
 		});
 	});
 
-	it("does not expose users as the canonical anonymous commenter endpoint", async () => {
+	it("keeps anonymous commenters separate from backend users", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/admin/users?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/commenters?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
 		});
 
-		expect(response.statusCode).toBe(404);
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			items: [],
+			pagination: {
+				totalCount: 0,
+			},
+		});
 	});
 
 	it("does not aggregate missing or unparsed user agents as unknown devices", async () => {

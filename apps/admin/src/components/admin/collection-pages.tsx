@@ -9,6 +9,7 @@ import {
 	approvePendingPage,
 	bulkTrashComments,
 	bulkUpdateComments,
+	clearPageTrash,
 	type CommentStatus,
 	clearTrash,
 	createBlacklist,
@@ -734,6 +735,10 @@ export function PagesPage({
 		mutationFn: deletePage,
 		onSuccess: invalidatePages,
 	});
+	const clearTrashMutation = useMutation({
+		mutationFn: clearPageTrash,
+		onSuccess: invalidatePages,
+	});
 	const refreshTitleMutation = useMutation({
 		mutationFn: refreshPageTitle,
 		onSuccess: invalidatePages,
@@ -754,6 +759,7 @@ export function PagesPage({
 		trashMutation.isPending ||
 		restoreMutation.isPending ||
 		deleteMutation.isPending ||
+		clearTrashMutation.isPending ||
 		approveMutation.isPending ||
 		rejectMutation.isPending ||
 		ignoreMutation.isPending;
@@ -781,16 +787,29 @@ export function PagesPage({
 			return;
 		}
 		const confirmed = await confirm({
-			title: "标记删除",
+			title: "删除页面",
 			description:
-				"页面将标记为删除状态，公开交互入口会被排除。恢复路径取决于后续后台能力，请谨慎操作。",
-			confirmText: "标记删除",
+				"页面将进入系统删除策略：默认保留恢复窗口；若删除保留天数为 0，会立即永久删除且无法从 QingYan 恢复。",
+			confirmText: "删除页面",
 			destructive: true,
 		});
 		if (!confirmed) {
 			return;
 		}
 		deleteMutation.mutate(input);
+	};
+	const clearPageTrashForSite = async () => {
+		const confirmed = await confirm({
+			title: "清空页面回收站",
+			description:
+				"当前站点回收站中的页面会按系统删除策略处理；删除保留天数为 0 时会立即永久删除，无法从 QingYan 恢复。",
+			confirmText: "清空页面回收站",
+			destructive: true,
+		});
+		if (!confirmed) {
+			return;
+		}
+		clearTrashMutation.mutate({ siteKey });
 	};
 
 	return (
@@ -827,6 +846,18 @@ export function PagesPage({
 						))}
 					</select>
 				</label>
+				{status === "trash" ? (
+					<div className="flex justify-end">
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={lifecyclePending}
+							onClick={() => void clearPageTrashForSite()}
+						>
+							清空页面回收站
+						</Button>
+					</div>
+				) : null}
 				<div className="flex flex-col gap-3 md:flex-row">
 					<label className="grid gap-1 text-sm md:w-56">
 						<span className="text-muted-foreground">排序字段</span>
@@ -1046,7 +1077,7 @@ export function PagesPage({
 												disabled={lifecyclePending}
 												onClick={() => void mutatePage(page, "delete")}
 											>
-												标记删除
+												删除页面
 											</Button>
 										</>
 									) : null}

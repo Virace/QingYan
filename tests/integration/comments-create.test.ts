@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { buildApp } from "../../src/app";
 import { createDatabaseClients } from "../../src/db/client";
 import {
+	adminUsers,
 	commentModeration,
 	comments,
 	pageThreads,
@@ -501,7 +502,7 @@ describe("POST /qingyan/api/comments", () => {
 		expect(createdComment?.authorWebsite).toBeNull();
 	});
 
-	it("creates a verified author comment when admin session is present", async () => {
+	it("creates a staff comment linked to the current admin user when admin session is present", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedActivePage(fixture, "post:verified-create");
@@ -527,6 +528,12 @@ describe("POST /qingyan/api/comments", () => {
 			.where(eq(siteSettings.siteId, site.id));
 
 		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"))
+			.limit(1);
+		expect(adminUser).toBeTruthy();
 		const response = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
@@ -556,8 +563,7 @@ describe("POST /qingyan/api/comments", () => {
 		expect(response.json()).toMatchObject({
 			comment: {
 				author: {
-					name: "Virace",
-					website: "https://fangyuan.example.com/about",
+					name: "admin",
 					badge: { label: "楼主" },
 				},
 				content: {
@@ -567,6 +573,7 @@ describe("POST /qingyan/api/comments", () => {
 				status: "approved",
 			},
 		});
+		expect(response.json().comment).not.toHaveProperty("authorUserId");
 		expect(response.json().comment).not.toHaveProperty("parentId");
 		expect(response.json().comment).not.toHaveProperty("viewerVote");
 		expect(response.json().comment).not.toHaveProperty("children");
@@ -577,15 +584,16 @@ describe("POST /qingyan/api/comments", () => {
 			.where(eq(comments.contentRaw, "verified comment"))
 			.limit(1);
 		expect(createdComment).toMatchObject({
-			authorIdentity: "verified",
-			authorName: "Virace",
-			authorEmail: "owner@example.com",
-			authorWebsite: "https://fangyuan.example.com/about",
+			authorIdentity: "staff",
+			authorUserId: adminUser?.id,
+			authorName: "admin",
+			authorEmail: "admin@localhost.invalid",
+			authorWebsite: null,
 			status: "approved",
 		});
 	});
 
-	it("renders verified comment names from current profile unless snapshot mode is selected", async () => {
+	it("renders staff comment names from current user profile unless snapshot mode is selected", async () => {
 		const fixture = await createCustomTestApp();
 		cleanups.push(fixture.cleanup);
 		await seedActivePage(fixture, "post:verified-display-mode");
@@ -611,6 +619,12 @@ describe("POST /qingyan/api/comments", () => {
 			.where(eq(siteSettings.siteId, site.id));
 
 		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"))
+			.limit(1);
+		expect(adminUser).toBeTruthy();
 		const createResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
@@ -638,15 +652,15 @@ describe("POST /qingyan/api/comments", () => {
 		expect(createResponse.statusCode).toBe(200);
 
 		await fixture.app.db
+			.update(adminUsers)
+			.set({
+				displayName: "后台当前资料",
+				website: "https://admin.example.com/profile",
+			})
+			.where(eq(adminUsers.id, adminUser?.id ?? 0));
+		await fixture.app.db
 			.update(siteSettings)
 			.set({
-				verifiedAuthorJson: serializeVerifiedAuthorSettings({
-					enabled: true,
-					displayName: "Virace 当前资料",
-					email: "owner@example.com",
-					website: "https://fangyuan.example.com/about",
-					badgeLabel: "楼主",
-				}),
 				staffDisplayJson: serializeStaffDisplaySettings({
 					nameMode: "current_profile",
 				}),
@@ -662,7 +676,8 @@ describe("POST /qingyan/api/comments", () => {
 		});
 		expect(currentProfileThread.statusCode).toBe(200);
 		expect(currentProfileThread.json().items[0].author).toMatchObject({
-			name: "Virace 当前资料",
+			name: "后台当前资料",
+			website: "https://admin.example.com/profile",
 			badge: { label: "楼主" },
 		});
 
@@ -684,9 +699,10 @@ describe("POST /qingyan/api/comments", () => {
 		});
 		expect(snapshotThread.statusCode).toBe(200);
 		expect(snapshotThread.json().items[0].author).toMatchObject({
-			name: "Virace",
+			name: "admin",
 			badge: { label: "楼主" },
 		});
+		expect(snapshotThread.json().items[0].author).not.toHaveProperty("website");
 	});
 
 	it("rejects reserved verified author email for visitor comments", async () => {

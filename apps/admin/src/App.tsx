@@ -13,6 +13,7 @@ import { fetchAdminMe } from "@/api/session";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { AdminConfirmDialogProvider } from "@/components/admin/confirm-dialog";
 import { LoginPage } from "@/components/admin/login-page";
+import { PasswordChangePage } from "@/components/admin/password-change-page";
 import {
 	Card,
 	CardDescription,
@@ -79,10 +80,32 @@ function AppContent({
 		);
 	}
 
+	if (authenticated && (meQuery.isFetching || !meQuery.data)) {
+		return (
+			<main className="flex min-h-dvh items-center justify-center bg-muted/40">
+				<Card className="w-[320px]">
+					<CardHeader>
+						<CardTitle className="text-base">正在载入</CardTitle>
+						<CardDescription>同步管理员会话状态。</CardDescription>
+					</CardHeader>
+				</Card>
+			</main>
+		);
+	}
+
 	return authenticated ? (
-		<AdminShell onLogout={() => setAuthenticated(false)} />
+		meQuery.data?.user.passwordChangeRequired ? (
+			<PasswordChangePage onChanged={() => meQuery.refetch()} />
+		) : (
+			<AdminShell onLogout={() => setAuthenticated(false)} />
+		)
 	) : (
-		<LoginPage onLogin={() => setAuthenticated(true)} />
+		<LoginPage
+			onLogin={() => {
+				setAuthenticated(true);
+				void meQuery.refetch();
+			}}
+		/>
 	);
 }
 

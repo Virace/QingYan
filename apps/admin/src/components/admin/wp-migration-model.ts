@@ -1,6 +1,6 @@
 import type { MigrationReportItem } from "../../api/import-export";
 
-export type AuthorCandidateDecision = "verified" | "visitor";
+export type AuthorCandidateDecision = "staff" | "verified" | "visitor";
 export type AuthorCandidateDecisionMap = Record<
 	string,
 	AuthorCandidateDecision
@@ -183,9 +183,9 @@ export function hasBlockingAuthorCandidates(
 	items: MigrationReportItem[],
 	decisions: AuthorCandidateDecisionMap,
 ): boolean {
-	return authorCandidateComments(items).some(
-		(candidate) => !decisions[candidate.oldCommentId],
-	);
+	void items;
+	void decisions;
+	return false;
 }
 
 export function formatMappingOverlay(

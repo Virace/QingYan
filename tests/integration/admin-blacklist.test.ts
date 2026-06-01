@@ -1,5 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
+import {
+	adminGroups,
+	adminUserGroups,
+	adminUserSiteAccess,
+	adminUsers,
+	auditLogs,
+	blacklistRules,
+	sites,
+} from "../../src/db/schema";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { AdminRepository } from "../../src/modules/admin/repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -10,6 +22,66 @@ afterEach(async () => {
 		await cleanup();
 	}
 });
+
+async function createSecondSite(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+) {
+	const repository = new AdminRepository(fixture.app.db);
+	await repository.createSite({
+		siteKey: "qingyan",
+		name: "QingYan",
+		allowedOrigins: ["http://localhost:4322"],
+	});
+	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
+}
+
+async function createSiteAdmin(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	input: {
+		username: string;
+		siteKeys: string[];
+	},
+) {
+	const [group] = await fixture.app.db
+		.select()
+		.from(adminGroups)
+		.where(eq(adminGroups.key, "site_admin"));
+	if (!group) {
+		throw new Error("Expected site_admin group to exist");
+	}
+	await fixture.app.db.insert(adminUsers).values({
+		username: input.username,
+		email: `${input.username}@example.test`,
+		passwordHash: createPasswordHash("replace-me"),
+		displayName: input.username,
+		status: "active",
+	});
+	const [user] = await fixture.app.db
+		.select()
+		.from(adminUsers)
+		.where(eq(adminUsers.username, input.username));
+	if (!user) {
+		throw new Error(`Expected user ${input.username} to exist`);
+	}
+	await fixture.app.db.insert(adminUserGroups).values({
+		userId: user.id,
+		groupId: group.id,
+	});
+	for (const siteKey of input.siteKeys) {
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, siteKey));
+		if (!site) {
+			throw new Error(`Expected site ${siteKey} to exist`);
+		}
+		await fixture.app.db.insert(adminUserSiteAccess).values({
+			userId: user.id,
+			siteId: site.id,
+		});
+	}
+	return user;
+}
 
 describe("admin blacklist", () => {
 	it("creates, lists and deletes blacklist rules", async () => {
@@ -152,6 +224,192 @@ describe("admin blacklist", () => {
 			pagination: {
 				totalCount: 1,
 			},
+		});
+	});
+
+	it("lets site admins delete only blacklist rules from granted sites", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createSecondSite(fixture);
+		const siteAdmin = await createSiteAdmin(fixture, {
+			username: "blacklist-site-admin",
+			siteKeys: ["fangyuan"],
+		});
+		const [fangyuan] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		const [qingyan] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "qingyan"));
+		if (!fangyuan || !qingyan) {
+			throw new Error("Expected both sites to exist");
+		}
+		await fixture.app.db.insert(blacklistRules).values([
+			{
+				siteId: fangyuan.id,
+				targetType: "email",
+				targetValue: "granted@example.test",
+				matchMode: "exact",
+				scope: "post",
+			},
+			{
+				siteId: qingyan.id,
+				targetType: "email",
+				targetValue: "denied@example.test",
+				matchMode: "exact",
+				scope: "post",
+			},
+			{
+				siteId: null,
+				targetType: "email",
+				targetValue: "global@example.test",
+				matchMode: "exact",
+				scope: "post",
+			},
+		]);
+		const rows = await fixture.app.db.select().from(blacklistRules);
+		const grantedRule = rows.find(
+			(rule) => rule.targetValue === "granted@example.test",
+		);
+		const deniedRule = rows.find(
+			(rule) => rule.targetValue === "denied@example.test",
+		);
+		const globalRule = rows.find(
+			(rule) => rule.targetValue === "global@example.test",
+		);
+		if (!grantedRule || !deniedRule || !globalRule) {
+			throw new Error("Expected seeded blacklist rules");
+		}
+		const admin = await loginAsAdmin(fixture.app, {
+			username: "blacklist-site-admin",
+			password: "replace-me",
+		});
+
+		const deniedSiteDelete = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/blacklist/${deniedRule.id}`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(deniedSiteDelete.statusCode).toBe(403);
+		expect(deniedSiteDelete.json()).toMatchObject({
+			error: {
+				code: "ADMIN_SITE_ACCESS_REQUIRED",
+			},
+		});
+
+		const deniedGlobalDelete = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/blacklist/${globalRule.id}`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(deniedGlobalDelete.statusCode).toBe(403);
+		expect(deniedGlobalDelete.json()).toMatchObject({
+			error: {
+				code: "ADMIN_SITE_ACCESS_REQUIRED",
+			},
+		});
+
+		const grantedDelete = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/blacklist/${grantedRule.id}`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(grantedDelete.statusCode).toBe(200);
+		expect(grantedDelete.json()).toMatchObject({
+			rule: {
+				id: grantedRule.id,
+				targetValue: "granted@example.test",
+			},
+		});
+		const remainingRules = await fixture.app.db.select().from(blacklistRules);
+		expect(remainingRules.map((rule) => rule.targetValue).sort()).toEqual([
+			"denied@example.test",
+			"global@example.test",
+		]);
+		const audit = (await fixture.app.db.select().from(auditLogs)).find(
+			(row) => row.action === "blacklist.deleted",
+		);
+		expect(audit).toMatchObject({
+			actorType: "admin_user",
+			actorId: String(siteAdmin.id),
+			targetType: "blacklist_rule",
+			targetId: String(grantedRule.id),
+		});
+	});
+
+	it("does not delete global blacklist rules from site-scoped target deletion", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const siteAdmin = await createSiteAdmin(fixture, {
+			username: "blacklist-target-site-admin",
+			siteKeys: ["fangyuan"],
+		});
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected fangyuan site");
+		}
+		await fixture.app.db.insert(blacklistRules).values([
+			{
+				siteId: site.id,
+				targetType: "email",
+				targetValue: "target@example.test",
+				matchMode: "exact",
+				scope: "post",
+			},
+			{
+				siteId: null,
+				targetType: "email",
+				targetValue: "target@example.test",
+				matchMode: "exact",
+				scope: "post",
+			},
+		]);
+		const admin = await loginAsAdmin(fixture.app, {
+			username: "blacklist-target-site-admin",
+			password: "replace-me",
+		});
+
+		const response = await fixture.app.inject({
+			method: "DELETE",
+			url: "/qingyan/api/admin/blacklist/target",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				targetType: "email",
+				matchMode: "exact",
+				targetValue: "target@example.test",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			rules: [
+				{
+					siteId: site.id,
+					targetValue: "target@example.test",
+				},
+			],
+		});
+		const remainingRules = await fixture.app.db.select().from(blacklistRules);
+		expect(remainingRules).toEqual([
+			expect.objectContaining({
+				siteId: null,
+				targetValue: "target@example.test",
+			}),
+		]);
+		const audit = (await fixture.app.db.select().from(auditLogs)).find(
+			(row) => row.action === "security.blacklist.deleted",
+		);
+		expect(audit).toMatchObject({
+			actorType: "admin_user",
+			actorId: String(siteAdmin.id),
+			targetType: "email",
+			targetId: "target@example.test",
 		});
 	});
 });

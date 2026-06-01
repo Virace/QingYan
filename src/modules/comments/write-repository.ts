@@ -174,6 +174,7 @@ export class CommentsWriteRepository {
 		pageThreadId: number;
 		parentCommentId: string | null;
 		visitorId: number | null;
+		authorUserId?: number | null;
 		authorIdentity?: CommentAuthorIdentity;
 		authorName: string;
 		authorEmail?: string;
@@ -193,6 +194,7 @@ export class CommentsWriteRepository {
 			pageThreadId: input.pageThreadId,
 			parentId: input.parentCommentId,
 			visitorId: input.visitorId,
+			authorUserId: input.authorUserId,
 			authorIdentity: input.authorIdentity ?? "visitor",
 			status: input.status,
 			authorName: input.authorName,

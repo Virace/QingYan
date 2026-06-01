@@ -1097,6 +1097,7 @@ function secretPlaceholder(configured: boolean) {
 
 export function SystemSettingsPage() {
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
 		queryKey: ["admin", "system-settings"],
 		queryFn: getSystemSettings,
@@ -1144,8 +1145,20 @@ export function SystemSettingsPage() {
 			<CardContent>
 				<form
 					className="grid gap-4 md:grid-cols-2"
-					onSubmit={(event) => {
+					onSubmit={async (event) => {
 						event.preventDefault();
+						if (draft.admin.deletion.retentionDays === 0) {
+							const confirmed = await confirm({
+								title: "立即永久删除",
+								description:
+									"删除保留天数为 0 时，高风险删除操作不会进入恢复窗口，会立即执行永久删除。确认保存这个策略？",
+								confirmText: "保存立即删除策略",
+								destructive: true,
+							});
+							if (!confirmed) {
+								return;
+							}
+						}
 						mutation.mutate(withoutEmptySecrets(draft));
 					}}
 				>
@@ -1208,9 +1221,32 @@ export function SystemSettingsPage() {
 										setDraft({
 											...draft,
 											admin: {
+												...draft.admin,
 												session: {
 													...draft.admin.session,
 													ttlMinutes: Number(event.target.value),
+												},
+											},
+										})
+									}
+								/>
+							</Field>
+							<Field
+								label="删除保留天数"
+								description="默认保留 15 天用于恢复；设置为 0 会立即永久删除。"
+							>
+								<Input
+									type="number"
+									min={0}
+									max={3650}
+									value={draft.admin.deletion.retentionDays}
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											admin: {
+												...draft.admin,
+												deletion: {
+													retentionDays: Number(event.target.value),
 												},
 											},
 										})

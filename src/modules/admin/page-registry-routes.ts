@@ -25,6 +25,7 @@ import {
 	adminPendingPagesQuerySchema,
 } from "./schemas";
 import { AdminSessionService } from "./session-service";
+import { requireSiteAccess, requireSiteIdAccess } from "./authorization";
 
 export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new AdminRepository(fastify.db);
@@ -111,10 +112,16 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	}
 
 	fastify.get("/pending", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPendingPagesQuerySchema.safeParse(request.query),
 		);
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.read",
+		});
 
 		const result = await service.listPendingCandidates(parsed);
 		return {
@@ -128,20 +135,32 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.get("/sources", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPageRegistrySourcesQuerySchema.safeParse(request.query),
 		);
+		const site = requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.read",
+		});
 		return {
-			items: await sourceRepository.listSources({ siteKey: parsed.siteKey }),
+			items: await sourceRepository.listSources({ siteId: site?.id }),
 		};
 	});
 
 	fastify.post("/sources", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPageRegistrySourceCreateBodySchema.safeParse(request.body),
 		);
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.update",
+		});
 		const site = await repository.getSiteByKey(parsed.siteKey);
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
@@ -162,21 +181,26 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.patch("/sources/:sourceId", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const params = parseOrThrow(
 			adminPageRegistrySourceParamsSchema.safeParse(request.params),
 		);
 		const patch = parseOrThrow(
 			adminPageRegistrySourcePatchBodySchema.safeParse(request.body),
 		);
+		const source = await sourceRepository.getSource(params.sourceId);
+		if (!source) {
+			throw new ResourceNotFoundError(
+				"PAGE_SOURCE_NOT_FOUND",
+				"页面来源不存在。",
+			);
+		}
+		requireSiteIdAccess({
+			session,
+			siteId: source.siteId,
+			permission: "page_registry.update",
+		});
 		if (patch.sourceUrl) {
-			const source = await sourceRepository.getSource(params.sourceId);
-			if (!source) {
-				throw new ResourceNotFoundError(
-					"PAGE_SOURCE_NOT_FOUND",
-					"页面来源不存在。",
-				);
-			}
 			const site = await repository.getSiteByKey(source.siteKey);
 			const allowedOrigins = site
 				? (JSON.parse(site.allowedOriginsJson) as string[])
@@ -192,16 +216,22 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.delete("/sources/:sourceId", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const params = parseOrThrow(
 			adminPageRegistrySourceParamsSchema.safeParse(request.params),
 		);
+		const source = await sourceRepository.getSource(params.sourceId);
+		requireSiteIdAccess({
+			session,
+			siteId: source?.siteId,
+			permission: "page_registry.update",
+		});
 		await sourceRepository.deleteSource(params.sourceId);
 		return { ok: true };
 	});
 
 	fastify.post("/sources/:sourceId/refresh", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const params = parseOrThrow(
 			adminPageRegistrySourceParamsSchema.safeParse(request.params),
 		);
@@ -215,6 +245,11 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 				"页面来源不存在。",
 			);
 		}
+		requireSiteIdAccess({
+			session,
+			siteId: source.siteId,
+			permission: "page_registry.update",
+		});
 		const job = await sourceRefresh.createRefreshJob({
 			siteKey: source.siteKey,
 			sourceIds: [source.id],
@@ -231,7 +266,7 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/refresh", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPageRegistryRefreshBodySchema.safeParse(request.body),
 		);
@@ -240,6 +275,12 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: [{ path: ["siteKey"], message: "siteKey is required" }],
 			});
 		}
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.update",
+		});
 		const job = await sourceRefresh.createRefreshJob({
 			siteKey: parsed.siteKey,
 			mode: parsed.mode,
@@ -256,22 +297,42 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.get("/maintenance-jobs/:jobId", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const params = parseOrThrow(
 			adminPageRegistryMaintenanceJobParamsSchema.safeParse(request.params),
 		);
+		const job = await maintenanceJobs.get(params.jobId);
+		if (job?.siteKey) {
+			requireSiteAccess({
+				session,
+				siteRegistry: fastify.siteRegistry,
+				siteKey: job.siteKey,
+				permission: "page_registry.read",
+			});
+		} else {
+			requireSiteAccess({
+				session,
+				siteRegistry: fastify.siteRegistry,
+				permission: "page_registry.read",
+			});
+		}
 		return {
-			job: await maintenanceJobs.get(params.jobId),
+			job,
 		};
 	});
 
 	fastify.post("/pending/approve", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPendingPageApproveBodySchema.safeParse(request.body),
 		);
 
-		const site = await repository.getSiteByKey(parsed.siteKey);
+		const site = requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.update",
+		});
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
@@ -288,10 +349,16 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/pending/reject", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPendingPageDecisionBodySchema.safeParse(request.body),
 		);
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.update",
+		});
 
 		return {
 			candidate: await service.rejectPendingCandidate(parsed),
@@ -299,12 +366,17 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/pending/ignore", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = parseOrThrow(
 			adminPendingPageDecisionBodySchema.safeParse(request.body),
 		);
 
-		const site = await repository.getSiteByKey(parsed.siteKey);
+		const site = requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.siteKey,
+			permission: "page_registry.update",
+		});
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}

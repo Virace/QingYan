@@ -10,6 +10,7 @@ import {
 	adminSitePatchBodySchema,
 } from "./schemas";
 import { AdminSessionService } from "./session-service";
+import { requirePermission, requireSiteAccess } from "./authorization";
 import { toValidationFields } from "./validation-fields";
 
 export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
@@ -27,12 +28,14 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 
 	fastify.get("/", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "sites.read");
 		return service.listSitesSummary();
 	});
 
 	fastify.post("/", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "sites.create");
 		const parsed = adminSiteCreateBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -43,11 +46,13 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 		return service.createSite({
 			...parsed.data,
 			requestId: request.context?.requestId,
+			actorUserId: session.user.id,
 		});
 	});
 
 	fastify.patch("/:siteKey", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "sites.update");
 		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
 		const parsedBody = adminSitePatchBodySchema.safeParse(request.body);
 		if (!parsedParams.success || !parsedBody.success) {
@@ -63,11 +68,12 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsedParams.data.siteKey,
 			...parsedBody.data,
 			requestId: request.context?.requestId,
+			actorUserId: session.user.id,
 		});
 	});
 
 	fastify.get("/:siteKey/settings", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
 		if (!parsedParams.success) {
 			throw new InvalidRequestError({
@@ -75,11 +81,17 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsedParams.data.siteKey,
+			permission: "site_settings.read",
+		});
 		return service.getSettings(parsedParams.data.siteKey);
 	});
 
 	fastify.put("/:siteKey/settings", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
 		const parsedBody = adminSettingsBodySchema.safeParse(request.body);
 		if (!parsedParams.success) {
@@ -93,9 +105,16 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 			);
 		}
 
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsedParams.data.siteKey,
+			permission: "site_settings.update",
+		});
 		return service.updateSettings(parsedParams.data.siteKey, {
 			...parsedBody.data,
 			requestId: request.context?.requestId,
+			actorUserId: session.user.id,
 		});
 	});
 };

@@ -4,6 +4,7 @@ import { ValidationFailedError } from "../shared/errors";
 import { adminSystemSettingsBodySchema } from "./schemas";
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
+import { requirePermission } from "./authorization";
 import { AdminSystemSettingsRepository } from "./system-settings-repository";
 import {
 	AdminSystemSettingsService,
@@ -27,12 +28,14 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 	);
 
 	fastify.get("/", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "system_settings.read");
 		return service.getSettings();
 	});
 
 	fastify.put("/", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "system_settings.update");
 		const parsed = adminSystemSettingsBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new ValidationFailedError(
@@ -43,6 +46,7 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 		return service.updateSettings({
 			...parsed.data,
 			requestId: request.context?.requestId,
+			actorUserId: session.user.id,
 		});
 	});
 };

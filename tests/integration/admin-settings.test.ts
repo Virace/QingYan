@@ -80,13 +80,13 @@ describe("admin settings", () => {
 					enabled: true,
 				},
 				pageViews: {
-					enabled: false,
+					enabled: true,
 				},
 				pageLikes: {
-					enabled: false,
+					enabled: true,
 				},
 				commentVotes: {
-					enabled: false,
+					enabled: true,
 				},
 			},
 		});
@@ -255,13 +255,13 @@ describe("admin settings", () => {
 				enabled: false,
 			},
 			pageViews: {
-				enabled: false,
+				enabled: true,
 			},
 			pageLikes: {
-				enabled: false,
+				enabled: true,
 			},
 			commentVotes: {
-				enabled: false,
+				enabled: true,
 			},
 		});
 
@@ -287,10 +287,10 @@ describe("admin settings", () => {
 				enabled: true,
 			},
 			pageLikes: {
-				enabled: false,
+				enabled: true,
 			},
 			commentVotes: {
-				enabled: false,
+				enabled: true,
 			},
 		});
 	});
@@ -333,7 +333,11 @@ describe("admin settings", () => {
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
 			url: "/qingyan/api/admin/sites/default/settings",
-			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+				origin: fixture.runtimeOptions.devMode.adminOrigin,
+			}),
 			payload: {
 				comments: {
 					enabled: false,

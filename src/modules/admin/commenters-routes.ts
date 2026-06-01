@@ -5,6 +5,7 @@ import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
 import { adminCommentersQuerySchema } from "./schemas";
+import { requireSiteAccess } from "./authorization";
 
 export const adminCommentersRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new AdminRepository(fastify.db);
@@ -21,7 +22,7 @@ export const adminCommentersRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 
 	fastify.get("/", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
 		const parsed = adminCommentersQuerySchema.safeParse(request.query);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -29,6 +30,12 @@ export const adminCommentersRoutes: FastifyPluginAsync = async (fastify) => {
 			});
 		}
 
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsed.data.siteKey,
+			permission: "commenters.read",
+		});
 		return service.listCommenters(parsed.data);
 	});
 };

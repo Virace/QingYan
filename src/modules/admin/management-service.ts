@@ -322,6 +322,7 @@ export class AdminManagementService {
 		name: string;
 		allowedOrigins: string[];
 		requestId?: string;
+		actorUserId?: number;
 	}) {
 		const existingSite = await this.repository.getSiteByKey(input.siteKey);
 		if (existingSite) {
@@ -344,7 +345,8 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "sites.created",
 			message: "站点已创建",
 			targetType: "site",
@@ -363,6 +365,7 @@ export class AdminManagementService {
 		name?: string;
 		allowedOrigins?: string[];
 		requestId?: string;
+		actorUserId?: number;
 	}) {
 		const existingSite = await this.repository.getSiteByKey(input.siteKey);
 		if (!existingSite) {
@@ -383,7 +386,8 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "sites.updated",
 			message: "站点已更新",
 			targetType: "site",
@@ -428,6 +432,7 @@ export class AdminManagementService {
 			isFolded?: boolean;
 			contentRaw?: string;
 			requestId?: string;
+			actorUserId?: number;
 		},
 	) {
 		const comment = await this.repository.updateComment(commentId, input);
@@ -437,7 +442,8 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: input.status ? "comments.status.changed" : "comments.updated",
 			message: input.status ? "评论状态已更新" : "评论内容已更新",
 			targetType: "comment",
@@ -456,6 +462,7 @@ export class AdminManagementService {
 			contentRaw?: string;
 		};
 		requestId?: string;
+		actorUserId?: number;
 	}) {
 		const comments = await this.repository.bulkUpdateComments(
 			input.commentIds,
@@ -464,7 +471,8 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: input.patch.status
 				? "comments.status.changed"
 				: "comments.updated",
@@ -483,7 +491,12 @@ export class AdminManagementService {
 		};
 	}
 
-	public async refreshCommentMetadata(commentId: string, requestId?: string) {
+	public async refreshCommentMetadata(input: {
+		commentId: string;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		const commentId = input.commentId;
 		const comment = await this.repository.getCommentById(commentId);
 		if (!comment || comment.deletedAt) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
@@ -525,8 +538,9 @@ export class AdminManagementService {
 			}
 
 			await this.security.writeAudit({
-				requestId,
-				actorType: "admin",
+				requestId: input.requestId,
+				actorType: input.actorUserId ? "admin_user" : "admin",
+				actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 				event: "comments.updated",
 				message: "评论地址信息已刷新",
 				targetType: "comment",
@@ -542,11 +556,18 @@ export class AdminManagementService {
 	public async bulkRefreshCommentMetadata(
 		commentIds: string[],
 		requestId?: string,
+		actorUserId?: number,
 	) {
 		const items = [];
 		for (const commentId of commentIds) {
 			try {
-				items.push(await this.refreshCommentMetadata(commentId, requestId));
+				items.push(
+					await this.refreshCommentMetadata({
+						commentId,
+						requestId,
+						actorUserId,
+					}),
+				);
 			} catch (error) {
 				items.push({
 					commentId,
@@ -562,7 +583,12 @@ export class AdminManagementService {
 		};
 	}
 
-	public async deleteComment(commentId: string, requestId?: string) {
+	public async deleteComment(input: {
+		commentId: string;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		const commentId = input.commentId;
 		const existingComment = await this.repository.getCommentById(commentId);
 		if (!existingComment || existingComment.deletedAt) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
@@ -581,8 +607,9 @@ export class AdminManagementService {
 		}
 
 		await this.security.writeAudit({
-			requestId,
-			actorType: "admin",
+			requestId: input.requestId,
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.deleted",
 			message: "评论已删除",
 			targetType: "comment",
@@ -595,6 +622,7 @@ export class AdminManagementService {
 	public async moveCommentsToTrash(input: {
 		commentIds: string[];
 		requestId?: string;
+		actorUserId?: number;
 	}) {
 		const movedComments = await this.repository.moveCommentsToTrash(
 			input.commentIds,
@@ -602,7 +630,8 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.status.changed",
 			message: "评论已移入回收站",
 			targetType: "comment",
@@ -619,14 +648,19 @@ export class AdminManagementService {
 		};
 	}
 
-	public async clearTrash(input: { siteKey?: string; requestId?: string }) {
+	public async clearTrash(input: {
+		siteKey?: string;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
 		const deletedCount = await this.repository.clearTrash(siteId);
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.deleted",
 			message: "回收站已清空",
 			targetType: "comment",
@@ -646,6 +680,7 @@ export class AdminManagementService {
 		input: {
 			contentRaw: string;
 			requestId?: string;
+			actorUserId?: number;
 		},
 	) {
 		const context =
@@ -689,7 +724,8 @@ export class AdminManagementService {
 			requestId: input.requestId,
 			siteKey: context.siteKey,
 			pageKey: context.pageKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.created",
 			message: "管理员已回复评论",
 			targetType: "comment",
@@ -756,6 +792,7 @@ export class AdminManagementService {
 		reason?: string;
 		expiresAt?: string;
 		requestId?: string;
+		actorUserId?: number;
 	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
 		const rule = await this.repository.createBlacklistRule({
@@ -771,7 +808,8 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "security.blacklist.added",
 			message: "已新增黑名单规则",
 			targetType: input.targetType,
@@ -785,8 +823,12 @@ export class AdminManagementService {
 		return rule;
 	}
 
-	public async deleteBlacklist(ruleId: number, requestId?: string) {
-		const rule = await this.repository.deleteBlacklistRule(ruleId);
+	public async deleteBlacklist(input: {
+		ruleId: number;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		const rule = await this.repository.deleteBlacklistRule(input.ruleId);
 		if (!rule) {
 			throw new ResourceNotFoundError(
 				"BLACKLIST_RULE_NOT_FOUND",
@@ -795,11 +837,12 @@ export class AdminManagementService {
 		}
 
 		await this.security.writeAudit({
-			requestId,
-			actorType: "admin",
+			requestId: input.requestId,
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			action: "blacklist.deleted",
 			targetType: "blacklist_rule",
-			targetId: String(ruleId),
+			targetId: String(input.ruleId),
 		});
 
 		return rule;
@@ -811,6 +854,7 @@ export class AdminManagementService {
 		matchMode: "exact" | "cidr" | "wildcard";
 		targetValue: string;
 		requestId?: string;
+		actorUserId?: number;
 	}) {
 		const siteId = await this.resolveSiteId(input.siteKey);
 		const rules = await this.repository.deleteBlacklistRulesByTarget({
@@ -829,7 +873,8 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "security.blacklist.deleted",
 			message: "已删除黑名单规则",
 			targetType: input.targetType,
@@ -937,6 +982,7 @@ export class AdminManagementService {
 				emailEnabled?: boolean;
 			};
 			requestId?: string;
+			actorUserId?: number;
 		},
 	) {
 		const { registeredSite } = this.resolveSite(siteKey);
@@ -1000,7 +1046,8 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey,
-			actorType: "admin",
+			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "settings.updated",
 			message: "站点设置已更新",
 			targetType: "site_settings",

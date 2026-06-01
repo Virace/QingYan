@@ -72,6 +72,16 @@ describe("GET /qingyan/api/comments/thread", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,

@@ -508,8 +508,16 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 		const allowedAdminOrigins =
 			runtimeSecurity.adminOriginGuard.allowedOrigins.length > 0
-				? runtimeSecurity.adminOriginGuard.allowedOrigins
+				? [...runtimeSecurity.adminOriginGuard.allowedOrigins]
 				: [new URL(fastify.config.server.publicBaseUrl).origin];
+		const devAdminOrigin = fastify.runtimeOptions.devMode.adminOrigin;
+		if (
+			fastify.runtimeOptions.devMode.enabled &&
+			devAdminOrigin &&
+			!allowedAdminOrigins.includes(devAdminOrigin)
+		) {
+			allowedAdminOrigins.push(devAdminOrigin);
+		}
 		if (origin && !allowedAdminOrigins.includes(origin)) {
 			throw new AppError(403, "ADMIN_ORIGIN_FORBIDDEN", "后台请求来源不合法。");
 		}

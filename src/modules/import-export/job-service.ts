@@ -89,6 +89,18 @@ function uniqueValues(values: string[]) {
 	return [...new Set(values)];
 }
 
+function normalizeEmail(value: string | undefined) {
+	return value?.trim().toLowerCase() ?? "";
+}
+
+function createDisabledStaffUsername(email: string) {
+	const hash = createHash("sha256")
+		.update(email.toLowerCase())
+		.digest("hex")
+		.slice(0, 12);
+	return `wp_staff_${hash}`;
+}
+
 export class ImportJobService {
 	public constructor(
 		private readonly repository: ImportJobRepository,
@@ -126,7 +138,9 @@ export class ImportJobService {
 
 	public async convertWordPressJobToPlan(
 		jobId: string,
-		input?: { authorDecisions?: Record<string, "verified" | "visitor"> },
+		input?: {
+			authorDecisions?: Record<string, "staff" | "verified" | "visitor">;
+		},
 	) {
 		const batch = await this.repository.getBatch(jobId);
 		if (!batch) {
@@ -433,6 +447,10 @@ export class ImportJobService {
 			skippedExistingComments: 0,
 			importRecordsCreated: 0,
 		};
+		const staffUserIdsByEmail = this.ensureDisabledStaffUsersForPlan(
+			batch.site_id,
+			plan,
+		);
 		const threads = this.ensurePageThreads(batch.site_id, plan, summary);
 		for (const item of plan.items) {
 			const threadId = threads.get(item.pageKey);
@@ -446,9 +464,121 @@ export class ImportJobService {
 				existingSourceRecords,
 				summary,
 				ipRegionSettings,
+				staffUserIdsByEmail,
 			);
 		}
 		return { summary, dryRun };
+	}
+
+	private ensureDisabledStaffUsersForPlan(siteId: number, plan: ImportPlan) {
+		const usersByEmail = new Map<string, number>();
+		for (const item of plan.items) {
+			for (const comment of item.comments) {
+				if (comment.authorIdentity !== "staff" || comment.authorUserId) {
+					continue;
+				}
+				const email = normalizeEmail(comment.authorEmail);
+				if (!email || usersByEmail.has(email)) {
+					continue;
+				}
+				usersByEmail.set(
+					email,
+					this.ensureDisabledStaffUser({
+						siteId,
+						email: comment.authorEmail ?? email,
+						displayName: comment.authorName,
+					}),
+				);
+			}
+		}
+		return usersByEmail;
+	}
+
+	private ensureDisabledStaffUser(input: {
+		siteId: number;
+		email: string;
+		displayName: string;
+	}) {
+		const email = input.email.trim();
+		const existing = this.sqlite
+			.prepare("SELECT id FROM admin_users WHERE lower(email) = lower(?)")
+			.get(email) as { id: number } | undefined;
+		if (existing) {
+			this.ensureStaffUserSiteAccess(existing.id, input.siteId);
+			return existing.id;
+		}
+
+		const nowIso = new Date().toISOString();
+		const username = this.createUniqueDisabledStaffUsername(email);
+		const result = this.sqlite
+			.prepare(
+				`INSERT INTO admin_users (
+					username, email, password_hash, display_name, status,
+					is_initial_admin, password_change_required, created_at,
+					updated_at, password_rotated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				username,
+				email,
+				`disabled:${randomUUID()}`,
+				input.displayName || email,
+				"disabled",
+				0,
+				1,
+				nowIso,
+				nowIso,
+				nowIso,
+			);
+		const userId = Number(result.lastInsertRowid);
+		this.ensureDisabledStaffUserGroup(userId);
+		this.ensureStaffUserSiteAccess(userId, input.siteId);
+		return userId;
+	}
+
+	private createUniqueDisabledStaffUsername(email: string) {
+		const baseUsername = createDisabledStaffUsername(email);
+		let username = baseUsername;
+		let suffix = 1;
+		while (this.adminUsernameExists(username)) {
+			suffix += 1;
+			username = `${baseUsername}_${suffix}`;
+		}
+		return username;
+	}
+
+	private adminUsernameExists(username: string) {
+		const row = this.sqlite
+			.prepare("SELECT 1 AS value FROM admin_users WHERE username = ?")
+			.get(username) as { value: number } | undefined;
+		return Boolean(row);
+	}
+
+	private ensureDisabledStaffUserGroup(userId: number) {
+		const group = this.sqlite
+			.prepare("SELECT id FROM admin_groups WHERE key = ?")
+			.get("site_moderator") as { id: number } | undefined;
+		if (!group) {
+			throw new InvalidRequestError({
+				message: "缺少站点评论管理员用户组，无法创建导入人员用户。",
+			});
+		}
+		this.sqlite
+			.prepare(
+				`INSERT INTO admin_user_groups (user_id, group_id)
+				VALUES (?, ?)
+				ON CONFLICT(user_id) DO UPDATE SET group_id = excluded.group_id`,
+			)
+			.run(userId, group.id);
+	}
+
+	private ensureStaffUserSiteAccess(userId: number, siteId: number) {
+		this.sqlite
+			.prepare(
+				`INSERT OR IGNORE INTO admin_user_site_access (user_id, site_id)
+				VALUES (?, ?)`,
+			)
+			.run(userId, siteId);
 	}
 
 	private ensurePageThreads(
@@ -504,6 +634,7 @@ export class ImportJobService {
 		existingSourceRecords: Map<string, string>,
 		summary: WordPressApplyResult["summary"],
 		ipRegionSettings: SystemSettings["ipRegion"],
+		staffUserIdsByEmail: Map<string, number>,
 	) {
 		const oldToNew = new Map<string, string>();
 		for (const comment of item.comments) {
@@ -521,6 +652,7 @@ export class ImportJobService {
 				parentId,
 				comment,
 				ipRegionSettings,
+				staffUserIdsByEmail,
 			);
 			this.insertImportRecord(batch, sourceKey, parentId, commentId, comment);
 			oldToNew.set(comment.source.oldCommentId, commentId);
@@ -551,23 +683,30 @@ export class ImportJobService {
 		parentId: string | null,
 		comment: ImportPlan["items"][number]["comments"][number],
 		ipRegionSettings: SystemSettings["ipRegion"],
+		staffUserIdsByEmail: Map<string, number>,
 	) {
 		const nowIso = new Date().toISOString();
 		const createdAt = comment.createdAt ?? nowIso;
 		const commentId = createCommentId();
+		const authorUserId =
+			comment.authorUserId ??
+			(comment.authorIdentity === "staff"
+				? staffUserIdsByEmail.get(normalizeEmail(comment.authorEmail))
+				: undefined);
 		this.sqlite
 			.prepare(
 				`INSERT INTO comments (
-					id, site_id, page_thread_id, parent_id, author_identity, status, author_name,
+					id, site_id, page_thread_id, parent_id, author_user_id, author_identity, status, author_name,
 					author_email, author_email_hash, author_website,
 					content_raw, content_html, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				commentId,
 				siteId,
 				threadId,
 				parentId,
+				authorUserId,
 				comment.authorIdentity,
 				comment.status,
 				comment.authorName,

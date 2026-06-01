@@ -330,6 +330,38 @@ describe("public origin guard", () => {
 		expect(runtimeOrigin.statusCode).toBe(200);
 	});
 
+	it("allows the admin dev origin even when database settings override startup defaults", async () => {
+		const fixture = await createTestApp({
+			devMode: true,
+			devAdminToken: "dev-token",
+		});
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app, {
+			password: "admin",
+		});
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+
+		await systemSettings.upsert("security", "adminOriginGuard.enabled", true);
+		await systemSettings.upsert("security", "adminOriginGuard.allowedOrigins", [
+			"https://admin.example.test",
+		]);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/sites/default",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+				origin: "http://localhost:5173",
+			}),
+			payload: {
+				name: "Default Dev",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+	});
+
 	it("allows dev memory mode writes without Origin for local integration", async () => {
 		const fixture = await createTestApp({
 			devMode: true,

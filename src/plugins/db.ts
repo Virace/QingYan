@@ -7,6 +7,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { createDatabaseClients } from "../db/client";
 import { applyDatabaseMigrations } from "../db/migrations";
 import { resolveAdminBootstrap } from "../modules/admin/bootstrap-service";
+import { AdminIdentityService } from "../modules/admin/admin-identity-service";
 import { IpRegionAutoUpdateScheduler } from "../modules/comments/metadata/ip-region-scheduler";
 import { RuntimeSystemSettingsService } from "../modules/system-settings/service";
 
@@ -21,10 +22,13 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	applyDatabaseMigrations(sqlite);
 	fastify.decorate("db", db);
 	fastify.decorate("sqlite", sqlite);
-	fastify.decorate(
-		"adminBootstrap",
-		await resolveAdminBootstrap(fastify.config, db, fastify.runtimeOptions),
+	const adminBootstrap = await resolveAdminBootstrap(
+		fastify.config,
+		db,
+		fastify.runtimeOptions,
 	);
+	await new AdminIdentityService(db).ensureInitialAdmin(adminBootstrap);
+	fastify.decorate("adminBootstrap", adminBootstrap);
 
 	if (fastify.runtimeOptions.devMode.seed) {
 		await fastify.siteRegistry.seedSiteFromTemplate(

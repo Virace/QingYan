@@ -317,7 +317,15 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
-			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
+			verifiedAuthorSession: adminSession
+				? {
+						type: "admin",
+						userId: adminSession.user.id,
+						displayName: adminSession.user.displayName,
+						email: adminSession.user.email,
+						website: adminSession.user.website,
+					}
+				: undefined,
 		});
 		setPublicVisitorCookie({
 			reply,

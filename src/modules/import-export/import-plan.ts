@@ -31,6 +31,7 @@ export interface ImportPlanComment {
 	authorIp?: string;
 	userAgent?: string;
 	authorIdentity: CommentAuthorIdentity;
+	authorUserId?: number;
 	content: string;
 	createdAt?: string;
 	parentOldCommentId: string | null;

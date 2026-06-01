@@ -325,6 +325,35 @@ export interface AdminSite {
 	visitorCount: number;
 }
 
+export type AdminGroupKey = "admin" | "site_admin" | "site_moderator";
+
+export interface AdminUser {
+	id: number;
+	username: string;
+	email: string;
+	displayName: string;
+	status: "active" | "disabled" | "deleted";
+	groupKey: AdminGroupKey;
+	groupName: string;
+	siteKeys: string[];
+	isInitialAdmin: boolean;
+	passwordChangeRequired: boolean;
+	loginBlockedUntil: string | null;
+	lastLoginAt: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+}
+
+export interface AdminGroup {
+	id: number;
+	key: AdminGroupKey;
+	name: string;
+	description: string | null;
+	kind: "system";
+	permissions: string[];
+}
+
 export interface AdminSettings {
 	siteKey: string;
 	comments: {
@@ -391,6 +420,9 @@ export interface AdminSystemSettings {
 	admin: {
 		session: {
 			ttlMinutes: number;
+		};
+		deletion: {
+			retentionDays: number;
 		};
 	};
 	security: {
@@ -687,6 +719,20 @@ export function deletePage(input: { pageKey: string; siteKey?: string }) {
 	);
 }
 
+export function clearPageTrash(input: { siteKey?: string }) {
+	return requestJson<{
+		deletedCount: number;
+		deletion: {
+			mode: "delayed" | "immediate";
+			resourceCount: number;
+			hardDeleteAfter?: string;
+		};
+	}>("/api/admin/pages/trash/clear", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
 export function refreshPageTitle(input: { pageKey: string; siteKey: string }) {
 	return requestJson<{ job: MaintenanceJob }>(
 		`/api/admin/pages/${encodeURIComponent(input.pageKey)}/title/refresh`,
@@ -944,4 +990,93 @@ export function updateSystemSettings(input: AdminSystemSettings) {
 		method: "PUT",
 		body: JSON.stringify(input),
 	});
+}
+
+export function listAdminUsers(
+	input: { search?: string; limit?: number; offset?: number } = {},
+) {
+	return requestJson<{ users: AdminUser[] }>(
+		`/api/admin/users?${queryString(input)}`,
+	);
+}
+
+export function createAdminUser(input: {
+	username: string;
+	email: string;
+	displayName: string;
+	password: string;
+	groupKey: AdminGroupKey;
+	siteKeys: string[];
+	passwordChangeRequired: boolean;
+}) {
+	return requestJson<{ user: AdminUser }>("/api/admin/users", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+export function updateAdminUser(
+	userId: number,
+	input: Partial<{
+		email: string;
+		displayName: string;
+		groupKey: AdminGroupKey;
+		siteKeys: string[];
+		status: "active" | "disabled" | "deleted";
+		passwordChangeRequired: boolean;
+	}>,
+) {
+	return requestJson<{ user: AdminUser; revokedSessions: number }>(
+		`/api/admin/users/${userId}`,
+		{
+			method: "PATCH",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function resetAdminUserPassword(
+	userId: number,
+	input: {
+		password: string;
+		passwordChangeRequired: boolean;
+	},
+) {
+	return requestJson<{ user: AdminUser; revokedSessions: number }>(
+		`/api/admin/users/${userId}/reset-password`,
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function revokeAdminUserSessions(
+	userId: number,
+	input: {
+		loginBlockPreset: "none" | "1h" | "1d" | "7d" | "custom";
+		loginBlockedUntil?: string;
+		reason?: string;
+	},
+) {
+	return requestJson<{ user: AdminUser; revokedSessions: number }>(
+		`/api/admin/users/${userId}/revoke-sessions`,
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function deleteAdminUser(userId: number) {
+	return requestJson<{ user: AdminUser; revokedSessions: number }>(
+		`/api/admin/users/${userId}`,
+		{
+			method: "DELETE",
+		},
+	);
+}
+
+export function listAdminGroups() {
+	return requestJson<{ groups: AdminGroup[] }>("/api/admin/groups");
 }

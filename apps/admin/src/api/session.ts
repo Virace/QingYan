@@ -25,6 +25,17 @@ export interface AdminSessionPayload {
 }
 
 export interface AdminMePayload extends AdminSessionPayload {
+	user: {
+		id: number;
+		username: string;
+		email: string;
+		displayName: string;
+		groupKey: string;
+		groupName: string;
+		isInitialAdmin: boolean;
+		passwordChangeRequired: boolean;
+	};
+	permissions: string[];
 	sites: AdminSiteSummary[];
 }
 

@@ -16,6 +16,7 @@ import { resolveInstallState } from "../src/modules/install/state";
 
 interface DevConfig {
 	adminPath: string;
+	apiBase: string;
 	apiOrigin: string;
 }
 
@@ -60,6 +61,7 @@ async function readDevConfig(
 
 	return {
 		adminPath,
+		apiBase: joinPublicPath(publicPath, "/api"),
 		apiOrigin:
 			process.env.QINGYAN_DEV_API_ORIGIN ?? `http://127.0.0.1:${apiPort}`,
 	};
@@ -174,10 +176,11 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const { adminPath, apiOrigin } = await readDevConfig(devEnv);
+	const { adminPath, apiBase, apiOrigin } = await readDevConfig(devEnv);
 	const adminBase = "/";
 
 	console.log(`QingYan API dev server: ${apiOrigin}`);
+	console.log(`QingYan Admin API base: ${apiBase}`);
 	console.log(`QingYan Admin dev server: http://localhost:5173${adminPath}`);
 	if (adminPath !== defaultExternalAdminPath()) {
 		console.log(
@@ -201,6 +204,7 @@ async function main(): Promise<void> {
 			createProcessEnv({
 				QINGYAN_ADMIN_BASE: adminBase,
 				QINGYAN_ADMIN_DEV_PATHS: buildAdminDevPaths(adminPath),
+				QINGYAN_DEV_API_BASE: apiBase,
 				QINGYAN_DEV_API_ORIGIN: apiOrigin,
 			}),
 		),

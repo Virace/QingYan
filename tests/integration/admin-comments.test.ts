@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 
 import {
+	adminGroups,
+	adminUserGroups,
+	adminUserSiteAccess,
+	adminUsers,
+	auditLogs,
 	blacklistRules,
 	commentRequestMetadata,
 	comments,
@@ -11,6 +16,8 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { AdminRepository } from "../../src/modules/admin/repository";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -23,6 +30,67 @@ afterEach(async () => {
 		await cleanup();
 	}
 });
+
+async function createSecondSite(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+) {
+	const repository = new AdminRepository(fixture.app.db);
+	await repository.createSite({
+		siteKey: "qingyan",
+		name: "QingYan",
+		allowedOrigins: ["http://localhost:4322"],
+	});
+	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
+}
+
+async function createScopedUser(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	input: {
+		username: string;
+		groupKey: "site_admin" | "site_moderator";
+		siteKeys: string[];
+	},
+) {
+	const [group] = await fixture.app.db
+		.select()
+		.from(adminGroups)
+		.where(eq(adminGroups.key, input.groupKey));
+	if (!group) {
+		throw new Error(`Expected group ${input.groupKey} to exist`);
+	}
+	await fixture.app.db.insert(adminUsers).values({
+		username: input.username,
+		email: `${input.username}@example.test`,
+		passwordHash: createPasswordHash("replace-me"),
+		displayName: input.username,
+		status: "active",
+	});
+	const [user] = await fixture.app.db
+		.select()
+		.from(adminUsers)
+		.where(eq(adminUsers.username, input.username));
+	if (!user) {
+		throw new Error(`Expected user ${input.username} to exist`);
+	}
+	await fixture.app.db.insert(adminUserGroups).values({
+		userId: user.id,
+		groupId: group.id,
+	});
+	for (const siteKey of input.siteKeys) {
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, siteKey));
+		if (!site) {
+			throw new Error(`Expected site ${siteKey} to exist`);
+		}
+		await fixture.app.db.insert(adminUserSiteAccess).values({
+			userId: user.id,
+			siteId: site.id,
+		});
+	}
+	return user;
+}
 
 describe("admin comments", () => {
 	it("defaults admin comments to active statuses and keeps spam and trash in explicit views", async () => {
@@ -952,6 +1020,203 @@ describe("admin comments", () => {
 		)) {
 			expect(comment.deletedAt).not.toBeNull();
 		}
+	});
+
+	it("rejects mixed-site bulk trash payloads for site-scoped users", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createSecondSite(fixture);
+		await createScopedUser(fixture, {
+			username: "comment-site-moderator",
+			groupKey: "site_moderator",
+			siteKeys: ["fangyuan"],
+		});
+		const [fangyuan] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		const [qingyan] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "qingyan"));
+		if (!fangyuan || !qingyan) {
+			throw new Error("Expected both sites to exist");
+		}
+		await fixture.app.db.insert(pageThreads).values([
+			{
+				siteId: fangyuan.id,
+				pageKey: "post:mixed-fangyuan",
+				pageTitle: "Mixed Fangyuan",
+			},
+			{
+				siteId: qingyan.id,
+				pageKey: "post:mixed-qingyan",
+				pageTitle: "Mixed QingYan",
+			},
+		]);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		const fangyuanThread = threads.find(
+			(thread) => thread.pageKey === "post:mixed-fangyuan",
+		);
+		const qingyanThread = threads.find(
+			(thread) => thread.pageKey === "post:mixed-qingyan",
+		);
+		if (!fangyuanThread || !qingyanThread) {
+			throw new Error("Expected both threads to exist");
+		}
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_mixed_fangyuan",
+				siteId: fangyuan.id,
+				pageThreadId: fangyuanThread.id,
+				status: "approved",
+				authorName: "FangYuan",
+				contentRaw: "fangyuan",
+				contentHtml: "<p>fangyuan</p>",
+			},
+			{
+				id: "c_mixed_qingyan",
+				siteId: qingyan.id,
+				pageThreadId: qingyanThread.id,
+				status: "approved",
+				authorName: "QingYan",
+				contentRaw: "qingyan",
+				contentHtml: "<p>qingyan</p>",
+			},
+		]);
+		const moderator = await loginAsAdmin(fixture.app, {
+			username: "comment-site-moderator",
+			password: "replace-me",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/bulk-trash",
+			...withAdminWriteAuth(moderator),
+			payload: {
+				commentIds: ["c_mixed_fangyuan", "c_mixed_qingyan"],
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "ADMIN_SITE_ACCESS_REQUIRED",
+			},
+		});
+		const rows = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(inArray(comments.id, ["c_mixed_fangyuan", "c_mixed_qingyan"]));
+		expect(rows.map((comment) => [comment.id, comment.status]).sort()).toEqual([
+			["c_mixed_fangyuan", "approved"],
+			["c_mixed_qingyan", "approved"],
+		]);
+	});
+
+	it("writes admin_user audits for comment trash and permanent delete operations", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!site || !adminUser) {
+			throw new Error("Expected site and admin user");
+		}
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "post:comment-audit",
+			pageTitle: "Comment Audit",
+			commentCount: 2,
+			rootCommentCount: 2,
+		});
+		const [thread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "post:comment-audit"));
+		if (!thread) {
+			throw new Error("Expected thread");
+		}
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_comment_audit_single",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "trash",
+				authorName: "Single",
+				contentRaw: "single",
+				contentHtml: "<p>single</p>",
+			},
+			{
+				id: "c_comment_audit_bulk",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "approved",
+				authorName: "Bulk",
+				contentRaw: "bulk",
+				contentHtml: "<p>bulk</p>",
+			},
+		]);
+
+		const bulkTrash = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/bulk-trash",
+			...withAdminWriteAuth(admin),
+			payload: {
+				commentIds: ["c_comment_audit_bulk"],
+			},
+		});
+		expect(bulkTrash.statusCode).toBe(200);
+
+		const permanentDelete = await fixture.app.inject({
+			method: "DELETE",
+			url: "/qingyan/api/admin/comments/c_comment_audit_single",
+			...withAdminWriteAuth(admin),
+		});
+		expect(permanentDelete.statusCode).toBe(200);
+
+		const clearTrash = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/comments/trash/clear",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+			},
+		});
+		expect(clearTrash.statusCode).toBe(200);
+
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "comments.status.changed",
+					targetType: "comment",
+					targetId: "c_comment_audit_bulk",
+				}),
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "comments.deleted",
+					targetType: "comment",
+					targetId: "c_comment_audit_single",
+				}),
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "comments.deleted",
+					targetType: "comment",
+					targetId: "fangyuan",
+				}),
+			]),
+		);
 	});
 
 	it("lists and updates spam and trash comments without exposing them publicly", async () => {
