@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, like, ne, or } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, like, ne, or, sql } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import {
@@ -383,6 +383,47 @@ export class AdminUsersRepository {
 			.select()
 			.from(adminSessions)
 			.where(inArray(adminSessions.id, sessionIds));
+	}
+
+	public async listActiveSessionStats(userIds: number[], nowIso: string) {
+		if (userIds.length === 0) {
+			return new Map<
+				number,
+				{ activeSessionCount: number; lastSessionSeenAt: string | null }
+			>();
+		}
+
+		const rows = await this.db
+			.select({
+				userId: adminSessions.userId,
+				activeSessionCount: count(),
+				lastSessionSeenAt: sql<string | null>`MAX(${adminSessions.lastSeenAt})`,
+			})
+			.from(adminSessions)
+			.where(
+				and(
+					inArray(adminSessions.userId, userIds),
+					isNull(adminSessions.revokedAt),
+					gt(adminSessions.expiresAt, nowIso),
+				),
+			)
+			.groupBy(adminSessions.userId);
+
+		const stats = new Map<
+			number,
+			{ activeSessionCount: number; lastSessionSeenAt: string | null }
+		>();
+		for (const row of rows) {
+			if (row.userId === null) {
+				continue;
+			}
+			stats.set(row.userId, {
+				activeSessionCount: Number(row.activeSessionCount ?? 0),
+				lastSessionSeenAt: row.lastSessionSeenAt ?? null,
+			});
+		}
+
+		return stats;
 	}
 
 	public async deleteSessionsForUser(userId: number) {

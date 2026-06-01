@@ -35,6 +35,18 @@ async function openSiteSettings(page: Page): Promise<void> {
 	await expect(page.getByRole("heading", { name: "站点设置" })).toBeVisible();
 }
 
+async function openSystemSettings(page: Page): Promise<void> {
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+	await page.getByRole("button", { name: "系统设置" }).click();
+	await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+}
+
+async function selectSettingsTab(page: Page, name: string): Promise<void> {
+	await page.getByRole("tab", { name, exact: true }).click();
+}
+
 async function ensureSwitchState(
 	page: Page,
 	name: string,
@@ -143,34 +155,238 @@ test("site settings page renders editable controls", async ({ page }) => {
 	await expect(page.getByRole("checkbox", { name: "邮箱" })).toBeVisible();
 	await expect(page.getByRole("checkbox", { name: "站点" })).toBeVisible();
 	await expect(page.getByText("IPv4 下载源")).toHaveCount(0);
+	await selectSettingsTab(page, "访客与计数");
+	await expect(page.getByRole("switch", { name: "访客记录" })).toBeVisible();
+	await selectSettingsTab(page, "通知");
+	await expect(page.getByText("当前站点邮件通知")).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "保存站点设置" }),
 	).toBeVisible();
 });
 
-test("system settings page renders database-owned install settings", async ({
-	page,
-}) => {
+test("admin shell keeps the active users view after reload", async ({ page }) => {
 	if (!(await isLoggedIn(page))) {
 		await login(page);
 	}
 
-	await page.getByRole("button", { name: "系统设置" }).click();
-	await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+	await page.getByRole("button", { name: "用户", exact: true }).click();
+	await expect(page.getByRole("heading", { name: "用户" })).toBeVisible();
+	await expect(page).toHaveURL(/view=users/);
+	await page.reload();
+	await expect(page.getByRole("heading", { name: "用户" })).toBeVisible();
+});
+
+test("users page renders tabs, dialogs and session-aware logout", async ({
+	page,
+}) => {
+	await page.route("**/api/admin/users?*", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				users: [
+					{
+						id: 1001,
+						username: "offline-site-admin",
+						email: "offline@example.com",
+						displayName: "Offline Site Admin",
+						status: "active",
+						groupKey: "site_admin",
+						groupName: "站点管理员",
+						siteKeys: ["fangyuan"],
+						isInitialAdmin: false,
+						passwordChangeRequired: false,
+						loginBlockedUntil: null,
+						activeSessionCount: 0,
+						lastSessionSeenAt: null,
+						lastLoginAt: null,
+						createdAt: "2026-06-02T00:00:00.000Z",
+						updatedAt: "2026-06-02T00:00:00.000Z",
+						deletedAt: null,
+					},
+				],
+			}),
+		});
+	});
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	await page.getByRole("button", { name: "用户", exact: true }).click();
+	await expect(page.getByRole("tab", { name: "用户", exact: true })).toBeVisible();
+	await expect(
+		page.getByRole("tab", { name: "用户组", exact: true }),
+	).toBeVisible();
+	await expect(page.getByText("无在线会话")).toBeVisible();
+	await expect(page.getByRole("button", { name: "强制登出" })).toBeDisabled();
+	await page.getByRole("button", { name: "新增用户" }).click();
+	await expect(page.getByRole("dialog", { name: "新增用户" })).toBeVisible();
+	await expect(page.getByLabel("用户名")).toBeVisible();
+	await expect(page.getByLabel("邮箱")).toBeVisible();
+	await expect(page.getByLabel("初始密码")).toBeVisible();
+	await page.keyboard.press("Escape");
+	await page.getByRole("button", { name: "重置密码" }).click();
+	const resetDialog = page.getByRole("dialog", { name: "重置密码" });
+	await expect(resetDialog).toBeVisible();
+	await expect(resetDialog.getByLabel("新密码", { exact: true })).toBeVisible();
+	await expect(resetDialog.getByLabel("确认新密码")).toBeVisible();
+});
+
+test("site create and visitor filters use dialog-style controls", async ({
+	page,
+}) => {
+	await page.route("**/api/admin/visitors?*", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				enabled: true,
+				trustMode: "trusted",
+				items: [
+					{
+						siteKey: "fangyuan",
+						visitorKey: "visitor_e2e",
+						lastSeenAt: "2026-06-02T00:00:00.000Z",
+						createdAt: "2026-06-02T00:00:00.000Z",
+						commentCount: 0,
+						pageCount: 1,
+						emailCount: 0,
+						emails: [],
+						ips: [],
+						userAgents: [],
+						lastIp: "203.0.113.8",
+						lastUserAgent: "Mozilla/5.0 E2E",
+						lastSeenPageKey: "post:e2e",
+						lastSeenPageUrl: "https://example.com/posts/e2e/",
+						lastRequestMeta: {
+							ip: { raw: "203.0.113.8", location: null },
+							userAgent: { raw: "Mozilla/5.0 E2E", device: null },
+						},
+						ipLocations: [],
+						devices: [],
+						blacklist: { ip: false, visitor: false },
+					},
+				],
+				pagination: { limit: 20, offset: 0, totalCount: 1 },
+			}),
+		});
+	});
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	await page.getByRole("button", { name: "站点", exact: true }).click();
+	await page.getByRole("button", { name: "新增站点" }).click();
+	await expect(page.getByRole("dialog", { name: "新增站点" })).toBeVisible();
+	await expect(page.getByLabel("站点 key")).toBeVisible();
+	await expect(page.getByLabel("站点名称")).toBeVisible();
+	await expect(page.getByLabel("前端站点 Origin")).toBeVisible();
+	await page.keyboard.press("Escape");
+
+	await page
+		.getByRole("navigation")
+		.getByRole("button", { name: "访客", exact: true })
+		.click();
+	await expect(page.getByText("站点 fangyuan")).toBeVisible();
+	await expect(page.getByText("https://example.com/posts/e2e/")).toBeVisible();
+	await expect(page.getByText(/PageKey/)).toHaveCount(0);
+	await page.getByText("筛选").click();
+	await expect(page.getByLabel("IP")).toBeVisible();
+	await expect(page.getByLabel("UA")).toBeVisible();
+	await expect(page.getByLabel("完整链接")).toBeVisible();
+	await expect(page.getByLabel("设备")).toBeVisible();
+	await expect(page.getByLabel("地域")).toBeVisible();
+	await expect(page.getByLabel("黑名单状态")).toBeVisible();
+});
+
+test("comments page row displays site key in page column", async ({ page }) => {
+	await page.route("**/api/admin/comments?*", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				items: [
+					{
+						id: "comment_e2e",
+						parentId: null,
+						status: "approved",
+						authorName: "E2E",
+						authorEmail: "e2e@example.com",
+						authorAvatarUrl: null,
+						authorIp: null,
+						authorUserAgent: null,
+						requestMeta: {
+							ip: { raw: null, location: null },
+							userAgent: { raw: null, device: null },
+						},
+						authorIpLocation: {
+							country: null,
+							region: null,
+							city: null,
+							isp: null,
+							raw: null,
+							source: null,
+							dbHash: null,
+							updatedAt: null,
+							error: null,
+						},
+						blacklist: { email: false, ip: false },
+						contentRaw: "hello",
+						isPinned: false,
+						isFolded: false,
+						replyCount: 0,
+						voteUpCount: 0,
+						voteDownCount: 0,
+						createdAt: "2026-06-02T00:00:00.000Z",
+						updatedAt: "2026-06-02T00:00:00.000Z",
+						siteKey: "fangyuan",
+						pageKey: "post:e2e",
+						pageTitle: "E2E Page",
+						pageUrl: "https://example.com/posts/e2e/",
+					},
+				],
+				pagination: { limit: 20, offset: 0, totalCount: 1 },
+			}),
+		});
+	});
+	if (!(await isLoggedIn(page))) {
+		await login(page);
+	}
+
+	await page.getByRole("button", { name: "评论", exact: true }).click();
+	await expect(page.getByText("站点 fangyuan")).toBeVisible();
+});
+
+test("system settings page renders database-owned install settings", async ({
+	page,
+}) => {
+	await openSystemSettings(page);
+	await expect(page.getByRole("tab", { name: "后台与安全" })).toBeVisible();
+	await expect(page.getByRole("tab", { name: "限流" })).toBeVisible();
+	await expect(page.getByRole("tab", { name: "邮件" })).toBeVisible();
+	await expect(page.getByRole("tab", { name: "验证码" })).toBeVisible();
+	await expect(
+		page.getByRole("tab", { name: "头像与公开接口" }),
+	).toBeVisible();
+	await expect(page.getByRole("tab", { name: "IP 地域" })).toBeVisible();
+	await expect(page.getByRole("tab", { name: "反垃圾" })).toBeVisible();
+
+	await selectSettingsTab(page, "邮件");
 	await expect(page.getByRole("heading", { name: "系统邮件" })).toBeVisible();
 	await expect(page.getByText("SMTP Host")).toHaveCount(0);
 	await expect(page.getByText("已保存的 SMTP 配置会保留")).toBeVisible();
+	await selectSettingsTab(page, "头像与公开接口");
 	await expect(page.getByRole("heading", { name: "外部头像" })).toBeVisible();
 	await expect(
 		page.getByRole("switch", { name: "外部头像 URL" }),
 	).toBeVisible();
+	await ensureSwitchState(page, "外部头像 URL", false);
 	await expect(page.getByText("头像接口地址")).toHaveCount(0);
 	await expect(page.getByText("邮箱哈希算法")).toHaveCount(0);
 	await expect(page.getByText("头像 URL 参数")).toHaveCount(0);
 	await expect(page.getByText("已保存的 base URL")).toBeVisible();
+	await selectSettingsTab(page, "验证码");
 	await expect(page.getByRole("heading", { name: "验证码服务" })).toBeVisible();
 	await expect(page.getByText("图片宽度")).toBeVisible();
 	await expect(page.getByText("Turnstile Site Key")).toHaveCount(0);
+	await selectSettingsTab(page, "IP 地域");
 	await expect(page.getByText("IPv4 下载源")).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "保存系统设置" }),
@@ -181,11 +397,8 @@ test("system settings mixed description fields keep switch controls aligned", as
 	page,
 }) => {
 	await page.setViewportSize({ width: 1536, height: 900 });
-	if (!(await isLoggedIn(page))) {
-		await login(page);
-	}
-
-	await page.getByRole("button", { name: "系统设置" }).click();
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "头像与公开接口");
 	await ensureSwitchState(page, "外部头像 URL", true);
 	await expect(page.getByText("头像接口地址")).toBeVisible();
 	await expectFieldRowsAligned(page, ["外部头像 URL", "头像接口地址"]);
@@ -196,6 +409,7 @@ test("system settings mixed description fields keep switch controls aligned", as
 	);
 	await expectFieldControlGap(page, "外部头像 URL", 14);
 
+	await selectSettingsTab(page, "邮件");
 	await ensureSwitchState(page, "系统邮件", true);
 	await expect(page.getByText("SMTP Host")).toBeVisible();
 	await expectFieldRowsAligned(page, ["系统邮件", "SMTP Host"]);
@@ -206,11 +420,8 @@ test("system settings mixed description fields keep switch controls aligned", as
 test("system settings captcha provider shows only matching fields", async ({
 	page,
 }) => {
-	if (!(await isLoggedIn(page))) {
-		await login(page);
-	}
-
-	await page.getByRole("button", { name: "系统设置" }).click();
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "验证码");
 	const provider = page.getByLabel("验证码服务");
 	await expect(provider).toBeVisible();
 	await expect(page.getByText("图片宽度")).toBeVisible();
@@ -281,6 +492,7 @@ test("site settings keeps independent counters visible when visitors are off", a
 	page,
 }) => {
 	await openSiteSettings(page);
+	await selectSettingsTab(page, "访客与计数");
 	await ensureSwitchState(page, "访客记录", false);
 	await expect(page.getByRole("switch", { name: "访客记录" })).toBeVisible();
 	await expect(page.getByRole("switch", { name: "页面浏览量" })).toBeVisible();
@@ -298,16 +510,14 @@ test("site settings keeps independent counters visible when visitors are off", a
 test("system mail disabled hides smtp details without removing site notification control", async ({
 	page,
 }) => {
-	if (!(await isLoggedIn(page))) {
-		await login(page);
-	}
-
-	await page.getByRole("button", { name: "系统设置" }).click();
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "邮件");
 	await expect(page.getByRole("heading", { name: "系统邮件" })).toBeVisible();
 	await expect(page.getByText("SMTP Host")).toHaveCount(0);
 	await expect(page.getByText("已保存的 SMTP 配置会保留")).toBeVisible();
 
 	await page.getByRole("button", { name: "站点设置" }).click();
+	await selectSettingsTab(page, "通知");
 	await expect(page.getByText("当前站点邮件通知")).toBeVisible();
 });
 

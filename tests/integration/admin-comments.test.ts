@@ -185,6 +185,13 @@ describe("admin comments", () => {
 		expect(
 			defaultList.json().items.map((comment: { id: string }) => comment.id),
 		).toEqual(["c_admin_view_approved", "c_admin_view_pending"]);
+		expect(
+			defaultList
+				.json()
+				.items.every(
+					(comment: { siteKey?: string }) => comment.siteKey === "fangyuan",
+				),
+		).toBe(true);
 		expect(defaultList.json().pagination.totalCount).toBe(2);
 
 		const spamList = await fixture.app.inject({

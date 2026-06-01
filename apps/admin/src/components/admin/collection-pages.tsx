@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Dialog } from "@radix-ui/themes";
 import { useState } from "react";
 
 import {
@@ -45,10 +46,11 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 import type { AdminView } from "./admin-shell";
 import { PaginationControls } from "./admin-pagination";
-import { EmptyState, inputClass } from "./admin-ui";
+import { EmptyState, Field, inputClass } from "./admin-ui";
 import type { CommentActionId } from "./comment-actions";
 import { CommentsList } from "./comments-list";
 import { useAdminConfirmDialog } from "./confirm-dialog";
@@ -1283,6 +1285,14 @@ export function VisitorsPage({
 	openComments: (input: { pageKey?: string; search?: string }) => void;
 }) {
 	const [search, setSearch] = useState("");
+	const [ip, setIp] = useState("");
+	const [userAgent, setUserAgent] = useState("");
+	const [pageUrl, setPageUrl] = useState("");
+	const [device, setDevice] = useState("");
+	const [location, setLocation] = useState("");
+	const [blacklist, setBlacklist] = useState<
+		"" | "any" | "ip" | "visitor" | "none"
+	>("");
 	const pagination = usePaginationState(20);
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
@@ -1292,6 +1302,12 @@ export function VisitorsPage({
 			"visitors",
 			siteKey,
 			search,
+			ip,
+			userAgent,
+			pageUrl,
+			device,
+			location,
+			blacklist,
 			pagination.limit,
 			pagination.offset,
 		],
@@ -1299,6 +1315,12 @@ export function VisitorsPage({
 			listVisitors({
 				siteKey,
 				search,
+				ip,
+				userAgent,
+				pageUrl,
+				device,
+				location,
+				blacklist: blacklist || undefined,
 				limit: pagination.limit,
 				offset: pagination.offset,
 			}),
@@ -1366,6 +1388,80 @@ export function VisitorsPage({
 						pagination.resetPage();
 					}}
 				/>
+				<details className="rounded-md border p-3">
+					<summary className="cursor-pointer select-none text-sm font-medium">
+						筛选
+					</summary>
+					<div className="mt-3 grid gap-3 md:grid-cols-3">
+						<Field label="IP">
+							<Input
+								aria-label="IP"
+								value={ip}
+								onChange={(event) => {
+									setIp(event.target.value);
+									pagination.resetPage();
+								}}
+							/>
+						</Field>
+						<Field label="UA">
+							<Input
+								aria-label="UA"
+								value={userAgent}
+								onChange={(event) => {
+									setUserAgent(event.target.value);
+									pagination.resetPage();
+								}}
+							/>
+						</Field>
+						<Field label="完整链接">
+							<Input
+								aria-label="完整链接"
+								value={pageUrl}
+								onChange={(event) => {
+									setPageUrl(event.target.value);
+									pagination.resetPage();
+								}}
+							/>
+						</Field>
+						<Field label="设备">
+							<Input
+								aria-label="设备"
+								value={device}
+								onChange={(event) => {
+									setDevice(event.target.value);
+									pagination.resetPage();
+								}}
+							/>
+						</Field>
+						<Field label="地域">
+							<Input
+								aria-label="地域"
+								value={location}
+								onChange={(event) => {
+									setLocation(event.target.value);
+									pagination.resetPage();
+								}}
+							/>
+						</Field>
+						<Field label="黑名单状态">
+							<select
+								className={inputClass}
+								value={blacklist}
+								onChange={(event) => {
+									setBlacklist(event.target.value as typeof blacklist);
+									pagination.resetPage();
+								}}
+								aria-label="黑名单状态"
+							>
+								<option value="">全部</option>
+								<option value="any">任意黑名单</option>
+								<option value="ip">IP 黑名单</option>
+								<option value="visitor">访客黑名单</option>
+								<option value="none">无黑名单</option>
+							</select>
+						</Field>
+					</div>
+				</details>
 				{visitorsDisabledMessage ? (
 					<EmptyState text={visitorsDisabledMessage} />
 				) : null}
@@ -1380,11 +1476,7 @@ export function VisitorsPage({
 				<div className="grid gap-3">
 					{query.data?.enabled !== false &&
 						query.data?.items.map((visitor) => {
-							const visitTarget =
-								visitor.lastSeenPageUrl ?? visitor.lastSeenPageKey ?? "-";
-							const showPageKey =
-								visitor.lastSeenPageKey &&
-								visitor.lastSeenPageKey !== visitor.lastSeenPageUrl;
+							const visitTarget = visitor.lastSeenPageUrl ?? "-";
 							const hasHistory =
 								(visitor.ipLocations?.length ?? 0) > 1 ||
 								(visitor.devices?.length ?? 0) > 1 ||
@@ -1401,7 +1493,7 @@ export function VisitorsPage({
 											<p className="truncate text-xs text-muted-foreground">
 												IP {visitor.lastIp ?? "-"}
 											</p>
-											{visitor.lastSeenPageKey || visitor.lastSeenPageUrl ? (
+											{visitor.lastSeenPageUrl ? (
 												<div className="mt-1 max-w-xl text-xs">
 													<ExternalLinkText
 														href={visitor.lastSeenPageUrl}
@@ -1409,11 +1501,6 @@ export function VisitorsPage({
 													>
 														{visitTarget}
 													</ExternalLinkText>
-													{showPageKey ? (
-														<p className="truncate text-muted-foreground">
-															PageKey {visitor.lastSeenPageKey}
-														</p>
-													) : null}
 												</div>
 											) : null}
 											<RequestMetaSummary
@@ -1450,6 +1537,9 @@ export function VisitorsPage({
 										<div className="flex flex-wrap gap-2">
 											<Badge variant="secondary">
 												评论 {visitor.commentCount}
+											</Badge>
+											<Badge variant="outline">
+												站点 {visitor.siteKey}
 											</Badge>
 											<Badge variant="outline">页面 {visitor.pageCount}</Badge>
 											{visitor.blacklist.ip ? (
@@ -1496,6 +1586,7 @@ export function SitesPage({
 	openSite: (siteKey: string, view: AdminView) => void;
 }) {
 	const queryClient = useQueryClient();
+	const [createOpen, setCreateOpen] = useState(false);
 	const [siteKey, setSiteKey] = useState("");
 	const [name, setName] = useState("");
 	const [origin, setOrigin] = useState("");
@@ -1509,6 +1600,7 @@ export function SitesPage({
 			setSiteKey("");
 			setName("");
 			setOrigin("");
+			setCreateOpen(false);
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 	});
@@ -1527,15 +1619,26 @@ export function SitesPage({
 	const allowedOrigin = origin.trim();
 
 	return (
-		<div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-lg">新增站点</CardTitle>
-					<CardDescription>创建站点后可继续配置站点设置。</CardDescription>
-				</CardHeader>
-				<CardContent>
+		<div className="grid gap-4">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<h2 className="text-lg font-semibold">站点</h2>
+					<p className="text-sm text-muted-foreground">
+						配置站点和站点设置摘要。
+					</p>
+				</div>
+				<Button type="button" onClick={() => setCreateOpen(true)}>
+					新增站点
+				</Button>
+			</div>
+			<Dialog.Root open={createOpen} onOpenChange={setCreateOpen}>
+				<Dialog.Content maxWidth="520px">
+					<Dialog.Title>新增站点</Dialog.Title>
+					<Dialog.Description size="2">
+						创建站点后可继续配置站点设置。
+					</Dialog.Description>
 					<form
-						className="flex flex-col gap-3"
+						className="mt-4 grid gap-4"
 						onSubmit={(event) => {
 							event.preventDefault();
 							if (!siteKey.trim() || !name.trim() || !allowedOrigin) {
@@ -1548,117 +1651,129 @@ export function SitesPage({
 							});
 						}}
 					>
-						<Input
-							placeholder="siteKey"
-							value={siteKey}
-							onChange={(event) => setSiteKey(event.target.value)}
-						/>
-						<Input
-							placeholder="站点名称"
-							value={name}
-							onChange={(event) => setName(event.target.value)}
-						/>
-						<Input
-							placeholder="前端站点 Origin，例如 https://example.com"
-							value={origin}
-							onChange={(event) => setOrigin(event.target.value)}
-						/>
-						<Button type="submit" disabled={createMutation.isPending}>
-							创建站点
-						</Button>
+						<div className="grid gap-2">
+							<Label htmlFor="site-create-key">站点 key</Label>
+							<Input
+								id="site-create-key"
+								value={siteKey}
+								onChange={(event) => setSiteKey(event.target.value)}
+							/>
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="site-create-name">站点名称</Label>
+							<Input
+								id="site-create-name"
+								value={name}
+								onChange={(event) => setName(event.target.value)}
+							/>
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="site-create-origin">
+								前端站点 Origin
+							</Label>
+							<Input
+								id="site-create-origin"
+								value={origin}
+								onChange={(event) => setOrigin(event.target.value)}
+							/>
+						</div>
+						<div className="flex justify-end gap-2">
+							<Dialog.Close>
+								<Button type="button" variant="outline">
+									取消
+								</Button>
+							</Dialog.Close>
+							<Button type="submit" disabled={createMutation.isPending}>
+								创建站点
+							</Button>
+						</div>
 					</form>
-				</CardContent>
-			</Card>
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-lg">站点</CardTitle>
-					<CardDescription>配置站点和站点设置摘要。</CardDescription>
-				</CardHeader>
-				<CardContent className="grid gap-3 md:grid-cols-2">
-					{query.data?.items.map((site) => {
-						const draftOrigin = site.allowedOrigins[0] ?? "";
-						return (
-							<div key={site.siteKey} className="rounded-md border p-4">
-								<p className="font-medium">{site.name}</p>
-								<p className="text-xs text-muted-foreground">{site.siteKey}</p>
-								<form
-									className="mt-3 grid gap-2"
-									onSubmit={(event) => {
-										event.preventDefault();
-										const form = new FormData(event.currentTarget);
-										const nextName = String(form.get("name") ?? "").trim();
-										const nextOrigin = String(form.get("origin") ?? "").trim();
-										if (!nextName || !nextOrigin) {
-											return;
-										}
-										updateMutation.mutate({
-											siteKey: site.siteKey,
-											name: nextName,
-											allowedOrigins: [nextOrigin],
-										});
-									}}
+				</Dialog.Content>
+			</Dialog.Root>
+			<div className="grid gap-3 md:grid-cols-2">
+				{query.data?.items.map((site) => {
+					const draftOrigin = site.allowedOrigins[0] ?? "";
+					return (
+						<div key={site.siteKey} className="rounded-md border p-4">
+							<p className="font-medium">{site.name}</p>
+							<p className="text-xs text-muted-foreground">{site.siteKey}</p>
+							<form
+								className="mt-3 grid gap-2"
+								onSubmit={(event) => {
+									event.preventDefault();
+									const form = new FormData(event.currentTarget);
+									const nextName = String(form.get("name") ?? "").trim();
+									const nextOrigin = String(form.get("origin") ?? "").trim();
+									if (!nextName || !nextOrigin) {
+										return;
+									}
+									updateMutation.mutate({
+										siteKey: site.siteKey,
+										name: nextName,
+										allowedOrigins: [nextOrigin],
+									});
+								}}
+							>
+								<Input name="name" defaultValue={site.name} />
+								<Input name="origin" defaultValue={draftOrigin} />
+								<Button
+									type="submit"
+									size="sm"
+									variant="outline"
+									disabled={updateMutation.isPending}
 								>
-									<Input name="name" defaultValue={site.name} />
-									<Input name="origin" defaultValue={draftOrigin} />
-									<Button
-										type="submit"
-										size="sm"
-										variant="outline"
-										disabled={updateMutation.isPending}
-									>
-										保存站点
-									</Button>
-								</form>
-								<div className="mt-3 flex flex-wrap gap-2">
-									<Badge variant="secondary">页面 {site.pageCount}</Badge>
-									<Badge variant="outline">评论 {site.commentCount}</Badge>
-									<Badge variant="outline">评论者 {site.commenterCount}</Badge>
-									<Badge variant="outline">访客 {site.visitorCount}</Badge>
-								</div>
-								<div className="mt-3 text-xs">
-									<ExternalLinkText href={draftOrigin}>
-										{draftOrigin || "-"}
-									</ExternalLinkText>
-								</div>
-								<div className="mt-4 flex flex-wrap gap-2">
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => openSite(site.siteKey, "settings")}
-									>
-										站点设置
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => openSite(site.siteKey, "pages")}
-									>
-										页面
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => openSite(site.siteKey, "commenters")}
-									>
-										评论者
-									</Button>
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() => openSite(site.siteKey, "visitors")}
-									>
-										访客
-									</Button>
-								</div>
+									保存站点
+								</Button>
+							</form>
+							<div className="mt-3 flex flex-wrap gap-2">
+								<Badge variant="secondary">页面 {site.pageCount}</Badge>
+								<Badge variant="outline">评论 {site.commentCount}</Badge>
+								<Badge variant="outline">评论者 {site.commenterCount}</Badge>
+								<Badge variant="outline">访客 {site.visitorCount}</Badge>
 							</div>
-						);
-					})}
-				</CardContent>
-			</Card>
+							<div className="mt-3 text-xs">
+								<ExternalLinkText href={draftOrigin}>
+									{draftOrigin || "-"}
+								</ExternalLinkText>
+							</div>
+							<div className="mt-4 flex flex-wrap gap-2">
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "settings")}
+								>
+									站点设置
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "pages")}
+								>
+									页面
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "commenters")}
+								>
+									评论者
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									onClick={() => openSite(site.siteKey, "visitors")}
+								>
+									访客
+								</Button>
+							</div>
+						</div>
+					);
+				})}
+			</div>
 		</div>
 	);
 }

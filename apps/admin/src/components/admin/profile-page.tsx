@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Tabs } from "@radix-ui/themes";
 import { KeyRoundIcon, MailIcon, SaveIcon, UserRoundIcon } from "lucide-react";
 
 import {
@@ -132,9 +133,16 @@ export function ProfilePage() {
 	}
 
 	return (
-		<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-			<div className="grid gap-4">
-				<Card>
+		<Tabs.Root defaultValue="profile">
+			<Tabs.List>
+				<Tabs.Trigger value="profile">资料</Tabs.Trigger>
+				<Tabs.Trigger value="email">邮箱</Tabs.Trigger>
+				<Tabs.Trigger value="password">密码</Tabs.Trigger>
+				<Tabs.Trigger value="account">账号与会话</Tabs.Trigger>
+			</Tabs.List>
+			<div className="pt-4">
+				<Tabs.Content value="profile">
+					<Card>
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<UserRoundIcon data-icon="inline-start" />
@@ -193,9 +201,11 @@ export function ProfilePage() {
 							</Button>
 						</form>
 					</CardContent>
-				</Card>
+					</Card>
+				</Tabs.Content>
 
-				<Card>
+				<Tabs.Content value="email">
+					<Card>
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<MailIcon data-icon="inline-start" />
@@ -274,9 +284,11 @@ export function ProfilePage() {
 							</form>
 						) : null}
 					</CardContent>
-				</Card>
+					</Card>
+				</Tabs.Content>
 
-				<Card>
+				<Tabs.Content value="password">
+					<Card>
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<KeyRoundIcon data-icon="inline-start" />
@@ -328,10 +340,11 @@ export function ProfilePage() {
 							</Button>
 						</form>
 					</CardContent>
-				</Card>
-			</div>
+					</Card>
+				</Tabs.Content>
 
-			<Card className="h-fit">
+				<Tabs.Content value="account">
+					<Card className="h-fit">
 				<CardHeader>
 					<CardTitle className="text-lg">{profile.user.displayName}</CardTitle>
 					<CardDescription>{profile.user.username}</CardDescription>
@@ -366,7 +379,9 @@ export function ProfilePage() {
 						value={profile.user.passwordChangeRequired ? "需修改密码" : "正常"}
 					/>
 				</CardContent>
-			</Card>
-		</div>
+					</Card>
+				</Tabs.Content>
+			</div>
+		</Tabs.Root>
 	);
 }

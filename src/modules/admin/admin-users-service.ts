@@ -68,8 +68,25 @@ export class AdminUsersService {
 		offset: number;
 	}) {
 		const rows = await this.repository.listUsers(input);
+		const sessionStats = await this.repository.listActiveSessionStats(
+			rows.map((row) => row.id),
+			new Date().toISOString(),
+		);
 		return {
-			users: await Promise.all(rows.map((row) => this.serializeUser(row.id))),
+			users: await Promise.all(
+				rows.map(async (row) => {
+					const user = await this.serializeUser(row.id);
+					const stats = sessionStats.get(row.id) ?? {
+						activeSessionCount: 0,
+						lastSessionSeenAt: null,
+					};
+					return {
+						...user,
+						activeSessionCount: stats.activeSessionCount,
+						lastSessionSeenAt: stats.lastSessionSeenAt,
+					};
+				}),
+			),
 		};
 	}
 

@@ -126,6 +126,7 @@ export interface AdminComment {
 	voteDownCount: number;
 	createdAt: string;
 	updatedAt: string;
+	siteKey: string;
 	pageKey: string;
 	pageTitle: string | null;
 	pageUrl: string | null;
@@ -339,6 +340,8 @@ export interface AdminUser {
 	isInitialAdmin: boolean;
 	passwordChangeRequired: boolean;
 	loginBlockedUntil: string | null;
+	activeSessionCount: number;
+	lastSessionSeenAt: string | null;
 	lastLoginAt: string | null;
 	createdAt: string;
 	updatedAt: string;
@@ -876,6 +879,12 @@ export function listCommenters(input: {
 export function listVisitors(input: {
 	siteKey?: string;
 	search?: string;
+	ip?: string;
+	userAgent?: string;
+	pageUrl?: string;
+	device?: string;
+	location?: string;
+	blacklist?: "any" | "ip" | "visitor" | "none";
 	limit?: number;
 	offset?: number;
 }) {

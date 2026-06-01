@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Tabs } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -370,7 +371,16 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="站点设置保存失败" />
-					<SettingsToggleGroup
+					<Tabs.Root defaultValue="comments" className="md:col-span-2">
+						<Tabs.List>
+							<Tabs.Trigger value="comments">评论</Tabs.Trigger>
+							<Tabs.Trigger value="engagement">访客与计数</Tabs.Trigger>
+							<Tabs.Trigger value="notifications">通知</Tabs.Trigger>
+						</Tabs.List>
+						<div className="pt-4">
+							<Tabs.Content value="comments">
+								<div className="grid gap-4 md:grid-cols-2">
+									<SettingsToggleGroup
 						title="评论"
 						description="控制当前站点是否提供评论提交、评论列表和评论相关互动。"
 						checked={draft.comments.enabled}
@@ -975,7 +985,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							</SettingsSection>
 						</div>
 					</SettingsToggleGroup>
-					<SettingsSection
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="engagement">
+								<div className="grid gap-4 md:grid-cols-2">
+									<SettingsSection
 						title="访客与计数"
 						description="访客记录决定 PV、点赞、投票是否能使用服务端可信去重。若需要可信统计，必须开启访客记录；若更重视隐私或轻量部署，可以关闭访客记录和相关计数。"
 					>
@@ -1040,7 +1054,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							) : null}
 						</div>
 					</SettingsSection>
-					<BooleanField
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="notifications">
+								<div className="grid gap-4 md:grid-cols-2">
+									<BooleanField
 						label="当前站点邮件通知"
 						description="只控制当前站点是否发送通知；实例级 SMTP 在系统设置中维护。"
 						checked={draft.notifications.emailEnabled}
@@ -1054,6 +1072,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							})
 						}
 					/>
+								</div>
+							</Tabs.Content>
+						</div>
+					</Tabs.Root>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
 							保存站点设置
@@ -1163,6 +1185,19 @@ export function SystemSettingsPage() {
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="系统设置保存失败" />
+					<Tabs.Root defaultValue="security" className="md:col-span-2">
+						<Tabs.List>
+							<Tabs.Trigger value="security">后台与安全</Tabs.Trigger>
+							<Tabs.Trigger value="rate-limit">限流</Tabs.Trigger>
+							<Tabs.Trigger value="mail">邮件</Tabs.Trigger>
+							<Tabs.Trigger value="captcha">验证码</Tabs.Trigger>
+							<Tabs.Trigger value="avatar">头像与公开接口</Tabs.Trigger>
+							<Tabs.Trigger value="ip-region">IP 地域</Tabs.Trigger>
+							<Tabs.Trigger value="anti-spam">反垃圾</Tabs.Trigger>
+						</Tabs.List>
+						<div className="pt-4">
+							<Tabs.Content value="security">
+								<div className="grid gap-4 md:grid-cols-2">
 					<Field label="日志等级">
 						<select
 							className={inputClass}
@@ -1407,7 +1442,12 @@ export function SystemSettingsPage() {
 								/>
 							</Field>
 						</div>
-						<SettingsSubsection
+					</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="rate-limit">
+								<div className="grid gap-4 md:grid-cols-2">
+						<SettingsSection
 							title="频率限制"
 							description="窗口字段单位均为秒；最大请求和最大失败字段单位均为次数。"
 						>
@@ -1653,8 +1693,11 @@ export function SystemSettingsPage() {
 									}
 								/>
 							</Field>
-						</SettingsSubsection>
-					</SettingsSection>
+						</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="avatar">
+								<div className="grid gap-4 md:grid-cols-2">
 					<SettingsSection
 						title="头像 / 外部头像 URL"
 						description="后端只返回 author.avatarUrl，不托管、不代理、不缓存头像图片。图片 404 或加载失败时由前端继续显示名称首字母或文字 fallback。"
@@ -1804,6 +1847,10 @@ export function SystemSettingsPage() {
 							/>
 						</div>
 					</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="mail">
+								<div className="grid gap-4 md:grid-cols-2">
 					<SettingsSection
 						title="系统邮件"
 						description="系统级邮件发送能力；当前站点是否发送通知由站点设置单独控制。密码留空时保留已有密钥。"
@@ -1942,6 +1989,10 @@ export function SystemSettingsPage() {
 							)}
 						</div>
 					</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="captcha">
+								<div className="grid gap-4 md:grid-cols-2">
 					<SettingsSection
 						title="验证码服务"
 						description="选择公开评论写操作使用的验证码提供方；密钥字段留空时保留已有配置。"
@@ -2375,6 +2426,10 @@ export function SystemSettingsPage() {
 							</SettingsSubsection>
 						) : null}
 					</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="anti-spam">
+								<div className="grid gap-4 md:grid-cols-2">
 					<SettingsSection
 						title="反垃圾服务"
 						description="Akismet API Key 为全局密钥；具体站点是否使用 Akismet 在站点设置的评论审核中选择。"
@@ -2403,6 +2458,10 @@ export function SystemSettingsPage() {
 							</Field>
 						</div>
 					</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="ip-region">
+								<div className="grid gap-4 md:grid-cols-2">
 					<SettingsSection
 						title="IP 数据库"
 						description="系统总开关控制是否允许解析 IP 地域；站点设置仍决定具体站点是否公开展示整理后的地区。"
@@ -2563,6 +2622,10 @@ export function SystemSettingsPage() {
 							</Field>
 						</div>
 					</SettingsSection>
+								</div>
+							</Tabs.Content>
+						</div>
+					</Tabs.Root>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
 							保存系统设置

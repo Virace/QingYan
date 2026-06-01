@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BadgeCheckIcon,
@@ -129,9 +129,20 @@ const profileNavItem = {
 	icon: UserRoundIcon,
 };
 
+function readInitialView(): AdminView {
+	if (typeof window === "undefined") {
+		return "overview";
+	}
+	const value = new URLSearchParams(window.location.search).get("view");
+	if (value === "profile" || navItems.some((item) => item.id === value)) {
+		return value as AdminView;
+	}
+	return "overview";
+}
+
 export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	const queryClient = useQueryClient();
-	const [view, setView] = useState<AdminView>("overview");
+	const [view, setViewState] = useState<AdminView>(() => readInitialView());
 	const [selectedSiteKey, setSelectedSiteKey] = useState("");
 	const [commentSearch, setCommentSearch] = useState("");
 	const [commentPageKey, setCommentPageKey] = useState("");
@@ -151,6 +162,15 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			setSelectedSiteKey(meQuery.data.sites[0].siteKey);
 		}
 	}, [meQuery.data, selectedSiteKey]);
+	const setView = useCallback((nextView: AdminView) => {
+		setViewState(nextView);
+		if (typeof window === "undefined") {
+			return;
+		}
+		const url = new URL(window.location.href);
+		url.searchParams.set("view", nextView);
+		window.history.replaceState(null, "", url);
+	}, []);
 
 	const activeSite = meQuery.data?.sites.find(
 		(site) => site.siteKey === selectedSiteKey,
@@ -162,7 +182,14 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	const allVisibleNavItems = [...visibleNavItems, profileNavItem];
 	const activeView = allVisibleNavItems.some((item) => item.id === view)
 		? view
-		: (visibleNavItems[0]?.id ?? "overview");
+		: meQuery.data
+			? (visibleNavItems[0]?.id ?? "overview")
+			: view;
+	useEffect(() => {
+		if (meQuery.data && activeView !== view) {
+			setView(activeView);
+		}
+	}, [activeView, meQuery.data, setView, view]);
 	const activeSiteKey =
 		selectedSiteKey || meQuery.data?.sites[0]?.siteKey || "";
 	const openComments = (input: { pageKey?: string; search?: string }) => {

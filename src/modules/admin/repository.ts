@@ -697,6 +697,7 @@ export class AdminRepository {
 				voteDownCount: comments.voteDownCount,
 				createdAt: comments.createdAt,
 				updatedAt: comments.updatedAt,
+				siteKey: sites.siteKey,
 				pageKey: pageThreads.pageKey,
 				pageTitle: pageThreads.pageTitle,
 				pageUrl: pageThreads.pageUrl,
@@ -810,6 +811,7 @@ export class AdminRepository {
 					voteDownCount: row.voteDownCount,
 					createdAt: row.createdAt,
 					updatedAt: row.updatedAt,
+					siteKey: row.siteKey,
 					pageKey: row.pageKey,
 					pageTitle: row.pageTitle,
 					pageUrl: resolvePublicPageUrl(
@@ -1167,10 +1169,21 @@ export class AdminRepository {
 	public async listVisitors(input: {
 		siteId?: number;
 		search?: string;
+		ip?: string;
+		userAgent?: string;
+		pageUrl?: string;
+		device?: string;
+		location?: string;
+		blacklist?: "any" | "ip" | "visitor" | "none";
 		limit: number;
 		offset: number;
 	}) {
 		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const ipValue = input.ip ? `%${input.ip}%` : undefined;
+		const userAgentValue = input.userAgent ? `%${input.userAgent}%` : undefined;
+		const pageUrlValue = input.pageUrl ? `%${input.pageUrl}%` : undefined;
+		const deviceValue = input.device ? `%${input.device}%` : undefined;
+		const locationValue = input.location ? `%${input.location}%` : undefined;
 		const rows = await this.db
 			.select({
 				id: visitors.id,
@@ -1190,7 +1203,67 @@ export class AdminRepository {
 			.where(
 				and(
 					input.siteId ? eq(visitors.siteId, input.siteId) : undefined,
-					searchValue ? like(visitors.visitorKey, searchValue) : undefined,
+					searchValue
+						? or(
+								like(visitors.visitorKey, searchValue),
+								like(visitors.lastIp, searchValue),
+								like(visitors.lastUserAgent, searchValue),
+								like(visitors.lastSeenPageUrl, searchValue),
+							)
+						: undefined,
+					ipValue
+						? or(
+								like(visitors.lastIp, ipValue),
+								sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.ip LIKE ${ipValue}
+								)`,
+							)
+						: undefined,
+					userAgentValue
+						? or(
+								like(visitors.lastUserAgent, userAgentValue),
+								sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.user_agent LIKE ${userAgentValue}
+								)`,
+							)
+						: undefined,
+					pageUrlValue
+						? or(
+								like(visitors.lastSeenPageUrl, pageUrlValue),
+								sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.last_seen_page_url LIKE ${pageUrlValue}
+								)`,
+							)
+						: undefined,
+					deviceValue
+						? sql`EXISTS (
+								SELECT 1 FROM visitor_request_metadata
+								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+								AND (
+									visitor_request_metadata.device_browser LIKE ${deviceValue}
+									OR visitor_request_metadata.device_os LIKE ${deviceValue}
+									OR visitor_request_metadata.device_type LIKE ${deviceValue}
+								)
+							)`
+						: undefined,
+					locationValue
+						? sql`EXISTS (
+								SELECT 1 FROM visitor_request_metadata
+								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+								AND (
+									visitor_request_metadata.ip_country LIKE ${locationValue}
+									OR visitor_request_metadata.ip_region LIKE ${locationValue}
+									OR visitor_request_metadata.ip_city LIKE ${locationValue}
+									OR visitor_request_metadata.ip_isp LIKE ${locationValue}
+								)
+							)`
+						: undefined,
 				),
 			)
 			.orderBy(desc(visitors.lastSeenAt));
@@ -1202,8 +1275,6 @@ export class AdminRepository {
 				totalCount: 0,
 			};
 		}
-		const pagedRows = rows.slice(input.offset, input.offset + input.limit);
-		const pagedVisitorIds = pagedRows.map((row) => row.id);
 
 		const commentStatsRows = await this.db
 			.select({
@@ -1266,7 +1337,7 @@ export class AdminRepository {
 			});
 		}
 		const metadataByVisitorId = new Map<number, RequestMetaAggregateSource[]>();
-		if (pagedVisitorIds.length > 0) {
+		if (visitorIds.length > 0) {
 			const metadataRows = await this.db
 				.select({
 					visitorId: visitorRequestMetadata.visitorId,
@@ -1292,7 +1363,7 @@ export class AdminRepository {
 					seenCount: visitorRequestMetadata.seenCount,
 				})
 				.from(visitorRequestMetadata)
-				.where(inArray(visitorRequestMetadata.visitorId, pagedVisitorIds))
+				.where(inArray(visitorRequestMetadata.visitorId, visitorIds))
 				.orderBy(desc(visitorRequestMetadata.lastSeenAt));
 			for (const row of metadataRows) {
 				const records = metadataByVisitorId.get(row.visitorId) ?? [];
@@ -1326,64 +1397,80 @@ export class AdminRepository {
 			input.siteId,
 		);
 		const ipRules = await this.listActiveBlacklistRules("ip", input.siteId);
-		return {
-			items: pagedRows.map((row) => {
-				const commentStats = commentStatsMap.get(row.id);
-				const ips = commentStats?.ips ?? [];
-				const metadataRows = metadataByVisitorId.get(row.id) ?? [];
-				const lastRequestMeta = buildRequestMeta(
-					metadataRows[0] ?? {
-						ip: row.lastIp,
-						userAgent: row.lastUserAgent,
-					},
-				);
-				const lastIp = row.lastIp ?? metadataRows[0]?.ip ?? null;
-				return {
-					siteKey: row.siteKey,
-					visitorKey: row.visitorKey,
-					lastIp,
-					lastUserAgent: row.lastUserAgent,
-					lastSeenPageKey: row.lastSeenPageKey,
-					lastSeenPageUrl: resolvePublicPageUrl(
-						row.lastSeenPageUrl,
-						parseStringArray(row.allowedOriginsJson),
+		const items = rows.map((row) => {
+			const commentStats = commentStatsMap.get(row.id);
+			const ips = commentStats?.ips ?? [];
+			const metadataRows = metadataByVisitorId.get(row.id) ?? [];
+			const lastRequestMeta = buildRequestMeta(
+				metadataRows[0] ?? {
+					ip: row.lastIp,
+					userAgent: row.lastUserAgent,
+				},
+			);
+			const lastIp = row.lastIp ?? metadataRows[0]?.ip ?? null;
+			const blacklist = {
+				ip: ipRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ ip: lastIp ?? undefined },
 					),
-					lastSeenAt: row.lastSeenAt,
-					createdAt: row.createdAt,
-					commentCount: commentStats?.commentCount ?? 0,
-					pageCount: pageCountMap.get(row.id) ?? 0,
-					emailCount: commentStats?.emailCount ?? 0,
-					emails: commentStats?.emails ?? [],
-					ips,
-					userAgents: commentStats?.userAgents ?? [],
-					lastRequestMeta,
-					ipLocations: aggregateIpLocations(metadataRows),
-					devices: aggregateDevices(metadataRows),
-					blacklist: {
-						ip: ipRules.some((rule) =>
-							matchBlacklistRule(
-								{
-									targetType: rule.targetType,
-									targetValue: rule.targetValue,
-									matchMode: rule.matchMode,
-								},
-								{ ip: lastIp ?? undefined },
-							),
-						),
-						visitor: visitorRules.some((rule) =>
-							matchBlacklistRule(
-								{
-									targetType: rule.targetType,
-									targetValue: rule.targetValue,
-									matchMode: rule.matchMode,
-								},
-								{ visitorKey: row.visitorKey },
-							),
-						),
-					},
-				};
-			}),
-			totalCount: rows.length,
+				),
+				visitor: visitorRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ visitorKey: row.visitorKey },
+					),
+				),
+			};
+
+			return {
+				siteKey: row.siteKey,
+				visitorKey: row.visitorKey,
+				lastIp,
+				lastUserAgent: row.lastUserAgent,
+				lastSeenPageKey: row.lastSeenPageKey,
+				lastSeenPageUrl: resolvePublicPageUrl(
+					row.lastSeenPageUrl,
+					parseStringArray(row.allowedOriginsJson),
+				),
+				lastSeenAt: row.lastSeenAt,
+				createdAt: row.createdAt,
+				commentCount: commentStats?.commentCount ?? 0,
+				pageCount: pageCountMap.get(row.id) ?? 0,
+				emailCount: commentStats?.emailCount ?? 0,
+				emails: commentStats?.emails ?? [],
+				ips,
+				userAgents: commentStats?.userAgents ?? [],
+				lastRequestMeta,
+				ipLocations: aggregateIpLocations(metadataRows),
+				devices: aggregateDevices(metadataRows),
+				blacklist,
+			};
+		});
+		const filteredItems =
+			input.blacklist === "any"
+				? items.filter((item) => item.blacklist.ip || item.blacklist.visitor)
+				: input.blacklist === "ip"
+					? items.filter((item) => item.blacklist.ip)
+					: input.blacklist === "visitor"
+						? items.filter((item) => item.blacklist.visitor)
+						: input.blacklist === "none"
+							? items.filter(
+									(item) => !item.blacklist.ip && !item.blacklist.visitor,
+								)
+							: items;
+
+		return {
+			items: filteredItems.slice(input.offset, input.offset + input.limit),
+			totalCount: filteredItems.length,
 		};
 	}
 

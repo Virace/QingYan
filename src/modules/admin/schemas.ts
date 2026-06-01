@@ -209,7 +209,14 @@ const singleSiteOriginListSchema = z
 
 export const adminPagesQuerySchema = adminCollectionQuerySchema;
 export const adminCommentersQuerySchema = adminCollectionQuerySchema;
-export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
+export const adminVisitorsQuerySchema = adminCollectionQuerySchema.extend({
+	ip: z.string().trim().min(1).optional(),
+	userAgent: z.string().trim().min(1).optional(),
+	pageUrl: z.string().trim().min(1).optional(),
+	device: z.string().trim().min(1).optional(),
+	location: z.string().trim().min(1).optional(),
+	blacklist: z.enum(["any", "ip", "visitor", "none"]).optional(),
+});
 
 export const pageRegistryStatusSchema = z.enum([
 	"active",

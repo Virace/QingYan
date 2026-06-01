@@ -525,6 +525,96 @@ describe("admin users api", () => {
 		});
 	});
 
+	it("lists only active non-revoked user sessions for force logout state", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createUser(fixture, {
+			username: "session-state-target",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		await loginAsAdmin(fixture.app, {
+			username: "session-state-target",
+			password: "replace-me",
+		});
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [target] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "session-state-target"));
+		if (!target) {
+			throw new Error("Expected target user");
+		}
+		await fixture.app.db.insert(adminSessions).values([
+			{
+				id: "expired_session_state_target",
+				userId: target.id,
+				tokenHash: "expired_session_hash",
+				expiresAt: "2000-01-01T00:00:00.000Z",
+				lastSeenAt: "2000-01-01T00:00:00.000Z",
+			},
+			{
+				id: "revoked_session_state_target",
+				userId: target.id,
+				tokenHash: "revoked_session_hash",
+				expiresAt: "2099-01-01T00:00:00.000Z",
+				revokedAt: "2026-06-02T00:00:00.000Z",
+				revocationReason: "test",
+				lastSeenAt: "2026-06-02T00:00:00.000Z",
+			},
+		]);
+
+		const listBefore = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/users",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(listBefore.statusCode).toBe(200);
+		const targetBefore = listBefore
+			.json()
+			.users.find(
+				(user: { username: string }) =>
+					user.username === "session-state-target",
+			);
+		expect(targetBefore).toMatchObject({
+			username: "session-state-target",
+			activeSessionCount: 1,
+		});
+		expect(typeof targetBefore.lastSessionSeenAt).toBe("string");
+
+		const revoke = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/users/${target.id}/revoke-sessions`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				loginBlockPreset: "none",
+				reason: "session state test",
+			},
+		});
+		expect(revoke.statusCode).toBe(200);
+
+		const listAfter = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/users",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(listAfter.statusCode).toBe(200);
+		const targetAfter = listAfter
+			.json()
+			.users.find(
+				(user: { username: string }) =>
+					user.username === "session-state-target",
+			);
+		expect(targetAfter).toMatchObject({
+			activeSessionCount: 0,
+			lastSessionSeenAt: null,
+		});
+	});
+
 	it("prevents removing the initial admin protections and the final active admin", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

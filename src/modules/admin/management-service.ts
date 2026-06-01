@@ -233,6 +233,12 @@ export class AdminManagementService {
 	public async listVisitors(input: {
 		siteKey?: string;
 		search?: string;
+		ip?: string;
+		userAgent?: string;
+		pageUrl?: string;
+		device?: string;
+		location?: string;
+		blacklist?: "any" | "ip" | "visitor" | "none";
 		limit: number;
 		offset: number;
 	}) {
@@ -258,6 +264,12 @@ export class AdminManagementService {
 		const result = await this.repository.listVisitors({
 			siteId,
 			search: input.search,
+			ip: input.ip,
+			userAgent: input.userAgent,
+			pageUrl: input.pageUrl,
+			device: input.device,
+			location: input.location,
+			blacklist: input.blacklist,
 			limit: input.limit,
 			offset: input.offset,
 		});

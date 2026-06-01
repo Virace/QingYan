@@ -151,6 +151,11 @@ describe("admin visitors", () => {
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
 			visitorKey: "visitor_admin_1",
+			lastIp: "203.0.113.31",
+			lastUserAgent: "Mozilla/5.0 Safari/17.0 iOS",
+			lastSeenPageKey: "post:visitor-1",
+			lastSeenPageUrl: "/posts/visitor-1/",
+			lastSeenAt: "2026-04-17T10:03:00.000Z",
 		});
 		const [visitor] = await fixture.app.db
 			.select()
@@ -247,6 +252,44 @@ describe("admin visitors", () => {
 				lastSeenPageUrl: "/posts/visitor-1/",
 			},
 		]);
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "visitor_admin_2",
+			lastIp: "198.51.100.20",
+			lastUserAgent: "Mozilla/5.0 Firefox/126.0 Linux",
+			lastSeenPageKey: "post:visitor-2",
+			lastSeenPageUrl: "/posts/visitor-2/",
+			lastSeenAt: "2026-04-17T09:00:00.000Z",
+		});
+		const [secondVisitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "visitor_admin_2"));
+		if (!secondVisitor) {
+			throw new Error("Expected second visitor to exist");
+		}
+		await fixture.app.db.insert(visitorRequestMetadata).values({
+			siteId: site.id,
+			visitorId: secondVisitor.id,
+			ip: "198.51.100.20",
+			ipHash: "ip_hash_20",
+			userAgent: "Mozilla/5.0 Firefox/126.0 Linux",
+			userAgentHash: "ua_hash_firefox",
+			ipCountry: "United States",
+			ipRegion: "California",
+			ipCity: "Palo Alto",
+			ipIsp: "Example ISP",
+			deviceBrowser: "firefox",
+			deviceBrowserVersion: "126.0",
+			deviceOs: "linux",
+			deviceOsVersion: "6",
+			deviceType: "desktop",
+			deviceIcon: "firefox",
+			lastSeenAt: "2026-04-17T09:00:00.000Z",
+			seenCount: 2,
+			lastSeenPageKey: "post:visitor-2",
+			lastSeenPageUrl: "/posts/visitor-2/",
+		});
 		await fixture.app.db.insert(blacklistRules).values({
 			siteId: site.id,
 			scope: "post",
@@ -273,60 +316,88 @@ describe("admin visitors", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json()).toMatchObject({
-			items: [
-				{
-					visitorKey: "visitor_admin_1",
-					commentCount: 1,
-					pageCount: 1,
-					emailCount: 1,
-					emails: ["alice@example.com"],
-					ips: ["203.0.113.30"],
-					userAgents: ["QingYan Visitor Browser"],
-					lastRequestMeta: {
-						ip: {
-							raw: "203.0.113.31",
-							location: {
-								label: "中国 / 广东 / 深圳",
-							},
-						},
-						userAgent: {
-							raw: "Mozilla/5.0 Safari/17.0 iOS",
-							device: {
-								label: "safari 17 / ios 17 / mobile",
-							},
-						},
-					},
-					ipLocations: [
-						{
-							key: "中国|广东|深圳",
-							label: "中国 / 广东 / 深圳",
-							count: 4,
-							distinctIpCount: 2,
-						},
-					],
-					devices: [
-						{
-							key: "chrome|windows|desktop",
-							label: "chrome 120 / windows 10 / desktop",
-							count: 3,
-						},
-						{
-							key: "safari|ios|mobile",
-							label: "safari 17 / ios 17 / mobile",
-							count: 1,
-						},
-					],
-					blacklist: {
-						ip: true,
-						visitor: true,
+		const responseJson = response.json();
+		expect(responseJson.items[0]).toMatchObject({
+			visitorKey: "visitor_admin_1",
+			commentCount: 1,
+			pageCount: 1,
+			emailCount: 1,
+			emails: ["alice@example.com"],
+			ips: ["203.0.113.30"],
+			userAgents: ["QingYan Visitor Browser"],
+			lastRequestMeta: {
+				ip: {
+					raw: "203.0.113.31",
+					location: {
+						label: "中国 / 广东 / 深圳",
 					},
 				},
+				userAgent: {
+					raw: "Mozilla/5.0 Safari/17.0 iOS",
+					device: {
+						label: "safari 17 / ios 17 / mobile",
+					},
+				},
+			},
+			ipLocations: [
+				{
+					key: "中国|广东|深圳",
+					label: "中国 / 广东 / 深圳",
+					count: 4,
+					distinctIpCount: 2,
+				},
 			],
-			pagination: {
-				totalCount: 1,
+			devices: [
+				{
+					key: "chrome|windows|desktop",
+					label: "chrome 120 / windows 10 / desktop",
+					count: 3,
+				},
+				{
+					key: "safari|ios|mobile",
+					label: "safari 17 / ios 17 / mobile",
+					count: 1,
+				},
+			],
+			blacklist: {
+				ip: true,
+				visitor: true,
 			},
 		});
+		expect(responseJson).toMatchObject({
+			pagination: {
+				totalCount: 2,
+			},
+		});
+
+		const assertVisitorFilter = async (
+			query: string,
+			expectedVisitors: string[],
+		) => {
+			const filterResponse = await fixture.app.inject({
+				method: "GET",
+				url: `/qingyan/api/admin/visitors?siteKey=fangyuan&${query}&limit=20&offset=0`,
+				cookies: {
+					qingyan_admin: adminCookie?.value ?? "",
+				},
+			});
+			expect(filterResponse.statusCode).toBe(200);
+			const json = filterResponse.json();
+			expect(
+				json.items.map((item: { visitorKey: string }) => item.visitorKey),
+			).toEqual(expectedVisitors);
+			expect(json.pagination.totalCount).toBe(expectedVisitors.length);
+		};
+
+		await assertVisitorFilter("ip=203.0.113.30", ["visitor_admin_1"]);
+		await assertVisitorFilter("userAgent=Firefox", ["visitor_admin_2"]);
+		await assertVisitorFilter("pageUrl=visitor-2", ["visitor_admin_2"]);
+		await assertVisitorFilter("device=mobile", ["visitor_admin_1"]);
+		await assertVisitorFilter("location=%E4%B8%AD%E5%9B%BD", [
+			"visitor_admin_1",
+		]);
+		await assertVisitorFilter("blacklist=ip", ["visitor_admin_1"]);
+		await assertVisitorFilter("blacklist=none", ["visitor_admin_2"]);
 	});
 
 	it("does not aggregate visitor missing or unparsed user agents as unknown devices", async () => {

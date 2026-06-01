@@ -247,6 +247,9 @@ export function CommentsList(props: CommentsListProps) {
 								) : null}
 							</div>
 							<div className="min-w-0 text-sm">
+								<div className="mb-2">
+									<Badge variant="outline">站点 {comment.siteKey}</Badge>
+								</div>
 								{comment.pageTitle ? (
 									<button
 										type="button"
