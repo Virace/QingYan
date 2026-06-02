@@ -14,6 +14,7 @@ servers:
 tags:
   - name: System
   - name: Comments
+  - name: Notifications
   - name: Captcha
   - name: Page Feedback
   - name: Upgrade
@@ -275,6 +276,31 @@ paths:
           $ref: '#/components/responses/Error409'
         '429':
           $ref: '#/components/responses/Error429'
+  /notifications/unsubscribe:
+    get:
+      tags: [Notifications]
+      summary: 退订普通评论者回复邮件通知
+      operationId: unsubscribeCommenterNotifications
+      description: |
+        使用邮件中的一次性退订 token 关闭对应普通评论者邮箱在对应站点的回复通知。数据库只保存 token hash；明文 token 只出现在邮件链接中。无效、过期或已消费 token 返回 404。
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: 退订成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnsubscribeResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
   /api/upgrade/state:
     get:
       tags: [Upgrade]
@@ -453,6 +479,13 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorObject'
+    UnsubscribeResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [unsubscribed]
     UpgradePlan:
       type: object
       required:
@@ -1055,7 +1088,7 @@ components:
               type: string
         options:
           type: object
-          description: Optional reserved create options. `notifyOnReply` is accepted for forward compatibility but has no public behavior yet.
+          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference when the submitted author email passes notification email policy. It does not affect staff/admin comments.
           properties:
             notifyOnReply:
               type: boolean

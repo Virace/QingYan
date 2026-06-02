@@ -192,6 +192,8 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 - `mail.smtp.username`
 - `mail.smtp.password`
 - `mail.smtp.from`
+- `notifications.delivery.*`
+- `notifications.channelConfigs[]`
 - `captcha.provider`
 - `captcha.image.*`
 - `captcha.turnstile.*`
@@ -216,11 +218,41 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 
 首装会写入完整默认系统设置，其中后台会话有效期默认 `4320` 分钟（3 天）。若安装表单或 `QINGYAN_ADMIN_SESSION_TTL_MINUTES` 提供了会话有效期，会写入 `system_settings.admin.session.ttlMinutes`，正常运行后可继续在 Admin Console 修改。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
-Admin Console API 会返回 logging、mail、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretConfigured`、`appTokenConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
 
 `${server.publicPath}/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
 
 日志目录仍属于部署环境，不在后台修改。后台 cookie 名称、SameSite 和 Secure 仍属于启动配置；新登录会话 TTL、logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
+
+### 通知与任务队列
+
+评论通知配置分为站点级和系统级：
+
+- 站点级 `site_settings.notifications.emailEnabled` 控制当前站点是否允许发送评论通知。
+- 站点级 `site_notification_recipients` 引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
+- 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。
+- 系统级 `notification_channel_configs` 维护具体通知渠道配置实例。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点接收人 route 使用 `channelConfigId` 选择具体实例。
+- 通知模板由 `notification_templates` 保存自定义覆盖；没有覆盖时使用内置默认模板。
+
+队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
+
+通知任务状态固定为 `queued`、`delayed`、`running`、`retrying`、`succeeded`、`failed`、`suppressed`、`cancelled`。通知接收人类型固定为 `backend_user`、`commenter`、`test`。普通评论者只支持 email；后台用户可使用 email、webhook、wxpusher，具体发送还要同时满足系统渠道配置实例、站点接收人 route 和个人偏好。任务和投递会记录 `channelConfigId` / `channelConfigName` 快照，用于区分多个同类型通道实例。
+
+评论者回复通知的公开写入语义：
+
+- `POST /api/comments` 的 `options.notifyOnReply` 只更新普通评论者在当前站点、当前邮箱的回复邮件偏好。
+- 只有普通评论者邮箱通过通知邮箱策略时才创建偏好；明显占位或无效邮箱不会创建偏好，但评论创建继续成功。
+- 只有最终 `approved` 的回复会触发普通评论者 email 任务；pending 回复在通过审核前不会发送。
+- import、migration 和系统来源不会创建评论者通知任务，也不会创建历史评论者偏好。
+- 全局退订链接使用一次性 token；数据库只保存 token hash，明文 token 只用于邮件链接生成，不写入任务 payload、日志、导出或 Admin API 响应。
+
+后台用户通知语义：
+
+- 接收人引用后台用户，不从 `comments.verifiedAuthor.email` 或评论作者邮箱派生长期接收人。
+- 待审核评论创建 `admin_comment_pending`；直接通过审核的评论创建 `admin_comment_approved`；pending 评论后续通过审核不再追加第二条后台用户通知。
+- 通知 planner、队列、worker、SMTP、Webhook 或 WxPusher 失败都不应阻断评论创建、审核、后台回复、导入、迁移或任务中心读取。
+
+Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属于敏感信息。它们不会在 Admin API GET 响应、普通 export、任务 payload 或日志中以明文返回；更新时省略 secret 字段或提交空 `secretConfig` 表示保留已有值。Webhook URL 的 query string 也不会写入收件地址快照，避免把 query token 带入任务中心和日志。
 
 ### 外部头像 URL
 

@@ -127,6 +127,7 @@ export type MaintenanceJobStatus =
 	| "retrying"
 	| "succeeded"
 	| "failed"
+	| "suppressed"
 	| "cancelled";
 
 export interface MaintenanceJob {
@@ -247,6 +248,46 @@ export interface TaskCenterItem extends MaintenanceJob {
 	queueState: TaskQueueState;
 }
 
+export interface TaskRunCenterItem {
+	source: "task_run";
+	id: string;
+	queueBackend: "database" | "bullmq";
+	queueMessageId: string | null;
+	type: string;
+	category:
+		| "notification"
+		| "import"
+		| "maintenance"
+		| "backup"
+		| "upgrade"
+		| "page"
+		| "system";
+	status: MaintenanceJobStatus;
+	siteId: number | null;
+	siteKey: string | null;
+	actorType: "admin_user" | "system" | "visitor" | null;
+	actorId: string | null;
+	subjectType: string | null;
+	subjectId: string | null;
+	payloadSummary: unknown;
+	payload: unknown;
+	scope: unknown;
+	progress: unknown;
+	result: unknown;
+	error: unknown;
+	idempotencyKey: string | null;
+	runAfter: string | null;
+	attempts: number;
+	maxAttempts: number;
+	createdAt: string;
+	startedAt: string | null;
+	finishedAt: string | null;
+	updatedAt: string;
+	queueState: TaskQueueState;
+}
+
+export type AdminTaskCenterItem = TaskCenterItem | TaskRunCenterItem;
+
 export function listTasks(input: {
 	siteKey?: string;
 	type?: string;
@@ -262,7 +303,7 @@ export function listTasks(input: {
 	}
 	const query = params.toString();
 	return requestJson<{
-		items: TaskCenterItem[];
+		items: AdminTaskCenterItem[];
 		totalCount: number;
 		limit: number;
 		offset: number;

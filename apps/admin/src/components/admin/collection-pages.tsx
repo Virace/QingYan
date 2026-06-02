@@ -60,6 +60,7 @@ import {
 	RequestMetaAggregateBadges,
 	RequestMetaSummary,
 } from "./request-meta-summary";
+import { summarizeCommenterNotifications } from "./notification-ui-model";
 
 type PageStatusFilter = "all" | PageRegistryStatus;
 
@@ -1203,73 +1204,100 @@ export function CommentersPage({
 							</tr>
 						</thead>
 						<tbody>
-							{query.data?.items.map((commenter) => (
-								<tr key={commenter.email} className="border-t">
-									<td className="p-3">{commenter.email}</td>
-									<td className="p-3">
-										<p>{commenter.names.join(", ")}</p>
-										<div className="mt-1 grid gap-1">
-											<RequestMetaAggregateBadges
-												items={commenter.ipLocations}
-												emptyText="地区 -"
-												showDistinctIpCount
-											/>
-											<RequestMetaAggregateBadges
-												items={commenter.devices}
-												emptyText="设备 -"
-											/>
-											<RawRequestMetaList
-												ips={commenter.ips}
-												userAgents={commenter.userAgents}
-											/>
-										</div>
-									</td>
-									<td className="p-3">
-										{commenter.commentCount}，待审 {commenter.pendingCount}
-									</td>
-									<td className="p-3">{commenter.pageCount}</td>
-									<td className="p-3">
-										{commenter.blacklist.email ? (
-											<Badge variant="destructive">黑名单</Badge>
-										) : (
-											<Badge variant="secondary">正常</Badge>
-										)}
-									</td>
-									<td className="p-3">
-										<div className="flex flex-wrap gap-2">
-											<Button
-												type="button"
-												size="sm"
-												variant="outline"
-												onClick={() =>
-													openComments({ search: commenter.email })
-												}
-											>
-												查看评论
-											</Button>
-											<Button
-												type="button"
-												size="sm"
-												variant={
-													commenter.blacklist.email ? "destructive" : "outline"
-												}
-												disabled={
-													createBlacklistMutation.isPending ||
-													deleteBlacklistMutation.isPending
-												}
-												onClick={() =>
-													toggleCommenterBlacklist({
-														targetValue: commenter.email,
-														isBlacklisted: commenter.blacklist.email,
-													})
-												}
-											>
-												{commenter.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
-											</Button>
-										</div>
-									</td>
-								</tr>
-							))}
+							{query.data?.items.map((commenter) => {
+								const notificationView =
+									summarizeCommenterNotifications(commenter);
+								return (
+									<tr key={commenter.email} className="border-t">
+										<td className="p-3">{commenter.email}</td>
+										<td className="p-3">
+											<p>{commenter.names.join(", ")}</p>
+											<div className="mt-1 grid gap-1">
+												<RequestMetaAggregateBadges
+													items={commenter.ipLocations}
+													emptyText="地区 -"
+													showDistinctIpCount
+												/>
+												<RequestMetaAggregateBadges
+													items={commenter.devices}
+													emptyText="设备 -"
+												/>
+												<RawRequestMetaList
+													ips={commenter.ips}
+													userAgents={commenter.userAgents}
+												/>
+											</div>
+										</td>
+										<td className="p-3">
+											{commenter.commentCount}，待审 {commenter.pendingCount}
+										</td>
+										<td className="p-3">{commenter.pageCount}</td>
+										<td className="p-3">
+											<div className="flex flex-col gap-2">
+												<div className="flex flex-wrap gap-2">
+													{commenter.blacklist.email ? (
+														<Badge variant="destructive">黑名单</Badge>
+													) : (
+														<Badge variant="secondary">正常</Badge>
+													)}
+													{notificationView.badges.map((badge) => (
+														<Badge
+															key={badge}
+															variant={
+																notificationView.state === "api_missing"
+																	? "outline"
+																	: "secondary"
+															}
+														>
+															{badge}
+														</Badge>
+													))}
+												</div>
+												<div className="grid gap-1 text-xs text-muted-foreground">
+													{notificationView.details.map((detail) => (
+														<p key={detail}>{detail}</p>
+													))}
+												</div>
+											</div>
+										</td>
+										<td className="p-3">
+											<div className="flex flex-wrap gap-2">
+												<Button
+													type="button"
+													size="sm"
+													variant="outline"
+													onClick={() =>
+														openComments({ search: commenter.email })
+													}
+												>
+													查看评论
+												</Button>
+												<Button
+													type="button"
+													size="sm"
+													variant={
+														commenter.blacklist.email
+															? "destructive"
+															: "outline"
+													}
+													disabled={
+														createBlacklistMutation.isPending ||
+														deleteBlacklistMutation.isPending
+													}
+													onClick={() =>
+														toggleCommenterBlacklist({
+															targetValue: commenter.email,
+															isBlacklisted: commenter.blacklist.email,
+														})
+													}
+												>
+													{commenter.blacklist.email ? "解除邮箱" : "拉黑邮箱"}
+												</Button>
+											</div>
+										</td>
+									</tr>
+								);
+							})}
 						</tbody>
 					</table>
 				</div>
@@ -1538,9 +1566,7 @@ export function VisitorsPage({
 											<Badge variant="secondary">
 												评论 {visitor.commentCount}
 											</Badge>
-											<Badge variant="outline">
-												站点 {visitor.siteKey}
-											</Badge>
+											<Badge variant="outline">站点 {visitor.siteKey}</Badge>
 											<Badge variant="outline">页面 {visitor.pageCount}</Badge>
 											{visitor.blacklist.ip ? (
 												<Badge variant="destructive">IP 黑名单</Badge>
@@ -1668,9 +1694,7 @@ export function SitesPage({
 							/>
 						</div>
 						<div className="grid gap-2">
-							<Label htmlFor="site-create-origin">
-								前端站点 Origin
-							</Label>
+							<Label htmlFor="site-create-origin">前端站点 Origin</Label>
 							<Input
 								id="site-create-origin"
 								value={origin}

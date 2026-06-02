@@ -326,6 +326,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 						website: adminSession.user.website,
 					}
 				: undefined,
+			options: parsed.data.options,
 		});
 		setPublicVisitorCookie({
 			reply,
@@ -338,6 +339,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			[
 				{
 					...result.createdComment,
+					parentId: null,
 					status: result.comment.status,
 				},
 			],
@@ -353,6 +355,9 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		);
 		if (!presentedComment) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+		if (result.createdComment.parentId) {
+			presentedComment.parentId = result.createdComment.parentId;
 		}
 
 		return {

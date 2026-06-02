@@ -26,6 +26,8 @@ import { PageRegistryService } from "../page-registry/service";
 import { AppError } from "../shared/errors";
 import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { TaskRunRepository } from "../tasks/task-run-repository";
+import type { TaskRunCategory, TaskRunStatus } from "../tasks/types";
 import { UpgradeService } from "../upgrade/upgrade-service";
 import { requirePermission, requireSiteAccess } from "./authorization";
 import { DeletionPolicyService } from "./deletion-policy-service";
@@ -150,6 +152,7 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		injected: fastify.serviceControl,
 	});
 	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
+	const taskRuns = new TaskRunRepository(fastify.db);
 	const pageRegistryService = new PageRegistryService(fastify.db);
 	const deletionPolicyService = new DeletionPolicyService(fastify.db);
 	const titleRefresh = new PageMetadataRefreshService(
@@ -408,25 +411,59 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 			siteRegistry: fastify.siteRegistry,
 			siteKey: parsed.data.siteKey,
 		});
-		const { items, totalCount } = await maintenanceJobs.listForTaskCenter({
+		const maintenancePage = await maintenanceJobs.listForTaskCenter({
 			siteKey: parsed.data.siteKey,
 			type: parsed.data.type as MaintenanceJobType | undefined,
 			status: parsed.data.status as MaintenanceJobStatus | undefined,
 			limit: parsed.data.limit,
 			offset: parsed.data.offset,
 		});
+		const taskRunPage = await taskRuns.listForTaskCenter({
+			siteKey: parsed.data.siteKey,
+			category: parsed.data.type as TaskRunCategory | undefined,
+			status: parsed.data.status as TaskRunStatus | undefined,
+			limit: parsed.data.limit,
+			offset: parsed.data.offset,
+		});
+		const maintenanceItems = await Promise.all(
+			maintenancePage.items.map(async (job) => ({
+				source: "maintenance" as const,
+				...job,
+				queueState: await maintenanceJobs.describeQueueState(
+					job,
+					defaultTaskQueueSettings,
+				),
+			})),
+		);
+		const taskRunItems = taskRunPage.items.map((task) => ({
+			source: "task_run" as const,
+			...task,
+			scope: task.payloadSummary,
+			queueState: {
+				waitingReason:
+					task.status === "delayed"
+						? "delayed_until_run_after"
+						: task.status === "retrying"
+							? "retry_wait"
+							: ["succeeded", "failed", "suppressed", "cancelled"].includes(
+										task.status,
+									)
+								? "terminal"
+								: "ready_for_runner",
+				waitingDescription: task.runAfter
+					? `任务预计 ${task.runAfter} 后可运行。`
+					: "任务已进入统一队列。",
+				readyAt: task.runAfter ?? task.updatedAt,
+			},
+		}));
+		const items = [...maintenanceItems, ...taskRunItems]
+			.sort((left, right) =>
+				(right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
+			)
+			.slice(0, parsed.data.limit);
 		return {
-			items: await Promise.all(
-				items.map(async (job) => ({
-					source: "maintenance" as const,
-					...job,
-					queueState: await maintenanceJobs.describeQueueState(
-						job,
-						defaultTaskQueueSettings,
-					),
-				})),
-			),
-			totalCount,
+			items,
+			totalCount: maintenancePage.totalCount + taskRunPage.totalCount,
 			limit: parsed.data.limit,
 			offset: parsed.data.offset,
 		};

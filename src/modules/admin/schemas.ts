@@ -79,6 +79,98 @@ const engagementSettingsSchema = z.object({
 		.optional(),
 });
 
+const adminNotificationDeliverySettingsSchema = z.object({
+	globalMaxPerMinute: z.number().int().positive().optional(),
+	perChannelMaxPerMinute: z.number().int().positive().optional(),
+	perSiteMaxPerHour: z.number().int().positive().optional(),
+	perRecipientMinIntervalSec: z.number().int().min(0).optional(),
+	dailyChannelBudget: z.number().int().positive().optional(),
+	lowPriorityDelaySec: z.number().int().min(0).optional(),
+	queueBackend: z.enum(["database", "bullmq"]).optional(),
+});
+
+const adminSystemNotificationsSchema = z.object({
+	delivery: adminNotificationDeliverySettingsSchema.optional(),
+	channelConfigs: z
+		.array(
+			z.object({
+				id: z.string().trim().min(1).optional(),
+				type: z.enum(["email", "webhook", "wxpusher"]),
+				name: z.string().trim().min(1),
+				description: z.string().trim().nullable().optional(),
+				enabled: z.boolean().default(true),
+				config: z.record(z.string(), z.unknown()).default({}),
+				secretConfig: z.record(z.string(), z.unknown()).optional(),
+			}),
+		)
+		.optional(),
+	webhook: z
+		.object({
+			enabled: z.boolean().optional(),
+			url: z.string().url().or(z.literal("")).optional(),
+			secret: z.string().min(1).optional(),
+		})
+		.optional(),
+	wxpusher: z
+		.object({
+			enabled: z.boolean().optional(),
+			appToken: z.string().min(1).optional(),
+			apiUrl: z.string().url().optional(),
+		})
+		.optional(),
+});
+
+const notificationTemplateFormatSchema = z.enum(["html", "text", "json"]);
+
+export const adminNotificationTemplateBodySchema = z.object({
+	format: notificationTemplateFormatSchema,
+	subjectTemplate: z.string().optional().nullable(),
+	bodyTemplate: z.string().min(1),
+});
+
+export const adminNotificationTemplatePreviewBodySchema = z
+	.object({
+		format: notificationTemplateFormatSchema.optional(),
+		subjectTemplate: z.string().optional().nullable(),
+		bodyTemplate: z.string().optional(),
+	})
+	.optional()
+	.default({});
+
+export const adminNotificationTemplateTestBodySchema = z.object({
+	recipient: z.string().min(1).optional(),
+});
+
+const siteNotificationRecipientChannelSchema = z.enum([
+	"email",
+	"webhook",
+	"wxpusher",
+]);
+const siteNotificationRecipientEventSchema = z.enum([
+	"admin_comment_pending",
+	"admin_comment_approved",
+]);
+const siteNotificationRecipientRouteSchema = z.object({
+	eventType: siteNotificationRecipientEventSchema,
+	channelConfigId: z.string().trim().min(1),
+	enabled: z.boolean().default(true),
+});
+const siteNotificationRecipientSchema = z
+	.object({
+		userId: z.number().int().positive(),
+		channels: z.array(siteNotificationRecipientChannelSchema).min(1).optional(),
+		events: z.array(siteNotificationRecipientEventSchema).min(1).optional(),
+		routes: z.array(siteNotificationRecipientRouteSchema).min(1).optional(),
+		includeCommentContent: z
+			.enum(["none", "summary", "full"])
+			.default("summary"),
+		rateLimitProfile: z.string().trim().min(1).nullable().optional(),
+		enabled: z.boolean().default(true),
+	})
+	.refine((value) => value.routes || (value.channels && value.events), {
+		message: "通知接收人必须配置至少一个事件和接收渠道。",
+	});
+
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
 	password: z.string().min(1),
@@ -504,6 +596,7 @@ export const adminSettingsBodySchema = z
 		notifications: z
 			.object({
 				emailEnabled: z.boolean().optional(),
+				recipients: z.array(siteNotificationRecipientSchema).optional(),
 			})
 			.optional(),
 	})
@@ -549,6 +642,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			}),
 		})
 		.optional(),
+	notifications: adminSystemNotificationsSchema.optional(),
 	captcha: z
 		.object({
 			provider: z.enum([
@@ -633,3 +727,14 @@ export const adminSystemSettingsBodySchema = z.object({
 		})
 		.optional(),
 });
+
+export const adminNotificationChannelTestBodySchema = z
+	.object({
+		channel: z.enum(["email", "webhook", "wxpusher"]).optional(),
+		channelConfigId: z.string().trim().min(1).optional(),
+		recipient: z.string().trim().min(1).optional(),
+		siteKey: z.string().trim().min(1).optional(),
+	})
+	.refine((value) => value.channelConfigId || value.channel, {
+		message: "必须选择一个通知渠道配置。",
+	});

@@ -207,6 +207,58 @@ describe("initial migration", () => {
 			const delayedDeletionIndexes = fixture.sqlite
 				.prepare("PRAGMA index_list(delayed_deletions)")
 				.all() as Array<{ name: string; unique: number }>;
+			const siteNotificationRecipientColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(site_notification_recipients)")
+				.all() as Array<{ name: string }>;
+			const siteNotificationRecipientIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(site_notification_recipients)")
+				.all() as Array<{ name: string; unique: number }>;
+			const notificationChannelConfigColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(notification_channel_configs)")
+				.all() as Array<{ name: string }>;
+			const notificationChannelConfigIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(notification_channel_configs)")
+				.all() as Array<{ name: string; unique: number }>;
+			const siteNotificationRecipientRouteColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(site_notification_recipient_routes)")
+				.all() as Array<{ name: string }>;
+			const siteNotificationRecipientRouteIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(site_notification_recipient_routes)")
+				.all() as Array<{ name: string; unique: number }>;
+			const adminNotificationPreferenceColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(admin_user_notification_preferences)")
+				.all() as Array<{ name: string }>;
+			const adminNotificationPreferenceIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(admin_user_notification_preferences)")
+				.all() as Array<{ name: string; unique: number }>;
+			const taskRunColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(task_runs)")
+				.all() as Array<{
+				name: string;
+				notnull: number;
+				dflt_value: string | null;
+			}>;
+			const taskRunIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(task_runs)")
+				.all() as Array<{ name: string; unique: number }>;
+			const taskRunForeignKeys = fixture.sqlite
+				.prepare("PRAGMA foreign_key_list(task_runs)")
+				.all() as Array<{ from: string; table: string; to: string }>;
+			const deliveryColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(notification_deliveries)")
+				.all() as Array<{ name: string; notnull: number }>;
+			const deliveryIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(notification_deliveries)")
+				.all() as Array<{ name: string; unique: number }>;
+			const deliveryForeignKeys = fixture.sqlite
+				.prepare("PRAGMA foreign_key_list(notification_deliveries)")
+				.all() as Array<{ from: string; table: string; to: string }>;
+			const notificationTemplateColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(notification_templates)")
+				.all() as Array<{ name: string }>;
+			const notificationTemplateIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(notification_templates)")
+				.all() as Array<{ name: string }>;
 
 			expect(commentsColumns.map((column) => column.name)).not.toEqual(
 				expect.arrayContaining([
@@ -542,6 +594,225 @@ describe("initial migration", () => {
 					}),
 				]),
 			);
+			expect(
+				siteNotificationRecipientColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"id",
+					"site_id",
+					"user_id",
+					"include_comment_content",
+					"rate_limit_profile",
+					"enabled",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(siteNotificationRecipientIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "site_notification_recipients_site_user_idx",
+						unique: 1,
+					}),
+					expect.objectContaining({
+						name: "site_notification_recipients_site_idx",
+					}),
+				]),
+			);
+			expect(
+				notificationChannelConfigColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"id",
+					"type",
+					"name",
+					"description",
+					"enabled",
+					"config_json",
+					"secret_config_json",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(notificationChannelConfigIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "notification_channel_configs_type_idx",
+					}),
+					expect.objectContaining({
+						name: "notification_channel_configs_enabled_idx",
+					}),
+				]),
+			);
+			expect(
+				siteNotificationRecipientRouteColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"id",
+					"recipient_id",
+					"event_type",
+					"channel_config_id",
+					"enabled",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(siteNotificationRecipientRouteIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "site_notification_recipient_routes_recipient_idx",
+					}),
+					expect.objectContaining({
+						name: "site_notification_recipient_routes_config_idx",
+					}),
+					expect.objectContaining({
+						name: "site_notification_recipient_routes_unique_idx",
+						unique: 1,
+					}),
+				]),
+			);
+			expect(
+				adminNotificationPreferenceColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"user_id",
+					"channel",
+					"enabled",
+					"digest_mode",
+					"digest_interval_minutes",
+					"digest_times_json",
+					"paused_until",
+					"channel_config_ref",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(adminNotificationPreferenceIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "admin_user_notification_preferences_user_config_idx",
+						unique: 1,
+					}),
+				]),
+			);
+			expect(taskRunColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"queue_backend",
+					"queue_message_id",
+					"type",
+					"category",
+					"status",
+					"site_id",
+					"site_key",
+					"actor_type",
+					"actor_id",
+					"subject_type",
+					"subject_id",
+					"payload_summary_json",
+					"payload_json",
+					"progress_json",
+					"result_json",
+					"error_json",
+					"idempotency_key",
+					"run_after",
+					"attempts",
+					"max_attempts",
+					"created_at",
+					"started_at",
+					"finished_at",
+					"updated_at",
+				]),
+			);
+			expect(
+				taskRunColumns.find((column) => column.name === "payload_json")
+					?.notnull,
+			).toBe(1);
+			expect(taskRunIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "task_runs_status_run_after_idx",
+					}),
+					expect.objectContaining({
+						name: "task_runs_category_created_idx",
+					}),
+					expect.objectContaining({ name: "task_runs_site_idx" }),
+					expect.objectContaining({
+						name: "task_runs_idempotency_idx",
+						unique: 1,
+					}),
+				]),
+			);
+			expect(taskRunForeignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						from: "site_id",
+						table: "sites",
+						to: "id",
+					}),
+				]),
+			);
+			expect(deliveryColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"task_run_id",
+					"channel",
+					"channel_config_ref",
+					"channel_config_name_snapshot",
+					"recipient_type",
+					"recipient_user_id",
+					"recipient_address_snapshot",
+					"recipient_identity_key",
+					"event_family",
+					"template_key",
+					"status",
+					"provider_message_id",
+					"last_error_json",
+					"sent_at",
+					"updated_at",
+				]),
+			);
+			expect(deliveryIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "notification_deliveries_task_run_idx",
+					}),
+					expect.objectContaining({
+						name: "notification_deliveries_recipient_idx",
+					}),
+					expect.objectContaining({
+						name: "notification_deliveries_status_idx",
+					}),
+				]),
+			);
+			expect(deliveryForeignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						from: "task_run_id",
+						table: "task_runs",
+						to: "id",
+					}),
+				]),
+			);
+			expect(notificationTemplateColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"key",
+					"channel",
+					"event_type",
+					"format",
+					"subject_template",
+					"body_template",
+					"updated_at",
+					"updated_by_user_id",
+				]),
+			);
+			expect(notificationTemplateIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "notification_templates_channel_event_idx",
+					}),
+				]),
+			);
 		} finally {
 			fixture.cleanup();
 		}
@@ -723,6 +994,13 @@ describe("initial migration", () => {
 					"pending_page_view_sessions",
 					"email_verification_tokens",
 					"delayed_deletions",
+					"site_notification_recipients",
+					"notification_channel_configs",
+					"site_notification_recipient_routes",
+					"admin_user_notification_preferences",
+					"task_runs",
+					"notification_deliveries",
+					"notification_templates",
 				]),
 			);
 			expect(adminSessionColumns.map((column) => column.name)).toEqual(
@@ -747,6 +1025,39 @@ describe("initial migration", () => {
 					"ip_hash",
 					"user_agent_hash",
 					"last_seen_at",
+				]),
+			);
+			const taskRunColumns = sqlite
+				.prepare("PRAGMA table_info(task_runs)")
+				.all() as Array<{ name: string }>;
+			expect(taskRunColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining(["payload_json", "idempotency_key"]),
+			);
+			const notificationChannelConfigColumns = sqlite
+				.prepare("PRAGMA table_info(notification_channel_configs)")
+				.all() as Array<{ name: string }>;
+			const siteNotificationRecipientRouteColumns = sqlite
+				.prepare("PRAGMA table_info(site_notification_recipient_routes)")
+				.all() as Array<{ name: string }>;
+			const deliveryColumns = sqlite
+				.prepare("PRAGMA table_info(notification_deliveries)")
+				.all() as Array<{ name: string }>;
+			expect(
+				notificationChannelConfigColumns.map((column) => column.name),
+			).toEqual(expect.arrayContaining(["id", "type", "name", "config_json"]));
+			expect(
+				siteNotificationRecipientRouteColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"recipient_id",
+					"event_type",
+					"channel_config_id",
+				]),
+			);
+			expect(deliveryColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"channel_config_ref",
+					"channel_config_name_snapshot",
 				]),
 			);
 		} finally {

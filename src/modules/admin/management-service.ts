@@ -17,6 +17,7 @@ import {
 	type VerifiedAuthorSettings,
 } from "../comments/verified-author";
 import { CommentsWriteRepository } from "../comments/write-repository";
+import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
 import {
 	AppError,
 	InvalidRequestError,
@@ -53,6 +54,20 @@ type CommentMetadataPatch = {
 			enabled?: boolean | 0 | 1;
 		};
 	};
+};
+
+type NotificationRecipientInput = {
+	userId: number;
+	channels?: Array<"email" | "webhook" | "wxpusher">;
+	events?: Array<"admin_comment_pending" | "admin_comment_approved">;
+	routes?: Array<{
+		eventType: "admin_comment_pending" | "admin_comment_approved";
+		channelConfigId: string;
+		enabled: boolean;
+	}>;
+	includeCommentContent: "none" | "summary" | "full";
+	rateLimitProfile?: string | null;
+	enabled: boolean;
 };
 
 function mergeCommentMetadata(
@@ -357,7 +372,7 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "sites.created",
 			message: "站点已创建",
@@ -398,7 +413,7 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "sites.updated",
 			message: "站点已更新",
@@ -447,6 +462,7 @@ export class AdminManagementService {
 			actorUserId?: number;
 		},
 	) {
+		const existingComment = await this.repository.getCommentById(commentId);
 		const comment = await this.repository.updateComment(commentId, input);
 		if (!comment) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
@@ -454,13 +470,25 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: input.status ? "comments.status.changed" : "comments.updated",
 			message: input.status ? "评论状态已更新" : "评论内容已更新",
 			targetType: "comment",
 			targetId: commentId,
 		});
+		if (
+			input.status === "approved" &&
+			existingComment?.status !== "approved" &&
+			comment.parentId
+		) {
+			await this.planReplyNotification({
+				commentId,
+				source: "admin_moderation",
+				requestId: input.requestId,
+				actorUserId: input.actorUserId,
+			});
+		}
 
 		return comment;
 	}
@@ -483,7 +511,7 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: input.patch.status
 				? "comments.status.changed"
@@ -496,6 +524,19 @@ export class AdminManagementService {
 				patch: input.patch,
 			},
 		});
+		if (input.patch.status === "approved") {
+			for (const comment of comments) {
+				if (!comment.parentId) {
+					continue;
+				}
+				await this.planReplyNotification({
+					commentId: comment.id,
+					source: "admin_moderation",
+					requestId: input.requestId,
+					actorUserId: input.actorUserId,
+				});
+			}
+		}
 
 		return {
 			comments,
@@ -551,7 +592,7 @@ export class AdminManagementService {
 
 			await this.security.writeAudit({
 				requestId: input.requestId,
-				actorType: input.actorUserId ? "admin_user" : "admin",
+				actorType: input.actorUserId ? "admin_user" : "system",
 				actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 				event: "comments.updated",
 				message: "评论地址信息已刷新",
@@ -620,7 +661,7 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.deleted",
 			message: "评论已删除",
@@ -642,7 +683,7 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.status.changed",
 			message: "评论已移入回收站",
@@ -671,7 +712,7 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.deleted",
 			message: "回收站已清空",
@@ -736,7 +777,7 @@ export class AdminManagementService {
 			requestId: input.requestId,
 			siteKey: context.siteKey,
 			pageKey: context.pageKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "comments.created",
 			message: "管理员已回复评论",
@@ -746,6 +787,12 @@ export class AdminManagementService {
 				parentCommentId,
 				status: "approved",
 			},
+		});
+		await this.planReplyNotification({
+			commentId: created.commentId,
+			source: "admin_reply",
+			requestId: input.requestId,
+			actorUserId: input.actorUserId,
 		});
 
 		const [presentedComment] = presentComments(
@@ -772,6 +819,49 @@ export class AdminManagementService {
 		return {
 			comment: presentedComment,
 		};
+	}
+
+	private async planReplyNotification(input: {
+		commentId: string;
+		source: "admin_moderation" | "admin_reply";
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		try {
+			const context = await this.repository.getCommentReplyContext(
+				input.commentId,
+			);
+			if (!context) {
+				return;
+			}
+			await new CommentNotificationPlanner(
+				this.repository.database,
+			).planForCommentEvent({
+				siteId: context.siteId,
+				siteKey: context.siteKey,
+				pageKey: context.pageKey,
+				commentId: input.commentId,
+				source: input.source,
+				actorType: input.actorUserId ? "admin_user" : "system",
+				actorId: input.actorUserId ? String(input.actorUserId) : "system",
+			});
+		} catch (error) {
+			await this.security
+				.writeAudit({
+					requestId: input.requestId,
+					actorType: "system",
+					actorId: "notification_planner",
+					event: "notification.email.failed",
+					message: "评论通知规划失败",
+					targetType: "comment",
+					targetId: input.commentId,
+					payload: {
+						source: input.source,
+						error: error instanceof Error ? error.message : String(error),
+					},
+				})
+				.catch(() => undefined);
+		}
 	}
 
 	public async listBlacklist(input: {
@@ -820,7 +910,7 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "security.blacklist.added",
 			message: "已新增黑名单规则",
@@ -850,7 +940,7 @@ export class AdminManagementService {
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			action: "blacklist.deleted",
 			targetType: "blacklist_rule",
@@ -885,7 +975,7 @@ export class AdminManagementService {
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey: input.siteKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "security.blacklist.deleted",
 			message: "已删除黑名单规则",
@@ -906,6 +996,11 @@ export class AdminManagementService {
 		if (!settings) {
 			throw new ResourceNotFoundError("SETTINGS_NOT_FOUND", "站点设置不存在。");
 		}
+		const recipients = await this.repository.listSiteNotificationRecipients(
+			registeredSite.id,
+		);
+		const channelConfigs =
+			await this.repository.listNotificationChannelConfigs();
 
 		return {
 			siteKey,
@@ -950,8 +1045,71 @@ export class AdminManagementService {
 			engagement: mergeEngagementSettings(settings.engagementJson),
 			notifications: {
 				emailEnabled: settings.emailNotificationsEnabled,
+				channelConfigs,
+				recipients: recipients.map((recipient) => ({
+					userId: recipient.userId,
+					username: recipient.username,
+					email: recipient.email,
+					displayName: recipient.displayName,
+					channels: recipient.channels,
+					events: recipient.events,
+					routes: recipient.routes.map((route) => ({
+						id: route.id,
+						eventType: route.eventType,
+						channelConfigId: route.channelConfigId,
+						channelType: route.channelType,
+						channelName: route.channelName,
+						enabled: route.enabled,
+					})),
+					includeCommentContent: recipient.includeCommentContent,
+					rateLimitProfile: recipient.rateLimitProfile,
+					enabled: recipient.enabled,
+				})),
 			},
 		};
+	}
+
+	private async validateNotificationRecipients(input: {
+		siteId: number;
+		recipients?: NotificationRecipientInput[];
+	}) {
+		if (!input.recipients) {
+			return;
+		}
+		const seenUserIds = new Set<number>();
+		for (const recipient of input.recipients) {
+			if (seenUserIds.has(recipient.userId)) {
+				throw new AppError(
+					400,
+					"ADMIN_NOTIFICATION_RECIPIENT_DUPLICATE",
+					"通知接收人不能重复。",
+				);
+			}
+			seenUserIds.add(recipient.userId);
+			const candidate = await this.repository.getNotificationRecipientCandidate(
+				{
+					siteId: input.siteId,
+					userId: recipient.userId,
+				},
+			);
+			if (!candidate) {
+				throw new ResourceNotFoundError("ADMIN_USER_NOT_FOUND", "用户不存在。");
+			}
+			if (candidate.status !== "active" || candidate.deletedAt) {
+				throw new AppError(
+					400,
+					"ADMIN_NOTIFICATION_RECIPIENT_INACTIVE",
+					"通知接收人必须是启用状态的后台用户。",
+				);
+			}
+			if (!candidate.siteAccessId) {
+				throw new AppError(
+					403,
+					"ADMIN_NOTIFICATION_RECIPIENT_SITE_ACCESS_REQUIRED",
+					"通知接收人必须拥有目标站点权限。",
+				);
+			}
+		}
 	}
 
 	public async updateSettings(
@@ -992,6 +1150,7 @@ export class AdminManagementService {
 			engagement?: EngagementSettingsPatch;
 			notifications?: {
 				emailEnabled?: boolean;
+				recipients?: NotificationRecipientInput[];
 			};
 			requestId?: string;
 			actorUserId?: number;
@@ -1010,6 +1169,10 @@ export class AdminManagementService {
 		const nextEngagement = input.engagement
 			? mergeEngagementSettingsPatch(currentEngagement, input.engagement)
 			: undefined;
+		await this.validateNotificationRecipients({
+			siteId: registeredSite.id,
+			recipients: input.notifications?.recipients,
+		});
 
 		await this.repository.updateSiteSettings(registeredSite.id, {
 			commentsEnabled: input.comments?.enabled,
@@ -1054,11 +1217,17 @@ export class AdminManagementService {
 				: undefined,
 			emailNotificationsEnabled: input.notifications?.emailEnabled,
 		});
+		if (input.notifications?.recipients) {
+			await this.repository.replaceSiteNotificationRecipients({
+				siteId: registeredSite.id,
+				recipients: input.notifications.recipients,
+			});
+		}
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
 			siteKey,
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			event: "settings.updated",
 			message: "站点设置已更新",

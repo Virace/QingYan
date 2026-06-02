@@ -194,7 +194,8 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 					{activeTasks.map((job) => (
 						<div key={job.id} className="grid gap-2">
 							<TaskSummary job={job} />
-							{["queued", "delayed", "retrying"].includes(job.status) ? (
+							{job.source === "maintenance" &&
+							["queued", "delayed", "retrying"].includes(job.status) ? (
 								<div className="flex flex-wrap gap-2">
 									<Button
 										type="button"

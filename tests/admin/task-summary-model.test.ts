@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { TaskCenterItem } from "../../apps/admin/src/api/ops";
+import type {
+	TaskCenterItem,
+	TaskRunCenterItem,
+} from "../../apps/admin/src/api/ops";
 import { summarizeTask } from "../../apps/admin/src/components/admin/task-summary-model";
 
 function task(
@@ -35,6 +38,50 @@ function task(
 		},
 		...rest,
 	} satisfies TaskCenterItem;
+}
+
+function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
+	return {
+		source: "task_run",
+		id: "task_1",
+		queueBackend: "database",
+		queueMessageId: "msg_1",
+		type: "comment_notification",
+		category: "notification",
+		status: "retrying",
+		siteId: 1,
+		siteKey: "default",
+		actorType: "system",
+		actorId: null,
+		subjectType: "comment",
+		subjectId: "comment_1",
+		payloadSummary: {
+			eventFamily: "admin_comment_pending",
+			channel: "email",
+			channelConfigName: "默认邮件",
+			recipientType: "backend_user",
+			recipientAddressSnapshot: "admin@example.com",
+		},
+		payload: null,
+		scope: null,
+		progress: null,
+		result: { providerMessageId: "provider_msg_1" },
+		error: { providerMessage: "smtp temp fail" },
+		idempotencyKey: "notification:1",
+		runAfter: "2026-06-02T00:05:00.000Z",
+		attempts: 2,
+		maxAttempts: 3,
+		createdAt: "2026-06-02T00:00:00.000Z",
+		startedAt: null,
+		finishedAt: null,
+		updatedAt: "2026-06-02T00:01:00.000Z",
+		queueState: {
+			waitingReason: "retry_wait",
+			waitingDescription: "等待重试。",
+			readyAt: "2026-06-02T00:05:00.000Z",
+		},
+		...input,
+	} satisfies TaskRunCenterItem;
 }
 
 describe("task summary model", () => {
@@ -147,5 +194,31 @@ describe("task summary model", () => {
 		);
 
 		expect(summary.description).not.toContain("undefined");
+	});
+
+	it("summarizes notification task rows with delivery trace fields", () => {
+		const summary = summarizeTask(notificationTask());
+
+		expect(summary.title).toBe("通知任务 / comment_notification");
+		expect(summary.description).toContain("事件 admin_comment_pending");
+		expect(summary.description).toContain("收件人 admin@example.com");
+		expect(summary.metrics).toEqual(
+			expect.arrayContaining([
+				{ label: "状态", value: "retrying" },
+				{ label: "尝试", value: "2 / 3" },
+				{ label: "事件", value: "admin_comment_pending" },
+				{ label: "通道", value: "email" },
+				{ label: "渠道配置", value: "默认邮件" },
+				{ label: "收件人类型", value: "backend_user" },
+				{ label: "收件地址", value: "admin@example.com" },
+				{ label: "队列", value: "database" },
+				{ label: "下次重试", value: "2026-06-02T00:05:00.000Z" },
+				{ label: "Provider Message ID", value: "provider_msg_1" },
+			]),
+		);
+		expect(summary.errors).toContainEqual({
+			label: "Provider",
+			message: "smtp temp fail",
+		});
 	});
 });

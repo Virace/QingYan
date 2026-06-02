@@ -17,7 +17,9 @@ import {
 	adminSessions,
 	blacklistRules,
 	commentRequestMetadata,
+	commenterNotificationPreferences,
 	comments,
+	emailDeliveryReputation,
 	pageThreads,
 	pageViewSessions,
 	sitePageRegistry,
@@ -28,6 +30,11 @@ import {
 } from "../../db/schema";
 import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { CommentStatus } from "../comments/moderation-types";
+import {
+	BackendUserNotificationRecipientsRepository,
+	type SiteNotificationRecipientInput,
+} from "../notifications/backend-user-recipients-repository";
+import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { resolvePublicPageUrl } from "../shared/page-url";
@@ -1088,6 +1095,58 @@ export class AdminRepository {
 		const pagedItems = items.slice(input.offset, input.offset + input.limit);
 		const pageEmails = pagedItems.map((item) => item.email);
 		const metadataByEmail = new Map<string, RequestMetaSource[]>();
+		const notificationsByEmail = new Map<
+			string,
+			{
+				notifyOnReply: boolean | null;
+				unsubscribedAt: string | null;
+				suppressedUntil: string | null;
+				reputationScore: number | null;
+				lastSuccessAt: string | null;
+				lastFailureAt: string | null;
+			}
+		>();
+		if (input.siteId && pageEmails.length > 0) {
+			const preferenceRows = await this.db
+				.select()
+				.from(commenterNotificationPreferences)
+				.where(
+					and(
+						eq(commenterNotificationPreferences.siteId, input.siteId),
+						inArray(commenterNotificationPreferences.email, pageEmails),
+					),
+				);
+			const reputationRows = await this.db
+				.select()
+				.from(emailDeliveryReputation)
+				.where(
+					and(
+						eq(emailDeliveryReputation.siteId, input.siteId),
+						inArray(emailDeliveryReputation.email, pageEmails),
+					),
+				);
+			for (const row of preferenceRows) {
+				notificationsByEmail.set(row.email, {
+					notifyOnReply: row.notifyOnReply,
+					unsubscribedAt: row.unsubscribedAt,
+					suppressedUntil: null,
+					reputationScore: null,
+					lastSuccessAt: null,
+					lastFailureAt: null,
+				});
+			}
+			for (const row of reputationRows) {
+				const current = notificationsByEmail.get(row.email);
+				notificationsByEmail.set(row.email, {
+					notifyOnReply: current?.notifyOnReply ?? null,
+					unsubscribedAt: current?.unsubscribedAt ?? null,
+					suppressedUntil: row.suppressedUntil,
+					reputationScore: row.failureScore,
+					lastSuccessAt: row.lastSuccessAt,
+					lastFailureAt: row.lastFailureAt,
+				});
+			}
+		}
 		if (pageEmails.length > 0) {
 			const metadataRows = await this.db
 				.select({
@@ -1158,6 +1217,7 @@ export class AdminRepository {
 				const metadataRows = metadataByEmail.get(item.email) ?? [];
 				return {
 					...item,
+					notifications: notificationsByEmail.get(item.email),
 					ipLocations: aggregateIpLocations(metadataRows),
 					devices: aggregateDevices(metadataRows),
 				};
@@ -1963,6 +2023,34 @@ export class AdminRepository {
 			.limit(1);
 
 		return settings;
+	}
+
+	public async listSiteNotificationRecipients(siteId: number) {
+		return new BackendUserNotificationRecipientsRepository(
+			this.db,
+		).listSiteRecipients(siteId);
+	}
+
+	public async listNotificationChannelConfigs() {
+		return new NotificationChannelConfigsRepository(this.db).list();
+	}
+
+	public async replaceSiteNotificationRecipients(input: {
+		siteId: number;
+		recipients: SiteNotificationRecipientInput[];
+	}) {
+		return new BackendUserNotificationRecipientsRepository(
+			this.db,
+		).replaceSiteRecipients(input);
+	}
+
+	public async getNotificationRecipientCandidate(input: {
+		siteId: number;
+		userId: number;
+	}) {
+		return new BackendUserNotificationRecipientsRepository(
+			this.db,
+		).getUserForRecipientValidation(input);
 	}
 
 	public async updateSiteSettings(

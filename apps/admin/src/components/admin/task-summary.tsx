@@ -1,9 +1,9 @@
-import type { TaskCenterItem } from "@/api/ops";
+import type { AdminTaskCenterItem } from "@/api/ops";
 import { Badge } from "@/components/ui/badge";
 
 import { summarizeTask } from "./task-summary-model";
 
-export function TaskSummary({ job }: { job: TaskCenterItem }) {
+export function TaskSummary({ job }: { job: AdminTaskCenterItem }) {
 	const summary = summarizeTask(job);
 
 	return (

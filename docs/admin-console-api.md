@@ -477,10 +477,20 @@ Query：
     email: boolean;
   };
   isBlacklisted: boolean;
+  notifications?: {
+    notifyOnReply?: boolean | null;
+    unsubscribedAt?: string | null;
+    suppressedUntil?: string | null;
+    reputationScore?: number | null;
+    lastSuccessAt?: string | null;
+    lastFailureAt?: string | null;
+  };
 }
 ```
 
 `email` 是 trim + lower-case 后的聚合键；`emailVariants` 保留该聚合组中出现过的原始邮箱写法。搜索邮箱时同样按归一化值匹配，因此 `Virace@aliyun.com` 和 `virace@aliyun.com` 会归到同一个评论者视图。`/api/admin/users` 命名空间保留给未来真正的后台用户或账号系统。
+
+`notifications` 汇总当前站点内该邮箱的普通评论者回复通知状态。`notifyOnReply=true` 表示该邮箱已选择接收已审核回复邮件；`unsubscribedAt` 来自全局退订链接；`suppressedUntil`、`reputationScore`、`lastSuccessAt` 和 `lastFailureAt` 来自投递 reputation，不等同于退订。明显占位或无效邮箱不会创建偏好，评论创建仍可继续。
 
 ### `GET /api/admin/visitors`
 
@@ -694,6 +704,8 @@ Query：
   };
   notifications: {
     emailEnabled: boolean;
+    recipients?: SiteNotificationRecipient[];
+    channelConfigs: NotificationChannelConfig[];
   };
   pageCount: number;
   commentCount: number;
@@ -770,6 +782,7 @@ Admin Settings API 的 canonical 开关路径：
 - 页面点赞：`engagement.pageLikes.enabled`
 - 访客记录：`engagement.visitors.enabled`
 - 当前站点邮件通知：`notifications.emailEnabled`
+- 当前站点后台用户通知接收人：`notifications.recipients`
 
 `pageFeedback.allowLike` 是过渡同步字段；新 UI 和新调用代码应以 `engagement.pageLikes.enabled` 为页面点赞 canonical 开关。
 
@@ -867,9 +880,35 @@ AdminSettings
   };
   notifications: {
     emailEnabled: boolean;
+    recipients?: Array<{
+      userId: number;
+      username: string;
+      email: string;
+      displayName: string;
+      // compatibility projection, derived from routes
+      channels: Array<"email" | "webhook" | "wxpusher">;
+      // compatibility projection, derived from routes
+      events: Array<"admin_comment_pending" | "admin_comment_approved">;
+      routes: Array<{
+        id?: string;
+        eventType: "admin_comment_pending" | "admin_comment_approved";
+        channelConfigId: string;
+        channelType?: "email" | "webhook" | "wxpusher";
+        channelName?: string;
+        enabled: boolean;
+      }>;
+      includeCommentContent: "none" | "summary" | "full";
+      rateLimitProfile: string | null;
+      enabled: boolean;
+    }>;
+    channelConfigs: NotificationChannelConfig[];
   };
 }
 ```
+
+后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；站点管理员只能配置自己有访问权的站点，且候选接收人也必须对该站点有访问权；站点评论管理员不可管理接收人。
+
+接收人配置的 canonical 模型是 `notifications.recipients[].routes[]`。每条 route 绑定一个事件和一个具体渠道配置实例，例如 `email:default`、`wxpusher:ops` 或 `webhook:feishu`。`channels` 和 `events` 仍作为兼容投影返回，旧请求也可用它们生成默认 route；新 Admin UI 和新调用代码应提交 `routes`。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核只保留审核语义，不追加第二条后台用户通知。
 
 Engagement 语义：
 
@@ -918,9 +957,13 @@ AdminSystemSettings
 
 ### `PUT /api/admin/system-settings`
 
-更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
+更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`notifications`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
 
 `mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。`notifications.emailEnabled` 是 site owner，只控制当前站点是否发送通知。
+
+`notifications.delivery.queueBackend` 默认是 `database`。选择 `bullmq` 时需要部署 Redis 并配置相应运行环境；BullMQ 只影响队列后端，不改变 planner、delivery projection、worker 状态模型或任务中心展示。
+
+Webhook 和 WxPusher 的 canonical 配置模型是 `notifications.channelConfigs[]`。每个元素是一条具体渠道配置实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`；站点接收人再通过 route 的 `channelConfigId` 选择具体实例。`email:default` 是只读默认邮件实例，GET 会返回，PUT 可原样带回但不会作为可编辑实例落库。Webhook/WxPusher 的 `secretConfig.secret`、`secretConfig.appToken` 是 secret 字段，GET 响应只返回 `secretConfigured` 状态；PUT 省略或提交空 `secretConfig` 会保留已有密钥。
 
 `avatar.external.enabled` 控制外部头像 URL 生成。`avatar.display.*` 和 `publicApi.advisoryFields.enabled` 控制可选公开展示建议字段，不能简单视为 `avatar.external.enabled` 的子设置。
 
@@ -975,6 +1018,42 @@ AdminSystemSettings
       password?: string;
       passwordConfigured: boolean;
       from: string;
+    };
+  };
+  notifications: {
+    delivery: {
+      globalMaxPerMinute: number;
+      perChannelMaxPerMinute: number;
+      perSiteMaxPerHour: number;
+      perRecipientMinIntervalSec: number;
+      dailyChannelBudget: number;
+      lowPriorityDelaySec: number;
+      queueBackend: "database" | "bullmq";
+    };
+    channelConfigs: Array<{
+      id: string;
+      type: "email" | "webhook" | "wxpusher";
+      name: string;
+      description: string | null;
+      enabled: boolean;
+      config: Record<string, unknown>;
+      secretConfig?: Record<string, unknown>;
+      secretConfigured?: boolean;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+    }>;
+    // compatibility settings, not the canonical Webhook/WxPusher model
+    webhook: {
+      enabled: boolean;
+      url: string;
+      secret?: string;
+      secretConfigured: boolean;
+    };
+    wxpusher: {
+      enabled: boolean;
+      appToken?: string;
+      appTokenConfigured: boolean;
+      apiUrl: string;
     };
   };
   captcha: {
@@ -1053,6 +1132,149 @@ AdminSystemSettings
       apiKey?: string;
       apiKeyConfigured: boolean;
     };
+  };
+}
+```
+
+### `POST /api/admin/system-settings/notifications/channel-test`
+
+创建通知通道测试任务。该接口需要 `system_settings.update` 权限，会创建 `channel_test` 类型的 `task_runs` 和对应 `notification_deliveries`，再由通知 worker 或测试流程投递。
+
+请求：
+
+```ts
+{
+  channelConfigId: string;
+  // compatibility fallback; new clients should use channelConfigId
+  channel?: "email" | "webhook" | "wxpusher";
+  recipient?: string;
+  siteKey?: string;
+}
+```
+
+响应：
+
+```ts
+{
+  taskId: string;
+  deliveryId: string;
+  queueBackend: "database" | "bullmq";
+  channelConfigId: string;
+  channelType: "email" | "webhook" | "wxpusher";
+  channelName: string;
+  channel: "email" | "webhook" | "wxpusher";
+  recipient: string;
+}
+```
+
+## Notification Templates
+
+通知模板接口主要服务 Admin Console 的模板管理页。模板支持 `html`、`text` 和 `json` 输出格式；变量渲染会按目标格式进行 escaping，JSON 模板渲染后必须是合法 JSON。
+
+### `GET /api/admin/notification-templates`
+
+列出默认模板和数据库中的自定义覆盖。需要 `system_settings.read` 权限。
+
+响应：
+
+```ts
+{
+  templates: Array<{
+    key: string;
+    name: string;
+    description: string;
+    channel: "email" | "webhook" | "wxpusher";
+    channelLabel: string;
+    channelDescription: string;
+    eventType: string;
+    eventLabel: string;
+    eventDescription: string;
+    format: "html" | "text" | "json";
+    formatLabel: string;
+    subjectTemplate: string | null;
+    bodyTemplate: string;
+    isCustomized: boolean;
+    updatedAt: string | null;
+    updatedByUserId: number | null;
+  }>;
+}
+```
+
+`name`、`description`、`channelLabel`、`channelDescription`、`eventLabel`、`eventDescription` 和 `formatLabel` 均为中文展示文案，来自内置默认模板元数据；数据库自定义覆盖只覆盖格式和模板内容，不覆盖这些展示字段。
+
+### `PUT /api/admin/notification-templates/{templateKey}`
+
+保存模板覆盖。需要 `system_settings.update` 权限。
+
+请求：
+
+```ts
+{
+  format: "html" | "text" | "json";
+  subjectTemplate?: string | null;
+  bodyTemplate: string;
+}
+```
+
+响应：
+
+```ts
+{
+  template: NotificationTemplate;
+}
+```
+
+### `POST /api/admin/notification-templates/{templateKey}/preview`
+
+使用预置示例变量预览模板渲染结果。需要 `system_settings.read` 权限；请求体可为空，也可临时覆盖格式和模板内容。
+
+响应：
+
+```ts
+{
+  rendered: {
+    subject?: string;
+    body: string;
+  };
+}
+```
+
+### `POST /api/admin/notification-templates/{templateKey}/restore-default`
+
+删除该模板的数据库覆盖，恢复默认模板。需要 `system_settings.update` 权限。
+
+响应：
+
+```ts
+{
+  template: NotificationTemplate;
+}
+```
+
+### `POST /api/admin/notification-templates/{templateKey}/test-send`
+
+创建模板测试发送任务。需要 `system_settings.update` 权限；`recipient` 省略时使用当前后台用户邮箱。
+
+请求：
+
+```ts
+{
+  recipient?: string;
+}
+```
+
+响应：
+
+```ts
+{
+  taskId: string;
+  deliveryId: string;
+  queueBackend: "database" | "bullmq";
+  channel: "email" | "webhook" | "wxpusher";
+  recipient: string;
+  preview: {
+    subject?: string;
+    body: string;
   };
 }
 ```
@@ -1420,7 +1642,7 @@ Query：
 
 ### `GET /api/admin/ops/tasks`
 
-任务中心维护任务列表。该接口聚合 maintenance job；导入任务仍由 import-export job API 管理。
+任务中心列表。该接口聚合旧 `maintenance_jobs` 与新 `task_runs` 投影；导入任务仍由 import-export job API 管理。
 
 Query：
 
@@ -1437,7 +1659,10 @@ Query：
 
 ```ts
 {
-  items: Array<MaintenanceJob & { source: "maintenance" }>;
+  items: AdminTaskCenterItem[];
+  totalCount: number;
+  limit: number;
+  offset: number;
 }
 ```
 
@@ -1476,3 +1701,54 @@ Query：
   updatedAt: string;
 }
 ```
+
+`TaskRunCenterItem`：
+
+```ts
+{
+  source: "task_run";
+  id: string;
+  queueBackend: "database" | "bullmq";
+  queueMessageId: string | null;
+  type: string;
+  category:
+    | "notification"
+    | "import"
+    | "maintenance"
+    | "backup"
+    | "upgrade"
+    | "page"
+    | "system";
+  status:
+    | "queued"
+    | "delayed"
+    | "running"
+    | "retrying"
+    | "succeeded"
+    | "failed"
+    | "suppressed"
+    | "cancelled";
+  siteId: number | null;
+  siteKey: string | null;
+  actorType: "admin_user" | "system" | "visitor" | null;
+  actorId: string | null;
+  subjectType: string | null;
+  subjectId: string | null;
+  payloadSummary: unknown;
+  payload: unknown;
+  scope: unknown;
+  progress: unknown;
+  result: unknown;
+  error: unknown;
+  idempotencyKey: string | null;
+  runAfter: string | null;
+  attempts: number;
+  maxAttempts: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+}
+```
+
+通知任务会在 `payloadSummary` / `payload` / `result` 中提供排障用 event、channel、channel config id/name、recipient type、recipient address snapshot、attempt、next retry、error 和 provider message id。`notification_deliveries.channelConfigRef` 与 `notification_deliveries.channelConfigNameSnapshot` 保存任务创建时的渠道配置快照，用于区分多个 Webhook 或 WxPusher 配置实例。拥有 `tasks.read` 的后台用户可以在任务中心查看这些内部排障字段；公开 API 不暴露这些字段。secret 和明文退订 token 不会写入 task payload、日志、导出或 Admin API 响应。

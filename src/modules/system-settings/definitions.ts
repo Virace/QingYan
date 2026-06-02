@@ -9,6 +9,7 @@ export const systemSettingCategories = [
 	"security",
 	"logging",
 	"mail",
+	"notifications",
 	"captcha",
 	"ipRegion",
 	"avatar",
@@ -130,6 +131,29 @@ export const systemSettingsSchema = z.object({
 			password: z.string().optional(),
 			passwordConfigured: z.boolean(),
 			from: z.string(),
+		}),
+	}),
+	notifications: z.object({
+		delivery: z.object({
+			globalMaxPerMinute: z.number().int().positive(),
+			perChannelMaxPerMinute: z.number().int().positive(),
+			perSiteMaxPerHour: z.number().int().positive(),
+			perRecipientMinIntervalSec: z.number().int().min(0),
+			dailyChannelBudget: z.number().int().positive(),
+			lowPriorityDelaySec: z.number().int().min(0),
+			queueBackend: z.enum(["database", "bullmq"]),
+		}),
+		webhook: z.object({
+			enabled: z.boolean(),
+			url: z.string().url().or(z.literal("")),
+			secret: z.string().optional(),
+			secretConfigured: z.boolean(),
+		}),
+		wxpusher: z.object({
+			enabled: z.boolean(),
+			appToken: z.string().optional(),
+			appTokenConfigured: z.boolean(),
+			apiUrl: z.string().url(),
 		}),
 	}),
 	captcha: z.object({
@@ -269,6 +293,29 @@ export const defaultSystemSettings: SystemSettings = {
 			from: "",
 		},
 	},
+	notifications: {
+		delivery: {
+			globalMaxPerMinute: 60,
+			perChannelMaxPerMinute: 30,
+			perSiteMaxPerHour: 240,
+			perRecipientMinIntervalSec: 300,
+			dailyChannelBudget: 1000,
+			lowPriorityDelaySec: 300,
+			queueBackend: "database",
+		},
+		webhook: {
+			enabled: false,
+			url: "",
+			secret: "",
+			secretConfigured: false,
+		},
+		wxpusher: {
+			enabled: false,
+			appToken: "",
+			appTokenConfigured: false,
+			apiUrl: "https://wxpusher.zjiecode.com/api/send/message",
+		},
+	},
 	captcha: {
 		provider: "image",
 		image: {
@@ -355,6 +402,14 @@ export const secretFieldDescriptors = [
 	{
 		valuePath: "mail.smtp.password",
 		configuredPath: "mail.smtp.passwordConfigured",
+	},
+	{
+		valuePath: "notifications.webhook.secret",
+		configuredPath: "notifications.webhook.secretConfigured",
+	},
+	{
+		valuePath: "notifications.wxpusher.appToken",
+		configuredPath: "notifications.wxpusher.appTokenConfigured",
 	},
 	{
 		valuePath: "captcha.turnstile.secretKey",

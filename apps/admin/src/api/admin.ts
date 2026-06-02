@@ -236,6 +236,80 @@ export interface AdminCommenter {
 		email: boolean;
 	};
 	isBlacklisted: boolean;
+	notifications?: {
+		notifyOnReply?: boolean | null;
+		unsubscribedAt?: string | null;
+		suppressedUntil?: string | null;
+		reputationScore?: number | null;
+		lastSuccessAt?: string | null;
+		lastFailureAt?: string | null;
+	};
+}
+
+export type NotificationChannel = "email" | "webhook" | "wxpusher";
+export type NotificationTemplateFormat = "html" | "text" | "json";
+export type SiteNotificationEvent =
+	| "admin_comment_pending"
+	| "admin_comment_approved";
+export type NotificationContentPolicy = "none" | "summary" | "full";
+
+export interface NotificationChannelConfig {
+	id: string;
+	type: NotificationChannel;
+	name: string;
+	description: string | null;
+	enabled: boolean;
+	config: Record<string, unknown>;
+	secretConfig?: Record<string, unknown>;
+	secretConfigured?: boolean;
+	createdAt?: string | null;
+	updatedAt?: string | null;
+}
+
+export interface SiteNotificationRoute {
+	id?: string;
+	eventType: SiteNotificationEvent;
+	channelConfigId: string;
+	channelType?: NotificationChannel;
+	channelName?: string;
+	enabled: boolean;
+}
+
+export interface SiteNotificationRecipient {
+	userId: number;
+	username: string;
+	email: string;
+	displayName: string;
+	channels: NotificationChannel[];
+	events: SiteNotificationEvent[];
+	routes: SiteNotificationRoute[];
+	includeCommentContent: NotificationContentPolicy;
+	rateLimitProfile: string | null;
+	enabled: boolean;
+}
+
+export interface NotificationTemplate {
+	key: string;
+	name: string;
+	description: string;
+	channel: NotificationChannel;
+	channelLabel: string;
+	channelDescription: string;
+	eventType: string;
+	eventLabel: string;
+	eventDescription: string;
+	format: NotificationTemplateFormat;
+	formatLabel: string;
+	subjectTemplate: string | null;
+	bodyTemplate: string;
+	isCustomized: boolean;
+	updatedAt: string | null;
+	updatedByUserId: number | null;
+}
+
+export interface RenderedNotificationTemplate {
+	subject?: string;
+	body: string;
 }
 
 export interface AdminVisitor {
@@ -319,6 +393,8 @@ export interface AdminSite {
 	engagement: AdminEngagementSettings & AdminEngagementSummary;
 	notifications: {
 		emailEnabled: boolean;
+		recipients?: SiteNotificationRecipient[];
+		channelConfigs: NotificationChannelConfig[];
 	};
 	pageCount: number;
 	commentCount: number;
@@ -416,6 +492,8 @@ export interface AdminSettings {
 	engagement: AdminEngagementSettings;
 	notifications: {
 		emailEnabled: boolean;
+		recipients?: SiteNotificationRecipient[];
+		channelConfigs: NotificationChannelConfig[];
 	};
 }
 
@@ -483,6 +561,30 @@ export interface AdminSystemSettings {
 			passwordConfigured: boolean;
 			from: string;
 		};
+	};
+	notifications: {
+		delivery: {
+			globalMaxPerMinute: number;
+			perChannelMaxPerMinute: number;
+			perSiteMaxPerHour: number;
+			perRecipientMinIntervalSec: number;
+			dailyChannelBudget: number;
+			lowPriorityDelaySec: number;
+			queueBackend: "database" | "bullmq";
+		};
+		webhook: {
+			enabled: boolean;
+			url: string;
+			secret?: string;
+			secretConfigured: boolean;
+		};
+		wxpusher: {
+			enabled: boolean;
+			appToken?: string;
+			appTokenConfigured: boolean;
+			apiUrl: string;
+		};
+		channelConfigs: NotificationChannelConfig[];
 	};
 	captcha: {
 		provider: "image" | "turnstile" | "hcaptcha" | "recaptcha" | "geetest";
@@ -999,6 +1101,103 @@ export function updateSystemSettings(input: AdminSystemSettings) {
 		method: "PUT",
 		body: JSON.stringify(input),
 	});
+}
+
+export function testNotificationChannel(input: {
+	channel?: NotificationChannel;
+	channelConfigId?: string;
+	recipient?: string;
+	siteKey?: string;
+}) {
+	return requestJson<{
+		taskId: string;
+		deliveryId: string;
+		queueBackend: "database" | "bullmq";
+		channelConfigId: string;
+		channelType: NotificationChannel;
+		channelName: string;
+		channel: NotificationChannel;
+		recipient: string;
+	}>("/api/admin/system-settings/notifications/channel-test", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+export function listNotificationTemplates() {
+	return requestJson<{ templates: NotificationTemplate[] }>(
+		"/api/admin/notification-templates",
+	);
+}
+
+export function updateNotificationTemplate(
+	templateKey: string,
+	input: {
+		format: NotificationTemplateFormat;
+		subjectTemplate?: string | null;
+		bodyTemplate: string;
+	},
+) {
+	return requestJson<{ template: NotificationTemplate }>(
+		`/api/admin/notification-templates/${encodeURIComponent(templateKey)}`,
+		{
+			method: "PUT",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function previewNotificationTemplate(
+	templateKey: string,
+	input: Partial<{
+		format: NotificationTemplateFormat;
+		subjectTemplate: string | null;
+		bodyTemplate: string;
+	}> = {},
+) {
+	return requestJson<{ rendered: RenderedNotificationTemplate }>(
+		`/api/admin/notification-templates/${encodeURIComponent(
+			templateKey,
+		)}/preview`,
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function restoreNotificationTemplateDefault(templateKey: string) {
+	return requestJson<{ template: NotificationTemplate }>(
+		`/api/admin/notification-templates/${encodeURIComponent(
+			templateKey,
+		)}/restore-default`,
+		{
+			method: "POST",
+			body: JSON.stringify({}),
+		},
+	);
+}
+
+export function testNotificationTemplate(
+	templateKey: string,
+	input: { recipient?: string } = {},
+) {
+	return requestJson<{
+		taskId: string;
+		deliveryId: string;
+		queueBackend: "database" | "bullmq";
+		channel: NotificationChannel;
+		recipient: string;
+		preview: RenderedNotificationTemplate;
+	}>(
+		`/api/admin/notification-templates/${encodeURIComponent(
+			templateKey,
+		)}/test-send`,
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
 }
 
 export function listAdminUsers(

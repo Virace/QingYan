@@ -215,7 +215,7 @@ describe("admin page registry sources", () => {
 		expect(listResponse.json()).toMatchObject({ items: [] });
 	});
 
-	it("stores execution options on page source refresh jobs", async () => {
+	it("stores execution options on single page source refresh jobs", async () => {
 		const fixture = await createTestApp({
 			pageSourceFetchText: async () => "<urlset />",
 		});
@@ -260,16 +260,18 @@ describe("admin page registry sources", () => {
 				maxBytes: 1_048_576,
 			},
 		});
+	});
 
-		const allFixture = await createTestApp({
+	it("stores execution options on all page source refresh jobs", async () => {
+		const fixture = await createTestApp({
 			pageSourceFetchText: async () => "<urlset />",
 		});
-		cleanups.push(allFixture.cleanup);
-		const allAdmin = await loginAsAdmin(allFixture.app);
-		const allResponse = await allFixture.app.inject({
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const allResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/admin/page-registry/refresh",
-			...withAdminWriteAuth(allAdmin),
+			...withAdminWriteAuth(admin),
 			payload: {
 				siteKey: "fangyuan",
 				timeoutMs: 15_000,

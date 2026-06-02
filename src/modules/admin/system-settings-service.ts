@@ -34,6 +34,19 @@ type AdminSystemSettingsInput = {
 			from: string;
 		};
 	};
+	notifications?: {
+		delivery?: Partial<SystemSettings["notifications"]["delivery"]>;
+		webhook?: {
+			enabled?: boolean;
+			url?: string;
+			secret?: string;
+		};
+		wxpusher?: {
+			enabled?: boolean;
+			appToken?: string;
+			apiUrl?: string;
+		};
+	};
 	captcha?: {
 		provider: SystemSettings["captcha"]["provider"];
 		image: SystemSettings["captcha"]["image"];
@@ -106,6 +119,22 @@ export class AdminSystemSettingsService {
 						},
 					}
 				: current.mail,
+			notifications: input.notifications
+				? {
+						delivery: {
+							...current.notifications.delivery,
+							...input.notifications.delivery,
+						},
+						webhook: {
+							...current.notifications.webhook,
+							...input.notifications.webhook,
+						},
+						wxpusher: {
+							...current.notifications.wxpusher,
+							...input.notifications.wxpusher,
+						},
+					}
+				: current.notifications,
 			captcha: input.captcha
 				? {
 						...current.captcha,
@@ -168,12 +197,12 @@ export class AdminSystemSettingsService {
 			event: "system.logging.updated",
 			requestId: input.requestId,
 			message: "系统设置已更新",
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			data: input.logging,
 		});
 		await this.repository.writeAudit({
-			actorType: input.actorUserId ? "admin_user" : "admin",
+			actorType: input.actorUserId ? "admin_user" : "system",
 			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			action: "system.settings.updated",
 			targetType: "system_settings",
@@ -183,6 +212,7 @@ export class AdminSystemSettingsService {
 				security: input.security,
 				logging: input.logging,
 				mail: input.mail,
+				notifications: maskSystemSettings(next).notifications,
 				captcha: input.captcha,
 				ipRegion: input.ipRegion,
 				avatar: input.avatar,

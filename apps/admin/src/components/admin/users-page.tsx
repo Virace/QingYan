@@ -51,11 +51,7 @@ function statusLabel(status: AdminUser["status"]) {
 	return "已删除";
 }
 
-function toggleSiteKey(
-	current: string[],
-	siteKey: string,
-	checked: boolean,
-) {
+function toggleSiteKey(current: string[], siteKey: string, checked: boolean) {
 	return checked
 		? Array.from(new Set([...current, siteKey]))
 		: current.filter((key) => key !== siteKey);
@@ -79,7 +75,9 @@ function SiteKeyPicker({
 						type="checkbox"
 						checked={siteKeys.includes(site.siteKey)}
 						onChange={(event) =>
-							onChange(toggleSiteKey(siteKeys, site.siteKey, event.target.checked))
+							onChange(
+								toggleSiteKey(siteKeys, site.siteKey, event.target.checked),
+							)
 						}
 					/>
 					<span>{site.name}</span>

@@ -23,6 +23,8 @@ import {
 	resolveEngagementTrustMode,
 } from "../shared/site-settings-defaults";
 import type { CommentsWriteRepository } from "./write-repository";
+import { CommenterPreferencesRepository } from "../notifications/commenter-preferences-repository";
+import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
 
 function resolveIdentity(
 	siteKey: string,
@@ -78,6 +80,9 @@ export class CommentsWriteService {
 			displayName?: string;
 			email?: string;
 			website?: string | null;
+		};
+		options?: {
+			notifyOnReply?: boolean;
 		};
 	}) {
 		const site = this.readRepository.getRegisteredSite(input.siteKey);
@@ -318,6 +323,29 @@ export class CommentsWriteService {
 				pageKey: input.pageKey,
 			},
 		});
+		if (!shouldUseVerifiedAuthor) {
+			await new CommenterPreferencesRepository(
+				this.writeRepository.database,
+			).upsertFromCommentForm({
+				siteId: site.id,
+				email: resolvedAuthorEmail,
+				notifyOnReply: input.options?.notifyOnReply ?? false,
+			});
+		}
+		if (input.parentCommentId && status === "approved") {
+			await this.planReplyNotification({
+				siteId: site.id,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				commentId: created.commentId,
+				source: shouldUseVerifiedAuthor ? "admin_reply" : "public_api",
+				actorType: shouldUseVerifiedAuthor ? "admin_user" : "visitor",
+				actorId: shouldUseVerifiedAuthor
+					? String(input.verifiedAuthorSession?.userId ?? "admin_session")
+					: (visitor?.visitorKey ?? input.ip ?? "anonymous"),
+				requestId: input.requestId,
+			});
+		}
 		const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
 		const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
 		if (abuseGuardEnabled && autoBlacklistEnabled) {
@@ -353,6 +381,41 @@ export class CommentsWriteService {
 				rootCommentCount: created.thread.rootCommentCount,
 			},
 		};
+	}
+
+	private async planReplyNotification(input: {
+		siteId: number;
+		siteKey: string;
+		pageKey: string;
+		commentId: string;
+		source: "public_api" | "admin_reply";
+		actorType: "admin_user" | "visitor";
+		actorId: string;
+		requestId?: string;
+	}) {
+		try {
+			await new CommentNotificationPlanner(
+				this.writeRepository.database,
+			).planForCommentEvent(input);
+		} catch (error) {
+			await this.security
+				.writeAudit({
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					actorType: "system",
+					actorId: "notification_planner",
+					event: "notification.email.failed",
+					message: "评论通知规划失败",
+					targetType: "comment",
+					targetId: input.commentId,
+					payload: {
+						source: input.source,
+						error: error instanceof Error ? error.message : String(error),
+					},
+				})
+				.catch(() => undefined);
+		}
 	}
 
 	public async castVote(input: {

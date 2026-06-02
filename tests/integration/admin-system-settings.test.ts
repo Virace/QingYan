@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { adminUsers, auditLogs } from "../../src/db/schema";
+import {
+	adminUsers,
+	auditLogs,
+	notificationChannelConfigs,
+} from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -705,6 +709,86 @@ describe("admin system settings", () => {
 		expect(afterUpdate.statusCode).toBe(200);
 		expect(afterUpdate.body).not.toContain("akismet-secret");
 		expect(afterUpdate.json().antiSpam.akismet.apiKeyConfigured).toBe(true);
+	});
+
+	it("preserves notification channel config secrets when GET response is saved back", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				notifications: {
+					channelConfigs: [
+						{
+							id: "webhook:ops",
+							type: "webhook",
+							name: "运维 Webhook",
+							description: null,
+							enabled: true,
+							config: {
+								url: "https://hooks.example.test/qingyan",
+							},
+							secretConfig: {
+								secret: "webhook-secret",
+							},
+						},
+					],
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.body).not.toContain("webhook-secret");
+		const getResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/system-settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(getResponse.statusCode).toBe(200);
+		expect(getResponse.body).not.toContain("webhook-secret");
+		const channelConfigs = getResponse.json().notifications.channelConfigs;
+
+		const saveBackResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				notifications: {
+					channelConfigs,
+				},
+			},
+		});
+
+		expect(saveBackResponse.statusCode).toBe(200);
+		expect(saveBackResponse.body).not.toContain("webhook-secret");
+		const [row] = await fixture.app.db
+			.select()
+			.from(notificationChannelConfigs)
+			.where(eq(notificationChannelConfigs.id, "webhook:ops"));
+		expect(row?.secretConfigJson).toBe(
+			JSON.stringify({ secret: "webhook-secret" }),
+		);
 	});
 
 	it("updates admin session ttl setting", async () => {

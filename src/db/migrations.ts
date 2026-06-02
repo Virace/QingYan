@@ -183,6 +183,16 @@ function addColumnIfMissing(
 	}
 }
 
+function indexExists(sqlite: SqliteClient, indexName: string): boolean {
+	return Boolean(
+		sqlite
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+			)
+			.get(indexName),
+	);
+}
+
 function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 	const applyBackfill = sqlite.transaction(() => {
 		if (tableExists(sqlite, "site_settings")) {
@@ -217,6 +227,63 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 		}
 
 		sqlite.exec(`
+			CREATE TABLE IF NOT EXISTS task_runs (
+				id text PRIMARY KEY NOT NULL,
+				queue_backend text NOT NULL,
+				queue_message_id text,
+				type text NOT NULL,
+				category text NOT NULL,
+				status text NOT NULL,
+				site_id integer,
+				site_key text,
+				actor_type text,
+				actor_id text,
+				subject_type text,
+				subject_id text,
+				payload_summary_json text NOT NULL,
+				payload_json text NOT NULL,
+				progress_json text,
+				result_json text,
+				error_json text,
+				idempotency_key text,
+				run_after text,
+				attempts integer DEFAULT 0 NOT NULL,
+				max_attempts integer DEFAULT 1 NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				started_at text,
+				finished_at text,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS task_runs_status_run_after_idx ON task_runs (status, run_after);
+			CREATE INDEX IF NOT EXISTS task_runs_category_created_idx ON task_runs (category, created_at);
+			CREATE INDEX IF NOT EXISTS task_runs_site_idx ON task_runs (site_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS task_runs_idempotency_idx ON task_runs (idempotency_key);
+
+			CREATE TABLE IF NOT EXISTS notification_deliveries (
+				id text PRIMARY KEY NOT NULL,
+				task_run_id text NOT NULL,
+				channel text NOT NULL,
+				channel_config_ref text,
+				channel_config_name_snapshot text,
+				recipient_type text NOT NULL,
+				recipient_user_id integer,
+				recipient_address_snapshot text NOT NULL,
+				recipient_identity_key text NOT NULL,
+				event_family text NOT NULL DEFAULT 'unknown',
+				template_key text NOT NULL,
+				status text NOT NULL,
+				provider_message_id text,
+				last_error_json text,
+				sent_at text,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (recipient_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS notification_deliveries_task_run_idx ON notification_deliveries (task_run_id);
+			CREATE INDEX IF NOT EXISTS notification_deliveries_recipient_idx ON notification_deliveries (recipient_type, recipient_identity_key);
+			CREATE INDEX IF NOT EXISTS notification_deliveries_status_idx ON notification_deliveries (status);
+
 			CREATE TABLE IF NOT EXISTS comment_request_metadata (
 				comment_id text PRIMARY KEY NOT NULL,
 				author_ip text,
@@ -379,7 +446,187 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			CREATE INDEX IF NOT EXISTS delayed_deletions_status_due_idx ON delayed_deletions (status, hard_delete_after);
 			CREATE INDEX IF NOT EXISTS delayed_deletions_site_id_idx ON delayed_deletions (site_id);
 			CREATE INDEX IF NOT EXISTS delayed_deletions_resource_idx ON delayed_deletions (resource_type, resource_id);
+
+			CREATE TABLE IF NOT EXISTS site_notification_recipients (
+				id text PRIMARY KEY NOT NULL,
+				site_id integer NOT NULL,
+				user_id integer NOT NULL,
+				channels_json text DEFAULT '[]' NOT NULL,
+				events_json text DEFAULT '[]' NOT NULL,
+				include_comment_content text NOT NULL,
+				rate_limit_profile text,
+				enabled integer DEFAULT true NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS site_notification_recipients_site_user_idx ON site_notification_recipients (site_id, user_id);
+			CREATE INDEX IF NOT EXISTS site_notification_recipients_site_idx ON site_notification_recipients (site_id);
+			CREATE INDEX IF NOT EXISTS site_notification_recipients_user_idx ON site_notification_recipients (user_id);
+
+			CREATE TABLE IF NOT EXISTS notification_channel_configs (
+				id text PRIMARY KEY NOT NULL,
+				type text NOT NULL,
+				name text NOT NULL,
+				description text,
+				enabled integer DEFAULT true NOT NULL,
+				config_json text NOT NULL,
+				secret_config_json text DEFAULT '{}' NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS notification_channel_configs_type_idx ON notification_channel_configs (type);
+			CREATE INDEX IF NOT EXISTS notification_channel_configs_enabled_idx ON notification_channel_configs (enabled);
+			INSERT OR IGNORE INTO notification_channel_configs (id, type, name, description, enabled, config_json, secret_config_json)
+			VALUES ('email:default', 'email', '默认邮件', '使用系统 SMTP 设置发送邮件通知。', true, '{}', '{}');
+
+			CREATE TABLE IF NOT EXISTS site_notification_recipient_routes (
+				id text PRIMARY KEY NOT NULL,
+				recipient_id text NOT NULL,
+				event_type text NOT NULL,
+				channel_config_id text NOT NULL,
+				enabled integer DEFAULT true NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (recipient_id) REFERENCES site_notification_recipients(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (channel_config_id) REFERENCES notification_channel_configs(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS site_notification_recipient_routes_recipient_idx ON site_notification_recipient_routes (recipient_id);
+			CREATE INDEX IF NOT EXISTS site_notification_recipient_routes_config_idx ON site_notification_recipient_routes (channel_config_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS site_notification_recipient_routes_unique_idx ON site_notification_recipient_routes (recipient_id, event_type, channel_config_id);
+
+			CREATE TABLE IF NOT EXISTS admin_user_notification_preferences (
+				user_id integer NOT NULL,
+				channel text NOT NULL,
+				enabled integer DEFAULT true NOT NULL,
+				digest_mode text DEFAULT 'off' NOT NULL,
+				digest_interval_minutes integer,
+				digest_times_json text,
+				paused_until text,
+				channel_config_ref text,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS admin_user_notification_preferences_user_config_idx ON admin_user_notification_preferences (user_id, channel_config_ref);
+
+			CREATE TABLE IF NOT EXISTS commenter_notification_preferences (
+				id text PRIMARY KEY NOT NULL,
+				site_id integer NOT NULL,
+				email text NOT NULL,
+				email_hash text NOT NULL,
+				notify_on_reply integer DEFAULT false NOT NULL,
+				unsubscribed_at text,
+				source text NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS commenter_notification_preferences_site_email_idx ON commenter_notification_preferences (site_id, email_hash);
+			CREATE INDEX IF NOT EXISTS commenter_notification_preferences_site_idx ON commenter_notification_preferences (site_id);
+
+			CREATE TABLE IF NOT EXISTS email_delivery_reputation (
+				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+				site_id integer NOT NULL,
+				email text NOT NULL,
+				email_hash text NOT NULL,
+				failure_score integer DEFAULT 0 NOT NULL,
+				last_failure_at text,
+				last_success_at text,
+				suppressed_until text,
+				suppressed_reason text,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS email_delivery_reputation_site_email_idx ON email_delivery_reputation (site_id, email_hash);
+			CREATE INDEX IF NOT EXISTS email_delivery_reputation_site_idx ON email_delivery_reputation (site_id);
+
+			CREATE TABLE IF NOT EXISTS unsubscribe_tokens (
+				id text PRIMARY KEY NOT NULL,
+				site_id integer NOT NULL,
+				email_hash text NOT NULL,
+				token_hash text NOT NULL,
+				purpose text NOT NULL,
+				expires_at text,
+				consumed_at text,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS unsubscribe_tokens_token_hash_idx ON unsubscribe_tokens (token_hash);
+			CREATE INDEX IF NOT EXISTS unsubscribe_tokens_site_email_idx ON unsubscribe_tokens (site_id, email_hash);
+
+			CREATE TABLE IF NOT EXISTS notification_templates (
+				key text PRIMARY KEY NOT NULL,
+				channel text NOT NULL,
+				event_type text NOT NULL,
+				format text NOT NULL,
+				subject_template text,
+				body_template text NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_by_user_id integer,
+				FOREIGN KEY (updated_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS notification_templates_channel_event_idx ON notification_templates (channel, event_type);
 		`);
+
+		if (tableExists(sqlite, "site_notification_recipients")) {
+			addColumnIfMissing(
+				sqlite,
+				"site_notification_recipients",
+				"channels_json",
+				"text DEFAULT '[]' NOT NULL",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"site_notification_recipients",
+				"events_json",
+				"text DEFAULT '[]' NOT NULL",
+			);
+		}
+
+		if (tableExists(sqlite, "notification_deliveries")) {
+			addColumnIfMissing(
+				sqlite,
+				"notification_deliveries",
+				"channel_config_ref",
+				"text",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"notification_deliveries",
+				"channel_config_name_snapshot",
+				"text",
+			);
+		}
+
+		if (
+			tableExists(sqlite, "admin_user_notification_preferences") &&
+			columnExists(
+				sqlite,
+				"admin_user_notification_preferences",
+				"channel_config_ref",
+			)
+		) {
+			sqlite.exec(`
+				UPDATE admin_user_notification_preferences
+				SET channel_config_ref = CASE
+					WHEN channel = 'email' THEN 'email:default'
+					WHEN channel_config_ref IS NULL OR channel_config_ref = '' THEN channel
+					ELSE channel_config_ref
+				END
+			`);
+			if (
+				!indexExists(
+					sqlite,
+					"admin_user_notification_preferences_user_config_idx",
+				)
+			) {
+				sqlite.exec(
+					"CREATE UNIQUE INDEX IF NOT EXISTS admin_user_notification_preferences_user_config_idx ON admin_user_notification_preferences (user_id, channel_config_ref)",
+				);
+			}
+		}
 	});
 
 	applyBackfill();

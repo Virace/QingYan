@@ -70,6 +70,10 @@ function mapCommentRequestMetadata(
 export class CommentsWriteRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
+	public get database(): AppDatabase {
+		return this.db;
+	}
+
 	public createCaptchaSessionId() {
 		return createEntityId("cap");
 	}

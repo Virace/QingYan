@@ -164,7 +164,9 @@ test("site settings page renders editable controls", async ({ page }) => {
 	).toBeVisible();
 });
 
-test("admin shell keeps the active users view after reload", async ({ page }) => {
+test("admin shell keeps the active users view after reload", async ({
+	page,
+}) => {
 	if (!(await isLoggedIn(page))) {
 		await login(page);
 	}
@@ -212,7 +214,9 @@ test("users page renders tabs, dialogs and session-aware logout", async ({
 	}
 
 	await page.getByRole("button", { name: "用户", exact: true }).click();
-	await expect(page.getByRole("tab", { name: "用户", exact: true })).toBeVisible();
+	await expect(
+		page.getByRole("tab", { name: "用户", exact: true }),
+	).toBeVisible();
 	await expect(
 		page.getByRole("tab", { name: "用户组", exact: true }),
 	).toBeVisible();
@@ -362,9 +366,7 @@ test("system settings page renders database-owned install settings", async ({
 	await expect(page.getByRole("tab", { name: "限流" })).toBeVisible();
 	await expect(page.getByRole("tab", { name: "邮件" })).toBeVisible();
 	await expect(page.getByRole("tab", { name: "验证码" })).toBeVisible();
-	await expect(
-		page.getByRole("tab", { name: "头像与公开接口" }),
-	).toBeVisible();
+	await expect(page.getByRole("tab", { name: "头像与公开接口" })).toBeVisible();
 	await expect(page.getByRole("tab", { name: "IP 地域" })).toBeVisible();
 	await expect(page.getByRole("tab", { name: "反垃圾" })).toBeVisible();
 

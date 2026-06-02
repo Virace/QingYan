@@ -6,6 +6,7 @@ import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
 import { adminOpsRoutes } from "./modules/admin/ops-routes";
 import { adminOverviewRoutes } from "./modules/admin/overview-routes";
+import { adminNotificationTemplateRoutes } from "./modules/admin/notification-template-routes";
 import { adminPageRegistryRoutes } from "./modules/admin/page-registry-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminProfileRoutes } from "./modules/admin/profile-routes";
@@ -28,6 +29,7 @@ import { registerDatabaseDevRoutes } from "./modules/dev/routes";
 import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
+import { notificationsPublicRoutes } from "./modules/notifications/public-routes";
 import type { ServiceControlController } from "./modules/service-control/systemd-service";
 import { buildErrorResponse } from "./modules/shared/error-response";
 import { AppError } from "./modules/shared/errors";
@@ -272,6 +274,9 @@ export async function buildApp(
 	await app.register(pageFeedbackPublicRoutes, {
 		prefix: joinPublicPath(publicPath, "/api"),
 	});
+	await app.register(notificationsPublicRoutes, {
+		prefix: joinPublicPath(publicPath, "/notifications"),
+	});
 	await app.register(commentsAdminRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/comments"),
 	});
@@ -295,6 +300,9 @@ export async function buildApp(
 	});
 	await app.register(adminSystemSettingsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/system-settings"),
+	});
+	await app.register(adminNotificationTemplateRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/notification-templates"),
 	});
 	await app.register(adminUsersRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin"),

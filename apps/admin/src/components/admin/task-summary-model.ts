@@ -1,4 +1,5 @@
-import type { TaskCenterItem } from "../../api/ops";
+import type { AdminTaskCenterItem } from "../../api/ops";
+import { notificationTaskDetails } from "./notification-ui-model";
 
 export interface TaskSummaryMetric {
 	label: string;
@@ -56,7 +57,7 @@ function formatError(value: unknown) {
 	);
 }
 
-function rawSections(job: TaskCenterItem): TaskSummaryRawSection[] {
+function rawSections(job: AdminTaskCenterItem): TaskSummaryRawSection[] {
 	return [
 		{ label: "scope" as const, value: job.scope },
 		{ label: "progress" as const, value: job.progress },
@@ -65,7 +66,7 @@ function rawSections(job: TaskCenterItem): TaskSummaryRawSection[] {
 	].filter((section) => section.value !== null && section.value !== undefined);
 }
 
-function genericSummary(job: TaskCenterItem): TaskSummaryModel {
+function genericSummary(job: AdminTaskCenterItem): TaskSummaryModel {
 	const queueState = "queueState" in job ? job.queueState : undefined;
 	const waitingDescription =
 		isRecord(queueState) && typeof queueState.waitingDescription === "string"
@@ -89,8 +90,45 @@ function firstNumber(...values: Array<string | undefined>) {
 	return values.find((value) => value !== undefined) ?? "-";
 }
 
-export function summarizeTask(job: TaskCenterItem): TaskSummaryModel {
+export function summarizeTask(job: AdminTaskCenterItem): TaskSummaryModel {
 	const generic = genericSummary(job);
+
+	if (job.source === "task_run" && job.category === "notification") {
+		const details = notificationTaskDetails(job);
+		const errorMessage = formatError(job.error);
+		return {
+			...generic,
+			title: `通知任务 / ${job.type}`,
+			description: `任务 ${job.id}，站点 ${job.siteKey ?? "-"}，事件 ${details.event}，收件人 ${details.recipientAddress}。`,
+			metrics: [
+				...generic.metrics,
+				{ label: "事件", value: details.event },
+				{ label: "通道", value: details.channel },
+				{ label: "渠道配置", value: details.channelConfig },
+				{ label: "收件人类型", value: details.recipientType },
+				{ label: "收件地址", value: details.recipientAddress },
+				{ label: "队列", value: job.queueBackend },
+				{ label: "下次重试", value: job.runAfter ?? "-" },
+				{ label: "Provider Message ID", value: details.providerMessageId },
+			],
+			errors:
+				errorMessage || details.providerError !== "-"
+					? [
+							...(errorMessage
+								? [{ label: "错误", message: errorMessage }]
+								: []),
+							...(details.providerError !== "-"
+								? [
+										{
+											label: "Provider",
+											message: details.providerError,
+										},
+									]
+								: []),
+						]
+					: [],
+		};
+	}
 
 	if (job.type === "page_source_refresh") {
 		return {
