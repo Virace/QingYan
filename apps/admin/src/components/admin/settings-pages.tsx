@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Tabs } from "@radix-ui/themes";
+import { Dialog, Tabs } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -10,12 +10,16 @@ import {
 	listBlacklist,
 	listAdminUsers,
 	listNotificationTemplates,
+	patchAdminSiteSettingsSection,
+	patchAdminSystemSettingsSection,
 	previewNotificationTemplate,
 	restoreNotificationTemplateDefault,
 	testNotificationChannel,
+	testSystemMail,
 	testNotificationTemplate,
 	type AdminSettings,
 	type AdminSystemSettings,
+	type AdminUser,
 	type NotificationChannel,
 	type NotificationChannelConfig,
 	type NotificationContentPolicy,
@@ -25,8 +29,6 @@ import {
 	type SiteNotificationEvent,
 	type SiteNotificationRecipient,
 	updateNotificationTemplate,
-	updateSettings,
-	updateSystemSettings,
 } from "@/api/admin";
 import { ApiError } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -79,13 +81,122 @@ import {
 	addRecipientRoute,
 	availableNotificationChannelConfigs,
 	eligibleNotificationRecipientUsers,
+	cloneNotificationChannelConfigDraft,
 	makeRecipientFromUser,
+	createNotificationChannelConfigDraft,
+	mailChannelTestState,
 	notificationChannelLabels,
 	notificationChannelConfigLabel,
+	notificationChannelTargetSummary,
+	notificationTestResultSummary,
+	readSettingsTabFromSearch,
 	removeRecipientRoute,
 	siteNotificationEventLabels,
 	siteNotificationEvents,
+	upsertNotificationChannelConfig,
+	writeSettingsTabToSearch,
 } from "./notification-ui-model";
+
+const siteSettingsTabs = ["comments", "engagement", "notifications"] as const;
+type SiteSettingsTab = (typeof siteSettingsTabs)[number];
+
+const systemSettingsTabs = [
+	"security",
+	"rate-limit",
+	"mail",
+	"notifications",
+	"captcha",
+	"avatar",
+	"ip-region",
+	"anti-spam",
+] as const;
+type SystemSettingsTab = (typeof systemSettingsTabs)[number];
+
+function buildSiteSettingsSectionPayload(
+	section: SiteSettingsTab,
+	draft: AdminSettings,
+) {
+	if (section === "comments") {
+		return draft.comments;
+	}
+	if (section === "engagement") {
+		return draft.engagement;
+	}
+	return draft.notifications;
+}
+
+function buildSystemSettingsSectionPayload(
+	section: SystemSettingsTab,
+	draft: AdminSystemSettings,
+) {
+	const sanitized = withoutEmptySecrets(draft);
+	switch (section) {
+		case "security":
+			return {
+				admin: sanitized.admin,
+				security: sanitized.security,
+				logging: sanitized.logging,
+			};
+		case "rate-limit":
+			return sanitized.security.rateLimit;
+		case "mail":
+			return sanitized.mail;
+		case "notifications":
+			return sanitized.notifications;
+		case "captcha":
+			return sanitized.captcha;
+		case "avatar":
+			return {
+				avatar: sanitized.avatar,
+				publicApi: sanitized.publicApi,
+			};
+		case "ip-region":
+			return sanitized.ipRegion;
+		case "anti-spam":
+			return sanitized.antiSpam;
+	}
+}
+
+const siteSectionSaveLabels: Record<SiteSettingsTab, string> = {
+	comments: "保存评论设置",
+	engagement: "保存访客与计数设置",
+	notifications: "保存站点通知设置",
+};
+
+const systemSectionSaveLabels: Record<SystemSettingsTab, string> = {
+	security: "保存后台与安全设置",
+	"rate-limit": "保存限流设置",
+	mail: "保存邮件设置",
+	notifications: "保存通知设置",
+	captcha: "保存验证码设置",
+	avatar: "保存头像与公开接口设置",
+	"ip-region": "保存 IP 地域设置",
+	"anti-spam": "保存反垃圾设置",
+};
+
+function initialSettingsTab<T extends string>(
+	param: string,
+	allowed: readonly T[],
+	fallback: T,
+) {
+	if (typeof window === "undefined") {
+		return fallback;
+	}
+	return readSettingsTabFromSearch(window.location.search, {
+		param,
+		allowed,
+		fallback,
+	});
+}
+
+function replaceSettingsTabQuery(param: string, value: string) {
+	if (typeof window === "undefined") {
+		return;
+	}
+	const url = new URL(window.location.href);
+	url.search = writeSettingsTabToSearch(url.search, { param, value });
+	window.history.replaceState(null, "", url);
+}
 
 function SettingsSaveError({
 	model,
@@ -135,38 +246,6 @@ function replaceRecipient(
 ) {
 	return recipients.map((recipient) =>
 		recipient.userId === nextRecipient.userId ? nextRecipient : recipient,
-	);
-}
-
-function createNotificationChannelConfig(
-	type: Exclude<NotificationChannel, "email">,
-): NotificationChannelConfig {
-	const timestamp = Date.now();
-	return {
-		id: `${type}:${timestamp}`,
-		type,
-		name: type === "webhook" ? "新的 Webhook" : "新的 WxPusher",
-		description: null,
-		enabled: true,
-		config:
-			type === "webhook"
-				? { url: "" }
-				: {
-						apiUrl: "https://wxpusher.zjiecode.com/api/send/message",
-						targetSummary: "",
-					},
-		secretConfig: {},
-		secretConfigured: false,
-	};
-}
-
-function updateChannelConfig(
-	configs: NotificationChannelConfig[],
-	configId: string,
-	patch: Partial<NotificationChannelConfig>,
-) {
-	return configs.map((config) =>
-		config.id === configId ? { ...config, ...patch } : config,
 	);
 }
 
@@ -312,6 +391,135 @@ function RecipientRoutesEditor({
 				</div>
 			</div>
 		</Field>
+	);
+}
+
+function SiteNotificationRecipientDialog({
+	open,
+	mode,
+	draft,
+	candidateUsers,
+	channelConfigs,
+	onOpenChange,
+	onDraftChange,
+	onSubmit,
+}: {
+	open: boolean;
+	mode: "create" | "edit";
+	draft: SiteNotificationRecipient | null;
+	candidateUsers: AdminUser[];
+	channelConfigs: NotificationChannelConfig[];
+	onOpenChange: (open: boolean) => void;
+	onDraftChange: (draft: SiteNotificationRecipient) => void;
+	onSubmit: () => void;
+}) {
+	return (
+		<Dialog.Root open={open} onOpenChange={onOpenChange}>
+			<Dialog.Content maxWidth="720px">
+				<Dialog.Title>
+					{mode === "create" ? "添加通知接收人" : "编辑通知接收人"}
+				</Dialog.Title>
+				<Dialog.Description size="2">
+					确认后才写回接收人列表；取消不会污染当前站点设置草稿。
+				</Dialog.Description>
+				<div className="mt-4 grid gap-3">
+					{mode === "create" ? (
+						<Field label="后台用户">
+							<select
+								className={inputClass}
+								value={draft?.userId ?? ""}
+								disabled={candidateUsers.length === 0}
+								onChange={(event) => {
+									const userId = Number(event.target.value);
+									const user = candidateUsers.find(
+										(item) => item.id === userId,
+									);
+									if (user) {
+										onDraftChange(makeRecipientFromUser(user));
+									}
+								}}
+							>
+								<option value="">
+									{candidateUsers.length > 0 ? "选择接收人" : "暂无可添加用户"}
+								</option>
+								{candidateUsers.map((user) => (
+									<option key={user.id} value={user.id}>
+										{user.displayName || user.username} / {user.email}
+									</option>
+								))}
+							</select>
+						</Field>
+					) : null}
+					{draft ? (
+						<>
+							<div className="rounded-md border bg-muted/30 p-3 text-sm">
+								<p className="font-medium">
+									{draft.displayName || draft.username}
+								</p>
+								<p className="text-xs text-muted-foreground">
+									{draft.username} / {draft.email}
+								</p>
+							</div>
+							<BooleanField
+								label="启用接收人"
+								checked={draft.enabled}
+								onCheckedChange={(enabled) =>
+									onDraftChange({ ...draft, enabled })
+								}
+							/>
+							<RecipientRoutesEditor
+								recipient={draft}
+								channelConfigs={channelConfigs}
+								onChange={onDraftChange}
+							/>
+							<Field label="内容策略">
+								<select
+									className={inputClass}
+									value={draft.includeCommentContent}
+									onChange={(event) =>
+										onDraftChange({
+											...draft,
+											includeCommentContent: event.target
+												.value as NotificationContentPolicy,
+										})
+									}
+								>
+									{contentPolicies.map((policy) => (
+										<option key={policy} value={policy}>
+											{contentPolicyLabels[policy]}
+										</option>
+									))}
+								</select>
+							</Field>
+							<Field label="限速 Profile">
+								<Input
+									value={draft.rateLimitProfile ?? ""}
+									placeholder="留空使用系统默认限速"
+									onChange={(event) =>
+										onDraftChange({
+											...draft,
+											rateLimitProfile: event.target.value.trim() || null,
+										})
+									}
+								/>
+							</Field>
+						</>
+					) : (
+						<EmptyState text="请选择接收人" />
+					)}
+					<div className="flex justify-end gap-2">
+						<Dialog.Close>
+							<Button type="button" variant="outline">
+								取消
+							</Button>
+						</Dialog.Close>
+						<Button type="button" disabled={!draft} onClick={onSubmit}>
+							确认
+						</Button>
+					</div>
+				</div>
+			</Dialog.Content>
+		</Dialog.Root>
 	);
 }
 
@@ -468,61 +676,511 @@ function NotificationChannelConfigEditor({
 	);
 }
 
-function ChannelTestControls({
+function NotificationChannelTestDialog({
+	open,
 	config,
 	defaultRecipient,
+	onOpenChange,
 	onTest,
 	pending,
 }: {
+	open: boolean;
 	config: NotificationChannelConfig;
 	defaultRecipient?: string;
+	onOpenChange: (open: boolean) => void;
 	onTest: (input: { channelConfigId: string; recipient?: string }) => void;
 	pending: boolean;
 }) {
 	const [recipient, setRecipient] = useState(defaultRecipient ?? "");
 
+	useEffect(() => {
+		if (open) {
+			setRecipient(defaultRecipient ?? "");
+		}
+	}, [defaultRecipient, open]);
+
 	return (
-		<div className="grid gap-2 rounded-md border bg-background p-3">
-			<div className="flex flex-col gap-2 md:flex-row md:items-end">
-				<Field label={`${notificationChannelConfigLabel(config)} 测试收件人`}>
-					<Input
-						value={recipient}
-						placeholder="留空使用当前管理员邮箱"
-						onChange={(event) => setRecipient(event.target.value)}
-					/>
-				</Field>
+		<Dialog.Root open={open} onOpenChange={onOpenChange}>
+			<Dialog.Content maxWidth="520px">
+				<Dialog.Title>测试通知通道</Dialog.Title>
+				<Dialog.Description size="2">
+					测试发送会创建 channel_test 通知任务，真实投递结果在任务中心查看。
+				</Dialog.Description>
+				<div className="mt-4 grid gap-3">
+					<div className="rounded-md border bg-muted/30 p-3 text-sm">
+						<p className="font-medium">
+							{notificationChannelConfigLabel(config)}
+						</p>
+						<p className="text-xs text-muted-foreground">
+							{notificationChannelTargetSummary(config)}
+						</p>
+					</div>
+					<Field label="测试收件人 / 目标">
+						<Input
+							value={recipient}
+							placeholder="留空使用当前管理员邮箱或通道默认目标"
+							onChange={(event) => setRecipient(event.target.value)}
+						/>
+					</Field>
+					<div className="flex justify-end gap-2">
+						<Dialog.Close>
+							<Button type="button" variant="outline">
+								取消
+							</Button>
+						</Dialog.Close>
+						<Button
+							type="button"
+							disabled={pending}
+							onClick={() =>
+								onTest({
+									channelConfigId: config.id,
+									recipient: recipient.trim() || undefined,
+								})
+							}
+						>
+							创建测试任务
+						</Button>
+					</div>
+				</div>
+			</Dialog.Content>
+		</Dialog.Root>
+	);
+}
+
+function MailTestPanel({
+	testable,
+	reason,
+	onOpen,
+}: {
+	testable: boolean;
+	reason: string;
+	onOpen: () => void;
+}) {
+	return (
+		<div className="rounded-md border bg-background p-3">
+			<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+				<div>
+					<p className="font-medium">邮件测试</p>
+					<p className="text-sm text-muted-foreground">
+						创建邮件通道测试任务，投递结果在任务中心查看。
+					</p>
+					{reason ? (
+						<p className="mt-1 text-xs text-muted-foreground">{reason}</p>
+					) : null}
+				</div>
 				<Button
 					type="button"
 					variant="outline"
-					disabled={pending}
-					onClick={() =>
-						onTest({
-							channelConfigId: config.id,
-							recipient: recipient.trim() || undefined,
-						})
-					}
+					disabled={!testable}
+					onClick={onOpen}
 				>
-					测试 {notificationChannelConfigLabel(config)}
+					测试邮件
 				</Button>
 			</div>
 		</div>
 	);
 }
 
+function NotificationChannelConfigList({
+	configs,
+	onAdd,
+	onEdit,
+	onRemove,
+	onTest,
+}: {
+	configs: NotificationChannelConfig[];
+	onAdd: (type: Exclude<NotificationChannel, "email">) => void;
+	onEdit: (config: NotificationChannelConfig) => void;
+	onRemove: (config: NotificationChannelConfig) => void;
+	onTest: (config: NotificationChannelConfig) => void;
+}) {
+	return (
+		<div className="grid gap-3">
+			<div className="flex flex-wrap gap-2">
+				<Button
+					type="button"
+					variant="outline"
+					onClick={() => onAdd("webhook")}
+				>
+					添加 Webhook
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					onClick={() => onAdd("wxpusher")}
+				>
+					添加 WxPusher
+				</Button>
+			</div>
+			<div className="overflow-x-auto rounded-md border bg-background">
+				<table className="w-full text-left text-sm">
+					<thead className="bg-muted/60">
+						<tr>
+							<th className="p-3">名称</th>
+							<th className="p-3">类型</th>
+							<th className="p-3">状态</th>
+							<th className="p-3">目标</th>
+							<th className="p-3">密钥</th>
+							<th className="p-3">操作</th>
+						</tr>
+					</thead>
+					<tbody>
+						{configs.map((config) => (
+							<tr key={config.id} className="border-t">
+								<td className="p-3">
+									<p className="font-medium">{config.name}</p>
+									<p className="text-xs text-muted-foreground">{config.id}</p>
+								</td>
+								<td className="p-3">
+									{notificationChannelLabels[config.type]}
+								</td>
+								<td className="p-3">
+									<Badge variant={config.enabled ? "secondary" : "outline"}>
+										{config.enabled ? "启用" : "停用"}
+									</Badge>
+								</td>
+								<td className="p-3">
+									{notificationChannelTargetSummary(config)}
+								</td>
+								<td className="p-3">
+									{config.type === "email"
+										? "使用 SMTP"
+										: config.secretConfigured
+											? "已配置"
+											: "未配置"}
+								</td>
+								<td className="p-3">
+									<div className="flex flex-wrap gap-2">
+										{config.type === "email" ? null : (
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												onClick={() => onEdit(config)}
+											>
+												编辑
+											</Button>
+										)}
+										{config.type === "email" ? (
+											<span className="text-xs text-muted-foreground">
+												到邮件页签测试
+											</span>
+										) : (
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												disabled={!config.enabled}
+												onClick={() => onTest(config)}
+											>
+												测试
+											</Button>
+										)}
+										{config.type === "email" ? null : (
+											<Button
+												type="button"
+												size="sm"
+												variant="destructive"
+												onClick={() => onRemove(config)}
+											>
+												删除
+											</Button>
+										)}
+									</div>
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	);
+}
+
+function NotificationChannelConfigDialog({
+	open,
+	draft,
+	mode,
+	onOpenChange,
+	onDraftChange,
+	onSubmit,
+}: {
+	open: boolean;
+	draft: NotificationChannelConfig | null;
+	mode: "create" | "edit";
+	onOpenChange: (open: boolean) => void;
+	onDraftChange: (draft: NotificationChannelConfig) => void;
+	onSubmit: () => void;
+}) {
+	if (!draft) {
+		return null;
+	}
+	return (
+		<Dialog.Root open={open} onOpenChange={onOpenChange}>
+			<Dialog.Content maxWidth="680px">
+				<Dialog.Title>
+					{mode === "create" ? "添加通知渠道" : "编辑通知渠道"}
+				</Dialog.Title>
+				<Dialog.Description size="2">
+					确认后才写回渠道列表；密钥字段留空时保留已有配置。
+				</Dialog.Description>
+				<div className="mt-4 grid gap-3">
+					<NotificationChannelConfigEditor
+						config={draft}
+						onChange={onDraftChange}
+					/>
+					<div className="flex justify-end gap-2">
+						<Dialog.Close>
+							<Button type="button" variant="outline">
+								取消
+							</Button>
+						</Dialog.Close>
+						<Button type="button" onClick={onSubmit}>
+							确认
+						</Button>
+					</div>
+				</div>
+			</Dialog.Content>
+		</Dialog.Root>
+	);
+}
+
+type NotificationTemplateDraft = {
+	format: NotificationTemplateFormat;
+	subjectTemplate: string;
+	bodyTemplate: string;
+};
+
+function notificationTemplateDraftFrom(
+	template: NotificationTemplate,
+): NotificationTemplateDraft {
+	return {
+		format: template.format,
+		subjectTemplate: template.subjectTemplate ?? "",
+		bodyTemplate: template.bodyTemplate,
+	};
+}
+
+function notificationTemplateOptionLabel(template: NotificationTemplate) {
+	return `${template.channelLabel} / ${template.formatLabel}`;
+}
+
+function notificationTemplateResultSummary(result: {
+	taskId: string;
+	deliveryId: string;
+	channel: NotificationChannel;
+	recipient: string;
+}) {
+	return `已创建测试任务 ${result.taskId}，投递记录 ${result.deliveryId}，通道 ${
+		notificationChannelLabels[result.channel]
+	}，收件人 ${result.recipient}。`;
+}
+
+function NotificationTemplatePreview({
+	format,
+	preview,
+}: {
+	format: NotificationTemplateFormat;
+	preview: RenderedNotificationTemplate | null;
+}) {
+	if (!preview) {
+		return <EmptyState text="尚未生成预览" />;
+	}
+	if (format === "html") {
+		return (
+			<div className="grid gap-2 rounded-md border p-3 text-sm">
+				<p className="font-medium">HTML 预览</p>
+				{preview.subject ? (
+					<p className="text-muted-foreground">主题：{preview.subject}</p>
+				) : null}
+				<iframe
+					title="通知模板 HTML 预览"
+					sandbox=""
+					srcDoc={preview.body}
+					className="h-56 w-full rounded border bg-background"
+				/>
+			</div>
+		);
+	}
+	if (format === "json") {
+		let formatted = preview.body;
+		let error: string | null = null;
+		try {
+			formatted = JSON.stringify(JSON.parse(preview.body), null, 2);
+		} catch (caught) {
+			error = caught instanceof Error ? caught.message : String(caught);
+		}
+		return (
+			<div className="grid gap-2 rounded-md border p-3 text-sm">
+				<p className="font-medium">JSON 预览</p>
+				{error ? (
+					<p className="text-xs font-medium text-destructive">
+						JSON 格式化失败：{error}
+					</p>
+				) : null}
+				<pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+					{formatted}
+				</pre>
+			</div>
+		);
+	}
+	return (
+		<div className="grid gap-2 rounded-md border p-3 text-sm">
+			<p className="font-medium">文本预览</p>
+			{preview.subject ? (
+				<p className="text-muted-foreground">主题：{preview.subject}</p>
+			) : null}
+			<pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+				{preview.body}
+			</pre>
+		</div>
+	);
+}
+
+function NotificationTemplateTestDialog({
+	open,
+	template,
+	recipient,
+	onRecipientChange,
+	onOpenChange,
+	onSubmit,
+	pending,
+}: {
+	open: boolean;
+	template: NotificationTemplate | null;
+	recipient: string;
+	onRecipientChange: (recipient: string) => void;
+	onOpenChange: (open: boolean) => void;
+	onSubmit: () => void;
+	pending: boolean;
+}) {
+	return (
+		<Dialog.Root open={open} onOpenChange={onOpenChange}>
+			<Dialog.Content maxWidth="520px">
+				<Dialog.Title>测试发送模板</Dialog.Title>
+				<Dialog.Description size="2">
+					测试发送会创建 template_test 通知任务，真实投递结果在任务中心查看。
+				</Dialog.Description>
+				<div className="mt-4 grid gap-3">
+					{template ? (
+						<div className="rounded-md border bg-muted/30 p-3 text-sm">
+							<p className="font-medium">{template.name}</p>
+							<p className="text-xs text-muted-foreground">
+								{notificationTemplateOptionLabel(template)}
+							</p>
+						</div>
+					) : null}
+					<Field label="测试收件人 / 目标">
+						<Input
+							value={recipient}
+							placeholder="留空使用当前管理员邮箱"
+							onChange={(event) => onRecipientChange(event.target.value)}
+						/>
+					</Field>
+					<div className="flex justify-end gap-2">
+						<Dialog.Close>
+							<Button type="button" variant="outline">
+								取消
+							</Button>
+						</Dialog.Close>
+						<Button
+							type="button"
+							disabled={!template || pending}
+							onClick={onSubmit}
+						>
+							创建测试任务
+						</Button>
+					</div>
+				</div>
+			</Dialog.Content>
+		</Dialog.Root>
+	);
+}
+
 function NotificationTemplatesPanel() {
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
 		queryKey: ["admin", "notification-templates"],
 		queryFn: listNotificationTemplates,
 	});
-	const [editing, setEditing] = useState<NotificationTemplate | null>(null);
-	const [format, setFormat] = useState<NotificationTemplateFormat>("text");
-	const [subjectTemplate, setSubjectTemplate] = useState("");
-	const [bodyTemplate, setBodyTemplate] = useState("");
+	const templates = query.data?.templates ?? [];
+	const events = Array.from(
+		templates
+			.reduce((byEvent, template) => {
+				if (!byEvent.has(template.eventType)) {
+					byEvent.set(template.eventType, []);
+				}
+				byEvent.get(template.eventType)?.push(template);
+				return byEvent;
+			}, new Map<string, NotificationTemplate[]>())
+			.entries(),
+	).map(([eventType, eventTemplates]) => ({
+		eventType,
+		eventLabel: eventTemplates[0]?.eventLabel ?? eventType,
+		eventDescription: eventTemplates[0]?.eventDescription ?? eventType,
+		triggerDescription: eventTemplates[0]?.triggerDescription ?? eventType,
+		recipientType: eventTemplates[0]?.recipientType ?? "通知接收人",
+		templates: eventTemplates,
+	}));
+	const [selectedEventType, setSelectedEventType] = useState("");
+	const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
+	const [drafts, setDrafts] = useState<
+		Record<string, NotificationTemplateDraft>
+	>({});
 	const [recipient, setRecipient] = useState("");
+	const [testOpen, setTestOpen] = useState(false);
 	const [preview, setPreview] = useState<RenderedNotificationTemplate | null>(
 		null,
 	);
+	const selectedEvent =
+		events.find((event) => event.eventType === selectedEventType) ?? events[0];
+	const selectedTemplate =
+		templates.find((template) => template.key === selectedTemplateKey) ??
+		selectedEvent?.templates[0] ??
+		null;
+	const draft = selectedTemplate
+		? (drafts[selectedTemplate.key] ??
+			notificationTemplateDraftFrom(selectedTemplate))
+		: null;
+	const isDirty =
+		Boolean(selectedTemplate && draft) &&
+		(draft?.format !== selectedTemplate?.format ||
+			draft?.subjectTemplate !== (selectedTemplate?.subjectTemplate ?? "") ||
+			draft?.bodyTemplate !== selectedTemplate?.bodyTemplate);
+
+	useEffect(() => {
+		if (!selectedEventType && events[0]) {
+			setSelectedEventType(events[0].eventType);
+		}
+	}, [events, selectedEventType]);
+
+	useEffect(() => {
+		if (
+			selectedEvent &&
+			(!selectedTemplateKey ||
+				!selectedEvent.templates.some(
+					(template) => template.key === selectedTemplateKey,
+				))
+		) {
+			setSelectedTemplateKey(selectedEvent.templates[0]?.key ?? "");
+			setPreview(null);
+		}
+	}, [selectedEvent, selectedTemplateKey]);
+
+	const updateDraft = (
+		template: NotificationTemplate,
+		patch: Partial<NotificationTemplateDraft>,
+	) => {
+		setDrafts((current) => ({
+			...current,
+			[template.key]: {
+				...(current[template.key] ?? notificationTemplateDraftFrom(template)),
+				...patch,
+			},
+		}));
+		setPreview(null);
+	};
 	const updateMutation = useMutation({
 		mutationFn: (input: {
 			templateKey: string;
@@ -536,7 +1194,12 @@ function NotificationTemplatesPanel() {
 				bodyTemplate: input.bodyTemplate,
 			}),
 		onSuccess: ({ template }) => {
-			setEditing(template);
+			setDrafts((current) => ({
+				...current,
+				[template.key]: notificationTemplateDraftFrom(template),
+			}));
+			setSelectedEventType(template.eventType);
+			setSelectedTemplateKey(template.key);
 			void queryClient.invalidateQueries({
 				queryKey: ["admin", "notification-templates"],
 			});
@@ -554,10 +1217,13 @@ function NotificationTemplatesPanel() {
 	const restoreMutation = useMutation({
 		mutationFn: restoreNotificationTemplateDefault,
 		onSuccess: ({ template }) => {
-			setEditing(template);
-			setFormat(template.format);
-			setSubjectTemplate(template.subjectTemplate ?? "");
-			setBodyTemplate(template.bodyTemplate);
+			setDrafts((current) => ({
+				...current,
+				[template.key]: notificationTemplateDraftFrom(template),
+			}));
+			setSelectedEventType(template.eventType);
+			setSelectedTemplateKey(template.key);
+			setPreview(null);
 			void queryClient.invalidateQueries({
 				queryKey: ["admin", "notification-templates"],
 			});
@@ -568,184 +1234,271 @@ function NotificationTemplatesPanel() {
 			testNotificationTemplate(input.templateKey, {
 				recipient: input.recipient,
 			}),
-		onSuccess: ({ preview: rendered }) => setPreview(rendered),
+		onSuccess: ({ preview: rendered }) => {
+			setPreview(rendered);
+			setTestOpen(false);
+		},
 	});
-	const openTemplate = (template: NotificationTemplate) => {
-		setEditing(template);
-		setFormat(template.format);
-		setSubjectTemplate(template.subjectTemplate ?? "");
-		setBodyTemplate(template.bodyTemplate);
-		setPreview(null);
+	const currentPayload =
+		selectedTemplate && draft
+			? {
+					templateKey: selectedTemplate.key,
+					format: draft.format,
+					subjectTemplate: selectedTemplate.supportsSubject
+						? draft.subjectTemplate.trim() || null
+						: null,
+					bodyTemplate: draft.bodyTemplate,
+				}
+			: null;
+	const restoreCurrentTemplate = async () => {
+		if (!selectedTemplate) {
+			return;
+		}
+		const confirmed = await confirm({
+			title: "恢复默认模板",
+			description: "确认恢复当前模板为默认内容？这个操作只影响当前模板。",
+			confirmText: "恢复默认",
+			destructive: true,
+		});
+		if (confirmed) {
+			restoreMutation.mutate(selectedTemplate.key);
+		}
 	};
-	const currentPayload = editing
-		? {
-				templateKey: editing.key,
-				format,
-				subjectTemplate: subjectTemplate.trim() || null,
-				bodyTemplate,
-			}
-		: null;
+	const previewError = buildSettingsErrorModel(
+		previewMutation.error,
+		"模板预览失败。",
+	);
+	const updateError = buildSettingsErrorModel(
+		updateMutation.error,
+		"模板保存失败。",
+	);
+	const restoreError = buildSettingsErrorModel(
+		restoreMutation.error,
+		"恢复默认模板失败。",
+	);
+	const testError = buildSettingsErrorModel(
+		testMutation.error,
+		"模板测试发送失败。",
+	);
 
 	return (
 		<SettingsSection
 			title="模板管理"
-			description="通知模板支持列表、编辑、预览、恢复默认和测试发送；测试发送会创建 template_test 通知任务。"
+			description="按事件和格式编辑通知模板；预览走服务端 renderer，测试发送只创建 template_test 任务。"
 		>
 			<div className="grid gap-4">
-				<div className="overflow-x-auto rounded-md border bg-background">
-					<table className="w-full text-left text-sm">
-						<thead className="bg-muted/60">
-							<tr>
-								<th className="p-3">模板</th>
-								<th className="p-3">通道</th>
-								<th className="p-3">事件</th>
-								<th className="p-3">状态</th>
-								<th className="p-3">操作</th>
-							</tr>
-						</thead>
-						<tbody>
-							{query.data?.templates.map((template) => (
-								<tr key={template.key} className="border-t">
-									<td className="p-3">
-										<p className="font-medium">{template.name}</p>
-										<p className="text-xs text-muted-foreground">
-											{template.description}
-										</p>
-									</td>
-									<td className="p-3">{template.channelLabel}</td>
-									<td className="p-3">
-										<p>{template.eventLabel}</p>
-										<p className="text-xs text-muted-foreground">
-											{template.eventDescription}
-										</p>
-									</td>
-									<td className="p-3">
-										<Badge
-											variant={template.isCustomized ? "secondary" : "outline"}
-										>
-											{template.isCustomized ? "已自定义" : "默认"}
-										</Badge>
-									</td>
-									<td className="p-3">
-										<Button
-											type="button"
-											size="sm"
-											variant="outline"
-											onClick={() => openTemplate(template)}
-										>
-											编辑
-										</Button>
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
-				{editing ? (
-					<div className="grid gap-3 rounded-md border bg-background p-3">
-						<div className="flex flex-wrap items-center gap-2">
-							<Badge variant="outline">{editing.channelLabel}</Badge>
-							<Badge variant="outline">{editing.eventLabel}</Badge>
-							<Badge variant="outline">{editing.formatLabel}</Badge>
-							<span className="text-sm font-medium">{editing.name}</span>
-							<span className="text-xs text-muted-foreground">
-								{editing.key}
-							</span>
-						</div>
-						<div className="grid gap-3 md:grid-cols-2">
-							<Field label="格式">
-								<select
-									className={inputClass}
-									value={format}
-									onChange={(event) =>
-										setFormat(event.target.value as NotificationTemplateFormat)
-									}
-								>
-									<option value="text">text</option>
-									<option value="html">HTML</option>
-									<option value="json">JSON</option>
-								</select>
-							</Field>
-							<Field label="测试收件人">
-								<Input
-									value={recipient}
-									placeholder="留空使用当前管理员邮箱"
-									onChange={(event) => setRecipient(event.target.value)}
-								/>
-							</Field>
-						</div>
-						<Field label="邮件主题模板">
-							<Input
-								value={subjectTemplate}
-								onChange={(event) => setSubjectTemplate(event.target.value)}
-							/>
-						</Field>
-						<Field label="消息正文模板">
-							<textarea
-								className={textareaClass}
-								value={bodyTemplate}
-								onChange={(event) => setBodyTemplate(event.target.value)}
-							/>
-						</Field>
-						<div className="flex flex-wrap gap-2">
-							<Button
-								type="button"
-								variant="outline"
-								disabled={!currentPayload || previewMutation.isPending}
-								onClick={() =>
-									currentPayload && previewMutation.mutate(currentPayload)
-								}
-							>
-								预览
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								disabled={!currentPayload || updateMutation.isPending}
-								onClick={() =>
-									currentPayload && updateMutation.mutate(currentPayload)
-								}
-							>
-								保存
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								disabled={!editing || restoreMutation.isPending}
-								onClick={() => restoreMutation.mutate(editing.key)}
-							>
-								恢复默认
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								disabled={!editing || testMutation.isPending}
-								onClick={() =>
-									testMutation.mutate({
-										templateKey: editing.key,
-										recipient: recipient.trim() || undefined,
-									})
-								}
-							>
-								测试发送
-							</Button>
-						</div>
-						{preview ? (
-							<div className="grid gap-2 rounded-md border p-3 text-sm">
-								<p className="font-medium">预览结果</p>
-								<p>主题：{preview.subject ?? "-"}</p>
-								<pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
-									{preview.body}
-								</pre>
+				<SettingsSaveError model={previewError} fallback="模板预览失败" />
+				<SettingsSaveError model={updateError} fallback="模板保存失败" />
+				<SettingsSaveError model={restoreError} fallback="恢复默认模板失败" />
+				<SettingsSaveError model={testError} fallback="模板测试发送失败" />
+				{templates.length === 0 ? (
+					<EmptyState text={query.isLoading ? "模板加载中" : "暂无通知模板"} />
+				) : null}
+				{selectedEvent && selectedTemplate && draft ? (
+					<>
+						<div className="grid gap-3 lg:grid-cols-[minmax(220px,280px)_minmax(260px,1fr)]">
+							<div className="grid gap-3 rounded-md border bg-background p-3">
+								<Field label="通知事件">
+									<select
+										className={inputClass}
+										value={selectedEvent.eventType}
+										onChange={(event) => {
+											const nextEvent = events.find(
+												(item) => item.eventType === event.target.value,
+											);
+											setSelectedEventType(event.target.value);
+											setSelectedTemplateKey(
+												nextEvent?.templates[0]?.key ?? "",
+											);
+											setPreview(null);
+										}}
+									>
+										{events.map((event) => (
+											<option key={event.eventType} value={event.eventType}>
+												{event.eventLabel}
+											</option>
+										))}
+									</select>
+								</Field>
+								<Field label="通道 / 格式">
+									<select
+										className={inputClass}
+										value={selectedTemplate.key}
+										onChange={(event) => {
+											setSelectedTemplateKey(event.target.value);
+											setPreview(null);
+										}}
+									>
+										{selectedEvent.templates.map((template) => (
+											<option key={template.key} value={template.key}>
+												{notificationTemplateOptionLabel(template)}
+											</option>
+										))}
+									</select>
+								</Field>
+								<div className="rounded-md border bg-muted/30 p-3 text-sm leading-6 text-muted-foreground">
+									<p className="font-medium text-foreground">
+										{selectedEvent.eventLabel}
+									</p>
+									<p>{selectedEvent.eventDescription}</p>
+									<p>{selectedEvent.triggerDescription}</p>
+									<p>接收人：{selectedEvent.recipientType}</p>
+								</div>
+								<div className="flex flex-wrap gap-2">
+									<Badge
+										variant={
+											selectedTemplate.isCustomized ? "secondary" : "outline"
+										}
+									>
+										{selectedTemplate.isCustomized ? "已自定义" : "默认"}
+									</Badge>
+									{isDirty ? <Badge variant="outline">未保存</Badge> : null}
+									<Badge variant="outline">{selectedTemplate.key}</Badge>
+								</div>
 							</div>
-						) : null}
+							<div className="grid gap-3 rounded-md border bg-background p-3">
+								<div>
+									<p className="font-medium">{selectedTemplate.name}</p>
+									<p className="text-sm leading-6 text-muted-foreground">
+										{selectedTemplate.description}
+									</p>
+								</div>
+								<div className="grid gap-3 md:grid-cols-2">
+									<Field label="格式">
+										<select
+											className={inputClass}
+											value={draft.format}
+											onChange={(event) =>
+												updateDraft(selectedTemplate, {
+													format: event.target
+														.value as NotificationTemplateFormat,
+												})
+											}
+										>
+											<option value="text">纯文本</option>
+											<option value="html">HTML</option>
+											<option value="json">JSON</option>
+										</select>
+									</Field>
+									<Field label="当前通道">
+										<Input
+											value={selectedTemplate.channelLabel}
+											readOnly
+											aria-readonly="true"
+										/>
+									</Field>
+								</div>
+								{selectedTemplate.supportsSubject ? (
+									<Field label="主题模板">
+										<Input
+											value={draft.subjectTemplate}
+											onChange={(event) =>
+												updateDraft(selectedTemplate, {
+													subjectTemplate: event.target.value,
+												})
+											}
+										/>
+									</Field>
+								) : (
+									<div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+										当前模板格式不使用主题字段。
+									</div>
+								)}
+								<Field label="正文模板">
+									<textarea
+										className={`${textareaClass} min-h-48 font-mono`}
+										value={draft.bodyTemplate}
+										onChange={(event) =>
+											updateDraft(selectedTemplate, {
+												bodyTemplate: event.target.value,
+											})
+										}
+									/>
+								</Field>
+								<div className="flex flex-wrap gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										disabled={!currentPayload || previewMutation.isPending}
+										onClick={() =>
+											currentPayload && previewMutation.mutate(currentPayload)
+										}
+									>
+										刷新预览
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										disabled={!currentPayload || updateMutation.isPending}
+										onClick={() =>
+											currentPayload && updateMutation.mutate(currentPayload)
+										}
+									>
+										保存
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										disabled={!selectedTemplate || restoreMutation.isPending}
+										onClick={() => void restoreCurrentTemplate()}
+									>
+										恢复默认
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										disabled={!selectedTemplate || testMutation.isPending}
+										onClick={() => setTestOpen(true)}
+									>
+										测试发送
+									</Button>
+								</div>
+							</div>
+						</div>
+						<div className="grid gap-3 lg:grid-cols-[minmax(220px,320px)_1fr]">
+							<div className="grid gap-2 rounded-md border bg-background p-3 text-sm">
+								<p className="font-medium">可用占位符</p>
+								{selectedTemplate.placeholders.map((placeholder) => (
+									<div key={placeholder.path} className="rounded border p-2">
+										<code className="text-xs">{`{{${placeholder.path}}}`}</code>
+										<p className="mt-1 font-medium">{placeholder.label}</p>
+										<p className="text-xs text-muted-foreground">
+											{placeholder.description}
+										</p>
+										{draft.format === "json" && placeholder.jsonSupported ? (
+											<code className="mt-1 block text-xs text-muted-foreground">
+												{`{{json ${placeholder.path}}}`}
+											</code>
+										) : null}
+									</div>
+								))}
+							</div>
+							<NotificationTemplatePreview
+								format={draft.format}
+								preview={preview}
+							/>
+						</div>
 						{testMutation.data ? (
 							<div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">
-								已创建模板测试任务 {testMutation.data.taskId}，收件人{" "}
-								{testMutation.data.recipient}。
+								{notificationTemplateResultSummary(testMutation.data)}
 							</div>
 						) : null}
-					</div>
+						<NotificationTemplateTestDialog
+							open={testOpen}
+							template={selectedTemplate}
+							recipient={recipient}
+							onRecipientChange={setRecipient}
+							onOpenChange={setTestOpen}
+							onSubmit={() =>
+								selectedTemplate &&
+								testMutation.mutate({
+									templateKey: selectedTemplate.key,
+									recipient: recipient.trim() || undefined,
+								})
+							}
+							pending={testMutation.isPending}
+						/>
+					</>
 				) : null}
 			</div>
 		</SettingsSection>
@@ -755,6 +1508,7 @@ function NotificationTemplatesPanel() {
 export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
+	const [createOpen, setCreateOpen] = useState(false);
 	const [targetValue, setTargetValue] = useState("");
 	const [reason, setReason] = useState("");
 	const [search, setSearch] = useState("");
@@ -781,6 +1535,7 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 		onSuccess() {
 			setTargetValue("");
 			setReason("");
+			setCreateOpen(false);
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 	});
@@ -802,134 +1557,152 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 	};
 
 	return (
-		<div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-lg">新增黑名单</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<form
-						className="flex flex-col gap-3"
-						onSubmit={(event) => {
-							event.preventDefault();
-							if (!targetValue.trim()) {
-								return;
-							}
-							createMutation.mutate({
-								siteKey,
-								targetType,
-								matchMode,
-								scope,
-								targetValue,
-								reason: reason || undefined,
-							});
-						}}
-					>
-						<Field label="目标类型">
-							<select
-								className={inputClass}
-								value={targetType}
-								onChange={(event) =>
-									setTargetType(event.target.value as typeof targetType)
-								}
+		<Card>
+			<CardHeader>
+				<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+					<div>
+						<CardTitle className="text-lg">黑名单规则</CardTitle>
+						<CardDescription>
+							按邮箱、访客或 IP 管理评论与访问拦截规则。
+						</CardDescription>
+					</div>
+					<Button type="button" onClick={() => setCreateOpen(true)}>
+						新增规则
+					</Button>
+				</div>
+			</CardHeader>
+			<CardContent className="grid gap-3">
+				<Input
+					placeholder="搜索黑名单"
+					value={search}
+					onChange={(event) => {
+						setSearch(event.target.value);
+						setPageIndex(0);
+					}}
+				/>
+				<PaginationControls
+					limit={limit}
+					pageIndex={pageIndex}
+					totalCount={query.data?.pagination.totalCount ?? 0}
+					itemCount={query.data?.items.length ?? 0}
+					setLimit={setLimit}
+					setPageIndex={setPageIndex}
+				/>
+				{query.data?.items.map((rule) => (
+					<div key={rule.id} className="rounded-md border p-3">
+						<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+							<div>
+								<p className="font-medium">{rule.targetValue}</p>
+								<p className="text-xs text-muted-foreground">
+									{labelFor(blacklistTargetTypeLabels, rule.targetType)} /{" "}
+									{labelFor(blacklistMatchModeLabels, rule.matchMode)} /{" "}
+									{labelFor(scopeLabels, rule.scope)}
+									{rule.reason ? ` / ${rule.reason}` : ""}
+									{rule.expiresAt ? ` / 过期 ${rule.expiresAt}` : ""}
+								</p>
+							</div>
+							<Button
+								type="button"
+								size="sm"
+								variant="destructive"
+								onClick={() => void removeRule(rule.id)}
 							>
-								<option value="email">邮箱</option>
-								<option value="visitor">访客</option>
-								<option value="ip">IP</option>
-							</select>
-						</Field>
-						<Field label="匹配模式">
-							<select
-								className={inputClass}
-								value={matchMode}
-								onChange={(event) =>
-									setMatchMode(event.target.value as typeof matchMode)
+								删除
+							</Button>
+						</div>
+					</div>
+				))}
+				{query.data?.items.length === 0 ? (
+					<EmptyState text="暂无黑名单规则" />
+				) : null}
+				<Dialog.Root open={createOpen} onOpenChange={setCreateOpen}>
+					<Dialog.Content maxWidth="520px">
+						<Dialog.Title>新增黑名单规则</Dialog.Title>
+						<Dialog.Description size="2">
+							确认后创建规则；取消不会保留新规则草稿。
+						</Dialog.Description>
+						<form
+							className="mt-4 flex flex-col gap-3"
+							onSubmit={(event) => {
+								event.preventDefault();
+								if (!targetValue.trim()) {
+									return;
 								}
-							>
-								<option value="exact">精确</option>
-								<option value="wildcard">通配</option>
-								<option value="cidr">CIDR</option>
-							</select>
-						</Field>
-						<Field label="作用域">
-							<select
-								className={inputClass}
-								value={scope}
-								onChange={(event) =>
-									setScope(event.target.value as typeof scope)
-								}
-							>
-								<option value="post">当前页面</option>
-								<option value="all">全局</option>
-							</select>
-						</Field>
-						<Field label="目标值">
-							<Input
-								value={targetValue}
-								onChange={(event) => setTargetValue(event.target.value)}
-							/>
-						</Field>
-						<Field label="原因">
-							<Input
-								value={reason}
-								onChange={(event) => setReason(event.target.value)}
-							/>
-						</Field>
-						<Button type="submit" disabled={createMutation.isPending}>
-							新增规则
-						</Button>
-					</form>
-				</CardContent>
-			</Card>
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-lg">黑名单规则</CardTitle>
-				</CardHeader>
-				<CardContent className="grid gap-3">
-					<Input
-						placeholder="搜索黑名单"
-						value={search}
-						onChange={(event) => {
-							setSearch(event.target.value);
-							setPageIndex(0);
-						}}
-					/>
-					<PaginationControls
-						limit={limit}
-						pageIndex={pageIndex}
-						totalCount={query.data?.pagination.totalCount ?? 0}
-						itemCount={query.data?.items.length ?? 0}
-						setLimit={setLimit}
-						setPageIndex={setPageIndex}
-					/>
-					{query.data?.items.map((rule) => (
-						<div key={rule.id} className="rounded-md border p-3">
-							<div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-								<div>
-									<p className="font-medium">{rule.targetValue}</p>
-									<p className="text-xs text-muted-foreground">
-										{labelFor(blacklistTargetTypeLabels, rule.targetType)} /{" "}
-										{labelFor(blacklistMatchModeLabels, rule.matchMode)} /{" "}
-										{labelFor(scopeLabels, rule.scope)}
-									</p>
-								</div>
-								<Button
-									type="button"
-									size="sm"
-									variant="destructive"
-									onClick={() => void removeRule(rule.id)}
+								createMutation.mutate({
+									siteKey,
+									targetType,
+									matchMode,
+									scope,
+									targetValue,
+									reason: reason || undefined,
+								});
+							}}
+						>
+							<Field label="目标类型">
+								<select
+									className={inputClass}
+									value={targetType}
+									onChange={(event) =>
+										setTargetType(event.target.value as typeof targetType)
+									}
 								>
-									删除
+									<option value="email">邮箱</option>
+									<option value="visitor">访客</option>
+									<option value="ip">IP</option>
+								</select>
+							</Field>
+							<Field label="匹配模式">
+								<select
+									className={inputClass}
+									value={matchMode}
+									onChange={(event) =>
+										setMatchMode(event.target.value as typeof matchMode)
+									}
+								>
+									<option value="exact">精确</option>
+									<option value="wildcard">通配</option>
+									<option value="cidr">CIDR</option>
+								</select>
+							</Field>
+							<Field label="作用域">
+								<select
+									className={inputClass}
+									value={scope}
+									onChange={(event) =>
+										setScope(event.target.value as typeof scope)
+									}
+								>
+									<option value="post">当前页面</option>
+									<option value="all">全局</option>
+								</select>
+							</Field>
+							<Field label="目标值">
+								<Input
+									value={targetValue}
+									onChange={(event) => setTargetValue(event.target.value)}
+								/>
+							</Field>
+							<Field label="原因">
+								<Input
+									value={reason}
+									onChange={(event) => setReason(event.target.value)}
+								/>
+							</Field>
+							<div className="flex justify-end gap-2">
+								<Dialog.Close>
+									<Button type="button" variant="outline">
+										取消
+									</Button>
+								</Dialog.Close>
+								<Button type="submit" disabled={createMutation.isPending}>
+									新增规则
 								</Button>
 							</div>
-						</div>
-					))}
-					{query.data?.items.length === 0 ? (
-						<EmptyState text="暂无黑名单规则" />
-					) : null}
-				</CardContent>
-			</Card>
-		</div>
+						</form>
+					</Dialog.Content>
+				</Dialog.Root>
+			</CardContent>
+		</Card>
 	);
 }
 
@@ -947,11 +1720,26 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		enabled: Boolean(resolvedSiteKey),
 	});
 	const [draft, setDraft] = useState<AdminSettings | null>(null);
+	const [recipientDialog, setRecipientDialog] = useState<{
+		mode: "create" | "edit";
+		draft: SiteNotificationRecipient | null;
+	} | null>(null);
+	const [siteTab, setSiteTab] = useState<SiteSettingsTab>(() =>
+		initialSettingsTab("siteTab", siteSettingsTabs, "comments"),
+	);
 	const mutation = useMutation({
-		mutationFn: (input: AdminSettings) => updateSettings(input.siteKey, input),
+		mutationFn: (input: { section: SiteSettingsTab; payload: unknown }) =>
+			patchAdminSiteSettingsSection(
+				resolvedSiteKey,
+				input.section,
+				input.payload,
+			),
 		onSuccess: (settings) => {
 			setDraft(settings);
-			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+			queryClient.setQueryData(
+				["admin", "settings", resolvedSiteKey],
+				settings,
+			);
 		},
 	});
 
@@ -960,6 +1748,13 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			setDraft(query.data);
 		}
 	}, [query.data]);
+	const setControlledSiteTab = (nextTab: string) => {
+		const normalized = siteSettingsTabs.includes(nextTab as SiteSettingsTab)
+			? (nextTab as SiteSettingsTab)
+			: "comments";
+		setSiteTab(normalized);
+		replaceSettingsTabQuery("siteTab", normalized);
+	};
 
 	if (!draft) {
 		if (!resolvedSiteKey) {
@@ -1040,6 +1835,24 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			},
 		});
 	};
+	const openRecipientCreateDialog = () =>
+		setRecipientDialog({ mode: "create", draft: null });
+	const openRecipientEditDialog = (recipient: SiteNotificationRecipient) =>
+		setRecipientDialog({
+			mode: "edit",
+			draft: structuredClone(recipient),
+		});
+	const submitRecipientDialog = () => {
+		if (!recipientDialog?.draft) {
+			return;
+		}
+		const nextRecipients =
+			recipientDialog.mode === "create"
+				? [...notificationRecipients, recipientDialog.draft]
+				: replaceRecipient(notificationRecipients, recipientDialog.draft);
+		setNotificationRecipients(nextRecipients);
+		setRecipientDialog(null);
+	};
 
 	return (
 		<Card>
@@ -1052,11 +1865,18 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 					className="grid gap-4 md:grid-cols-2"
 					onSubmit={(event) => {
 						event.preventDefault();
-						mutation.mutate(draft);
+						mutation.mutate({
+							section: siteTab,
+							payload: buildSiteSettingsSectionPayload(siteTab, draft),
+						});
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="站点设置保存失败" />
-					<Tabs.Root defaultValue="comments" className="md:col-span-2">
+					<Tabs.Root
+						value={siteTab}
+						onValueChange={setControlledSiteTab}
+						className="md:col-span-2"
+					>
 						<Tabs.List>
 							<Tabs.Trigger value="comments">评论</Tabs.Trigger>
 							<Tabs.Trigger value="engagement">访客与计数</Tabs.Trigger>
@@ -1782,6 +2602,16 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 										description="接收人必须是启用状态且有当前站点权限的后台用户；保存后会替换当前站点接收人列表。"
 									>
 										<div className="grid gap-3">
+											<div>
+												<Button
+													type="button"
+													variant="outline"
+													disabled={notificationCandidateUsers.length === 0}
+													onClick={openRecipientCreateDialog}
+												>
+													添加接收人
+												</Button>
+											</div>
 											{notificationRecipients.map((recipient) => (
 												<div
 													key={recipient.userId}
@@ -1795,8 +2625,36 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															<p className="text-xs text-muted-foreground">
 																{recipient.username} / {recipient.email}
 															</p>
+															<p className="mt-1 text-xs text-muted-foreground">
+																{recipient.routes
+																	.map(
+																		(route) =>
+																			`${siteNotificationEventLabels[route.eventType]} -> ${
+																				route.channelName ??
+																				route.channelConfigId
+																			}`,
+																	)
+																	.join("；")}
+															</p>
+															<p className="mt-1 text-xs text-muted-foreground">
+																{
+																	contentPolicyLabels[
+																		recipient.includeCommentContent
+																	]
+																}
+																{recipient.rateLimitProfile
+																	? ` / ${recipient.rateLimitProfile}`
+																	: ""}
+															</p>
 														</div>
 														<div className="flex flex-wrap gap-2">
+															<Badge
+																variant={
+																	recipient.enabled ? "secondary" : "outline"
+																}
+															>
+																{recipient.enabled ? "启用" : "停用"}
+															</Badge>
 															<Button
 																type="button"
 																size="sm"
@@ -1818,6 +2676,16 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															<Button
 																type="button"
 																size="sm"
+																variant="outline"
+																onClick={() =>
+																	openRecipientEditDialog(recipient)
+																}
+															>
+																编辑
+															</Button>
+															<Button
+																type="button"
+																size="sm"
 																variant="destructive"
 																onClick={() =>
 																	setNotificationRecipients(
@@ -1832,108 +2700,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															</Button>
 														</div>
 													</div>
-													<div className="grid gap-3 md:grid-cols-[2fr_1fr]">
-														<RecipientRoutesEditor
-															recipient={recipient}
-															channelConfigs={
-																draft.notifications.channelConfigs
-															}
-															onChange={(nextRecipient) =>
-																setNotificationRecipients(
-																	replaceRecipient(
-																		notificationRecipients,
-																		nextRecipient,
-																	),
-																)
-															}
-														/>
-														<Field label="内容策略">
-															<select
-																className={inputClass}
-																value={recipient.includeCommentContent}
-																onChange={(event) =>
-																	setNotificationRecipients(
-																		updateRecipient(
-																			notificationRecipients,
-																			recipient.userId,
-																			{
-																				includeCommentContent: event.target
-																					.value as NotificationContentPolicy,
-																			},
-																		),
-																	)
-																}
-															>
-																{contentPolicies.map((policy) => (
-																	<option key={policy} value={policy}>
-																		{contentPolicyLabels[policy]}
-																	</option>
-																))}
-															</select>
-														</Field>
-													</div>
-													<Field label="限速 Profile">
-														<Input
-															value={recipient.rateLimitProfile ?? ""}
-															placeholder="留空使用系统默认限速"
-															onChange={(event) =>
-																setNotificationRecipients(
-																	updateRecipient(
-																		notificationRecipients,
-																		recipient.userId,
-																		{
-																			rateLimitProfile:
-																				event.target.value.trim() || null,
-																		},
-																	),
-																)
-															}
-														/>
-													</Field>
 												</div>
 											))}
 											{notificationRecipients.length === 0 ? (
 												<EmptyState text="暂无后台通知接收人" />
 											) : null}
-											<div className="grid gap-2 rounded-md border bg-background p-3">
-												<Field label="候选用户">
-													<select
-														className={inputClass}
-														value=""
-														disabled={notificationCandidateUsers.length === 0}
-														onChange={(event) => {
-															const userId = Number(event.target.value);
-															const user = notificationCandidateUsers.find(
-																(item) => item.id === userId,
-															);
-															if (!user) {
-																return;
-															}
-															setNotificationRecipients([
-																...notificationRecipients,
-																makeRecipientFromUser(user),
-															]);
-														}}
-													>
-														<option value="">
-															{notificationCandidateUsers.length > 0
-																? "选择接收人"
-																: "暂无可添加用户"}
-														</option>
-														{notificationCandidateUsers.map((user) => (
-															<option key={user.id} value={user.id}>
-																{user.displayName || user.username} /{" "}
-																{user.email}
-															</option>
-														))}
-													</select>
-												</Field>
-												<p className="text-xs text-muted-foreground">
-													当前候选来源为后台用户列表；后端暂无独立 notification
-													candidates
-													接口时，前端按启用状态和站点权限做展示过滤。
-												</p>
-											</div>
 										</div>
 									</SettingsSection>
 								</div>
@@ -1942,10 +2713,28 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 					</Tabs.Root>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
-							保存站点设置
+							{siteSectionSaveLabels[siteTab]}
 						</Button>
 					</div>
 				</form>
+				<SiteNotificationRecipientDialog
+					open={Boolean(recipientDialog)}
+					mode={recipientDialog?.mode ?? "create"}
+					draft={recipientDialog?.draft ?? null}
+					candidateUsers={notificationCandidateUsers}
+					channelConfigs={draft.notifications.channelConfigs}
+					onOpenChange={(open) => {
+						if (!open) {
+							setRecipientDialog(null);
+						}
+					}}
+					onDraftChange={(nextDraft) =>
+						setRecipientDialog((current) =>
+							current ? { ...current, draft: nextDraft } : current,
+						)
+					}
+					onSubmit={submitRecipientDialog}
+				/>
 			</CardContent>
 		</Card>
 	);
@@ -2010,25 +2799,48 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 		queryFn: getSystemSettings,
 	});
 	const [draft, setDraft] = useState<AdminSystemSettings | null>(null);
-	const [newChannelType, setNewChannelType] =
-		useState<Exclude<NotificationChannel, "email">>("webhook");
+	const [channelDialog, setChannelDialog] = useState<{
+		mode: "create" | "edit";
+		draft: NotificationChannelConfig;
+	} | null>(null);
+	const [channelTestConfig, setChannelTestConfig] =
+		useState<NotificationChannelConfig | null>(null);
+	const [systemTab, setSystemTab] = useState<SystemSettingsTab>(() =>
+		initialSettingsTab("systemTab", systemSettingsTabs, "security"),
+	);
+	const [savedMailSettings, setSavedMailSettings] = useState<
+		AdminSystemSettings["mail"] | null
+	>(null);
 	const mutation = useMutation({
-		mutationFn: updateSystemSettings,
+		mutationFn: (input: { section: SystemSettingsTab; payload: unknown }) =>
+			patchAdminSystemSettingsSection(input.section, input.payload),
 		onSuccess: (settings) => {
 			setDraft(settings);
-			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+			setSavedMailSettings(settings.mail);
+			queryClient.setQueryData(["admin", "system-settings"], settings);
 		},
 	});
 	const channelTestMutation = useMutation({
 		mutationFn: (input: { channelConfigId: string; recipient?: string }) =>
 			testNotificationChannel({ ...input, siteKey }),
 	});
+	const mailTestMutation = useMutation({
+		mutationFn: () => testSystemMail(),
+	});
 
 	useEffect(() => {
 		if (query.data) {
 			setDraft(query.data);
+			setSavedMailSettings(query.data.mail);
 		}
 	}, [query.data]);
+	const setControlledSystemTab = (nextTab: string) => {
+		const normalized = systemSettingsTabs.includes(nextTab as SystemSettingsTab)
+			? (nextTab as SystemSettingsTab)
+			: "security";
+		setSystemTab(normalized);
+		replaceSettingsTabQuery("systemTab", normalized);
+	};
 
 	if (!draft) {
 		return <EmptyState text="加载中" />;
@@ -2052,6 +2864,69 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 		channelTestMutation.error,
 		"通知通道测试失败。",
 	);
+	const mailTestError = buildSettingsErrorModel(
+		mailTestMutation.error,
+		"邮件测试失败。",
+	);
+	const mailTestState = mailChannelTestState({
+		settings: draft,
+		dirty: savedMailSettings
+			? JSON.stringify(savedMailSettings) !== JSON.stringify(draft.mail)
+			: false,
+	});
+	const profileVerificationMailReady =
+		draft.mail.enabled &&
+		Boolean(draft.mail.smtp.host.trim()) &&
+		Boolean(draft.mail.smtp.from.trim());
+	const openChannelCreateDialog = (
+		type: Exclude<NotificationChannel, "email">,
+	) =>
+		setChannelDialog({
+			mode: "create",
+			draft: createNotificationChannelConfigDraft(type),
+		});
+	const openChannelEditDialog = (config: NotificationChannelConfig) =>
+		setChannelDialog({
+			mode: "edit",
+			draft: cloneNotificationChannelConfigDraft(config),
+		});
+	const submitChannelDialog = () => {
+		if (!channelDialog) {
+			return;
+		}
+		setDraft({
+			...draft,
+			notifications: {
+				...draft.notifications,
+				channelConfigs: upsertNotificationChannelConfig(
+					draft.notifications.channelConfigs,
+					channelDialog.draft,
+				),
+			},
+		});
+		setChannelDialog(null);
+	};
+	const removeChannelConfig = async (config: NotificationChannelConfig) => {
+		const confirmed = await confirm({
+			title: "删除通知渠道",
+			description:
+				"确认删除这个通知渠道配置？如果站点通知接收人仍引用它，后端会阻止保存。",
+			confirmText: "删除渠道",
+			destructive: true,
+		});
+		if (!confirmed) {
+			return;
+		}
+		setDraft({
+			...draft,
+			notifications: {
+				...draft.notifications,
+				channelConfigs: draft.notifications.channelConfigs.filter(
+					(item) => item.id !== config.id,
+				),
+			},
+		});
+	};
 
 	return (
 		<Card>
@@ -2076,11 +2951,18 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 								return;
 							}
 						}
-						mutation.mutate(withoutEmptySecrets(draft));
+						mutation.mutate({
+							section: systemTab,
+							payload: buildSystemSettingsSectionPayload(systemTab, draft),
+						});
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="系统设置保存失败" />
-					<Tabs.Root defaultValue="security" className="md:col-span-2">
+					<Tabs.Root
+						value={systemTab}
+						onValueChange={setControlledSystemTab}
+						className="md:col-span-2"
+					>
 						<Tabs.List>
 							<Tabs.Trigger value="security">后台与安全</Tabs.Trigger>
 							<Tabs.Trigger value="rate-limit">限流</Tabs.Trigger>
@@ -2184,6 +3066,30 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 													}
 												/>
 											</Field>
+											<BooleanField
+												label="自助邮箱/密码变更需要邮件验证"
+												description="只有系统邮件已启用且 SMTP 配置完整时，该开关才会触发验证码流程；否则仍按当前密码直接确认。"
+												checked={
+													draft.admin.emailVerification.selfServiceRequired
+												}
+												onCheckedChange={(selfServiceRequired) =>
+													setDraft({
+														...draft,
+														admin: {
+															...draft.admin,
+															emailVerification: {
+																selfServiceRequired,
+															},
+														},
+													})
+												}
+											/>
+											{profileVerificationMailReady ? null : (
+												<div className="rounded-md border bg-background p-3 text-sm leading-6 text-muted-foreground md:col-span-2">
+													当前系统邮件未启用或 SMTP
+													配置不完整。该开关可以保存，但自助邮箱/密码变更仍会按当前密码直接确认。
+												</div>
+											)}
 										</div>
 									</SettingsSection>
 									<SettingsSection
@@ -2897,6 +3803,25 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 													配置会保留，再次开启后继续使用。
 												</div>
 											)}
+											<div className="md:col-span-2">
+												<SettingsSaveError
+													model={mailTestError}
+													fallback="邮件测试失败"
+												/>
+												<MailTestPanel
+													testable={mailTestState.testable}
+													reason={mailTestState.reason}
+													onOpen={() => mailTestMutation.mutate()}
+												/>
+												{mailTestMutation.data ? (
+													<div className="mt-3 rounded-md border bg-background p-3 text-sm text-muted-foreground">
+														{notificationTestResultSummary({
+															...mailTestMutation.data,
+															channelName: "默认邮件",
+														})}
+													</div>
+												) : null}
+											</div>
 										</div>
 									</SettingsSection>
 								</div>
@@ -3076,106 +4001,19 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 										title="通知渠道配置"
 										description="邮件、Webhook、WxPusher 都按配置实例保存；Webhook 和 WxPusher 可添加多个实例，站点接收人再选择具体实例。密钥字段留空时保留已有配置。"
 									>
-										<div className="grid gap-4">
-											<div className="grid gap-2 rounded-md border bg-background p-3 md:grid-cols-[1fr_auto] md:items-end">
-												<Field label="新增渠道类型">
-													<select
-														className={inputClass}
-														value={newChannelType}
-														onChange={(event) =>
-															setNewChannelType(
-																event.target.value as Exclude<
-																	NotificationChannel,
-																	"email"
-																>,
-															)
-														}
-													>
-														<option value="webhook">Webhook</option>
-														<option value="wxpusher">WxPusher</option>
-													</select>
-												</Field>
-												<Button
-													type="button"
-													variant="outline"
-													onClick={() =>
-														setDraft({
-															...draft,
-															notifications: {
-																...draft.notifications,
-																channelConfigs: [
-																	...draft.notifications.channelConfigs,
-																	createNotificationChannelConfig(
-																		newChannelType,
-																	),
-																],
-															},
-														})
-													}
-												>
-													添加渠道配置
-												</Button>
-											</div>
-											{draft.notifications.channelConfigs.map((config) => (
-												<NotificationChannelConfigEditor
-													key={config.id}
-													config={config}
-													onChange={(nextConfig) =>
-														setDraft({
-															...draft,
-															notifications: {
-																...draft.notifications,
-																channelConfigs: updateChannelConfig(
-																	draft.notifications.channelConfigs,
-																	config.id,
-																	nextConfig,
-																),
-															},
-														})
-													}
-													onRemove={
-														config.type === "email"
-															? undefined
-															: () =>
-																	setDraft({
-																		...draft,
-																		notifications: {
-																			...draft.notifications,
-																			channelConfigs:
-																				draft.notifications.channelConfigs.filter(
-																					(item) => item.id !== config.id,
-																				),
-																		},
-																	})
-													}
-												/>
-											))}
-										</div>
+										<NotificationChannelConfigList
+											configs={draft.notifications.channelConfigs}
+											onAdd={openChannelCreateDialog}
+											onEdit={openChannelEditDialog}
+											onRemove={(config) => void removeChannelConfig(config)}
+											onTest={setChannelTestConfig}
+										/>
 									</SettingsSection>
-									<SettingsSection
-										title="通道测试"
-										description="测试发送会创建 channel_test 通知任务；真实投递结果在任务中心查看。"
-									>
-										<div className="grid gap-3">
-											{availableNotificationChannelConfigs(
-												draft.notifications.channelConfigs,
-											).map((config) => (
-												<ChannelTestControls
-													key={config.id}
-													config={config}
-													onTest={channelTestMutation.mutate}
-													pending={channelTestMutation.isPending}
-												/>
-											))}
-											{channelTestMutation.data ? (
-												<div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">
-													已创建测试任务 {channelTestMutation.data.taskId}，
-													通道 {channelTestMutation.data.channel}，收件人{" "}
-													{channelTestMutation.data.recipient}。
-												</div>
-											) : null}
+									{channelTestMutation.data ? (
+										<div className="md:col-span-2 rounded-md border bg-background p-3 text-sm text-muted-foreground">
+											{notificationTestResultSummary(channelTestMutation.data)}
 										</div>
-									</SettingsSection>
+									) : null}
 									<NotificationTemplatesPanel />
 								</div>
 							</Tabs.Content>
@@ -3826,10 +4664,45 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 					</Tabs.Root>
 					<div className="md:col-span-2">
 						<Button type="submit" disabled={mutation.isPending}>
-							保存系统设置
+							{systemSectionSaveLabels[systemTab]}
 						</Button>
 					</div>
 				</form>
+				<NotificationChannelConfigDialog
+					open={Boolean(channelDialog)}
+					mode={channelDialog?.mode ?? "create"}
+					draft={channelDialog?.draft ?? null}
+					onOpenChange={(open) => {
+						if (!open) {
+							setChannelDialog(null);
+						}
+					}}
+					onDraftChange={(nextDraft) =>
+						channelDialog
+							? setChannelDialog({
+									...channelDialog,
+									draft: nextDraft,
+								})
+							: undefined
+					}
+					onSubmit={submitChannelDialog}
+				/>
+				{channelTestConfig ? (
+					<NotificationChannelTestDialog
+						open={Boolean(channelTestConfig)}
+						config={channelTestConfig}
+						onOpenChange={(open) => {
+							if (!open) {
+								setChannelTestConfig(null);
+							}
+						}}
+						onTest={(input) => {
+							channelTestMutation.mutate(input);
+							setChannelTestConfig(null);
+						}}
+						pending={channelTestMutation.isPending}
+					/>
+				) : null}
 			</CardContent>
 		</Card>
 	);

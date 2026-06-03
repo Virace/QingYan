@@ -4,7 +4,9 @@ import type { AppDatabase } from "../../../db/client";
 import { notificationTemplates } from "../../../db/schema";
 import {
 	defaultNotificationTemplates,
+	notificationTemplateFormatMetadata,
 	type DefaultNotificationTemplate,
+	type NotificationTemplatePlaceholder,
 } from "./defaults";
 import type { NotificationTemplateFormat } from "./renderer";
 
@@ -18,8 +20,12 @@ export interface NotificationTemplateRecord {
 	eventType: string;
 	eventLabel: string;
 	eventDescription: string;
+	triggerDescription: string;
+	recipientType: string;
+	placeholders: NotificationTemplatePlaceholder[];
 	format: NotificationTemplateFormat;
 	formatLabel: string;
+	supportsSubject: boolean;
 	subjectTemplate: string | null;
 	bodyTemplate: string;
 	isCustomized: boolean;
@@ -40,8 +46,12 @@ function fromDefault(
 		eventType: template.eventType,
 		eventLabel: template.eventLabel,
 		eventDescription: template.eventDescription,
+		triggerDescription: template.triggerDescription,
+		recipientType: template.recipientType,
+		placeholders: template.placeholders,
 		format: template.format,
 		formatLabel: template.formatLabel,
+		supportsSubject: template.supportsSubject,
 		subjectTemplate: template.subjectTemplate ?? null,
 		bodyTemplate: template.bodyTemplate,
 		isCustomized: false,
@@ -75,8 +85,15 @@ export class NotificationTemplateRepository {
 				eventType: override.eventType,
 				eventLabel: template.eventLabel,
 				eventDescription: template.eventDescription,
+				triggerDescription: template.triggerDescription,
+				recipientType: template.recipientType,
+				placeholders: template.placeholders,
 				format: override.format as NotificationTemplateFormat,
-				formatLabel: template.formatLabel,
+				formatLabel:
+					notificationTemplateFormatMetadata[
+						override.format as NotificationTemplateFormat
+					].label,
+				supportsSubject: template.supportsSubject,
 				subjectTemplate: override.subjectTemplate,
 				bodyTemplate: override.bodyTemplate,
 				isCustomized: true,
@@ -106,8 +123,18 @@ export class NotificationTemplateRepository {
 				eventType: override.eventType,
 				eventLabel: fallback?.eventLabel ?? override.eventType,
 				eventDescription: fallback?.eventDescription ?? override.eventType,
+				triggerDescription:
+					fallback?.triggerDescription ??
+					fallback?.eventDescription ??
+					override.eventType,
+				recipientType: fallback?.recipientType ?? "通知接收人",
+				placeholders: fallback?.placeholders ?? [],
 				format: override.format as NotificationTemplateFormat,
-				formatLabel: fallback?.formatLabel ?? override.format,
+				formatLabel:
+					notificationTemplateFormatMetadata[
+						override.format as NotificationTemplateFormat
+					].label,
+				supportsSubject: fallback?.supportsSubject ?? true,
 				subjectTemplate: override.subjectTemplate,
 				bodyTemplate: override.bodyTemplate,
 				isCustomized: true,

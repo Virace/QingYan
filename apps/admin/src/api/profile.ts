@@ -1,4 +1,4 @@
-import { requestJson, updateAdminCsrf } from "./client";
+import { requestJson } from "./client";
 import type { AdminMePayload } from "./session";
 
 export interface AdminProfilePayload {
@@ -30,14 +30,28 @@ export function updateAdminProfile(input: {
 export function updateAdminProfilePassword(input: {
 	currentPassword: string;
 	nextPassword: string;
+	confirmPassword: string;
 }) {
-	return requestJson<AdminProfilePayload>("/api/admin/profile/password", {
+	return requestJson<
+		| AdminProfilePayload
+		| {
+				status: "pending_verification";
+				expiresAt: string;
+		  }
+	>("/api/admin/profile/password", {
 		method: "POST",
 		body: JSON.stringify(input),
-	}).then((payload) => {
-		updateAdminCsrf({ token: null });
-		return payload;
 	});
+}
+
+export function confirmAdminProfilePasswordChange(input: { token: string }) {
+	return requestJson<AdminProfilePayload>(
+		"/api/admin/profile/password/confirm",
+		{
+			method: "POST",
+			body: JSON.stringify(input),
+		},
+	);
 }
 
 export type AdminEmailChangeResponse =
@@ -45,7 +59,6 @@ export type AdminEmailChangeResponse =
 			status: "pending_verification";
 			newEmail: string;
 			expiresAt: string;
-			verificationToken?: string;
 	  }
 	| {
 			status: "changed";
@@ -54,7 +67,7 @@ export type AdminEmailChangeResponse =
 
 export function requestAdminProfileEmailChange(input: {
 	newEmail: string;
-	currentPassword?: string;
+	currentPassword: string;
 }) {
 	return requestJson<AdminEmailChangeResponse>(
 		"/api/admin/profile/email-change",
@@ -62,12 +75,7 @@ export function requestAdminProfileEmailChange(input: {
 			method: "POST",
 			body: JSON.stringify(input),
 		},
-	).then((payload) => {
-		if (payload.status === "changed") {
-			updateAdminCsrf({ token: null });
-		}
-		return payload;
-	});
+	);
 }
 
 export function confirmAdminProfileEmailChange(input: { token: string }) {

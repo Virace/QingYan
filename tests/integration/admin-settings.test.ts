@@ -295,6 +295,82 @@ describe("admin settings", () => {
 		});
 	});
 
+	it("patches one site settings section without erasing sibling sections", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/settings/fangyuan/sections/engagement",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				visitors: {
+					enabled: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			siteKey: "fangyuan",
+			comments: {
+				enabled: true,
+				defaultStatus: "pending",
+			},
+			engagement: {
+				visitors: {
+					enabled: false,
+				},
+				pageViews: {
+					enabled: true,
+				},
+				pageLikes: {
+					enabled: true,
+				},
+				commentVotes: {
+					enabled: true,
+				},
+			},
+		});
+
+		const readResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(readResponse.statusCode).toBe(200);
+		expect(readResponse.json().engagement.visitors.enabled).toBe(false);
+		expect(readResponse.json().comments.defaultStatus).toBe("pending");
+	});
+
+	it("rejects unknown site settings sections", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/settings/fangyuan/sections/security",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				enabled: false,
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+			},
+		});
+	});
+
 	it("reads site settings for the dev default site", async () => {
 		const fixture = await createTestApp({ devMode: true });
 		cleanups.push(fixture.cleanup);

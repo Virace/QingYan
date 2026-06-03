@@ -56,7 +56,7 @@ describe("initial migration", () => {
 					"site_page_registry",
 					"pending_page_candidates",
 					"pending_page_view_sessions",
-					"email_verification_tokens",
+					"admin_profile_verification_tokens",
 					"delayed_deletions",
 				]),
 			);
@@ -196,10 +196,10 @@ describe("initial migration", () => {
 				.prepare("PRAGMA table_info(pending_page_view_sessions)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const emailVerificationColumns = fixture.sqlite
-				.prepare("PRAGMA table_info(email_verification_tokens)")
+				.prepare("PRAGMA table_info(admin_profile_verification_tokens)")
 				.all() as Array<{ name: string }>;
 			const emailVerificationIndexes = fixture.sqlite
-				.prepare("PRAGMA index_list(email_verification_tokens)")
+				.prepare("PRAGMA index_list(admin_profile_verification_tokens)")
 				.all() as Array<{ name: string; unique: number }>;
 			const delayedDeletionColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(delayed_deletions)")
@@ -544,9 +544,11 @@ describe("initial migration", () => {
 			expect(emailVerificationColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
 					"id",
+					"purpose",
 					"user_id",
-					"new_email",
 					"token_hash",
+					"new_email",
+					"pending_password_hash",
 					"expires_at",
 					"consumed_at",
 					"created_at",
@@ -555,10 +557,10 @@ describe("initial migration", () => {
 			expect(emailVerificationIndexes).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
-						name: "email_verification_tokens_user_id_idx",
+						name: "admin_profile_verification_tokens_user_id_idx",
 					}),
 					expect.objectContaining({
-						name: "email_verification_tokens_token_hash_idx",
+						name: "admin_profile_verification_tokens_token_hash_idx",
 						unique: 1,
 					}),
 				]),
@@ -992,7 +994,7 @@ describe("initial migration", () => {
 					"site_page_registry_source_pages",
 					"pending_page_candidates",
 					"pending_page_view_sessions",
-					"email_verification_tokens",
+					"admin_profile_verification_tokens",
 					"delayed_deletions",
 					"site_notification_recipients",
 					"notification_channel_configs",

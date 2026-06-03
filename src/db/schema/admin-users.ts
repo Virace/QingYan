@@ -120,21 +120,25 @@ export const adminUserSiteAccess = sqliteTable(
 	],
 );
 
-export const emailVerificationTokens = sqliteTable(
-	"email_verification_tokens",
+export const adminProfileVerificationTokens = sqliteTable(
+	"admin_profile_verification_tokens",
 	{
 		id: integer("id").primaryKey({ autoIncrement: true }),
+		purpose: text("purpose").notNull(),
 		userId: integer("user_id")
 			.notNull()
 			.references(() => adminUsers.id),
-		newEmail: text("new_email").notNull(),
 		tokenHash: text("token_hash").notNull(),
+		newEmail: text("new_email"),
+		pendingPasswordHash: text("pending_password_hash"),
 		expiresAt: text("expires_at").notNull(),
 		consumedAt: text("consumed_at"),
 		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
-		index("email_verification_tokens_user_id_idx").on(table.userId),
-		uniqueIndex("email_verification_tokens_token_hash_idx").on(table.tokenHash),
+		index("admin_profile_verification_tokens_user_id_idx").on(table.userId),
+		uniqueIndex("admin_profile_verification_tokens_token_hash_idx").on(
+			table.tokenHash,
+		),
 	],
 );

@@ -298,13 +298,24 @@ export interface NotificationTemplate {
 	eventType: string;
 	eventLabel: string;
 	eventDescription: string;
+	triggerDescription: string;
+	recipientType: string;
+	placeholders: NotificationTemplatePlaceholder[];
 	format: NotificationTemplateFormat;
 	formatLabel: string;
+	supportsSubject: boolean;
 	subjectTemplate: string | null;
 	bodyTemplate: string;
 	isCustomized: boolean;
 	updatedAt: string | null;
 	updatedByUserId: number | null;
+}
+
+export interface NotificationTemplatePlaceholder {
+	path: string;
+	label: string;
+	description: string;
+	jsonSupported: boolean;
 }
 
 export interface RenderedNotificationTemplate {
@@ -501,6 +512,9 @@ export interface AdminSystemSettings {
 	admin: {
 		session: {
 			ttlMinutes: number;
+		};
+		emailVerification: {
+			selfServiceRequired: boolean;
 		};
 		deletion: {
 			retentionDays: number;
@@ -1092,6 +1106,25 @@ export function updateSettings(siteKey: string, input: Partial<AdminSettings>) {
 	);
 }
 
+export type AdminSiteSettingsSection =
+	| "comments"
+	| "engagement"
+	| "notifications";
+
+export function patchAdminSiteSettingsSection(
+	siteKey: string,
+	section: AdminSiteSettingsSection,
+	input: unknown,
+) {
+	return requestJson<AdminSettings>(
+		`/api/admin/settings/${encodeURIComponent(siteKey)}/sections/${encodeURIComponent(section)}`,
+		{
+			method: "PATCH",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
 export function getSystemSettings() {
 	return requestJson<AdminSystemSettings>("/api/admin/system-settings");
 }
@@ -1101,6 +1134,29 @@ export function updateSystemSettings(input: AdminSystemSettings) {
 		method: "PUT",
 		body: JSON.stringify(input),
 	});
+}
+
+export type AdminSystemSettingsSection =
+	| "security"
+	| "rate-limit"
+	| "mail"
+	| "notifications"
+	| "captcha"
+	| "avatar"
+	| "ip-region"
+	| "anti-spam";
+
+export function patchAdminSystemSettingsSection(
+	section: AdminSystemSettingsSection,
+	input: unknown,
+) {
+	return requestJson<AdminSystemSettings>(
+		`/api/admin/system-settings/sections/${encodeURIComponent(section)}`,
+		{
+			method: "PATCH",
+			body: JSON.stringify(input),
+		},
+	);
 }
 
 export function testNotificationChannel(input: {
@@ -1119,6 +1175,21 @@ export function testNotificationChannel(input: {
 		channel: NotificationChannel;
 		recipient: string;
 	}>("/api/admin/system-settings/notifications/channel-test", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+export function testSystemMail(input: { recipient?: string } = {}) {
+	return requestJson<{
+		status: "sent";
+		taskId: string;
+		deliveryId: string;
+		channel: "email";
+		recipient: string;
+		providerMessageId?: string;
+		message: string;
+	}>("/api/admin/system-settings/mail/test", {
 		method: "POST",
 		body: JSON.stringify(input),
 	});

@@ -1,4 +1,6 @@
 import type { AuthenticatedAdminSession } from "../admin/session-service";
+import { AppError } from "../shared/errors";
+import type { RuntimeSystemSettingsService } from "../system-settings/service";
 import type { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskQueue } from "../tasks/types";
 import {
@@ -15,6 +17,7 @@ export class NotificationChannelTestService {
 		private readonly queue: TaskQueue,
 		private readonly repository: TaskRunRepository,
 		private readonly configs: NotificationChannelConfigsRepository,
+		private readonly systemSettings: RuntimeSystemSettingsService,
 	) {}
 
 	public async enqueue(input: {
@@ -25,6 +28,7 @@ export class NotificationChannelTestService {
 		session: AuthenticatedAdminSession;
 	}) {
 		const config = await this.resolveConfig(input);
+		await this.assertTestable(config);
 		const recipient =
 			input.recipient ??
 			channelTargetSnapshot(config, input.session.user.email);
@@ -93,5 +97,48 @@ export class NotificationChannelTestService {
 			throw new Error(`Notification channel config not found: ${id ?? "-"}`);
 		}
 		return config;
+	}
+
+	private async assertTestable(config: NotificationChannelConfigRecord) {
+		const fields: Array<{ path: string; message: string }> = [];
+		if (!config.enabled) {
+			fields.push({
+				path: "notifications.channelConfigs.enabled",
+				message: "通知通道配置已停用，不能创建测试任务。",
+			});
+		}
+		if (config.type === "email") {
+			const settings = await this.systemSettings.getSettings();
+			if (!settings.mail.enabled) {
+				fields.push({
+					path: "mail.enabled",
+					message: "系统邮件未启用，不能创建邮件测试任务。",
+				});
+			}
+			if (!settings.mail.smtp.host.trim()) {
+				fields.push({
+					path: "mail.smtp.host",
+					message: "SMTP Host 不能为空。",
+				});
+			}
+			if (!settings.mail.smtp.from.trim()) {
+				fields.push({
+					path: "mail.smtp.from",
+					message: "SMTP 发件人不能为空。",
+				});
+			}
+		}
+		if (fields.length > 0) {
+			throw new AppError(
+				400,
+				"NOTIFICATION_CHANNEL_NOT_TESTABLE",
+				"通知通道当前不可测试。",
+				{
+					channelConfigId: config.id,
+					channelType: config.type,
+					fields,
+				},
+			);
+		}
 	}
 }

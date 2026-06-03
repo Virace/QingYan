@@ -12,6 +12,7 @@ import { adminPagesRoutes } from "./modules/admin/pages-routes";
 import { adminProfileRoutes } from "./modules/admin/profile-routes";
 import { createPasswordHash } from "./modules/admin/password-hash";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
+import { adminSettingsRoutes } from "./modules/admin/settings-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
@@ -29,6 +30,8 @@ import { registerDatabaseDevRoutes } from "./modules/dev/routes";
 import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
+import type { EmailSender } from "./modules/notifications/channels/email-channel";
+import type { AdminProfileEmailSender } from "./modules/admin/profile-service";
 import { notificationsPublicRoutes } from "./modules/notifications/public-routes";
 import type { ServiceControlController } from "./modules/service-control/systemd-service";
 import { buildErrorResponse } from "./modules/shared/error-response";
@@ -53,6 +56,8 @@ interface BuildAppOptions {
 		options: { timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
+	emailSender?: EmailSender;
+	adminProfileEmailSender?: AdminProfileEmailSender;
 }
 
 function registerBaseRoutes(
@@ -139,6 +144,12 @@ export async function buildApp(
 	}
 	if (options.serviceControl) {
 		app.decorate("serviceControl", options.serviceControl);
+	}
+	if (options.emailSender) {
+		app.decorate("emailSender", options.emailSender);
+	}
+	if (options.adminProfileEmailSender) {
+		app.decorate("adminProfileEmailSender", options.adminProfileEmailSender);
 	}
 
 	app.setErrorHandler(async (error, request, reply) => {
@@ -297,6 +308,9 @@ export async function buildApp(
 	});
 	await app.register(adminSitesRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/sites"),
+	});
+	await app.register(adminSettingsRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/settings"),
 	});
 	await app.register(adminSystemSettingsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/system-settings"),

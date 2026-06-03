@@ -1,5 +1,6 @@
 import type {
 	AdminCommenter,
+	AdminSystemSettings,
 	AdminUser,
 	NotificationChannel,
 	NotificationChannelConfig,
@@ -48,6 +49,113 @@ export function notificationChannelConfigLabel(
 	return `${config.name}（${notificationChannelLabels[config.type]}）`;
 }
 
+export function createNotificationChannelConfigDraft(
+	type: Exclude<NotificationChannel, "email">,
+	now = Date.now(),
+): NotificationChannelConfig {
+	return {
+		id: `${type}:${now}`,
+		type,
+		name: type === "webhook" ? "新的 Webhook" : "新的 WxPusher",
+		description: null,
+		enabled: true,
+		config:
+			type === "webhook"
+				? { url: "" }
+				: {
+						apiUrl: "https://wxpusher.zjiecode.com/api/send/message",
+						targetSummary: "",
+					},
+		secretConfig: {},
+		secretConfigured: false,
+	};
+}
+
+export function cloneNotificationChannelConfigDraft(
+	config: NotificationChannelConfig,
+): NotificationChannelConfig {
+	return {
+		...config,
+		config: { ...config.config },
+		secretConfig: { ...(config.secretConfig ?? {}) },
+	};
+}
+
+export function upsertNotificationChannelConfig(
+	configs: NotificationChannelConfig[],
+	nextConfig: NotificationChannelConfig,
+): NotificationChannelConfig[] {
+	const exists = configs.some((config) => config.id === nextConfig.id);
+	if (!exists) {
+		return [...configs, nextConfig];
+	}
+	return configs.map((config) =>
+		config.id === nextConfig.id ? nextConfig : config,
+	);
+}
+
+function stringConfigValue(config: NotificationChannelConfig, key: string) {
+	const value = config.config[key];
+	return typeof value === "string" ? value.trim() : "";
+}
+
+export function notificationChannelTargetSummary(
+	config: NotificationChannelConfig,
+) {
+	if (config.type === "email") {
+		return "使用系统 SMTP 设置";
+	}
+	if (config.type === "webhook") {
+		const url = stringConfigValue(config, "url");
+		if (!url) {
+			return "未配置 Webhook URL";
+		}
+		try {
+			const parsed = new URL(url);
+			return `${parsed.origin}${parsed.pathname}`;
+		} catch {
+			return url;
+		}
+	}
+	return stringConfigValue(config, "targetSummary") || "未配置接收目标摘要";
+}
+
+export function mailChannelTestState(input: {
+	settings: Pick<AdminSystemSettings, "mail">;
+	dirty: boolean;
+}) {
+	const missing: string[] = [];
+	if (!input.settings.mail.enabled) {
+		missing.push("系统邮件未启用");
+	}
+	if (!input.settings.mail.smtp.host.trim()) {
+		missing.push("SMTP Host 不能为空");
+	}
+	if (!input.settings.mail.smtp.from.trim()) {
+		missing.push("发件人不能为空");
+	}
+	if (input.dirty) {
+		missing.push("请先保存邮件设置");
+	}
+	return {
+		testable: missing.length === 0,
+		reason: missing.join("；"),
+	};
+}
+
+export function notificationTestResultSummary(result: {
+	taskId: string;
+	deliveryId: string;
+	channelName?: string;
+	channel?: NotificationChannel;
+	recipient: string;
+}) {
+	const channel =
+		result.channelName ??
+		(result.channel ? notificationChannelLabels[result.channel] : "通知通道");
+	return `已创建测试任务 ${result.taskId}，投递记录 ${result.deliveryId}，通道 ${channel}，收件人 ${result.recipient}。`;
+}
+
 export function availableNotificationChannelConfigs(
 	configs: NotificationChannelConfig[],
 ) {
@@ -64,6 +172,31 @@ export function toggleListValue<T extends string>(
 	}
 	const next = values.filter((item) => item !== value);
 	return next.length > 0 ? next : values;
+}
+
+export function readSettingsTabFromSearch<T extends string>(
+	search: string,
+	options: {
+		param: string;
+		allowed: readonly T[];
+		fallback: T;
+	},
+): T {
+	const value = new URLSearchParams(search).get(options.param);
+	return options.allowed.includes(value as T) ? (value as T) : options.fallback;
+}
+
+export function writeSettingsTabToSearch(
+	search: string,
+	options: {
+		param: string;
+		value: string;
+	},
+): string {
+	const params = new URLSearchParams(search);
+	params.set(options.param, options.value);
+	const nextSearch = params.toString();
+	return nextSearch ? `?${nextSearch}` : "";
 }
 
 export function buildRecipientInput(

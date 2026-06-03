@@ -2,7 +2,11 @@ import { eq, inArray, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 import type { AppDatabase } from "../../db/client";
-import { notificationChannelConfigs } from "../../db/schema";
+import {
+	notificationChannelConfigs,
+	siteNotificationRecipientRoutes,
+} from "../../db/schema";
+import { AppError } from "../shared/errors";
 
 export type NotificationChannelType = "email" | "webhook" | "wxpusher";
 
@@ -126,6 +130,42 @@ export class NotificationChannelConfigsRepository {
 				secretConfigJson: notificationChannelConfigs.secretConfigJson,
 			})
 			.from(notificationChannelConfigs);
+		const nextPersistedIds = new Set(
+			input
+				.map((config) => config.id)
+				.filter((id): id is string =>
+					Boolean(id && id !== defaultEmailChannelConfig.id),
+				),
+		);
+		const deletedIds = existingRows
+			.map((row) => row.id)
+			.filter(
+				(id) =>
+					id !== defaultEmailChannelConfig.id && !nextPersistedIds.has(id),
+			);
+		if (deletedIds.length > 0) {
+			const referencedRows = await this.db
+				.select({
+					channelConfigId: siteNotificationRecipientRoutes.channelConfigId,
+				})
+				.from(siteNotificationRecipientRoutes)
+				.where(
+					inArray(siteNotificationRecipientRoutes.channelConfigId, deletedIds),
+				);
+			const referencedIds = Array.from(
+				new Set(referencedRows.map((row) => row.channelConfigId)),
+			);
+			if (referencedIds.length > 0) {
+				throw new AppError(
+					400,
+					"NOTIFICATION_CHANNEL_CONFIG_IN_USE",
+					"通知通道仍被站点通知接收人引用，不能删除。",
+					{
+						channelConfigIds: referencedIds,
+					},
+				);
+			}
+		}
 		const existingSecrets = new Map(
 			existingRows.map((row) => [row.id, row.secretConfigJson ?? "{}"]),
 		);

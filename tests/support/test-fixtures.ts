@@ -9,7 +9,9 @@ import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
 import { createDatabaseClients } from "../../src/db/client";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import type { AdminProfileEmailSender } from "../../src/modules/admin/profile-service";
 import type { CommentMetadataResolver } from "../../src/modules/comments/metadata/resolver";
+import type { EmailSender } from "../../src/modules/notifications/channels/email-channel";
 import type { ServiceControlController } from "../../src/modules/service-control/systemd-service";
 import {
 	createSiteRegistry,
@@ -169,6 +171,8 @@ export async function createTestApp(options?: {
 		options: { timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
+	emailSender?: EmailSender;
+	adminProfileEmailSender?: AdminProfileEmailSender;
 }) {
 	const workspace = createTestWorkspace();
 	applyInitialMigration(workspace.databaseFile);
@@ -199,6 +203,8 @@ export async function createTestApp(options?: {
 		pageSourceFetchText: options?.pageSourceFetchText,
 		pageTitleFetchHtml: options?.pageTitleFetchHtml,
 		serviceControl: options?.serviceControl,
+		emailSender: options?.emailSender,
+		adminProfileEmailSender: options?.adminProfileEmailSender,
 	});
 
 	return {

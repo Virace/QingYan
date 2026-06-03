@@ -4,6 +4,7 @@ import { Tabs } from "@radix-ui/themes";
 import { KeyRoundIcon, MailIcon, SaveIcon, UserRoundIcon } from "lucide-react";
 
 import {
+	confirmAdminProfilePasswordChange,
 	confirmAdminProfileEmailChange,
 	fetchAdminProfile,
 	requestAdminProfileEmailChange,
@@ -39,9 +40,13 @@ export function ProfilePage() {
 	const [avatarUrl, setAvatarUrl] = useState("");
 	const [currentPassword, setCurrentPassword] = useState("");
 	const [nextPassword, setNextPassword] = useState("");
+	const [confirmPassword, setConfirmPassword] = useState("");
+	const [passwordVerificationCode, setPasswordVerificationCode] = useState("");
+	const [pendingPasswordExpiresAt, setPendingPasswordExpiresAt] = useState("");
 	const [email, setEmail] = useState("");
 	const [emailPassword, setEmailPassword] = useState("");
-	const [verificationToken, setVerificationToken] = useState("");
+	const [verificationCode, setVerificationCode] = useState("");
+	const [pendingEmailExpiresAt, setPendingEmailExpiresAt] = useState("");
 	const [profileMessage, setProfileMessage] = useState("");
 	const [passwordMessage, setPasswordMessage] = useState("");
 	const [emailMessage, setEmailMessage] = useState("");
@@ -50,7 +55,7 @@ export function ProfilePage() {
 		queryFn: fetchAdminProfile,
 	});
 	const profile = profileQuery.data;
-	const pendingToken = verificationToken.trim();
+	const pendingCode = verificationCode.trim();
 
 	useEffect(() => {
 		if (!profile) {
@@ -79,15 +84,40 @@ export function ProfilePage() {
 	});
 	const updatePasswordMutation = useMutation({
 		mutationFn: updateAdminProfilePassword,
-		onSuccess() {
+		onSuccess(payload) {
 			setPasswordMessage("");
+			if ("status" in payload) {
+				setPasswordVerificationCode("");
+				setPendingPasswordExpiresAt(payload.expiresAt);
+				return;
+			}
 			setCurrentPassword("");
 			setNextPassword("");
+			setConfirmPassword("");
+			setPendingPasswordExpiresAt("");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 		onError(error) {
 			setPasswordMessage(
 				error instanceof Error ? error.message : "密码修改失败。",
+			);
+		},
+	});
+	const confirmPasswordMutation = useMutation({
+		mutationFn: confirmAdminProfilePasswordChange,
+		onSuccess() {
+			setPasswordMessage("");
+			setCurrentPassword("");
+			setNextPassword("");
+			setConfirmPassword("");
+			setPasswordVerificationCode("");
+			setPendingPasswordExpiresAt("");
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+			void queryClient.invalidateQueries({ queryKey: ["admin", "profile"] });
+		},
+		onError(error) {
+			setPasswordMessage(
+				error instanceof Error ? error.message : "密码确认失败。",
 			);
 		},
 	});
@@ -97,9 +127,11 @@ export function ProfilePage() {
 			setEmailMessage("");
 			setEmailPassword("");
 			if (payload.status === "pending_verification") {
-				setVerificationToken(payload.verificationToken ?? "");
+				setVerificationCode("");
+				setPendingEmailExpiresAt(payload.expiresAt);
 				return;
 			}
+			setPendingEmailExpiresAt("");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 		onError(error) {
@@ -112,7 +144,8 @@ export function ProfilePage() {
 		mutationFn: confirmAdminProfileEmailChange,
 		onSuccess(payload) {
 			setEmailMessage("");
-			setVerificationToken("");
+			setVerificationCode("");
+			setPendingEmailExpiresAt("");
 			setEmail(payload.user.email);
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 			void queryClient.invalidateQueries({ queryKey: ["admin", "profile"] });
@@ -223,7 +256,7 @@ export function ProfilePage() {
 									event.preventDefault();
 									emailChangeMutation.mutate({
 										newEmail: email.trim(),
-										currentPassword: emailPassword || undefined,
+										currentPassword: emailPassword,
 									});
 								}}
 							>
@@ -259,21 +292,27 @@ export function ProfilePage() {
 									提交邮箱变更
 								</Button>
 							</form>
-							{pendingToken ? (
+							{pendingEmailExpiresAt ? (
 								<form
 									className="grid gap-3 rounded-md border bg-muted/20 p-3"
 									onSubmit={(event) => {
 										event.preventDefault();
-										confirmEmailMutation.mutate({ token: pendingToken });
+										confirmEmailMutation.mutate({ token: pendingCode });
 									}}
 								>
+									<p className="text-sm text-muted-foreground">
+										验证码已发送到新邮箱，有效期至{" "}
+										{formatDateTime(pendingEmailExpiresAt)}。
+									</p>
 									<div className="grid gap-2">
-										<Label htmlFor="profile-email-token">验证令牌</Label>
+										<Label htmlFor="profile-email-token">邮箱验证码</Label>
 										<Input
 											id="profile-email-token"
-											value={verificationToken}
+											inputMode="numeric"
+											autoComplete="one-time-code"
+											value={verificationCode}
 											onChange={(event) =>
-												setVerificationToken(event.target.value)
+												setVerificationCode(event.target.value)
 											}
 										/>
 									</div>
@@ -307,6 +346,7 @@ export function ProfilePage() {
 									updatePasswordMutation.mutate({
 										currentPassword,
 										nextPassword,
+										confirmPassword,
 									});
 								}}
 							>
@@ -337,6 +377,16 @@ export function ProfilePage() {
 										onChange={(event) => setNextPassword(event.target.value)}
 									/>
 								</div>
+								<div className="grid gap-2">
+									<Label htmlFor="profile-confirm-password">确认新密码</Label>
+									<Input
+										id="profile-confirm-password"
+										type="password"
+										autoComplete="new-password"
+										value={confirmPassword}
+										onChange={(event) => setConfirmPassword(event.target.value)}
+									/>
+								</div>
 								<Button
 									type="submit"
 									disabled={updatePasswordMutation.isPending}
@@ -345,6 +395,41 @@ export function ProfilePage() {
 									保存密码
 								</Button>
 							</form>
+							{pendingPasswordExpiresAt ? (
+								<form
+									className="mt-4 grid gap-3 rounded-md border bg-muted/20 p-3"
+									onSubmit={(event) => {
+										event.preventDefault();
+										confirmPasswordMutation.mutate({
+											token: passwordVerificationCode.trim(),
+										});
+									}}
+								>
+									<p className="text-sm text-muted-foreground">
+										验证码已发送到当前账号邮箱，有效期至{" "}
+										{formatDateTime(pendingPasswordExpiresAt)}。
+									</p>
+									<div className="grid gap-2">
+										<Label htmlFor="profile-password-token">密码验证码</Label>
+										<Input
+											id="profile-password-token"
+											inputMode="numeric"
+											autoComplete="one-time-code"
+											value={passwordVerificationCode}
+											onChange={(event) =>
+												setPasswordVerificationCode(event.target.value)
+											}
+										/>
+									</div>
+									<Button
+										type="submit"
+										variant="outline"
+										disabled={confirmPasswordMutation.isPending}
+									>
+										确认密码变更
+									</Button>
+								</form>
+							) : null}
 						</CardContent>
 					</Card>
 				</Tabs.Content>

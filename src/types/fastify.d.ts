@@ -10,6 +10,8 @@ import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
 import type { ServiceControlController } from "../modules/service-control/systemd-service";
 import type { SiteRegistry } from "../modules/shared/site-registry";
+import type { EmailSender } from "../modules/notifications/channels/email-channel";
+import type { AdminProfileEmailSender } from "../modules/admin/profile-service";
 
 export interface RequestContext {
 	requestId: string;
@@ -51,6 +53,8 @@ declare module "fastify" {
 			options: { timeoutMs: number; maxBytes: number },
 		) => Promise<{ status: number; text: string }>;
 		serviceControl?: ServiceControlController;
+		emailSender?: EmailSender;
+		adminProfileEmailSender?: AdminProfileEmailSender;
 		devMockService?: DevMockService;
 	}
 

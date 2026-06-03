@@ -42,8 +42,21 @@ describe("admin notification templates", () => {
 					eventType: "reply_approved",
 					eventLabel: "评论回复已通过",
 					eventDescription: expect.stringContaining("已审核回复"),
+					triggerDescription: expect.stringContaining("已审核回复"),
+					recipientType: "评论订阅者",
+					placeholders: expect.arrayContaining([
+						expect.objectContaining({
+							path: "comment.authorName",
+							label: "评论作者",
+						}),
+						expect.objectContaining({
+							path: "links.unsubscribe",
+							label: "退订链接",
+						}),
+					]),
 					format: "text",
 					formatLabel: "纯文本",
+					supportsSubject: true,
 					isCustomized: false,
 				}),
 				expect.objectContaining({
@@ -55,6 +68,7 @@ describe("admin notification templates", () => {
 					eventLabel: "新评论待审核",
 					format: "json",
 					formatLabel: "JSON",
+					supportsSubject: false,
 				}),
 			]),
 		);
@@ -64,9 +78,9 @@ describe("admin notification templates", () => {
 			url: "/qingyan/api/admin/notification-templates/commenter_reply_approved_email_text",
 			...withAdminWriteAuth(auth),
 			payload: {
-				format: "text",
+				format: "html",
 				subjectTemplate: "[{{site.name}}] custom subject",
-				bodyTemplate: "{{comment.authorName}} custom body",
+				bodyTemplate: "<p>{{comment.authorName}} custom body</p>",
 			},
 		});
 		expect(updateResponse.statusCode).toBe(200);
@@ -75,7 +89,8 @@ describe("admin notification templates", () => {
 			name: "评论回复提醒 - 纯文本邮件",
 			channelLabel: "邮件",
 			eventLabel: "评论回复已通过",
-			formatLabel: "纯文本",
+			format: "html",
+			formatLabel: "HTML",
 			isCustomized: true,
 			subjectTemplate: "[{{site.name}}] custom subject",
 		});
@@ -93,7 +108,7 @@ describe("admin notification templates", () => {
 		expect(previewResponse.json()).toMatchObject({
 			rendered: {
 				subject: "[FangYuan] custom subject",
-				body: "Alice custom body",
+				body: "<p>Alice custom body</p>",
 			},
 		});
 

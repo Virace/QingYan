@@ -5,6 +5,7 @@ import { AdminRepository } from "./repository";
 import {
 	adminProfileEmailChangeBodySchema,
 	adminProfileEmailChangeConfirmBodySchema,
+	adminProfilePasswordConfirmBodySchema,
 	adminProfilePasswordBodySchema,
 	adminProfilePatchBodySchema,
 } from "./schemas";
@@ -21,7 +22,12 @@ export const adminProfileRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.adminBootstrap,
 		fastify.siteRegistry,
 	);
-	const service = new AdminProfileService(fastify.db, fastify.security);
+	const service = new AdminProfileService(
+		fastify.db,
+		fastify.security,
+		undefined,
+		fastify.adminProfileEmailSender ?? fastify.emailSender,
+	);
 
 	fastify.get("/", async (request) => {
 		const session = await sessionService.requireSession(request, {
@@ -87,6 +93,24 @@ export const adminProfileRoutes: FastifyPluginAsync = async (fastify) => {
 			);
 		}
 		return service.confirmEmailChange({
+			session,
+			token: parsed.data.token,
+		});
+	});
+
+	fastify.post("/password/confirm", async (request) => {
+		const session = await sessionService.requireSession(request, {
+			allowPasswordChangeRequired: true,
+		});
+		const parsed = adminProfilePasswordConfirmBodySchema.safeParse(
+			request.body,
+		);
+		if (!parsed.success) {
+			throw new ValidationFailedError(
+				toValidationFields(parsed.error.issues, request.body),
+			);
+		}
+		return service.confirmPasswordChange({
 			session,
 			token: parsed.data.token,
 		});

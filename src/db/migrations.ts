@@ -112,18 +112,20 @@ function applyUnreleasedMultiUserAdminBackfill(sqlite: SqliteClient): void {
 			CREATE UNIQUE INDEX IF NOT EXISTS admin_user_site_access_user_site_idx ON admin_user_site_access (user_id, site_id);
 			CREATE INDEX IF NOT EXISTS admin_user_site_access_site_idx ON admin_user_site_access (site_id);
 
-			CREATE TABLE IF NOT EXISTS email_verification_tokens (
+			CREATE TABLE IF NOT EXISTS admin_profile_verification_tokens (
 				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+				purpose text NOT NULL,
 				user_id integer NOT NULL,
-				new_email text NOT NULL,
 				token_hash text NOT NULL,
+				new_email text,
+				pending_password_hash text,
 				expires_at text NOT NULL,
 				consumed_at text,
 				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 				FOREIGN KEY (user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
 			);
-			CREATE INDEX IF NOT EXISTS email_verification_tokens_user_id_idx ON email_verification_tokens (user_id);
-			CREATE UNIQUE INDEX IF NOT EXISTS email_verification_tokens_token_hash_idx ON email_verification_tokens (token_hash);
+			CREATE INDEX IF NOT EXISTS admin_profile_verification_tokens_user_id_idx ON admin_profile_verification_tokens (user_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS admin_profile_verification_tokens_token_hash_idx ON admin_profile_verification_tokens (token_hash);
 
 			CREATE TABLE IF NOT EXISTS delayed_deletions (
 				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -411,18 +413,20 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			CREATE UNIQUE INDEX IF NOT EXISTS pending_page_view_sessions_page_fingerprint_idx ON pending_page_view_sessions (site_key, page_key, fingerprint);
 			CREATE INDEX IF NOT EXISTS pending_page_view_sessions_site_page_idx ON pending_page_view_sessions (site_key, page_key);
 
-			CREATE TABLE IF NOT EXISTS email_verification_tokens (
+			CREATE TABLE IF NOT EXISTS admin_profile_verification_tokens (
 				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+				purpose text NOT NULL,
 				user_id integer NOT NULL,
-				new_email text NOT NULL,
 				token_hash text NOT NULL,
+				new_email text,
+				pending_password_hash text,
 				expires_at text NOT NULL,
 				consumed_at text,
 				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 				FOREIGN KEY (user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
 			);
-			CREATE INDEX IF NOT EXISTS email_verification_tokens_user_id_idx ON email_verification_tokens (user_id);
-			CREATE UNIQUE INDEX IF NOT EXISTS email_verification_tokens_token_hash_idx ON email_verification_tokens (token_hash);
+			CREATE INDEX IF NOT EXISTS admin_profile_verification_tokens_user_id_idx ON admin_profile_verification_tokens (user_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS admin_profile_verification_tokens_token_hash_idx ON admin_profile_verification_tokens (token_hash);
 
 			CREATE TABLE IF NOT EXISTS delayed_deletions (
 				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,

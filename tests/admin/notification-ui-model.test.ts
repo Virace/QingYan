@@ -1,17 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import type { AdminCommenter, AdminUser } from "../../apps/admin/src/api/admin";
+import type {
+	AdminCommenter,
+	AdminSystemSettings,
+	AdminUser,
+	NotificationChannelConfig,
+} from "../../apps/admin/src/api/admin";
 import type { TaskRunCenterItem } from "../../apps/admin/src/api/ops";
 import {
 	addRecipientRoute,
 	availableNotificationChannelConfigs,
+	cloneNotificationChannelConfigDraft,
+	createNotificationChannelConfigDraft,
 	eligibleNotificationRecipientUsers,
+	mailChannelTestState,
 	makeRecipientFromUser,
 	notificationChannelConfigLabel,
+	notificationChannelTargetSummary,
 	notificationTaskDetails,
+	notificationTestResultSummary,
+	readSettingsTabFromSearch,
 	removeRecipientRoute,
 	summarizeCommenterNotifications,
 	toggleListValue,
+	writeSettingsTabToSearch,
+	upsertNotificationChannelConfig,
 } from "../../apps/admin/src/components/admin/notification-ui-model";
 
 function user(input: Partial<AdminUser> & Pick<AdminUser, "id" | "username">) {
@@ -100,6 +113,42 @@ function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
 		},
 		...input,
 	} satisfies TaskRunCenterItem;
+}
+
+function mailSettings(
+	input: Partial<AdminSystemSettings["mail"]> = {},
+): Pick<AdminSystemSettings, "mail"> {
+	return {
+		mail: {
+			enabled: false,
+			smtp: {
+				host: "",
+				port: 587,
+				secure: false,
+				username: "",
+				password: "",
+				passwordConfigured: false,
+				from: "",
+			},
+			...input,
+		},
+	};
+}
+
+function webhookConfig(
+	input: Partial<NotificationChannelConfig> = {},
+): NotificationChannelConfig {
+	return {
+		id: "webhook:ops",
+		type: "webhook",
+		name: "运维 Webhook",
+		description: null,
+		enabled: true,
+		config: { url: "https://hooks.example.test/qingyan?token=secret" },
+		secretConfig: {},
+		secretConfigured: true,
+		...input,
+	};
 }
 
 describe("notification UI model", () => {
@@ -192,6 +241,92 @@ describe("notification UI model", () => {
 		).toEqual(["email:default"]);
 	});
 
+	it("creates and applies channel config dialog drafts without mutating the source list", () => {
+		const created = createNotificationChannelConfigDraft("webhook", 1234);
+		expect(created).toMatchObject({
+			id: "webhook:1234",
+			type: "webhook",
+			name: "新的 Webhook",
+			config: { url: "" },
+		});
+
+		const original = webhookConfig();
+		const draft = cloneNotificationChannelConfigDraft(original);
+		draft.name = "修改后的 Webhook";
+		draft.config.url = "https://hooks.example.test/changed";
+		draft.secretConfig = { secret: "next-secret" };
+
+		expect(original.name).toBe("运维 Webhook");
+		expect(original.config.url).toBe(
+			"https://hooks.example.test/qingyan?token=secret",
+		);
+		expect(original.secretConfig).toEqual({});
+		expect(upsertNotificationChannelConfig([original], draft)).toEqual([draft]);
+		expect(upsertNotificationChannelConfig([], created)).toEqual([created]);
+	});
+
+	it("summarizes channel targets and mail test availability", () => {
+		expect(notificationChannelTargetSummary(webhookConfig())).toBe(
+			"https://hooks.example.test/qingyan",
+		);
+		expect(
+			notificationChannelTargetSummary(webhookConfig({ config: { url: "" } })),
+		).toBe("未配置 Webhook URL");
+		expect(
+			notificationChannelTargetSummary({
+				id: "wxpusher:audit",
+				type: "wxpusher",
+				name: "审计 WxPusher",
+				description: null,
+				enabled: true,
+				config: { targetSummary: "UID_admin" },
+			}),
+		).toBe("UID_admin");
+
+		expect(
+			mailChannelTestState({
+				settings: mailSettings(),
+				dirty: false,
+			}),
+		).toEqual({
+			testable: false,
+			reason: "系统邮件未启用；SMTP Host 不能为空；发件人不能为空",
+		});
+		expect(
+			mailChannelTestState({
+				settings: mailSettings({
+					enabled: true,
+					smtp: {
+						host: "smtp.example.test",
+						port: 587,
+						secure: false,
+						username: "notify@example.test",
+						passwordConfigured: true,
+						from: "notify@example.test",
+					},
+				}),
+				dirty: true,
+			}),
+		).toEqual({
+			testable: false,
+			reason: "请先保存邮件设置",
+		});
+	});
+
+	it("formats notification test task results as created tasks", () => {
+		expect(
+			notificationTestResultSummary({
+				taskId: "task_1",
+				deliveryId: "delivery_1",
+				channelName: "默认邮件",
+				channel: "email",
+				recipient: "admin@example.test",
+			}),
+		).toBe(
+			"已创建测试任务 task_1，投递记录 delivery_1，通道 默认邮件，收件人 admin@example.test。",
+		);
+	});
+
 	it("keeps channel and event lists non-empty while toggling", () => {
 		expect(toggleListValue(["email"], "webhook", true)).toEqual([
 			"email",
@@ -201,6 +336,36 @@ describe("notification UI model", () => {
 		expect(toggleListValue(["email", "webhook"], "email", false)).toEqual([
 			"webhook",
 		]);
+	});
+
+	it("reads and writes settings tab query values without disturbing outer view", () => {
+		expect(
+			readSettingsTabFromSearch("?view=settings&systemTab=mail", {
+				param: "systemTab",
+				allowed: ["security", "mail", "notifications"],
+				fallback: "security",
+			}),
+		).toBe("mail");
+		expect(
+			readSettingsTabFromSearch("?view=settings&systemTab=unknown", {
+				param: "systemTab",
+				allowed: ["security", "mail", "notifications"],
+				fallback: "security",
+			}),
+		).toBe("security");
+
+		expect(
+			writeSettingsTabToSearch("?view=settings&siteTab=comments", {
+				param: "siteTab",
+				value: "notifications",
+			}),
+		).toBe("?view=settings&siteTab=notifications");
+		expect(
+			writeSettingsTabToSearch("?view=system-settings&systemTab=security", {
+				param: "systemTab",
+				value: "mail",
+			}),
+		).toBe("?view=system-settings&systemTab=mail");
 	});
 
 	it("surfaces commenter notification API gaps without pretending data exists", () => {

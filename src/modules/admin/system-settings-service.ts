@@ -77,6 +77,32 @@ type AdminSystemSettingsInput = {
 	actorUserId?: number;
 };
 
+export type AdminSystemSettingsSection =
+	| "security"
+	| "rate-limit"
+	| "mail"
+	| "notifications"
+	| "captcha"
+	| "avatar"
+	| "ip-region"
+	| "anti-spam";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeRecordPatch<T>(current: T, patch: unknown): T {
+	if (!isRecord(current) || !isRecord(patch)) {
+		return patch as T;
+	}
+
+	const next: Record<string, unknown> = { ...current };
+	for (const [key, value] of Object.entries(patch)) {
+		next[key] = mergeRecordPatch(next[key], value);
+	}
+	return next as T;
+}
+
 export class AdminSystemSettingsService {
 	public constructor(
 		private readonly repository: AdminSystemSettingsRepository,
@@ -84,9 +110,13 @@ export class AdminSystemSettingsService {
 		private readonly defaults?: SystemSettings,
 	) {}
 
-	public async getSettings() {
+	private async readCurrentSettings() {
 		const rows = (await this.repository.listAll()) as SystemSettingRow[];
-		const settings = readSystemSettingsRows(rows, this.defaults);
+		return readSystemSettingsRows(rows, this.defaults);
+	}
+
+	public async getSettings() {
+		const settings = await this.readCurrentSettings();
 
 		return {
 			...maskSystemSettings(settings),
@@ -97,9 +127,61 @@ export class AdminSystemSettingsService {
 		};
 	}
 
+	public async buildSectionPatchInput(
+		section: AdminSystemSettingsSection,
+		patch: Record<string, unknown>,
+	): Promise<AdminSystemSettingsInput> {
+		const current = await this.readCurrentSettings();
+		const next = structuredClone(current);
+
+		switch (section) {
+			case "security":
+				next.admin = patch.admin
+					? mergeRecordPatch(next.admin, patch.admin)
+					: next.admin;
+				next.security = patch.security
+					? mergeRecordPatch(next.security, patch.security)
+					: mergeRecordPatch(next.security, patch);
+				next.logging = patch.logging
+					? mergeRecordPatch(next.logging, patch.logging)
+					: next.logging;
+				break;
+			case "rate-limit":
+				next.security = {
+					...next.security,
+					rateLimit: mergeRecordPatch(next.security.rateLimit, patch),
+				};
+				break;
+			case "mail":
+				next.mail = mergeRecordPatch(next.mail, patch);
+				break;
+			case "notifications":
+				next.notifications = mergeRecordPatch(next.notifications, patch);
+				break;
+			case "captcha":
+				next.captcha = mergeRecordPatch(next.captcha, patch);
+				break;
+			case "avatar":
+				next.avatar = patch.avatar
+					? mergeRecordPatch(next.avatar, patch.avatar)
+					: mergeRecordPatch(next.avatar, patch);
+				next.publicApi = patch.publicApi
+					? mergeRecordPatch(next.publicApi, patch.publicApi)
+					: next.publicApi;
+				break;
+			case "ip-region":
+				next.ipRegion = mergeRecordPatch(next.ipRegion, patch);
+				break;
+			case "anti-spam":
+				next.antiSpam = mergeRecordPatch(next.antiSpam, patch);
+				break;
+		}
+
+		return next;
+	}
+
 	public async updateSettings(input: AdminSystemSettingsInput) {
-		const rows = (await this.repository.listAll()) as SystemSettingRow[];
-		const current = readSystemSettingsRows(rows, this.defaults);
+		const current = await this.readCurrentSettings();
 		const patch: SystemSettings = {
 			...current,
 			admin: input.admin
@@ -211,7 +293,7 @@ export class AdminSystemSettingsService {
 				admin: input.admin,
 				security: input.security,
 				logging: input.logging,
-				mail: input.mail,
+				mail: input.mail ? maskSystemSettings(next).mail : undefined,
 				notifications: maskSystemSettings(next).notifications,
 				captcha: input.captcha,
 				ipRegion: input.ipRegion,

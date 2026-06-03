@@ -6,7 +6,7 @@ import {
 	adminSessions,
 	adminUserGroups,
 	adminUsers,
-	emailVerificationTokens,
+	adminProfileVerificationTokens,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -21,6 +21,13 @@ afterEach(async () => {
 });
 
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+type SentProfileEmail = {
+	to: string;
+	from: string;
+	subject?: string;
+	body: string;
+	format: "html" | "text" | "json";
+};
 
 async function createProfileUser(
 	fixture: TestFixture,
@@ -173,6 +180,7 @@ describe("admin profile api", () => {
 			payload: {
 				currentPassword: "replace-me",
 				nextPassword: "next-password",
+				confirmPassword: "next-password",
 			},
 		});
 		expect(passwordResponse.statusCode).toBe(200);
@@ -210,8 +218,275 @@ describe("admin profile api", () => {
 		expect(newLogin.loginResponse.statusCode).toBe(200);
 	});
 
-	it("creates and consumes email verification tokens for ordinary self-service email changes", async () => {
+	it("rejects password changes when confirmation does not match", async () => {
 		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createProfileUser(fixture, {
+			username: "password-mismatch-user",
+		});
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app, {
+			username: "password-mismatch-user",
+			password: "replace-me",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/profile/password",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				currentPassword: "replace-me",
+				nextPassword: "next-password",
+				confirmPassword: "different-password",
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "INVALID_REQUEST",
+			},
+		});
+		const oldLogin = await loginAsAdmin(fixture.app, {
+			username: "password-mismatch-user",
+			password: "replace-me",
+		});
+		expect(oldLogin.loginResponse.statusCode).toBe(200);
+	});
+
+	it("changes password immediately and keeps the current session valid when verification cannot run", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createProfileUser(fixture, {
+			username: "direct-password-user",
+		});
+		const initialAdmin = await loginAsAdmin(fixture.app);
+		const settingsResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie: initialAdmin.adminCookie,
+				csrfToken: initialAdmin.csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					emailVerification: {
+						selfServiceRequired: true,
+					},
+				},
+				mail: {
+					enabled: false,
+					smtp: {
+						host: "",
+						port: 465,
+						secure: true,
+						username: "",
+						from: "",
+					},
+				},
+			},
+		});
+		expect(settingsResponse.statusCode).toBe(200);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app, {
+			username: "direct-password-user",
+			password: "replace-me",
+		});
+
+		const invalidPasswordResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/profile/password",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				currentPassword: "wrong-password",
+				nextPassword: "next-password",
+				confirmPassword: "next-password",
+			},
+		});
+		expect(invalidPasswordResponse.statusCode).toBe(403);
+		expect(invalidPasswordResponse.json()).toMatchObject({
+			error: {
+				code: "ADMIN_CURRENT_PASSWORD_INVALID",
+			},
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/profile/password",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				currentPassword: "replace-me",
+				nextPassword: "next-password",
+				confirmPassword: "next-password",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			user: {
+				username: "direct-password-user",
+				passwordChangeRequired: false,
+			},
+		});
+		const sessionResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/session/me",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(sessionResponse.statusCode).toBe(200);
+
+		const oldLogin = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/session/login",
+			payload: {
+				username: "direct-password-user",
+				password: "replace-me",
+				captchaValue: "2468",
+			},
+		});
+		expect(oldLogin.statusCode).not.toBe(200);
+		const newLogin = await loginAsAdmin(fixture.app, {
+			username: "direct-password-user",
+			password: "next-password",
+		});
+		expect(newLogin.loginResponse.statusCode).toBe(200);
+	});
+
+	it("stores a pending password hash and changes password after email verification", async () => {
+		const sentProfileEmails: SentProfileEmail[] = [];
+		const fixture = await createTestApp({
+			adminProfileEmailSender: async (input) => {
+				sentProfileEmails.push(input);
+				return { providerMessageId: "profile-password-1" };
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		const user = await createProfileUser(fixture, {
+			username: "verified-password-user",
+		});
+		const initialAdmin = await loginAsAdmin(fixture.app);
+		const settingsResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie: initialAdmin.adminCookie,
+				csrfToken: initialAdmin.csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					emailVerification: {
+						selfServiceRequired: true,
+					},
+				},
+				mail: {
+					enabled: true,
+					smtp: {
+						host: "smtp.example.test",
+						port: 465,
+						secure: true,
+						username: "smtp-user",
+						password: "smtp-secret",
+						from: "QingYan <noreply@example.test>",
+					},
+				},
+			},
+		});
+		expect(settingsResponse.statusCode).toBe(200);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app, {
+			username: "verified-password-user",
+			password: "replace-me",
+		});
+
+		const requestResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/profile/password",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				currentPassword: "replace-me",
+				nextPassword: "next-password",
+				confirmPassword: "next-password",
+			},
+		});
+
+		expect(requestResponse.statusCode).toBe(200);
+		expect(requestResponse.json()).toMatchObject({
+			status: "pending_verification",
+			expiresAt: expect.any(String),
+		});
+		expect(requestResponse.json().verificationToken).toBeUndefined();
+		expect(sentProfileEmails).toHaveLength(1);
+		expect(sentProfileEmails[0]).toMatchObject({
+			to: "verified-password-user@example.test",
+			format: "text",
+		});
+		const code = sentProfileEmails[0]?.body.match(/\b\d{6}\b/u)?.[0];
+		expect(code).toEqual(expect.any(String));
+
+		const tokens = await fixture.app.db
+			.select()
+			.from(adminProfileVerificationTokens)
+			.where(eq(adminProfileVerificationTokens.userId, user.id));
+		expect(tokens).toHaveLength(1);
+		expect(tokens[0]).toMatchObject({
+			purpose: "password_change",
+			newEmail: null,
+			consumedAt: null,
+		});
+		expect(tokens[0]?.pendingPasswordHash).toMatch(/^scrypt:/);
+
+		const oldLogin = await loginAsAdmin(fixture.app, {
+			username: "verified-password-user",
+			password: "replace-me",
+		});
+		expect(oldLogin.loginResponse.statusCode).toBe(200);
+
+		const confirmResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/profile/password/confirm",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				token: code,
+			},
+		});
+		expect(confirmResponse.statusCode).toBe(200);
+		expect(confirmResponse.json()).toMatchObject({
+			user: {
+				username: "verified-password-user",
+				passwordChangeRequired: false,
+			},
+		});
+		const sessionResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/session/me",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(sessionResponse.statusCode).toBe(200);
+
+		const newLogin = await loginAsAdmin(fixture.app, {
+			username: "verified-password-user",
+			password: "next-password",
+		});
+		expect(newLogin.loginResponse.statusCode).toBe(200);
+	});
+
+	it("creates and consumes email verification tokens for ordinary self-service email changes without leaking codes", async () => {
+		const sentProfileEmails: SentProfileEmail[] = [];
+		const fixture = await createTestApp({
+			emailSender: async (input) => {
+				sentProfileEmails.push(input);
+				return { providerMessageId: "profile-email-1" };
+			},
+		});
 		cleanups.push(fixture.cleanup);
 		const user = await createProfileUser(fixture, {
 			username: "email-change-user",
@@ -223,6 +498,41 @@ describe("admin profile api", () => {
 			username: "email-change-user",
 			password: "replace-me",
 		});
+		const initialAdmin = await loginAsAdmin(fixture.app);
+		const settingsResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({
+				adminCookie: initialAdmin.adminCookie,
+				csrfToken: initialAdmin.csrfToken,
+			}),
+			payload: {
+				logging: {
+					level: "info",
+					retentionDays: 7,
+				},
+				admin: {
+					session: {
+						ttlMinutes: 4320,
+					},
+					emailVerification: {
+						selfServiceRequired: true,
+					},
+				},
+				mail: {
+					enabled: true,
+					smtp: {
+						host: "smtp.example.test",
+						port: 465,
+						secure: true,
+						username: "smtp-user",
+						password: "smtp-secret",
+						from: "QingYan <noreply@example.test>",
+					},
+				},
+			},
+		});
+		expect(settingsResponse.statusCode).toBe(200);
 
 		const duplicateResponse = await fixture.app.inject({
 			method: "POST",
@@ -253,31 +563,44 @@ describe("admin profile api", () => {
 		const requestPayload = requestResponse.json() as {
 			status: string;
 			newEmail: string;
-			verificationToken: string;
+			expiresAt: string;
+			verificationToken?: string;
+			code?: string;
 		};
 		expect(requestPayload).toMatchObject({
 			status: "pending_verification",
 			newEmail: "next.email@example.test",
 		});
-		expect(requestPayload.verificationToken).toEqual(expect.any(String));
+		expect(requestPayload.expiresAt).toEqual(expect.any(String));
+		expect(requestPayload.verificationToken).toBeUndefined();
+		expect(requestPayload.code).toBeUndefined();
+		expect(sentProfileEmails).toHaveLength(1);
+		expect(sentProfileEmails[0]).toMatchObject({
+			to: "next.email@example.test",
+			format: "text",
+		});
+		const code = sentProfileEmails[0]?.body.match(/\b\d{6}\b/u)?.[0];
+		expect(code).toEqual(expect.any(String));
 
 		const tokens = await fixture.app.db
 			.select()
-			.from(emailVerificationTokens)
-			.where(eq(emailVerificationTokens.userId, user.id));
+			.from(adminProfileVerificationTokens)
+			.where(eq(adminProfileVerificationTokens.userId, user.id));
 		expect(tokens).toHaveLength(1);
 		expect(tokens[0]).toMatchObject({
+			purpose: "email_change",
 			newEmail: "next.email@example.test",
+			pendingPasswordHash: null,
 			consumedAt: null,
 		});
-		expect(tokens[0]?.tokenHash).not.toBe(requestPayload.verificationToken);
+		expect(tokens[0]?.tokenHash).toEqual(expect.any(String));
 
 		const confirmResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/admin/profile/email-change/confirm",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
-				token: requestPayload.verificationToken,
+				token: code,
 			},
 		});
 		expect(confirmResponse.statusCode).toBe(200);
@@ -293,7 +616,7 @@ describe("admin profile api", () => {
 			url: "/qingyan/api/admin/profile/email-change/confirm",
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 			payload: {
-				token: requestPayload.verificationToken,
+				token: code,
 			},
 		});
 		expect(reusedResponse.statusCode).toBe(400);
@@ -304,7 +627,7 @@ describe("admin profile api", () => {
 		});
 	});
 
-	it("changes email immediately and revokes the current session when verification is disabled", async () => {
+	it("changes email immediately without revoking the current session when verification is disabled", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const user = await createProfileUser(fixture, {
@@ -383,19 +706,20 @@ describe("admin profile api", () => {
 			.select()
 			.from(adminSessions)
 			.where(eq(adminSessions.userId, user.id));
-		expect(directUserSession?.revokedAt).toEqual(expect.any(String));
+		expect(directUserSession?.revokedAt).toBeNull();
 
-		const afterRevokeResponse = await fixture.app.inject({
+		const afterChangeResponse = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/admin/session/me",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},
 		});
-		expect(afterRevokeResponse.statusCode).toBe(401);
-		expect(afterRevokeResponse.json()).toMatchObject({
-			error: {
-				code: "ADMIN_SESSION_REVOKED",
+		expect(afterChangeResponse.statusCode).toBe(200);
+		expect(afterChangeResponse.json()).toMatchObject({
+			user: {
+				username: "direct-email-user",
+				email: "direct.next@example.test",
 			},
 		});
 	});
@@ -441,7 +765,8 @@ describe("admin profile api", () => {
 			password: "replace-me",
 		});
 
-		await fixture.app.db.insert(emailVerificationTokens).values({
+		await fixture.app.db.insert(adminProfileVerificationTokens).values({
+			purpose: "email_change",
 			userId: user.id,
 			newEmail: "expired-next@example.test",
 			tokenHash:

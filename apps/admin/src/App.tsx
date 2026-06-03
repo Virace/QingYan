@@ -80,7 +80,7 @@ function AppContent({
 		);
 	}
 
-	if (authenticated && (meQuery.isFetching || !meQuery.data)) {
+	if (authenticated && !meQuery.data) {
 		return (
 			<main className="flex min-h-dvh items-center justify-center bg-muted/40">
 				<Card className="w-[320px]">

@@ -18,7 +18,7 @@ import {
 	adminUserGroups,
 	adminUsers,
 	adminUserSiteAccess,
-	emailVerificationTokens,
+	adminProfileVerificationTokens,
 	sites,
 } from "../../db/schema";
 import type { AdminGroupKey } from "./permissions";
@@ -483,36 +483,38 @@ export class AdminUsersRepository {
 			.where(eq(adminSessions.id, input.sessionId));
 	}
 
-	public async createEmailVerificationToken(input: {
+	public async createProfileVerificationToken(input: {
+		purpose: "email_change" | "password_change";
 		userId: number;
-		newEmail: string;
+		newEmail?: string | null;
+		pendingPasswordHash?: string | null;
 		tokenHash: string;
 		expiresAt: string;
 	}) {
-		await this.db.insert(emailVerificationTokens).values(input);
+		await this.db.insert(adminProfileVerificationTokens).values(input);
 		const [token] = await this.db
 			.select()
-			.from(emailVerificationTokens)
-			.where(eq(emailVerificationTokens.tokenHash, input.tokenHash))
+			.from(adminProfileVerificationTokens)
+			.where(eq(adminProfileVerificationTokens.tokenHash, input.tokenHash))
 			.limit(1);
 		return token;
 	}
 
-	public async getEmailVerificationTokenByHash(tokenHash: string) {
+	public async getProfileVerificationTokenByHash(tokenHash: string) {
 		const [token] = await this.db
 			.select()
-			.from(emailVerificationTokens)
-			.where(eq(emailVerificationTokens.tokenHash, tokenHash))
+			.from(adminProfileVerificationTokens)
+			.where(eq(adminProfileVerificationTokens.tokenHash, tokenHash))
 			.limit(1);
 		return token;
 	}
 
-	public async consumeEmailVerificationToken(tokenId: number) {
+	public async consumeProfileVerificationToken(tokenId: number) {
 		await this.db
-			.update(emailVerificationTokens)
+			.update(adminProfileVerificationTokens)
 			.set({
 				consumedAt: new Date().toISOString(),
 			})
-			.where(eq(emailVerificationTokens.id, tokenId));
+			.where(eq(adminProfileVerificationTokens.id, tokenId));
 	}
 }

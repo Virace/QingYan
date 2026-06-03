@@ -93,28 +93,57 @@ const adminSystemNotificationsSchema = z.object({
 	delivery: adminNotificationDeliverySettingsSchema.optional(),
 	channelConfigs: z
 		.array(
-			z.object({
-				id: z.string().trim().min(1).optional(),
-				type: z.enum(["email", "webhook", "wxpusher"]),
-				name: z.string().trim().min(1),
-				description: z.string().trim().nullable().optional(),
-				enabled: z.boolean().default(true),
-				config: z.record(z.string(), z.unknown()).default({}),
-				secretConfig: z.record(z.string(), z.unknown()).optional(),
-			}),
+			z
+				.object({
+					id: z.string().trim().min(1).optional(),
+					type: z.enum(["email", "webhook", "wxpusher"]),
+					name: z.string().trim().min(1),
+					description: z.string().trim().nullable().optional(),
+					enabled: z.boolean().default(true),
+					config: z.record(z.string(), z.unknown()).default({}),
+					secretConfig: z.record(z.string(), z.unknown()).optional(),
+				})
+				.superRefine((value, context) => {
+					if (value.type === "webhook") {
+						const url =
+							typeof value.config.url === "string"
+								? value.config.url.trim()
+								: "";
+						if (!url || !isSafeHttpUrl(url)) {
+							context.addIssue({
+								code: "custom",
+								path: ["config", "url"],
+								message: "Webhook URL 必须是合法的 http/https URL。",
+							});
+						}
+					}
+					if (value.type === "wxpusher") {
+						const apiUrl =
+							typeof value.config.apiUrl === "string"
+								? value.config.apiUrl.trim()
+								: "";
+						if (apiUrl && !isSafeHttpUrl(apiUrl)) {
+							context.addIssue({
+								code: "custom",
+								path: ["config", "apiUrl"],
+								message: "WxPusher API URL 必须是合法的 http/https URL。",
+							});
+						}
+					}
+				}),
 		)
 		.optional(),
 	webhook: z
 		.object({
 			enabled: z.boolean().optional(),
 			url: z.string().url().or(z.literal("")).optional(),
-			secret: z.string().min(1).optional(),
+			secret: z.string().optional(),
 		})
 		.optional(),
 	wxpusher: z
 		.object({
 			enabled: z.boolean().optional(),
-			appToken: z.string().min(1).optional(),
+			appToken: z.string().optional(),
 			apiUrl: z.string().url().optional(),
 		})
 		.optional(),
@@ -170,6 +199,32 @@ const siteNotificationRecipientSchema = z
 	.refine((value) => value.routes || (value.channels && value.events), {
 		message: "通知接收人必须配置至少一个事件和接收渠道。",
 	});
+
+const sectionPatchBodySchema = z
+	.record(z.string(), z.unknown())
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminSystemSettingsSectionParamsSchema = z.object({
+	section: z.enum([
+		"security",
+		"rate-limit",
+		"mail",
+		"notifications",
+		"captcha",
+		"avatar",
+		"ip-region",
+		"anti-spam",
+	]),
+});
+
+export const adminSiteSettingsSectionParamsSchema = z.object({
+	siteKey: z.string().min(1),
+	section: z.enum(["comments", "engagement", "notifications"]),
+});
+
+export const adminSectionPatchBodySchema = sectionPatchBodySchema;
 
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
@@ -251,10 +306,16 @@ export const adminProfilePatchBodySchema = z
 		message: "至少需要一个更新字段",
 	});
 
-export const adminProfilePasswordBodySchema = z.object({
-	currentPassword: z.string().min(1),
-	nextPassword: z.string().min(8),
-});
+export const adminProfilePasswordBodySchema = z
+	.object({
+		currentPassword: z.string().min(1),
+		nextPassword: z.string().min(8),
+		confirmPassword: z.string().min(8),
+	})
+	.refine((value) => value.nextPassword === value.confirmPassword, {
+		path: ["confirmPassword"],
+		message: "两次输入的新密码不一致。",
+	});
 
 export const adminProfileEmailChangeBodySchema = z.object({
 	newEmail: z
@@ -262,10 +323,14 @@ export const adminProfileEmailChangeBodySchema = z.object({
 		.trim()
 		.email()
 		.transform((value) => value.toLowerCase()),
-	currentPassword: z.string().min(1).optional(),
+	currentPassword: z.string().min(1),
 });
 
 export const adminProfileEmailChangeConfirmBodySchema = z.object({
+	token: z.string().min(1),
+});
+
+export const adminProfilePasswordConfirmBodySchema = z.object({
 	token: z.string().min(1),
 });
 
@@ -637,7 +702,7 @@ export const adminSystemSettingsBodySchema = z.object({
 				port: z.number().int().positive(),
 				secure: z.boolean(),
 				username: z.string(),
-				password: z.string().min(1).optional(),
+				password: z.string().optional(),
 				from: z.string(),
 			}),
 		})
@@ -660,7 +725,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			turnstile: z
 				.object({
 					siteKey: z.string(),
-					secretKey: z.string().min(1).optional(),
+					secretKey: z.string().optional(),
 					expectedAction: z.string(),
 					expectedHostname: z.string().optional(),
 				})
@@ -668,7 +733,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			hcaptcha: z
 				.object({
 					siteKey: z.string(),
-					secretKey: z.string().min(1).optional(),
+					secretKey: z.string().optional(),
 					expectedHostname: z.string().optional(),
 				})
 				.optional(),
@@ -677,7 +742,7 @@ export const adminSystemSettingsBodySchema = z.object({
 					variant: z.enum(["score_based", "policy_based_challenge"]),
 					projectId: z.string(),
 					siteKey: z.string(),
-					apiKey: z.string().min(1).optional(),
+					apiKey: z.string().optional(),
 					expectedAction: z.string(),
 					expectedHostname: z.string().optional(),
 					minScore: z.number().min(0).max(1),
@@ -686,7 +751,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			geetest: z
 				.object({
 					captchaId: z.string(),
-					captchaKey: z.string().min(1).optional(),
+					captchaKey: z.string().optional(),
 					apiServer: z.string().url(),
 				})
 				.optional(),
@@ -722,7 +787,7 @@ export const adminSystemSettingsBodySchema = z.object({
 	antiSpam: z
 		.object({
 			akismet: z.object({
-				apiKey: z.string().min(1).optional(),
+				apiKey: z.string().optional(),
 			}),
 		})
 		.optional(),
@@ -738,3 +803,10 @@ export const adminNotificationChannelTestBodySchema = z
 	.refine((value) => value.channelConfigId || value.channel, {
 		message: "必须选择一个通知渠道配置。",
 	});
+
+export const adminMailTestBodySchema = z
+	.object({
+		recipient: z.string().trim().min(1).optional(),
+	})
+	.optional()
+	.default({});

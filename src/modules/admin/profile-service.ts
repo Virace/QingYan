@@ -1,12 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import type { AppDatabase } from "../../db/client";
+import type { EmailSender } from "../notifications/channels/email-channel";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { AdminUsersRepository } from "./admin-users-repository";
 import { createPasswordHash, verifyPasswordHash } from "./password-hash";
 import type { AuthenticatedAdminSession } from "./session-service";
+
+export type AdminProfileEmailSender = EmailSender;
 
 export class AdminProfileService {
 	private readonly repository: AdminUsersRepository;
@@ -15,6 +18,7 @@ export class AdminProfileService {
 		db: AppDatabase,
 		private readonly security: SecurityToolkit,
 		private readonly settings = new RuntimeSystemSettingsService(db),
+		private readonly emailSender?: EmailSender,
 	) {
 		this.repository = new AdminUsersRepository(db);
 	}
@@ -50,6 +54,61 @@ export class AdminProfileService {
 				"当前密码不正确。",
 			);
 		}
+	}
+
+	private createEmailVerificationCode() {
+		return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+	}
+
+	private async canSendProfileVerificationEmail() {
+		const settings = await this.settings.getSettings();
+		return (
+			settings.mail.enabled &&
+			settings.admin.emailVerification.selfServiceRequired &&
+			Boolean(settings.mail.smtp.host.trim()) &&
+			Boolean(settings.mail.smtp.from.trim()) &&
+			Boolean(this.emailSender)
+		);
+	}
+
+	private async sendEmailChangeVerification(input: {
+		to: string;
+		from: string;
+		code: string;
+		expiresAt: string;
+	}) {
+		await this.emailSender?.({
+			to: input.to,
+			from: input.from,
+			subject: "[QingYan] 后台邮箱变更验证码",
+			body: [
+				"你正在变更 QingYan 后台账号邮箱。",
+				`验证码：${input.code}`,
+				`有效期至：${input.expiresAt}`,
+				"如果这不是你本人操作，请忽略本邮件并尽快修改密码。",
+			].join("\n"),
+			format: "text",
+		});
+	}
+
+	private async sendPasswordChangeVerification(input: {
+		to: string;
+		from: string;
+		code: string;
+		expiresAt: string;
+	}) {
+		await this.emailSender?.({
+			to: input.to,
+			from: input.from,
+			subject: "[QingYan] 后台密码变更验证码",
+			body: [
+				"你正在变更 QingYan 后台账号登录密码。",
+				`验证码：${input.code}`,
+				`有效期至：${input.expiresAt}`,
+				"如果这不是你本人操作，请忽略本邮件并尽快检查账号安全。",
+			].join("\n"),
+			format: "text",
+		});
 	}
 
 	private async serializeProfile(session: AuthenticatedAdminSession) {
@@ -126,7 +185,11 @@ export class AdminProfileService {
 		session: AuthenticatedAdminSession;
 		currentPassword: string;
 		nextPassword: string;
+		confirmPassword: string;
 	}) {
+		if (input.nextPassword !== input.confirmPassword) {
+			throw new AppError(400, "INVALID_REQUEST", "两次输入的新密码不一致。");
+		}
 		const user = await this.repository.getUserById(input.session.user.id);
 		if (
 			!user ||
@@ -138,9 +201,42 @@ export class AdminProfileService {
 				"当前密码不正确。",
 			);
 		}
+		const nextPasswordHash = createPasswordHash(input.nextPassword);
+		const settings = await this.settings.getSettings();
+		if (await this.canSendProfileVerificationEmail()) {
+			const code = this.createEmailVerificationCode();
+			const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+			await this.repository.createProfileVerificationToken({
+				purpose: "password_change",
+				userId: input.session.user.id,
+				pendingPasswordHash: nextPasswordHash,
+				tokenHash: this.hashEmailVerificationToken(code),
+				expiresAt,
+			});
+			await this.sendPasswordChangeVerification({
+				to: user.email,
+				from: settings.mail.smtp.from,
+				code,
+				expiresAt,
+			});
+			await this.security.writeAudit({
+				actorType: "admin_user",
+				actorId: String(input.session.user.id),
+				action: "admin.profile.password_change_requested",
+				targetType: "admin_user",
+				targetId: String(input.session.user.id),
+				payload: {
+					expiresAt,
+				},
+			});
+			return {
+				status: "pending_verification" as const,
+				expiresAt,
+			};
+		}
 		await this.repository.updateUserPassword({
 			userId: input.session.user.id,
-			passwordHash: createPasswordHash(input.nextPassword),
+			passwordHash: nextPasswordHash,
 			passwordChangeRequired: false,
 		});
 		await this.security.writeAudit({
@@ -159,25 +255,85 @@ export class AdminProfileService {
 		});
 	}
 
+	public async confirmPasswordChange(input: {
+		session: AuthenticatedAdminSession;
+		token: string;
+	}) {
+		const tokenHash = this.hashEmailVerificationToken(input.token);
+		const token =
+			await this.repository.getProfileVerificationTokenByHash(tokenHash);
+		if (
+			!token ||
+			token.purpose !== "password_change" ||
+			token.userId !== input.session.user.id ||
+			token.consumedAt !== null ||
+			!token.pendingPasswordHash
+		) {
+			throw new AppError(
+				400,
+				"ADMIN_PASSWORD_VERIFICATION_TOKEN_INVALID",
+				"密码验证令牌无效。",
+			);
+		}
+		if (new Date(token.expiresAt).getTime() <= Date.now()) {
+			throw new AppError(
+				400,
+				"ADMIN_PASSWORD_VERIFICATION_TOKEN_EXPIRED",
+				"密码验证令牌已过期。",
+			);
+		}
+		await this.repository.updateUserPassword({
+			userId: input.session.user.id,
+			passwordHash: token.pendingPasswordHash,
+			passwordChangeRequired: false,
+		});
+		await this.repository.consumeProfileVerificationToken(token.id);
+		await this.security.writeAudit({
+			actorType: "admin_user",
+			actorId: String(input.session.user.id),
+			action: "admin.profile.password_changed",
+			targetType: "admin_user",
+			targetId: String(input.session.user.id),
+			payload: {
+				verificationTokenId: token.id,
+			},
+		});
+		return this.serializeProfile({
+			...input.session,
+			user: {
+				...input.session.user,
+				passwordChangeRequired: false,
+			},
+		});
+	}
+
 	public async requestEmailChange(input: {
 		session: AuthenticatedAdminSession;
 		newEmail: string;
-		currentPassword?: string;
+		currentPassword: string;
 	}) {
 		const newEmail = input.newEmail.trim().toLowerCase();
+		await this.requireCurrentPassword(
+			input.session.user.id,
+			input.currentPassword,
+		);
 		await this.requireUniqueEmail(newEmail, input.session.user.id);
 
-		const adminSettings = await this.settings.getAdminSettings();
-		if (
-			adminSettings.emailVerification.selfServiceRequired &&
-			input.session.groupKey !== "admin"
-		) {
-			const token = `ev_${randomUUID().replaceAll("-", "")}`;
-			const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-			await this.repository.createEmailVerificationToken({
+		const settings = await this.settings.getSettings();
+		if (await this.canSendProfileVerificationEmail()) {
+			const code = this.createEmailVerificationCode();
+			const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+			await this.repository.createProfileVerificationToken({
+				purpose: "email_change",
 				userId: input.session.user.id,
 				newEmail,
-				tokenHash: this.hashEmailVerificationToken(token),
+				tokenHash: this.hashEmailVerificationToken(code),
+				expiresAt,
+			});
+			await this.sendEmailChangeVerification({
+				to: newEmail,
+				from: settings.mail.smtp.from,
+				code,
 				expiresAt,
 			});
 			await this.security.writeAudit({
@@ -195,22 +351,12 @@ export class AdminProfileService {
 				status: "pending_verification" as const,
 				newEmail,
 				expiresAt,
-				verificationToken: token,
 			};
 		}
 
-		await this.requireCurrentPassword(
-			input.session.user.id,
-			input.currentPassword,
-		);
 		const user = await this.repository.updateUser({
 			userId: input.session.user.id,
 			email: newEmail,
-		});
-		await this.repository.revokeSession({
-			sessionId: input.session.id,
-			revokedByUserId: input.session.user.id,
-			reason: "profile_email_changed",
 		});
 		await this.security.writeAudit({
 			actorType: "admin_user",
@@ -220,7 +366,7 @@ export class AdminProfileService {
 			targetId: String(input.session.user.id),
 			payload: {
 				newEmail,
-				sessionRevoked: true,
+				sessionRevoked: false,
 			},
 		});
 		return {
@@ -244,11 +390,13 @@ export class AdminProfileService {
 	}) {
 		const tokenHash = this.hashEmailVerificationToken(input.token);
 		const token =
-			await this.repository.getEmailVerificationTokenByHash(tokenHash);
+			await this.repository.getProfileVerificationTokenByHash(tokenHash);
 		if (
 			!token ||
+			token.purpose !== "email_change" ||
 			token.userId !== input.session.user.id ||
-			token.consumedAt !== null
+			token.consumedAt !== null ||
+			!token.newEmail
 		) {
 			throw new AppError(
 				400,
@@ -268,7 +416,7 @@ export class AdminProfileService {
 			userId: input.session.user.id,
 			email: token.newEmail,
 		});
-		await this.repository.consumeEmailVerificationToken(token.id);
+		await this.repository.consumeProfileVerificationToken(token.id);
 		await this.security.writeAudit({
 			actorType: "admin_user",
 			actorId: String(input.session.user.id),
