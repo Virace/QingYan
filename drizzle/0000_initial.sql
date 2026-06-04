@@ -633,15 +633,98 @@ CREATE TABLE `maintenance_jobs` (
 	`finished_at` text,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );--> statement-breakpoint
+CREATE TABLE `scheduled_tasks` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`description` text,
+	`type` text NOT NULL,
+	`site_id` integer,
+	`scope_kind` text NOT NULL,
+	`scope_json` text NOT NULL,
+	`enabled` integer DEFAULT false NOT NULL,
+	`disabled_reason` text,
+	`schedule_kind` text NOT NULL,
+	`schedule_preset` text,
+	`cron_expression` text,
+	`timezone` text,
+	`payload_json` text NOT NULL,
+	`payload_schema_version` integer DEFAULT 1 NOT NULL,
+	`policy_json` text NOT NULL,
+	`trigger_json` text NOT NULL,
+	`trigger_schema_version` integer DEFAULT 1 NOT NULL,
+	`next_run_at` text,
+	`claim_worker_id` text,
+	`claim_expires_at` text,
+	`last_run_at` text,
+	`last_run_id` text,
+	`last_status` text,
+	`retention_count` integer DEFAULT 5 NOT NULL,
+	`owner_user_id` integer NOT NULL,
+	`created_by_user_id` integer,
+	`updated_by_user_id` integer,
+	`transferred_by_user_id` integer,
+	`transferred_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`deleted_at` text,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`owner_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`updated_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`transferred_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_enabled_next_run_idx` ON `scheduled_tasks` (`enabled`,`next_run_at`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_claim_expires_idx` ON `scheduled_tasks` (`claim_expires_at`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_site_type_idx` ON `scheduled_tasks` (`site_id`,`type`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_owner_idx` ON `scheduled_tasks` (`owner_user_id`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_deleted_idx` ON `scheduled_tasks` (`deleted_at`);--> statement-breakpoint
+CREATE TABLE `scheduled_task_deleted_snapshots` (
+	`id` text PRIMARY KEY NOT NULL,
+	`scheduled_task_id` text NOT NULL,
+	`snapshot_json` text NOT NULL,
+	`deleted_by_user_id` integer,
+	`deleted_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`delete_reason` text,
+	`last_run_id` text,
+	`last_status` text,
+	FOREIGN KEY (`deleted_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `scheduled_task_deleted_snapshots_task_idx` ON `scheduled_task_deleted_snapshots` (`scheduled_task_id`);--> statement-breakpoint
+CREATE INDEX `scheduled_task_deleted_snapshots_deleted_idx` ON `scheduled_task_deleted_snapshots` (`deleted_at`);--> statement-breakpoint
+CREATE TABLE `task_metric_rollups` (
+	`id` text PRIMARY KEY NOT NULL,
+	`site_id` integer,
+	`site_key` text DEFAULT '__global__' NOT NULL,
+	`metric_key` text NOT NULL,
+	`bucket_start_at` text NOT NULL,
+	`bucket_size_sec` integer NOT NULL,
+	`dimension_json` text NOT NULL,
+	`value` real DEFAULT 0 NOT NULL,
+	`sample_count` integer DEFAULT 0 NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `task_metric_rollups_site_metric_bucket_idx` ON `task_metric_rollups` (`site_id`,`metric_key`,`bucket_start_at`);--> statement-breakpoint
+CREATE INDEX `task_metric_rollups_metric_bucket_idx` ON `task_metric_rollups` (`metric_key`,`bucket_start_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `task_metric_rollups_unique_bucket_idx` ON `task_metric_rollups` (`site_key`,`metric_key`,`bucket_start_at`,`bucket_size_sec`,`dimension_json`);--> statement-breakpoint
 CREATE TABLE `task_runs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`queue_backend` text NOT NULL,
 	`queue_message_id` text,
+	`scheduled_task_id` text,
+	`scheduled_task_name_snapshot` text,
 	`type` text NOT NULL,
 	`category` text NOT NULL,
 	`status` text NOT NULL,
 	`site_id` integer,
 	`site_key` text,
+	`scope_kind` text,
+	`trigger` text,
+	`trigger_snapshot_json` text,
+	`scope_json` text,
+	`input_json` text,
+	`action_config_snapshot_json` text,
 	`actor_type` text,
 	`actor_id` text,
 	`subject_type` text,
@@ -651,20 +734,49 @@ CREATE TABLE `task_runs` (
 	`progress_json` text,
 	`result_json` text,
 	`error_json` text,
+	`skip_reason` text,
+	`block_reason` text,
 	`idempotency_key` text,
 	`run_after` text,
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`max_attempts` integer DEFAULT 1 NOT NULL,
+	`retry_delay_sec` integer DEFAULT 0 NOT NULL,
+	`priority` integer DEFAULT 0 NOT NULL,
+	`concurrency_key` text,
+	`worker_id` text,
+	`lock_conflict_with_run_id` text,
+	`lock_conflict_with_task_name` text,
+	`owner_user_id_snapshot` integer,
+	`created_by_user_id` integer,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`started_at` text,
 	`finished_at` text,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`owner_user_id_snapshot`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
+CREATE INDEX `task_runs_scheduled_task_created_idx` ON `task_runs` (`scheduled_task_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `task_runs_status_run_after_idx` ON `task_runs` (`status`,`run_after`);--> statement-breakpoint
+CREATE INDEX `task_runs_type_status_run_after_idx` ON `task_runs` (`type`,`status`,`run_after`);--> statement-breakpoint
 CREATE INDEX `task_runs_category_created_idx` ON `task_runs` (`category`,`created_at`);--> statement-breakpoint
 CREATE INDEX `task_runs_site_idx` ON `task_runs` (`site_id`);--> statement-breakpoint
+CREATE INDEX `task_runs_site_created_idx` ON `task_runs` (`site_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `task_runs_concurrency_status_idx` ON `task_runs` (`concurrency_key`,`status`);--> statement-breakpoint
 CREATE UNIQUE INDEX `task_runs_idempotency_idx` ON `task_runs` (`idempotency_key`);--> statement-breakpoint
+CREATE TABLE `task_event_logs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`task_run_id` text NOT NULL,
+	`event_type` text NOT NULL,
+	`level` text NOT NULL,
+	`message` text NOT NULL,
+	`data_json` text,
+	`visible_to_site_admin` integer DEFAULT false NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`task_run_id`) REFERENCES `task_runs`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `task_event_logs_run_created_idx` ON `task_event_logs` (`task_run_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `task_event_logs_level_created_idx` ON `task_event_logs` (`level`,`created_at`);--> statement-breakpoint
 CREATE TABLE `notification_deliveries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_run_id` text NOT NULL,

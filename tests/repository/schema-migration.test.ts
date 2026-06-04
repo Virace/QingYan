@@ -231,6 +231,25 @@ describe("initial migration", () => {
 			const adminNotificationPreferenceIndexes = fixture.sqlite
 				.prepare("PRAGMA index_list(admin_user_notification_preferences)")
 				.all() as Array<{ name: string; unique: number }>;
+			const scheduledTaskColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(scheduled_tasks)")
+				.all() as Array<{
+				name: string;
+				notnull: number;
+				dflt_value: string | null;
+			}>;
+			const scheduledTaskIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(scheduled_tasks)")
+				.all() as Array<{ name: string; unique: number }>;
+			const scheduledTaskForeignKeys = fixture.sqlite
+				.prepare("PRAGMA foreign_key_list(scheduled_tasks)")
+				.all() as Array<{ from: string; table: string; to: string }>;
+			const scheduledTaskDeletedSnapshotColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(scheduled_task_deleted_snapshots)")
+				.all() as Array<{ name: string; notnull: number }>;
+			const scheduledTaskDeletedSnapshotIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(scheduled_task_deleted_snapshots)")
+				.all() as Array<{ name: string; unique: number }>;
 			const taskRunColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(task_runs)")
 				.all() as Array<{
@@ -243,6 +262,28 @@ describe("initial migration", () => {
 				.all() as Array<{ name: string; unique: number }>;
 			const taskRunForeignKeys = fixture.sqlite
 				.prepare("PRAGMA foreign_key_list(task_runs)")
+				.all() as Array<{ from: string; table: string; to: string }>;
+			const taskEventLogColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(task_event_logs)")
+				.all() as Array<{ name: string; notnull: number }>;
+			const taskEventLogIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(task_event_logs)")
+				.all() as Array<{ name: string; unique: number }>;
+			const taskEventLogForeignKeys = fixture.sqlite
+				.prepare("PRAGMA foreign_key_list(task_event_logs)")
+				.all() as Array<{ from: string; table: string; to: string }>;
+			const taskMetricRollupColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(task_metric_rollups)")
+				.all() as Array<{
+				name: string;
+				notnull: number;
+				type: string;
+			}>;
+			const taskMetricRollupIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(task_metric_rollups)")
+				.all() as Array<{ name: string; unique: number }>;
+			const taskMetricRollupForeignKeys = fixture.sqlite
+				.prepare("PRAGMA foreign_key_list(task_metric_rollups)")
 				.all() as Array<{ from: string; table: string; to: string }>;
 			const deliveryColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(notification_deliveries)")
@@ -697,16 +738,118 @@ describe("initial migration", () => {
 					}),
 				]),
 			);
+			expect(scheduledTaskColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"name",
+					"description",
+					"type",
+					"site_id",
+					"scope_kind",
+					"scope_json",
+					"enabled",
+					"disabled_reason",
+					"schedule_kind",
+					"schedule_preset",
+					"cron_expression",
+					"timezone",
+					"payload_json",
+					"payload_schema_version",
+					"policy_json",
+					"trigger_json",
+					"trigger_schema_version",
+					"next_run_at",
+					"claim_worker_id",
+					"claim_expires_at",
+					"last_run_at",
+					"last_run_id",
+					"last_status",
+					"retention_count",
+					"owner_user_id",
+					"created_by_user_id",
+					"updated_by_user_id",
+					"transferred_by_user_id",
+					"transferred_at",
+					"created_at",
+					"updated_at",
+					"deleted_at",
+				]),
+			);
+			expect(
+				scheduledTaskColumns.find((column) => column.name === "payload_json")
+					?.notnull,
+			).toBe(1);
+			expect(scheduledTaskIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "scheduled_tasks_enabled_next_run_idx",
+					}),
+					expect.objectContaining({
+						name: "scheduled_tasks_claim_expires_idx",
+					}),
+					expect.objectContaining({
+						name: "scheduled_tasks_site_type_idx",
+					}),
+					expect.objectContaining({ name: "scheduled_tasks_owner_idx" }),
+					expect.objectContaining({ name: "scheduled_tasks_deleted_idx" }),
+				]),
+			);
+			expect(scheduledTaskForeignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						from: "site_id",
+						table: "sites",
+						to: "id",
+					}),
+					expect.objectContaining({
+						from: "owner_user_id",
+						table: "admin_users",
+						to: "id",
+					}),
+				]),
+			);
+			expect(
+				scheduledTaskDeletedSnapshotColumns.map((column) => column.name),
+			).toEqual(
+				expect.arrayContaining([
+					"id",
+					"scheduled_task_id",
+					"snapshot_json",
+					"deleted_by_user_id",
+					"deleted_at",
+					"delete_reason",
+					"last_run_id",
+					"last_status",
+				]),
+			);
+			expect(scheduledTaskDeletedSnapshotIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "scheduled_task_deleted_snapshots_task_idx",
+					}),
+					expect.objectContaining({
+						name: "scheduled_task_deleted_snapshots_deleted_idx",
+					}),
+				]),
+			);
 			expect(taskRunColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
 					"id",
 					"queue_backend",
 					"queue_message_id",
+					"scheduled_task_id",
+					"scheduled_task_name_snapshot",
 					"type",
 					"category",
 					"status",
 					"site_id",
 					"site_key",
+					"scope_kind",
+					"trigger",
+					"trigger_snapshot_json",
+					"scope_json",
+					"input_json",
+					"action_config_snapshot_json",
 					"actor_type",
 					"actor_id",
 					"subject_type",
@@ -716,10 +859,20 @@ describe("initial migration", () => {
 					"progress_json",
 					"result_json",
 					"error_json",
+					"skip_reason",
+					"block_reason",
 					"idempotency_key",
 					"run_after",
 					"attempts",
 					"max_attempts",
+					"retry_delay_sec",
+					"priority",
+					"concurrency_key",
+					"worker_id",
+					"lock_conflict_with_run_id",
+					"lock_conflict_with_task_name",
+					"owner_user_id_snapshot",
+					"created_by_user_id",
 					"created_at",
 					"started_at",
 					"finished_at",
@@ -733,12 +886,22 @@ describe("initial migration", () => {
 			expect(taskRunIndexes).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
+						name: "task_runs_scheduled_task_created_idx",
+					}),
+					expect.objectContaining({
 						name: "task_runs_status_run_after_idx",
+					}),
+					expect.objectContaining({
+						name: "task_runs_type_status_run_after_idx",
 					}),
 					expect.objectContaining({
 						name: "task_runs_category_created_idx",
 					}),
 					expect.objectContaining({ name: "task_runs_site_idx" }),
+					expect.objectContaining({ name: "task_runs_site_created_idx" }),
+					expect.objectContaining({
+						name: "task_runs_concurrency_status_idx",
+					}),
 					expect.objectContaining({
 						name: "task_runs_idempotency_idx",
 						unique: 1,
@@ -746,6 +909,82 @@ describe("initial migration", () => {
 				]),
 			);
 			expect(taskRunForeignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						from: "site_id",
+						table: "sites",
+						to: "id",
+					}),
+				]),
+			);
+			expect(taskEventLogColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"task_run_id",
+					"event_type",
+					"level",
+					"message",
+					"data_json",
+					"visible_to_site_admin",
+					"created_at",
+				]),
+			);
+			expect(taskEventLogIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "task_event_logs_run_created_idx",
+					}),
+					expect.objectContaining({
+						name: "task_event_logs_level_created_idx",
+					}),
+				]),
+			);
+			expect(taskEventLogForeignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						from: "task_run_id",
+						table: "task_runs",
+						to: "id",
+					}),
+				]),
+			);
+			expect(taskMetricRollupColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"id",
+					"site_id",
+					"site_key",
+					"metric_key",
+					"bucket_start_at",
+					"bucket_size_sec",
+					"dimension_json",
+					"value",
+					"sample_count",
+					"created_at",
+					"updated_at",
+				]),
+			);
+			expect(
+				taskMetricRollupColumns.find((column) => column.name === "site_key")
+					?.notnull,
+			).toBe(1);
+			expect(
+				taskMetricRollupColumns.find((column) => column.name === "value")?.type,
+			).toBe("REAL");
+			expect(taskMetricRollupIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "task_metric_rollups_site_metric_bucket_idx",
+					}),
+					expect.objectContaining({
+						name: "task_metric_rollups_metric_bucket_idx",
+					}),
+					expect.objectContaining({
+						name: "task_metric_rollups_unique_bucket_idx",
+						unique: 1,
+					}),
+				]),
+			);
+			expect(taskMetricRollupForeignKeys).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
 						from: "site_id",

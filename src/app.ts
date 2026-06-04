@@ -15,6 +15,7 @@ import { adminSessionRoutes } from "./modules/admin/session-routes";
 import { adminSettingsRoutes } from "./modules/admin/settings-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
+import { adminTasksRoutes } from "./modules/admin/tasks-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminCommentersRoutes } from "./modules/admin/commenters-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
@@ -278,6 +279,9 @@ export async function buildApp(
 	});
 	await app.register(adminOpsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/ops"),
+	});
+	await app.register(adminTasksRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/tasks"),
 	});
 	await app.register(commentsPublicRoutes, {
 		prefix: joinPublicPath(publicPath, "/api"),

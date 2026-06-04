@@ -1047,6 +1047,7 @@ export class AdminManagementService {
 				emailEnabled: settings.emailNotificationsEnabled,
 				channelConfigs,
 				recipients: recipients.map((recipient) => ({
+					id: recipient.id,
 					userId: recipient.userId,
 					username: recipient.username,
 					email: recipient.email,

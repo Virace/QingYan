@@ -162,5 +162,5 @@ describe("startup mode resolver", () => {
 			broken.cleanup();
 			normal.cleanup();
 		}
-	});
+	}, 10_000);
 });

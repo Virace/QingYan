@@ -604,6 +604,174 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			);
 		}
 
+		sqlite.exec(`
+			CREATE TABLE IF NOT EXISTS scheduled_tasks (
+				id text PRIMARY KEY NOT NULL,
+				name text NOT NULL,
+				description text,
+				type text NOT NULL,
+				site_id integer,
+				scope_kind text NOT NULL,
+				scope_json text NOT NULL,
+				enabled integer DEFAULT false NOT NULL,
+				disabled_reason text,
+				schedule_kind text NOT NULL,
+				schedule_preset text,
+				cron_expression text,
+				timezone text,
+				payload_json text NOT NULL,
+				payload_schema_version integer DEFAULT 1 NOT NULL,
+				policy_json text NOT NULL,
+				trigger_json text NOT NULL,
+				trigger_schema_version integer DEFAULT 1 NOT NULL,
+				next_run_at text,
+				claim_worker_id text,
+				claim_expires_at text,
+				last_run_at text,
+				last_run_id text,
+				last_status text,
+				retention_count integer DEFAULT 5 NOT NULL,
+				owner_user_id integer NOT NULL,
+				created_by_user_id integer,
+				updated_by_user_id integer,
+				transferred_by_user_id integer,
+				transferred_at text,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				deleted_at text,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (owner_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (created_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (updated_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (transferred_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS scheduled_tasks_enabled_next_run_idx ON scheduled_tasks (enabled, next_run_at);
+			CREATE INDEX IF NOT EXISTS scheduled_tasks_claim_expires_idx ON scheduled_tasks (claim_expires_at);
+			CREATE INDEX IF NOT EXISTS scheduled_tasks_site_type_idx ON scheduled_tasks (site_id, type);
+			CREATE INDEX IF NOT EXISTS scheduled_tasks_owner_idx ON scheduled_tasks (owner_user_id);
+			CREATE INDEX IF NOT EXISTS scheduled_tasks_deleted_idx ON scheduled_tasks (deleted_at);
+
+			CREATE TABLE IF NOT EXISTS scheduled_task_deleted_snapshots (
+				id text PRIMARY KEY NOT NULL,
+				scheduled_task_id text NOT NULL,
+				snapshot_json text NOT NULL,
+				deleted_by_user_id integer,
+				deleted_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				delete_reason text,
+				last_run_id text,
+				last_status text,
+				FOREIGN KEY (deleted_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS scheduled_task_deleted_snapshots_task_idx ON scheduled_task_deleted_snapshots (scheduled_task_id);
+			CREATE INDEX IF NOT EXISTS scheduled_task_deleted_snapshots_deleted_idx ON scheduled_task_deleted_snapshots (deleted_at);
+		`);
+
+		if (tableExists(sqlite, "scheduled_tasks")) {
+			addColumnIfMissing(sqlite, "scheduled_tasks", "claim_worker_id", "text");
+			addColumnIfMissing(sqlite, "scheduled_tasks", "claim_expires_at", "text");
+			sqlite.exec(`
+				CREATE INDEX IF NOT EXISTS scheduled_tasks_claim_expires_idx ON scheduled_tasks (claim_expires_at);
+			`);
+		}
+
+		if (tableExists(sqlite, "task_runs")) {
+			addColumnIfMissing(sqlite, "task_runs", "scheduled_task_id", "text");
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"scheduled_task_name_snapshot",
+				"text",
+			);
+			addColumnIfMissing(sqlite, "task_runs", "scope_kind", "text");
+			addColumnIfMissing(sqlite, "task_runs", "trigger", "text");
+			addColumnIfMissing(sqlite, "task_runs", "trigger_snapshot_json", "text");
+			addColumnIfMissing(sqlite, "task_runs", "scope_json", "text");
+			addColumnIfMissing(sqlite, "task_runs", "input_json", "text");
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"action_config_snapshot_json",
+				"text",
+			);
+			addColumnIfMissing(sqlite, "task_runs", "skip_reason", "text");
+			addColumnIfMissing(sqlite, "task_runs", "block_reason", "text");
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"retry_delay_sec",
+				"integer DEFAULT 0 NOT NULL",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"priority",
+				"integer DEFAULT 0 NOT NULL",
+			);
+			addColumnIfMissing(sqlite, "task_runs", "concurrency_key", "text");
+			addColumnIfMissing(sqlite, "task_runs", "worker_id", "text");
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"lock_conflict_with_run_id",
+				"text",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"lock_conflict_with_task_name",
+				"text",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"owner_user_id_snapshot",
+				"integer",
+			);
+			addColumnIfMissing(sqlite, "task_runs", "created_by_user_id", "integer");
+			sqlite.exec(`
+				CREATE INDEX IF NOT EXISTS task_runs_scheduled_task_created_idx ON task_runs (scheduled_task_id, created_at);
+				CREATE INDEX IF NOT EXISTS task_runs_type_status_run_after_idx ON task_runs (type, status, run_after);
+				CREATE INDEX IF NOT EXISTS task_runs_site_created_idx ON task_runs (site_id, created_at);
+				CREATE INDEX IF NOT EXISTS task_runs_concurrency_status_idx ON task_runs (concurrency_key, status);
+			`);
+		}
+
+		sqlite.exec(`
+			CREATE TABLE IF NOT EXISTS task_event_logs (
+				id text PRIMARY KEY NOT NULL,
+				task_run_id text NOT NULL,
+				event_type text NOT NULL,
+				level text NOT NULL,
+				message text NOT NULL,
+				data_json text,
+				visible_to_site_admin integer DEFAULT false NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS task_event_logs_run_created_idx ON task_event_logs (task_run_id, created_at);
+			CREATE INDEX IF NOT EXISTS task_event_logs_level_created_idx ON task_event_logs (level, created_at);
+		`);
+
+		sqlite.exec(`
+			CREATE TABLE IF NOT EXISTS task_metric_rollups (
+				id text PRIMARY KEY NOT NULL,
+				site_id integer,
+				site_key text DEFAULT '__global__' NOT NULL,
+				metric_key text NOT NULL,
+				bucket_start_at text NOT NULL,
+				bucket_size_sec integer NOT NULL,
+				dimension_json text NOT NULL,
+				value real DEFAULT 0 NOT NULL,
+				sample_count integer DEFAULT 0 NOT NULL,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS task_metric_rollups_site_metric_bucket_idx ON task_metric_rollups (site_id, metric_key, bucket_start_at);
+			CREATE INDEX IF NOT EXISTS task_metric_rollups_metric_bucket_idx ON task_metric_rollups (metric_key, bucket_start_at);
+			CREATE UNIQUE INDEX IF NOT EXISTS task_metric_rollups_unique_bucket_idx ON task_metric_rollups (site_key, metric_key, bucket_start_at, bucket_size_sec, dimension_json);
+		`);
+
 		if (
 			tableExists(sqlite, "admin_user_notification_preferences") &&
 			columnExists(

@@ -1,0 +1,934 @@
+import { and, desc, eq } from "drizzle-orm";
+import type { z } from "zod";
+
+import type { AppDatabase } from "../../db/client";
+import {
+	auditLogs,
+	adminGroups,
+	adminUserGroups,
+	adminUsers,
+	adminUserSiteAccess,
+} from "../../db/schema";
+import type { AuthenticatedAdminSession } from "../admin/session-service";
+import { toValidationFields } from "../admin/validation-fields";
+import {
+	AppError,
+	ResourceNotFoundError,
+	ValidationFailedError,
+} from "../shared/errors";
+import type { SiteRegistry } from "../shared/site-registry";
+import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
+import { BackendUserNotificationRecipientsRepository } from "../notifications/backend-user-recipients-repository";
+import {
+	calculateNextRunAt,
+	validateScheduleDefinition,
+} from "./schedule-calculator";
+import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
+import {
+	ScheduledTaskRepository,
+	type ScheduledTaskRecord,
+} from "./scheduled-task-repository";
+import { TaskRunRepository } from "./task-run-repository";
+import type { TaskRunRecord } from "./types";
+import {
+	canManageScheduledTask,
+	canRunScheduledTask,
+	canViewTaskLogs,
+	projectDeletedSnapshotForSession,
+	projectScheduledTaskForSession,
+	projectTaskRunForSession,
+	type TaskVisibilitySession,
+} from "./task-visibility";
+
+const RETENTION_COUNT_MAX = 30;
+
+function toVisibilitySession(
+	session: AuthenticatedAdminSession,
+): TaskVisibilitySession {
+	return {
+		userId: session.user.id,
+		groupKey: session.groupKey,
+		isAdmin: session.isAdmin,
+		isInitialAdmin: session.isInitialAdmin,
+		siteIds: session.siteIds,
+	};
+}
+
+function validationField(path: string, message: string) {
+	return {
+		path,
+		code: "custom",
+		message,
+		received: "unknown",
+	};
+}
+
+export interface ScheduledTaskWriteInput {
+	name?: string;
+	description?: string | null;
+	type?: string;
+	siteKey?: string | null;
+	scopeKind?: string;
+	scope?: unknown;
+	enabled?: boolean;
+	scheduleKind?: string;
+	schedulePreset?: string | null;
+	cronExpression?: string | null;
+	timezone?: string | null;
+	payload?: unknown;
+	policy?: unknown;
+	trigger?: unknown;
+	retentionCount?: number;
+}
+
+export class AdminTaskService {
+	private readonly registry = createBuiltInTaskTypeRegistry();
+	private readonly scheduledTasks: ScheduledTaskRepository;
+	private readonly taskRuns: TaskRunRepository;
+	private readonly channelConfigs: NotificationChannelConfigsRepository;
+	private readonly notificationRecipients: BackendUserNotificationRecipientsRepository;
+
+	public constructor(
+		private readonly db: AppDatabase,
+		private readonly siteRegistry: SiteRegistry,
+	) {
+		this.scheduledTasks = new ScheduledTaskRepository(db, {
+			retentionCountMax: RETENTION_COUNT_MAX,
+		});
+		this.taskRuns = new TaskRunRepository(db);
+		this.channelConfigs = new NotificationChannelConfigsRepository(db);
+		this.notificationRecipients =
+			new BackendUserNotificationRecipientsRepository(db);
+	}
+
+	public listDefinitions() {
+		return {
+			items: this.registry.list().map((definition) => ({
+				type: definition.type,
+				label: definition.label,
+				description: definition.description,
+				category: definition.category,
+				scope: definition.scope,
+				permissions: definition.permissions,
+				defaultPayload: definition.defaultPayload,
+				defaultPolicy: definition.defaultPolicy,
+				schedule: definition.schedule,
+				dangerous: definition.dangerous ?? false,
+				reuse: definition.reuse,
+			})),
+		};
+	}
+
+	public async listScheduled(session: AuthenticatedAdminSession) {
+		const visibilitySession = toVisibilitySession(session);
+		const items = (await this.scheduledTasks.list({ limit: 200, offset: 0 }))
+			.map((task) =>
+				projectScheduledTaskForSession(task, { session: visibilitySession }),
+			)
+			.filter((item) => item !== null);
+		return { items, totalCount: items.length };
+	}
+
+	public async getScheduled(id: string, session: AuthenticatedAdminSession) {
+		const task = await this.scheduledTasks.get(id);
+		if (!task) {
+			throw new ResourceNotFoundError(
+				"SCHEDULED_TASK_NOT_FOUND",
+				"任务不存在。",
+			);
+		}
+		const projected = projectScheduledTaskForSession(task, {
+			session: toVisibilitySession(session),
+		});
+		if (!projected) {
+			throw new ResourceNotFoundError(
+				"SCHEDULED_TASK_NOT_FOUND",
+				"任务不存在。",
+			);
+		}
+		return projected;
+	}
+
+	public async createScheduled(
+		input: ScheduledTaskWriteInput,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const normalized = this.validateWriteInput(input, session);
+		await this.validateFailureNotificationPolicy(
+			normalized.policy,
+			normalized.siteId,
+		);
+		const task = await this.scheduledTasks.create({
+			...normalized,
+			ownerUserId: session.user.id,
+			createdByUserId: session.user.id,
+			updatedByUserId: session.user.id,
+		});
+		await this.writeAudit(session, "task.scheduled.create", task, {
+			requestId,
+		});
+		return projectScheduledTaskForSession(task, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async updateScheduled(
+		id: string,
+		input: ScheduledTaskWriteInput,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const task = await this.getTaskForManage(id, session);
+		const merged = {
+			name: input.name ?? task.name,
+			description:
+				input.description === undefined ? task.description : input.description,
+			type: input.type ?? task.type,
+			siteKey: task.siteId ? this.siteKeyForId(task.siteId) : null,
+			scopeKind: input.scopeKind ?? task.scopeKind,
+			scope: input.scope ?? task.scope,
+			enabled: input.enabled ?? task.enabled,
+			scheduleKind: input.scheduleKind ?? task.scheduleKind,
+			schedulePreset:
+				input.schedulePreset === undefined
+					? task.schedulePreset
+					: input.schedulePreset,
+			cronExpression:
+				input.cronExpression === undefined
+					? task.cronExpression
+					: input.cronExpression,
+			timezone: input.timezone === undefined ? task.timezone : input.timezone,
+			payload: input.payload ?? task.payload,
+			policy: input.policy ?? task.policy,
+			trigger: input.trigger ?? task.trigger,
+			retentionCount: input.retentionCount ?? task.retentionCount,
+		};
+		const normalized = this.validateWriteInput(merged, session);
+		await this.validateFailureNotificationPolicy(
+			normalized.policy,
+			normalized.siteId,
+		);
+		const updated = await this.scheduledTasks.update(id, {
+			name: normalized.name,
+			description: normalized.description,
+			siteId: normalized.siteId,
+			scopeKind: normalized.scopeKind,
+			scope: normalized.scope,
+			enabled: normalized.enabled,
+			disabledReason: normalized.enabled ? null : "manual_disabled",
+			scheduleKind: normalized.scheduleKind,
+			schedulePreset: normalized.schedulePreset,
+			cronExpression: normalized.cronExpression,
+			timezone: normalized.timezone,
+			payload: normalized.payload,
+			policy: normalized.policy,
+			trigger: normalized.trigger,
+			nextRunAt: normalized.nextRunAt,
+			retentionCount: normalized.retentionCount,
+			updatedByUserId: session.user.id,
+		});
+		await this.writeAudit(session, "task.scheduled.update", updated, {
+			requestId,
+		});
+		return projectScheduledTaskForSession(updated, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async runScheduled(
+		id: string,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const task = await this.getTaskForRun(id, session);
+		const run = await this.taskRuns.createScheduledTaskRun({
+			scheduledTask: task,
+			trigger: "manual",
+			triggerSnapshot: {
+				actorType: "admin_user",
+				actorId: session.user.id,
+			},
+			input: task.payload,
+			category: this.registry.get(task.type)?.category ?? "maintenance",
+			createdByUserId: session.user.id,
+		});
+		await this.scheduledTasks.updateLastRun(task.id, {
+			lastRunAt: run.createdAt,
+			lastRunId: run.id,
+			lastStatus: run.status,
+		});
+		await this.taskRuns.pruneScheduledTaskRuns({
+			scheduledTaskId: task.id,
+			retainCount: task.retentionCount,
+		});
+		await this.writeAudit(session, "task.scheduled.run", task, {
+			runId: run.id,
+			runStatus: run.status,
+			requestId,
+		});
+		return projectTaskRunForSession(run, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async deleteScheduled(
+		id: string,
+		reason: string | null,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const task = await this.getTaskForManage(id, session);
+		const snapshot = await this.scheduledTasks.deleteWithSnapshot(id, {
+			deletedByUserId: session.user.id,
+			deleteReason: reason,
+		});
+		await this.writeAudit(session, "task.scheduled.delete", task, {
+			requestId,
+		});
+		return projectDeletedSnapshotForSession(snapshot);
+	}
+
+	public async enableScheduled(
+		id: string,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const task = await this.getTaskForManage(id, session);
+		const updated = await this.scheduledTasks.enable(task.id, {
+			updatedByUserId: session.user.id,
+		});
+		await this.writeAudit(session, "task.scheduled.enable", updated, {
+			requestId,
+		});
+		return projectScheduledTaskForSession(updated, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async disableScheduled(
+		id: string,
+		reason: string,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const task = await this.getTaskForManage(id, session);
+		const updated = await this.scheduledTasks.disable(task.id, {
+			reason,
+			updatedByUserId: session.user.id,
+		});
+		await this.writeAudit(session, "task.scheduled.disable", updated, {
+			requestId,
+		});
+		return projectScheduledTaskForSession(updated, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async transferOwner(
+		id: string,
+		ownerUserId: number,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const task = await this.getTaskForManage(id, session);
+		await this.assertCanOwnTask(ownerUserId, task);
+		const updated = await this.scheduledTasks.update(task.id, {
+			ownerUserId,
+			transferredByUserId: session.user.id,
+			transferredAt: new Date().toISOString(),
+			updatedByUserId: session.user.id,
+		});
+		await this.writeAudit(session, "task.scheduled.transfer_owner", updated, {
+			requestId,
+		});
+		return projectScheduledTaskForSession(updated, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async reconcileOwner(
+		ownerUserId: number,
+		reason: string,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		if (!session.isInitialAdmin && !session.isAdmin) {
+			throw new AppError(403, "ADMIN_PERMISSION_REQUIRED", "缺少后台权限。");
+		}
+		const initialAdmin = await this.getInitialAdmin();
+		const tasks = await this.scheduledTasks.list({ limit: 500, offset: 0 });
+		const updatedTaskIds: string[] = [];
+		for (const task of tasks) {
+			if (task.ownerUserId !== ownerUserId) {
+				continue;
+			}
+			const updated = await this.scheduledTasks.update(task.id, {
+				enabled: false,
+				disabledReason: reason,
+				ownerUserId: initialAdmin.id,
+				transferredByUserId: session.user.id,
+				transferredAt: new Date().toISOString(),
+				updatedByUserId: session.user.id,
+			});
+			updatedTaskIds.push(updated.id);
+			await this.writeAudit(
+				session,
+				"task.scheduled.owner_reconcile",
+				updated,
+				{
+					requestId,
+				},
+			);
+		}
+		return { updatedTaskIds };
+	}
+
+	public async listRuns(session: AuthenticatedAdminSession) {
+		const result = await this.taskRuns.listForTaskCenter({
+			limit: 200,
+			offset: 0,
+		});
+		const visibilitySession = toVisibilitySession(session);
+		const items = result.items
+			.map((run) =>
+				projectTaskRunForSession(run, { session: visibilitySession }),
+			)
+			.filter((item) => item !== null);
+		return { items, totalCount: items.length };
+	}
+
+	public async getRun(id: string, session: AuthenticatedAdminSession) {
+		const run = await this.taskRuns.get(id);
+		if (!run) {
+			throw new ResourceNotFoundError("TASK_RUN_NOT_FOUND", "任务运行不存在。");
+		}
+		const projected = projectTaskRunForSession(run, {
+			session: toVisibilitySession(session),
+		});
+		if (!projected) {
+			throw new ResourceNotFoundError("TASK_RUN_NOT_FOUND", "任务运行不存在。");
+		}
+		return projected;
+	}
+
+	public async assertCanViewRunLogs(
+		id: string,
+		session: AuthenticatedAdminSession,
+	) {
+		const run = await this.taskRuns.getRequired(id);
+		if (!canViewTaskLogs(run, toVisibilitySession(session))) {
+			throw new AppError(403, "TASK_LOG_ACCESS_DENIED", "没有任务日志权限。");
+		}
+		return run;
+	}
+
+	public async cancelRun(
+		id: string,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		await this.assertCanViewRunLogs(id, session);
+		const cancelled = await this.taskRuns.cancel(id, {
+			code: "TASK_RUN_CANCELLED",
+			reason: "manual_cancel",
+			cancelledByUserId: session.user.id,
+		});
+		await this.writeRunAudit(session, "task.run.cancel", cancelled, {
+			requestId,
+		});
+		return projectTaskRunForSession(cancelled, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async retryRun(
+		id: string,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		await this.assertCanViewRunLogs(id, session);
+		const runAfter = new Date().toISOString();
+		const retrying = await this.taskRuns.markRetrying(
+			id,
+			{
+				code: "TASK_RUN_RETRY_REQUESTED",
+				retryByUserId: session.user.id,
+			},
+			runAfter,
+		);
+		await this.writeRunAudit(session, "task.run.retry", retrying, {
+			requestId,
+		});
+		return projectTaskRunForSession(retrying, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async listAudit(session: AuthenticatedAdminSession) {
+		const rows = await this.db
+			.select()
+			.from(auditLogs)
+			.where(
+				and(
+					session.isAdmin || session.isInitialAdmin
+						? undefined
+						: eq(auditLogs.actorType, "admin_user"),
+				),
+			)
+			.orderBy(desc(auditLogs.createdAt))
+			.limit(200);
+		const visibleRows = rows.filter((row) => {
+			if (!row.action.startsWith("task.")) {
+				return false;
+			}
+			if (session.isAdmin || session.isInitialAdmin) {
+				return true;
+			}
+			return row.siteId !== null && session.siteIds.includes(row.siteId);
+		});
+		return {
+			items: visibleRows.map((row) => {
+				const payload = this.parseAuditPayload(row.payloadJson);
+				return {
+					id: row.id,
+					siteId: row.siteId,
+					actorType: row.actorType,
+					actorId: row.actorId,
+					action: row.action,
+					targetType: row.targetType,
+					targetId: row.targetId,
+					taskName: payload.taskName,
+					taskType: payload.taskType,
+					siteKey: payload.siteKey,
+					runId:
+						payload.runId ??
+						(row.targetType === "task_run" ? row.targetId : null),
+					runStatus: payload.runStatus,
+					requestId: payload.requestId,
+					scheduledTaskId:
+						payload.scheduledTaskId ??
+						(row.targetType === "scheduled_task" ? row.targetId : null),
+					createdAt: row.createdAt,
+				};
+			}),
+			totalCount: visibleRows.length,
+		};
+	}
+
+	public async listDeletedSnapshots(session: AuthenticatedAdminSession) {
+		this.assertCanViewDeletedSnapshots(session);
+		const items = await this.scheduledTasks.listDeletedSnapshots({
+			limit: 200,
+			offset: 0,
+		});
+		return {
+			items: items.map(projectDeletedSnapshotForSession),
+			totalCount: items.length,
+		};
+	}
+
+	public async getDeletedSnapshot(
+		id: string,
+		session: AuthenticatedAdminSession,
+	) {
+		this.assertCanViewDeletedSnapshots(session);
+		const snapshot = await this.scheduledTasks.getDeletedSnapshot(id);
+		if (!snapshot) {
+			throw new ResourceNotFoundError(
+				"SCHEDULED_TASK_DELETED_SNAPSHOT_NOT_FOUND",
+				"任务删除快照不存在。",
+			);
+		}
+		return projectDeletedSnapshotForSession(snapshot);
+	}
+
+	private validateWriteInput(
+		input: ScheduledTaskWriteInput,
+		session: AuthenticatedAdminSession,
+	) {
+		const fields = [];
+		if (!input.name || typeof input.name !== "string") {
+			fields.push(validationField("name", "任务名称不能为空。"));
+		}
+		if (!input.type || typeof input.type !== "string") {
+			fields.push(validationField("type", "任务类型不能为空。"));
+		}
+		const definition =
+			typeof input.type === "string" ? this.registry.get(input.type) : null;
+		if (input.type && !definition) {
+			fields.push(validationField("type", "任务类型不存在。"));
+		}
+		const site =
+			typeof input.siteKey === "string"
+				? this.siteRegistry.getRegisteredSite(input.siteKey)
+				: undefined;
+		if (input.scopeKind === "site" && !site) {
+			fields.push(validationField("siteKey", "站点不存在。"));
+		}
+		if (
+			site &&
+			!session.isAdmin &&
+			!session.isInitialAdmin &&
+			!session.siteIds.includes(site.id)
+		) {
+			throw new AppError(403, "ADMIN_SITE_ACCESS_REQUIRED", "没有该站点权限。");
+		}
+		if (definition) {
+			const parsed = definition.payloadSchema.safeParse(input.payload);
+			if (!parsed.success) {
+				fields.push(
+					...toValidationFields(
+						parsed.error.issues as z.core.$ZodIssue[],
+						input.payload,
+					).map((field) => ({ ...field, path: `payload.${field.path}` })),
+				);
+			}
+			if (definition.dangerous && input.enabled) {
+				fields.push(
+					validationField(
+						"enabled",
+						"危险任务必须先以禁用状态创建，确认后再手动启用。",
+					),
+				);
+			}
+			if (
+				definition.type === "blacklist_automation" &&
+				input.scopeKind === "global" &&
+				!session.isAdmin &&
+				!session.isInitialAdmin
+			) {
+				fields.push(
+					validationField(
+						"scopeKind",
+						"全局黑名单自动化只允许全局管理员或初始管理员创建。",
+					),
+				);
+			}
+		}
+		try {
+			validateScheduleDefinition({
+				scheduleKind: input.scheduleKind ?? "",
+				schedulePreset: input.schedulePreset,
+				cronExpression: input.cronExpression,
+				trigger: input.trigger,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			fields.push(validationField("trigger.everyMinutes", message));
+		}
+		if (fields.length > 0) {
+			throw new ValidationFailedError(fields);
+		}
+		const nextRunAt =
+			calculateNextRunAt({
+				scheduleKind: input.scheduleKind ?? "manual_only",
+				schedulePreset: input.schedulePreset,
+				cronExpression: input.cronExpression,
+				trigger: input.trigger,
+				now: new Date(),
+			})?.toISOString() ?? null;
+		return {
+			name: String(input.name),
+			description: input.description ?? null,
+			type: String(input.type),
+			siteId: site?.id ?? null,
+			scopeKind: input.scopeKind ?? "global",
+			scope: input.scope ?? {},
+			enabled: input.enabled ?? false,
+			disabledReason: input.enabled === false ? "manual_disabled" : null,
+			scheduleKind: input.scheduleKind ?? "manual_only",
+			schedulePreset: input.schedulePreset ?? null,
+			cronExpression: input.cronExpression ?? null,
+			timezone: input.timezone ?? null,
+			payload: input.payload,
+			policy: input.policy ?? {},
+			trigger: input.trigger ?? {},
+			nextRunAt,
+			retentionCount: Math.min(
+				Math.max(input.retentionCount ?? 5, 0),
+				RETENTION_COUNT_MAX,
+			),
+		};
+	}
+
+	private async validateFailureNotificationPolicy(
+		policy: unknown,
+		siteId: number | null,
+	) {
+		const fields = [];
+		const failureNotification =
+			policy &&
+			typeof policy === "object" &&
+			"failureNotification" in policy &&
+			(policy as Record<string, unknown>).failureNotification &&
+			typeof (policy as Record<string, unknown>).failureNotification ===
+				"object"
+				? ((policy as Record<string, unknown>).failureNotification as Record<
+						string,
+						unknown
+					>)
+				: null;
+		if (!failureNotification?.enabled) {
+			return;
+		}
+		if (!siteId) {
+			fields.push(
+				validationField(
+					"policy.failureNotification.enabled",
+					"失败通知只支持站点范围任务。",
+				),
+			);
+		}
+		const channelConfigIds = Array.isArray(failureNotification.channelConfigIds)
+			? failureNotification.channelConfigIds.filter(
+					(item): item is string => typeof item === "string" && item.length > 0,
+				)
+			: [];
+		const recipientIds = Array.isArray(failureNotification.recipientIds)
+			? failureNotification.recipientIds.filter(
+					(item): item is string => typeof item === "string" && item.length > 0,
+				)
+			: [];
+		if (channelConfigIds.length === 0) {
+			fields.push(
+				validationField(
+					"policy.failureNotification.channelConfigIds",
+					"失败通知需要选择至少一个通知通道。",
+				),
+			);
+		}
+		if (recipientIds.length === 0) {
+			fields.push(
+				validationField(
+					"policy.failureNotification.recipientIds",
+					"失败通知需要选择至少一个接收人。",
+				),
+			);
+		}
+		const channelConfigs =
+			await this.channelConfigs.listByIds(channelConfigIds);
+		const channelConfigById = new Map(
+			channelConfigs.map((config) => [config.id, config]),
+		);
+		for (const channelConfigId of channelConfigIds) {
+			const config = channelConfigById.get(channelConfigId);
+			if (!config?.enabled) {
+				fields.push(
+					validationField(
+						"policy.failureNotification.channelConfigIds",
+						"通知通道不存在或未启用。",
+					),
+				);
+				break;
+			}
+		}
+		if (siteId) {
+			const recipients =
+				await this.notificationRecipients.listSiteRecipients(siteId);
+			const recipientById = new Map(
+				recipients.map((recipient) => [recipient.id, recipient]),
+			);
+			for (const recipientId of recipientIds) {
+				const recipient = recipientById.get(recipientId);
+				if (!recipient?.enabled) {
+					fields.push(
+						validationField(
+							"policy.failureNotification.recipientIds",
+							"通知接收人不存在或未启用。",
+						),
+					);
+					break;
+				}
+			}
+		}
+		if (fields.length > 0) {
+			throw new ValidationFailedError(fields);
+		}
+	}
+
+	private assertCanViewDeletedSnapshots(session: AuthenticatedAdminSession) {
+		if (!session.isInitialAdmin) {
+			throw new AppError(
+				403,
+				"TASK_DELETED_SNAPSHOT_ACCESS_DENIED",
+				"只有初始管理员可以查看任务删除快照。",
+			);
+		}
+	}
+
+	private parseAuditPayload(value: string | null) {
+		if (!value) {
+			return {} as Record<string, unknown>;
+		}
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			return parsed && typeof parsed === "object"
+				? (parsed as Record<string, unknown>)
+				: {};
+		} catch {
+			return {};
+		}
+	}
+
+	private async getTaskForManage(
+		id: string,
+		session: AuthenticatedAdminSession,
+	): Promise<ScheduledTaskRecord> {
+		const task = await this.scheduledTasks.get(id);
+		if (!task) {
+			throw new ResourceNotFoundError(
+				"SCHEDULED_TASK_NOT_FOUND",
+				"任务不存在。",
+			);
+		}
+		if (!canManageScheduledTask(task, toVisibilitySession(session))) {
+			throw new AppError(
+				403,
+				"SCHEDULED_TASK_MANAGE_DENIED",
+				"没有任务管理权限。",
+			);
+		}
+		return task;
+	}
+
+	private async getTaskForRun(
+		id: string,
+		session: AuthenticatedAdminSession,
+	): Promise<ScheduledTaskRecord> {
+		const task = await this.scheduledTasks.get(id);
+		if (!task) {
+			throw new ResourceNotFoundError(
+				"SCHEDULED_TASK_NOT_FOUND",
+				"任务不存在。",
+			);
+		}
+		if (!canRunScheduledTask(task, toVisibilitySession(session))) {
+			throw new AppError(
+				403,
+				"SCHEDULED_TASK_RUN_DENIED",
+				"没有任务执行权限。",
+			);
+		}
+		return task;
+	}
+
+	private siteKeyForId(siteId: number): string | null {
+		return (
+			this.siteRegistry.listRegisteredSites().find((site) => site.id === siteId)
+				?.siteKey ?? null
+		);
+	}
+
+	private async assertCanOwnTask(
+		ownerUserId: number,
+		task: ScheduledTaskRecord,
+	) {
+		const [user] = await this.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.id, ownerUserId));
+		if (!user || user.status !== "active" || user.deletedAt) {
+			throw new AppError(400, "TASK_OWNER_INVALID", "目标 owner 不可用。");
+		}
+		if (user.isInitialAdmin) {
+			return;
+		}
+		const [group] = await this.db
+			.select({ key: adminGroups.key })
+			.from(adminUserGroups)
+			.innerJoin(adminGroups, eq(adminUserGroups.groupId, adminGroups.id))
+			.where(eq(adminUserGroups.userId, ownerUserId));
+		if (group?.key === "admin") {
+			return;
+		}
+		if (group?.key !== "site_admin" || !task.siteId) {
+			throw new AppError(400, "TASK_OWNER_INVALID", "目标 owner 权限不足。");
+		}
+		const [access] = await this.db
+			.select()
+			.from(adminUserSiteAccess)
+			.where(
+				and(
+					eq(adminUserSiteAccess.userId, ownerUserId),
+					eq(adminUserSiteAccess.siteId, task.siteId),
+				),
+			)
+			.limit(1);
+		if (!access) {
+			throw new AppError(400, "TASK_OWNER_INVALID", "目标 owner 无站点权限。");
+		}
+	}
+
+	private async getInitialAdmin() {
+		const [user] = await this.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.isInitialAdmin, true))
+			.limit(1);
+		if (!user) {
+			throw new ResourceNotFoundError(
+				"INITIAL_ADMIN_NOT_FOUND",
+				"初始管理员不存在。",
+			);
+		}
+		return user;
+	}
+
+	private async writeAudit(
+		session: AuthenticatedAdminSession,
+		action: string,
+		task: Pick<ScheduledTaskRecord, "id" | "siteId" | "type" | "name">,
+		metadata: {
+			requestId?: string;
+			runId?: string;
+			runStatus?: TaskRunRecord["status"];
+		} = {},
+	) {
+		const siteKey =
+			task.siteId === null
+				? undefined
+				: (this.siteKeyForId(task.siteId) ?? undefined);
+		await this.db.insert(auditLogs).values({
+			siteId: task.siteId,
+			actorType: "admin_user",
+			actorId: String(session.user.id),
+			action,
+			targetType: "scheduled_task",
+			targetId: task.id,
+			payloadJson: JSON.stringify({
+				taskName: task.name,
+				taskType: task.type,
+				siteKey,
+				requestId: metadata.requestId,
+				runId: metadata.runId,
+				runStatus: metadata.runStatus,
+			}),
+		});
+	}
+
+	private async writeRunAudit(
+		session: AuthenticatedAdminSession,
+		action: string,
+		run: TaskRunRecord,
+		metadata: { requestId?: string } = {},
+	) {
+		await this.db.insert(auditLogs).values({
+			siteId: run.siteId,
+			actorType: "admin_user",
+			actorId: String(session.user.id),
+			action,
+			targetType: "task_run",
+			targetId: run.id,
+			payloadJson: JSON.stringify({
+				scheduledTaskId: run.scheduledTaskId,
+				taskName: run.scheduledTaskNameSnapshot,
+				taskType: run.type,
+				siteKey: run.siteKey,
+				runId: run.id,
+				runStatus: run.status,
+				requestId: metadata.requestId,
+			}),
+		});
+	}
+}

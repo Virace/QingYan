@@ -16,6 +16,8 @@ export type TaskRunStatus =
 	| "retrying"
 	| "succeeded"
 	| "failed"
+	| "skipped"
+	| "blocked"
 	| "suppressed"
 	| "cancelled";
 
@@ -42,11 +44,19 @@ export interface TaskRunRecord {
 	id: string;
 	queueBackend: TaskQueueBackend;
 	queueMessageId: string | null;
+	scheduledTaskId: string | null;
+	scheduledTaskNameSnapshot: string | null;
 	type: string;
 	category: TaskRunCategory;
 	status: TaskRunStatus;
 	siteId: number | null;
 	siteKey: string | null;
+	scopeKind: string | null;
+	scope: unknown;
+	trigger: string | null;
+	triggerSnapshot: unknown;
+	input: unknown;
+	actionConfigSnapshot: unknown;
 	actorType: TaskActorType | null;
 	actorId: string | null;
 	subjectType: string | null;
@@ -60,6 +70,16 @@ export interface TaskRunRecord {
 	runAfter: string | null;
 	attempts: number;
 	maxAttempts: number;
+	retryDelaySec: number;
+	priority: number;
+	concurrencyKey: string | null;
+	workerId: string | null;
+	lockConflictWithRunId: string | null;
+	lockConflictWithTaskName: string | null;
+	ownerUserIdSnapshot: number | null;
+	createdByUserId: number | null;
+	skipReason: string | null;
+	blockReason: string | null;
 	createdAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;

@@ -1493,6 +1493,324 @@ Query：
 }
 ```
 
+## Task Scheduler
+
+任务调度中心接口服务内置 Admin Console，不进入公开 OpenAPI。所有写操作需要已登录后台会话和 CSRF token；后端按当前用户的全局管理员、初始管理员、站点管理员、站点评论管理员和站点授权执行 ACL，不以前端隐藏作为权限边界。
+
+任务调度中心只允许后端注册的内置 task type，不支持任意 Shell、Python、JavaScript、SQL、系统命令、容器命令或脚本库任务。
+
+### `GET /api/admin/tasks/definitions`
+
+列出后端权威 task type registry。
+
+响应：
+```ts
+{
+  items: Array<{
+    type: string;
+    label: string;
+    description: string;
+    category: "notification" | "import" | "maintenance" | "backup" | "upgrade" | "page" | "system";
+    scope: "global" | "site" | "multi_site" | "page";
+    defaultPayload: Record<string, unknown>;
+    defaultPolicy: {
+      maxAttempts?: number;
+      retryDelaySec?: number;
+      timeoutMs?: number;
+      maxBytes?: number;
+      concurrencyKey?: string;
+    };
+    schedule: {
+      manual: boolean;
+      presets: string[];
+      cron: boolean;
+      condition: boolean;
+    };
+    dangerous: boolean;
+    reuse: {
+      service: string;
+      method: string;
+      file: string;
+    };
+  }>;
+}
+```
+
+当前内置 task type 包括：
+
+- `page_source_refresh`
+- `page_metadata_refresh`
+- `comment_ip_refresh`
+- `ip_region_update`
+- `backup`
+- `site_settings_action`
+- `blacklist_automation`
+- `daily_site_digest`
+
+### `GET /api/admin/tasks/scheduled`
+
+列出当前用户可见的计划任务定义。非 owner 的站点管理员和站点评论管理员只能看到摘要投影，不能看到 raw payload、policy、trigger 或日志。
+
+响应：
+```ts
+{
+  items: ScheduledTaskProjection[];
+  totalCount: number;
+}
+```
+
+### `POST /api/admin/tasks/scheduled`
+
+创建计划任务定义。危险 task type 必须先以 `enabled=false` 创建；如果请求里传入 `enabled=true`，后端返回 `VALIDATION_FAILED`，字段路径为 `enabled`。
+
+请求：
+```ts
+{
+  name: string;
+  description?: string | null;
+  type: string;
+  siteKey?: string | null;
+  scopeKind: "global" | "site" | "multi_site" | "page";
+  scope: Record<string, unknown>;
+  enabled: boolean;
+  scheduleKind: "manual_only" | "once" | "interval" | "daily" | "weekly" | "monthly" | "cron";
+  schedulePreset?: string | null;
+  cronExpression?: string | null;
+  timezone?: string | null;
+  payload: Record<string, unknown>;
+  policy: {
+    maxAttempts?: number;
+    retryDelaySec?: number;
+    timeoutMs?: number;
+    maxBytes?: number;
+    concurrencyKey?: string;
+    failureNotification?: {
+      enabled: boolean;
+      channelConfigIds: string[];
+      recipientIds: string[];
+    };
+  };
+  trigger: {
+    runAt?: string;
+    everyMinutes?: number;
+    time?: string;
+    dayOfWeek?: number;
+    dayOfMonth?: number;
+  };
+  retentionCount: number;
+}
+```
+
+响应为 `ScheduledTaskProjection`。
+
+### `GET /api/admin/tasks/scheduled/{taskId}`
+
+读取单个计划任务定义。无可见权限时返回 `SCHEDULED_TASK_NOT_FOUND`；摘要可见但无管理权限时，响应不包含 raw payload/policy/trigger。
+
+### `PATCH /api/admin/tasks/scheduled/{taskId}`
+
+更新计划任务定义。只有 owner、初始管理员或具备全局管理权限的管理员可以更新。
+
+### `DELETE /api/admin/tasks/scheduled/{taskId}`
+
+删除计划任务定义并写入删除快照。历史 run 不会被删除；普通任务管理 UI 不提供恢复入口。
+
+请求：
+```ts
+{
+  reason?: string | null;
+}
+```
+
+响应为 `ScheduledTaskDeletedSnapshot`。
+
+### `POST /api/admin/tasks/scheduled/{taskId}/run`
+
+立即创建一次手动运行记录。该接口只创建 `task_runs` 记录并写审计；执行由后端任务 runner/worker 后续处理。
+
+响应为 `TaskRunProjection`，owner 和管理员可见 raw input；摘要用户只能看到脱敏投影。
+
+### `POST /api/admin/tasks/scheduled/{taskId}/enable`
+
+启用计划任务定义。任务 owner 权限变化导致自动停用后，需要具备管理权限的用户手动重新启用。
+
+### `POST /api/admin/tasks/scheduled/{taskId}/disable`
+
+禁用计划任务定义。
+
+请求：
+```ts
+{
+  reason: string;
+}
+```
+
+### `POST /api/admin/tasks/scheduled/{taskId}/transfer-owner`
+
+转移任务 owner。目标用户必须处于 active 状态，并具备目标任务作用范围所需权限；初始管理员可接管所有任务。
+
+请求：
+```ts
+{
+  ownerUserId: number;
+}
+```
+
+### `POST /api/admin/tasks/owners/reconcile`
+
+管理员或初始管理员用于处理 owner 被停用、删除、降权或失去站点权限后的任务。匹配的任务会自动 disabled，并转移给初始管理员。
+
+请求：
+```ts
+{
+  ownerUserId: number;
+  reason: "owner_permission_changed" | "owner_disabled" | "owner_deleted" | string;
+}
+```
+
+响应：
+```ts
+{
+  updatedTaskIds: string[];
+}
+```
+
+### `GET /api/admin/tasks/runs`
+
+列出任务运行记录。
+
+响应：
+```ts
+{
+  items: TaskRunProjection[];
+  totalCount: number;
+}
+```
+
+### `GET /api/admin/tasks/runs/{runId}`
+
+读取单个任务运行记录。非 owner 摘要用户不能看到 raw input/output/error。
+
+### `GET /api/admin/tasks/runs/{runId}/events`
+
+分页读取任务事件日志。只有具备日志权限的用户可以访问；站点摘要用户默认不能访问事件日志。显式标记 `visibleToSiteAdmin=true` 的事件仍需经过后端权限投影和脱敏。
+
+响应：
+```ts
+{
+  items: Array<{
+    id: string;
+    taskRunId: string;
+    eventType: string;
+    level: "debug" | "info" | "warn" | "error";
+    message: string;
+    data: unknown;
+    visibleToSiteAdmin: boolean;
+    createdAt: string;
+  }>;
+  totalCount: number;
+}
+```
+
+### `POST /api/admin/tasks/runs/{runId}/cancel`
+
+取消任务运行记录。当前实现写入 `cancelled` 状态和 `TASK_RUN_CANCELLED` 错误快照。
+
+### `POST /api/admin/tasks/runs/{runId}/retry`
+
+把任务运行记录标记为 `retrying`，并写入 `TASK_RUN_RETRY_REQUESTED` 错误快照。
+
+### `GET /api/admin/tasks/audit`
+
+列出任务相关审计记录。初始管理员和管理员可见全局任务审计；站点用户只能看到其授权站点范围内的任务审计摘要。
+
+### `GET /api/admin/tasks/deleted-snapshots`
+
+列出计划任务删除快照。仅初始管理员可访问。
+
+### `GET /api/admin/tasks/deleted-snapshots/{snapshotId}`
+
+读取单个计划任务删除快照。仅初始管理员可访问。
+
+`ScheduledTaskProjection`：
+```ts
+{
+  id: string;
+  name: string;
+  description: string | null;
+  type: string;
+  siteId: number | null;
+  scopeKind: string;
+  enabled: boolean;
+  disabledReason: string | null;
+  scheduleKind: string;
+  schedulePreset: string | null;
+  cronExpression: string | null;
+  timezone: string | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastRunId: string | null;
+  lastStatus: string | null;
+  ownerUserId: number;
+  createdByUserId: number | null;
+  updatedByUserId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  canManage: boolean;
+  canRun: boolean;
+  canViewLogs: boolean;
+  visibility: "summary" | "definition";
+  scope?: unknown;
+  payload?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  trigger?: Record<string, unknown>;
+  retentionCount?: number;
+}
+```
+
+`TaskRunProjection`：
+```ts
+{
+  id: string;
+  scheduledTaskId: string | null;
+  scheduledTaskNameSnapshot: string | null;
+  type: string;
+  category: "notification" | "import" | "maintenance" | "backup" | "upgrade" | "page" | "system";
+  status: "queued" | "delayed" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "blocked" | "suppressed" | "cancelled";
+  siteId: number | null;
+  siteKey: string | null;
+  scopeKind: string | null;
+  trigger: string | null;
+  ownerUserIdSnapshot: number | null;
+  createdByUserId: number | null;
+  skipReason: string | null;
+  blockReason: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+  canViewLogs: boolean;
+  visibility: "run_summary" | "run_detail";
+  scope?: unknown;
+  triggerSnapshot?: unknown;
+  input?: unknown;
+  actionConfigSnapshot?: unknown;
+  payloadSummary?: unknown;
+  payload?: unknown;
+  progress?: unknown;
+  result?: unknown;
+  error?: unknown;
+  attempts?: number;
+  maxAttempts?: number;
+  retryDelaySec?: number;
+  priority?: number;
+  concurrencyKey?: string | null;
+  workerId?: string | null;
+  lockConflictWithRunId?: string | null;
+  lockConflictWithTaskName?: string | null;
+}
+```
+
 ## Ops
 
 ### `GET /api/admin/ops/status`

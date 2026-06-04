@@ -1,9 +1,24 @@
 import { randomUUID } from "node:crypto";
 
-import { and, count, desc, eq } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	lte,
+	or,
+} from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
-import { notificationDeliveries, taskRuns } from "../../db/schema";
+import {
+	notificationDeliveries,
+	taskEventLogs,
+	taskRuns,
+} from "../../db/schema";
+import type { ScheduledTaskRecord } from "./scheduled-task-repository";
 import {
 	type NotificationDeliveryRecord,
 	parseNullableJson,
@@ -29,11 +44,19 @@ function serializeTaskRun(row: typeof taskRuns.$inferSelect): TaskRunRecord {
 		id: row.id,
 		queueBackend: row.queueBackend as TaskQueueBackend,
 		queueMessageId: row.queueMessageId,
+		scheduledTaskId: row.scheduledTaskId,
+		scheduledTaskNameSnapshot: row.scheduledTaskNameSnapshot,
 		type: row.type,
 		category: row.category as TaskRunCategory,
 		status: row.status as TaskRunStatus,
 		siteId: row.siteId,
 		siteKey: row.siteKey,
+		scopeKind: row.scopeKind,
+		scope: parseNullableJson(row.scopeJson),
+		trigger: row.trigger,
+		triggerSnapshot: parseNullableJson(row.triggerSnapshotJson),
+		input: parseNullableJson(row.inputJson),
+		actionConfigSnapshot: parseNullableJson(row.actionConfigSnapshotJson),
 		actorType: row.actorType as TaskActorType | null,
 		actorId: row.actorId,
 		subjectType: row.subjectType,
@@ -47,6 +70,16 @@ function serializeTaskRun(row: typeof taskRuns.$inferSelect): TaskRunRecord {
 		runAfter: row.runAfter,
 		attempts: row.attempts,
 		maxAttempts: row.maxAttempts,
+		retryDelaySec: row.retryDelaySec,
+		priority: row.priority,
+		concurrencyKey: row.concurrencyKey,
+		workerId: row.workerId,
+		lockConflictWithRunId: row.lockConflictWithRunId,
+		lockConflictWithTaskName: row.lockConflictWithTaskName,
+		ownerUserIdSnapshot: row.ownerUserIdSnapshot,
+		createdByUserId: row.createdByUserId,
+		skipReason: row.skipReason,
+		blockReason: row.blockReason,
 		createdAt: row.createdAt,
 		startedAt: row.startedAt,
 		finishedAt: row.finishedAt,
@@ -76,6 +109,18 @@ function serializeDelivery(
 		sentAt: row.sentAt,
 		updatedAt: row.updatedAt,
 	};
+}
+
+function readSiteKey(...values: unknown[]): string | null {
+	for (const value of values) {
+		if (value && typeof value === "object" && "siteKey" in value) {
+			const siteKey = (value as { siteKey?: unknown }).siteKey;
+			if (typeof siteKey === "string" && siteKey.trim()) {
+				return siteKey;
+			}
+		}
+	}
+	return null;
 }
 
 export class TaskRunRepository {
@@ -112,11 +157,19 @@ export class TaskRunRepository {
 			id,
 			queueBackend: input.queueBackend ?? "database",
 			queueMessageId: input.queueMessageId ?? null,
+			scheduledTaskId: null,
+			scheduledTaskNameSnapshot: null,
 			type: input.type,
 			category: input.category,
 			status,
 			siteId: input.siteId ?? null,
 			siteKey: input.siteKey ?? null,
+			scopeKind: null,
+			trigger: null,
+			triggerSnapshotJson: null,
+			scopeJson: null,
+			inputJson: null,
+			actionConfigSnapshotJson: null,
 			actorType: input.actorType ?? null,
 			actorId: input.actorId ?? null,
 			subjectType: input.subjectType ?? null,
@@ -132,10 +185,105 @@ export class TaskRunRepository {
 			runAfter,
 			attempts: input.attempts ?? 0,
 			maxAttempts: input.maxAttempts ?? 1,
+			retryDelaySec: 0,
+			priority: 0,
+			concurrencyKey: null,
+			workerId: null,
+			lockConflictWithRunId: null,
+			lockConflictWithTaskName: null,
+			ownerUserIdSnapshot: null,
+			createdByUserId: null,
+			skipReason: null,
+			blockReason: null,
 			createdAt: timestamp,
 			startedAt: input.startedAt ?? null,
 			finishedAt: input.finishedAt ?? null,
 			updatedAt,
+		});
+		return this.getRequired(id);
+	}
+
+	public async createScheduledTaskRun(input: {
+		id?: string;
+		scheduledTask: ScheduledTaskRecord;
+		trigger: string;
+		triggerSnapshot: unknown;
+		input: unknown;
+		category?: TaskRunCategory;
+		createdByUserId?: number | null;
+		queueBackend?: TaskQueueBackend;
+		status?: TaskRunStatus;
+		runAfter?: string | null;
+		createdAt?: string;
+		updatedAt?: string;
+		concurrencyKey?: string | null;
+	}) {
+		const timestamp = input.createdAt ?? nowIso();
+		const runAfter = input.runAfter ?? null;
+		const status: TaskRunStatus =
+			input.status ?? (runAfter && runAfter > timestamp ? "delayed" : "queued");
+		const id = input.id ?? createTaskRunId();
+		const policy = (input.scheduledTask.policy ?? {}) as Partial<{
+			maxAttempts: number;
+			retryDelaySec: number;
+			priority: number;
+			concurrencyKey: string;
+		}>;
+		await this.db.insert(taskRuns).values({
+			id,
+			queueBackend: input.queueBackend ?? "database",
+			queueMessageId: null,
+			scheduledTaskId: input.scheduledTask.id,
+			scheduledTaskNameSnapshot: input.scheduledTask.name,
+			type: input.scheduledTask.type,
+			category: input.category ?? "maintenance",
+			status,
+			siteId: input.scheduledTask.siteId,
+			siteKey: readSiteKey(
+				input.scheduledTask.scope,
+				input.scheduledTask.payload,
+				input.input,
+			),
+			scopeKind: input.scheduledTask.scopeKind,
+			trigger: input.trigger,
+			triggerSnapshotJson: stringifyJson(input.triggerSnapshot),
+			scopeJson: stringifyJson(input.scheduledTask.scope),
+			inputJson: stringifyJson(input.input),
+			actionConfigSnapshotJson: stringifyJson({
+				payload: input.scheduledTask.payload,
+				policy: input.scheduledTask.policy,
+			}),
+			actorType: null,
+			actorId: null,
+			subjectType: "scheduled_task",
+			subjectId: input.scheduledTask.id,
+			payloadSummaryJson: stringifyJson({
+				scheduledTaskId: input.scheduledTask.id,
+				scheduledTaskName: input.scheduledTask.name,
+				type: input.scheduledTask.type,
+			}),
+			payloadJson: stringifyJson(input.input),
+			progressJson: null,
+			resultJson: null,
+			errorJson: null,
+			skipReason: null,
+			blockReason: null,
+			idempotencyKey: null,
+			runAfter,
+			attempts: 0,
+			maxAttempts: policy.maxAttempts ?? 1,
+			retryDelaySec: policy.retryDelaySec ?? 0,
+			priority: policy.priority ?? 0,
+			concurrencyKey: input.concurrencyKey ?? policy.concurrencyKey ?? null,
+			workerId: null,
+			lockConflictWithRunId: null,
+			lockConflictWithTaskName: null,
+			ownerUserIdSnapshot: input.scheduledTask.ownerUserId,
+			createdByUserId: input.createdByUserId ?? null,
+			createdAt: timestamp,
+			startedAt: null,
+			finishedAt: null,
+			updatedAt: input.updatedAt ?? timestamp,
 		});
 		return this.getRequired(id);
 	}
@@ -195,6 +343,101 @@ export class TaskRunRepository {
 		};
 	}
 
+	public async pruneScheduledTaskRuns(input: {
+		scheduledTaskId: string;
+		retainCount: number;
+	}) {
+		const retainCount = Math.max(0, input.retainCount);
+		const rows = await this.db
+			.select({ id: taskRuns.id })
+			.from(taskRuns)
+			.where(eq(taskRuns.scheduledTaskId, input.scheduledTaskId))
+			.orderBy(desc(taskRuns.createdAt), desc(taskRuns.id));
+		const deleteIds = rows.slice(retainCount).map((row) => row.id);
+		if (deleteIds.length === 0) {
+			return { deletedRunIds: [] };
+		}
+		this.db.transaction((tx) => {
+			tx.delete(notificationDeliveries)
+				.where(inArray(notificationDeliveries.taskRunId, deleteIds))
+				.run();
+			tx.delete(taskEventLogs)
+				.where(inArray(taskEventLogs.taskRunId, deleteIds))
+				.run();
+			tx.delete(taskRuns).where(inArray(taskRuns.id, deleteIds)).run();
+		});
+		return { deletedRunIds: deleteIds };
+	}
+
+	public async findRunningByConcurrencyKey(concurrencyKey: string) {
+		const [row] = await this.db
+			.select()
+			.from(taskRuns)
+			.where(
+				and(
+					eq(taskRuns.concurrencyKey, concurrencyKey),
+					inArray(taskRuns.status, ["running", "retrying"]),
+				),
+			)
+			.orderBy(desc(taskRuns.createdAt))
+			.limit(1);
+		return row ? serializeTaskRun(row) : null;
+	}
+
+	public async listStaleRunning(staleBeforeIso: string) {
+		const rows = await this.db
+			.select()
+			.from(taskRuns)
+			.where(
+				and(
+					eq(taskRuns.status, "running"),
+					isNotNull(taskRuns.updatedAt),
+					lte(taskRuns.updatedAt, staleBeforeIso),
+				),
+			)
+			.orderBy(taskRuns.updatedAt);
+		return rows.map(serializeTaskRun);
+	}
+
+	public async claimRunnable(input: {
+		workerId: string;
+		nowIso?: string;
+		limit?: number;
+	}) {
+		const timestamp = input.nowIso ?? nowIso();
+		const runnableCondition = and(
+			inArray(taskRuns.status, ["queued", "delayed", "retrying"]),
+			or(isNull(taskRuns.runAfter), lte(taskRuns.runAfter, timestamp)),
+		);
+		const rows = await this.db
+			.select({ id: taskRuns.id })
+			.from(taskRuns)
+			.where(runnableCondition)
+			.orderBy(desc(taskRuns.priority), taskRuns.runAfter, taskRuns.createdAt)
+			.limit(Math.max(1, input.limit ?? 1));
+		const claimed: TaskRunRecord[] = [];
+		for (const row of rows) {
+			const [updated] = await this.db
+				.update(taskRuns)
+				.set({
+					status: "running",
+					startedAt: timestamp,
+					workerId: input.workerId,
+					progressJson: stringifyJson({
+						workerId: input.workerId,
+						heartbeatAt: timestamp,
+					}),
+					updatedAt: timestamp,
+				})
+				.where(and(eq(taskRuns.id, row.id), runnableCondition))
+				.returning();
+			if (updated) {
+				claimed.push(serializeTaskRun(updated));
+			}
+		}
+		return claimed;
+	}
+
 	public async markRunning(id: string, progress?: unknown) {
 		const timestamp = nowIso();
 		await this.db
@@ -202,8 +445,27 @@ export class TaskRunRepository {
 			.set({
 				status: "running",
 				startedAt: timestamp,
+				workerId:
+					progress &&
+					typeof progress === "object" &&
+					"workerId" in progress &&
+					typeof progress.workerId === "string"
+						? progress.workerId
+						: undefined,
 				progressJson:
 					progress === undefined ? undefined : stringifyJson(progress),
+				updatedAt: timestamp,
+			})
+			.where(eq(taskRuns.id, id));
+		return this.getRequired(id);
+	}
+
+	public async updateProgress(id: string, progress: unknown) {
+		const timestamp = nowIso();
+		await this.db
+			.update(taskRuns)
+			.set({
+				progressJson: stringifyJson(progress),
 				updatedAt: timestamp,
 			})
 			.where(eq(taskRuns.id, id));
@@ -268,6 +530,75 @@ export class TaskRunRepository {
 			})
 			.where(eq(taskRuns.id, id));
 		return this.getRequired(id);
+	}
+
+	public async markSkipped(id: string, skipReason: string, result?: unknown) {
+		const timestamp = nowIso();
+		await this.db
+			.update(taskRuns)
+			.set({
+				status: "skipped",
+				skipReason,
+				resultJson: result === undefined ? null : stringifyJson(result),
+				finishedAt: timestamp,
+				updatedAt: timestamp,
+			})
+			.where(eq(taskRuns.id, id));
+		return this.getRequired(id);
+	}
+
+	public async markBlocked(id: string, blockReason: string, error?: unknown) {
+		const timestamp = nowIso();
+		await this.db
+			.update(taskRuns)
+			.set({
+				status: "blocked",
+				blockReason,
+				errorJson: error === undefined ? null : stringifyJson(error),
+				finishedAt: timestamp,
+				updatedAt: timestamp,
+			})
+			.where(eq(taskRuns.id, id));
+		return this.getRequired(id);
+	}
+
+	public async recordLockConflict(input: {
+		scheduledTask: ScheduledTaskRecord;
+		trigger: string;
+		triggerSnapshot: unknown;
+		input: unknown;
+		category?: TaskRunCategory;
+		createdByUserId?: number | null;
+		conflictWithRunId: string;
+		conflictWithTaskName: string;
+		concurrencyKey: string;
+	}) {
+		const run = await this.createScheduledTaskRun({
+			scheduledTask: input.scheduledTask,
+			trigger: input.trigger,
+			triggerSnapshot: input.triggerSnapshot,
+			input: input.input,
+			category: input.category,
+			createdByUserId: input.createdByUserId,
+			status: "failed",
+			concurrencyKey: input.concurrencyKey,
+		});
+		const timestamp = nowIso();
+		await this.db
+			.update(taskRuns)
+			.set({
+				errorJson: stringifyJson({
+					code: "TASK_LOCK_CONFLICT",
+					conflictWithRunId: input.conflictWithRunId,
+					conflictWithTaskName: input.conflictWithTaskName,
+				}),
+				lockConflictWithRunId: input.conflictWithRunId,
+				lockConflictWithTaskName: input.conflictWithTaskName,
+				finishedAt: timestamp,
+				updatedAt: timestamp,
+			})
+			.where(eq(taskRuns.id, run.id));
+		return this.getRequired(run.id);
 	}
 
 	public async cancel(id: string, reason: unknown) {

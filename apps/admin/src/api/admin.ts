@@ -276,6 +276,7 @@ export interface SiteNotificationRoute {
 }
 
 export interface SiteNotificationRecipient {
+	id?: string;
 	userId: number;
 	username: string;
 	email: string;
