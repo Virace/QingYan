@@ -13,7 +13,6 @@ import { AdminIdentityService } from "../modules/admin/admin-identity-service";
 import { FullBackupService } from "../modules/backup/full-backup-service";
 import { IpRegionAutoUpdateScheduler } from "../modules/comments/metadata/ip-region-scheduler";
 import { CommentIpMaintenanceService } from "../modules/comments/metadata/comment-ip-maintenance-service";
-import { MaintenanceJobRepository } from "../modules/ops/maintenance-job-repository";
 import { QingYanExportService } from "../modules/import-export/qingyan/export-service";
 import { fetchPageSourceText } from "../modules/page-registry/source-fetcher";
 import { PageSourceRefreshService } from "../modules/page-registry/source-refresh-service";
@@ -96,34 +95,45 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		systemSettingsService.getIpRegionSettings(),
 	);
 	await ipRegionScheduler.start();
-	const maintenanceJobs = new MaintenanceJobRepository(db);
-	const titleRefresh = new PageMetadataRefreshService(db, maintenanceJobs, {
+	const titleRefresh = new PageMetadataRefreshService(db, {
 		fetchHtml: fastify.pageTitleFetchHtml ?? fetchPageTitleHtml,
 	});
-	const sourceRefresh = new PageSourceRefreshService(db, maintenanceJobs, {
+	const taskRuns = new TaskRunRepository(db);
+	const eventLogs = new TaskEventLogRepository(db);
+	const sourceRefresh = new PageSourceRefreshService(db, {
 		fetchText: fastify.pageSourceFetchText ?? fetchPageSourceText,
 		loadAllowedOriginsForSite: async (siteKey) =>
 			fastify.siteRegistry.getRegisteredSite(siteKey)?.allowedOrigins ?? [],
-		createTitleRefreshJob: async (input) => {
-			await titleRefresh.createRefreshJob({
+		createTitleRefreshRun: async (input) => {
+			await taskRuns.create({
+				type: "page_metadata_refresh",
+				category: "maintenance",
 				siteKey: input.siteKey,
-				pageKeys: input.pageKeys,
-				onlyMissingTitle: true,
+				payload: {
+					siteKey: input.siteKey,
+					scope: "missing_only",
+					pageKeys: input.pageKeys,
+					trigger: "source_refresh",
+				},
+				payloadSummary: {
+					siteKey: input.siteKey,
+					pageKeys: input.pageKeys,
+				},
+				input: {
+					siteKey: input.siteKey,
+					scope: "missing_only",
+					pageKeys: input.pageKeys,
+					trigger: "source_refresh",
+				},
 				trigger: "source_refresh",
 			});
 		},
 	});
 	const taskFailureNotifications = new TaskFailureNotificationService(db);
-	const taskRuns = new TaskRunRepository(db);
-	const eventLogs = new TaskEventLogRepository(db);
 	const taskTypeRegistry = createBuiltInTaskTypeRegistry();
-	const commentIpMaintenance = new CommentIpMaintenanceService(
-		db,
-		maintenanceJobs,
-		{
-			loadIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
-		},
-	);
+	const commentIpMaintenance = new CommentIpMaintenanceService(db, {
+		loadIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
+	});
 	const backupTaskService = new DefaultBackupTaskService({
 		exportService: new QingYanExportService(sqlite),
 		fullBackupService: new FullBackupService({

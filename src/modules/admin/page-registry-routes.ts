@@ -1,19 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { PageRegistryService } from "../page-registry/service";
-import { fetchPageSourceText } from "../page-registry/source-fetcher";
-import { PageSourceRefreshService } from "../page-registry/source-refresh-service";
 import { PageSourceRepository } from "../page-registry/source-repository";
-import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
 import {
 	AppError,
 	InvalidRequestError,
 	ResourceNotFoundError,
 } from "../shared/errors";
-import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
+import { AdminTaskService } from "../tasks/admin-task-service";
 import { AdminRepository } from "./repository";
 import {
-	adminPageRegistryMaintenanceJobParamsSchema,
 	adminPageRegistryRefreshBodySchema,
 	adminPageRegistrySourceCreateBodySchema,
 	adminPageRegistrySourceParamsSchema,
@@ -37,55 +33,7 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 	const service = new PageRegistryService(fastify.db);
 	const sourceRepository = new PageSourceRepository(fastify.db);
-	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
-	const titleRefresh = new PageMetadataRefreshService(
-		fastify.db,
-		maintenanceJobs,
-		{
-			fetchHtml:
-				fastify.pageTitleFetchHtml ??
-				(async (url, options) => {
-					const controller = new AbortController();
-					const timeout = setTimeout(
-						() => controller.abort(),
-						options.timeoutMs,
-					);
-					try {
-						const response = await fetch(url, { signal: controller.signal });
-						const text = await response.text();
-						if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
-							throw new AppError(
-								413,
-								"PAGE_TITLE_HTML_TOO_LARGE",
-								"页面 HTML 内容超过大小限制。",
-							);
-						}
-						return { status: response.status, text };
-					} finally {
-						clearTimeout(timeout);
-					}
-				}),
-		},
-	);
-	const sourceRefresh = new PageSourceRefreshService(
-		fastify.db,
-		maintenanceJobs,
-		{
-			fetchText: fastify.pageSourceFetchText ?? fetchPageSourceText,
-			loadAllowedOriginsForSite: async (siteKey) => {
-				const site = await repository.getSiteByKey(siteKey);
-				return site ? (JSON.parse(site.allowedOriginsJson) as string[]) : [];
-			},
-			createTitleRefreshJob: async (input) => {
-				await titleRefresh.createRefreshJob({
-					siteKey: input.siteKey,
-					pageKeys: input.pageKeys,
-					onlyMissingTitle: true,
-					trigger: "source_refresh",
-				});
-			},
-		},
-	);
+	const adminTasks = new AdminTaskService(fastify.db, fastify.siteRegistry);
 
 	function parseOrThrow<T>(
 		result:
@@ -250,19 +198,25 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			siteId: source.siteId,
 			permission: "page_registry.update",
 		});
-		const job = await sourceRefresh.createRefreshJob({
-			siteKey: source.siteKey,
-			sourceIds: [source.id],
-			trigger: "manual",
-			timeoutMs: body?.timeoutMs,
-			maxBytes: body?.maxBytes,
-			runAfter: body?.runAfter ?? null,
-			maxAttempts: body?.maxAttempts,
-			retryDelaySec: body?.retryDelaySec,
-		});
-		void sourceRefresh.runNextQueuedJob();
-		void titleRefresh.runNextQueuedJob();
-		return { job };
+		const run = await adminTasks.createManualRun(
+			{
+				type: "page_source_refresh",
+				siteKey: source.siteKey,
+				payload: {
+					siteKey: source.siteKey,
+					sourceIds: [source.id],
+					trigger: "manual",
+					timeoutMs: body?.timeoutMs,
+					maxBytes: body?.maxBytes,
+				},
+				runAfter: body?.runAfter ?? null,
+				maxAttempts: body?.maxAttempts,
+				retryDelaySec: body?.retryDelaySec,
+			},
+			session,
+			request.context?.requestId,
+		);
+		return { run };
 	});
 
 	fastify.post("/refresh", async (request) => {
@@ -281,44 +235,25 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsed.siteKey,
 			permission: "page_registry.update",
 		});
-		const job = await sourceRefresh.createRefreshJob({
-			siteKey: parsed.siteKey,
-			mode: parsed.mode,
-			trigger: "manual",
-			timeoutMs: parsed.timeoutMs,
-			maxBytes: parsed.maxBytes,
-			runAfter: parsed.runAfter ?? null,
-			maxAttempts: parsed.maxAttempts,
-			retryDelaySec: parsed.retryDelaySec,
-		});
-		void sourceRefresh.runNextQueuedJob();
-		void titleRefresh.runNextQueuedJob();
-		return { job };
-	});
-
-	fastify.get("/maintenance-jobs/:jobId", async (request) => {
-		const session = await sessionService.requireSession(request);
-		const params = parseOrThrow(
-			adminPageRegistryMaintenanceJobParamsSchema.safeParse(request.params),
+		const run = await adminTasks.createManualRun(
+			{
+				type: "page_source_refresh",
+				siteKey: parsed.siteKey,
+				payload: {
+					siteKey: parsed.siteKey,
+					mode: parsed.mode,
+					trigger: "manual",
+					timeoutMs: parsed.timeoutMs,
+					maxBytes: parsed.maxBytes,
+				},
+				runAfter: parsed.runAfter ?? null,
+				maxAttempts: parsed.maxAttempts,
+				retryDelaySec: parsed.retryDelaySec,
+			},
+			session,
+			request.context?.requestId,
 		);
-		const job = await maintenanceJobs.get(params.jobId);
-		if (job?.siteKey) {
-			requireSiteAccess({
-				session,
-				siteRegistry: fastify.siteRegistry,
-				siteKey: job.siteKey,
-				permission: "page_registry.read",
-			});
-		} else {
-			requireSiteAccess({
-				session,
-				siteRegistry: fastify.siteRegistry,
-				permission: "page_registry.read",
-			});
-		}
-		return {
-			job,
-		};
+		return { run };
 	});
 
 	fastify.post("/pending/approve", async (request) => {

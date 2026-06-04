@@ -5,13 +5,13 @@ import {
 	adminUsers,
 	comments,
 	delayedDeletions,
-	maintenanceJobs,
 	pageThreads,
 	pageViewSessions,
 	sitePageRegistry,
 	siteSettings,
 	sites,
 	systemSettings,
+	taskRuns,
 	visitors,
 } from "../../src/db/schema";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
@@ -523,33 +523,26 @@ describe("admin pages", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			job: {
+			run: {
 				type: "page_metadata_refresh",
 				status: "queued",
 				siteKey: "fangyuan",
-				scope: {
+				input: {
 					siteKey: "fangyuan",
 					pageKeys: ["post:title-refresh"],
-					forceTitle: true,
+					scope: "force",
 					trigger: "manual",
 				},
 			},
 		});
-		const [job] = await fixture.app.db.select().from(maintenanceJobs);
-		expect(job).toMatchObject({
-			type: "page_metadata_refresh",
-			status: "succeeded",
-			siteKey: "fangyuan",
-			concurrencyKey: "page-title:fangyuan:post:title-refresh",
-		});
-		const [page] = await fixture.app.db
+		const [run] = await fixture.app.db
 			.select()
-			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "post:title-refresh"));
-		expect(page).toMatchObject({
-			title: "Fresh Title",
-			status: "active",
-			titleRefreshStatusCode: 200,
+			.from(taskRuns)
+			.where(eq(taskRuns.type, "page_metadata_refresh"));
+		expect(run).toMatchObject({
+			type: "page_metadata_refresh",
+			status: "queued",
+			siteKey: "fangyuan",
 		});
 	});
 });

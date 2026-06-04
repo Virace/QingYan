@@ -612,27 +612,6 @@ CREATE TABLE `ip_region_update_runs` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );--> statement-breakpoint
-CREATE TABLE `maintenance_jobs` (
-	`id` text PRIMARY KEY NOT NULL,
-	`type` text NOT NULL,
-	`status` text NOT NULL,
-	`site_key` text,
-	`scope_json` text NOT NULL,
-	`progress_json` text,
-	`result_json` text,
-	`error_json` text,
-	`run_after` text,
-	`attempts` integer DEFAULT 0 NOT NULL,
-	`max_attempts` integer DEFAULT 1 NOT NULL,
-	`retry_delay_sec` integer DEFAULT 0 NOT NULL,
-	`priority` integer DEFAULT 0 NOT NULL,
-	`concurrency_key` text,
-	`last_heartbeat_at` text,
-	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`started_at` text,
-	`finished_at` text,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
-);--> statement-breakpoint
 CREATE TABLE `scheduled_tasks` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -767,6 +746,8 @@ CREATE UNIQUE INDEX `task_runs_idempotency_idx` ON `task_runs` (`idempotency_key
 CREATE TABLE `task_event_logs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_run_id` text NOT NULL,
+	`sequence` integer DEFAULT 0 NOT NULL,
+	`stream` text DEFAULT 'system' NOT NULL,
 	`event_type` text NOT NULL,
 	`level` text NOT NULL,
 	`message` text NOT NULL,
@@ -775,6 +756,7 @@ CREATE TABLE `task_event_logs` (
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`task_run_id`) REFERENCES `task_runs`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
+CREATE INDEX `task_event_logs_run_sequence_idx` ON `task_event_logs` (`task_run_id`,`sequence`);--> statement-breakpoint
 CREATE INDEX `task_event_logs_run_created_idx` ON `task_event_logs` (`task_run_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `task_event_logs_level_created_idx` ON `task_event_logs` (`level`,`created_at`);--> statement-breakpoint
 CREATE TABLE `notification_deliveries` (

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import {
 	createPageRegistrySource,
@@ -62,7 +63,7 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 		void queryClient.invalidateQueries({
 			queryKey: ["admin", "page-registry", "sources"],
 		});
-		void queryClient.invalidateQueries({ queryKey: ["admin", "tasks"] });
+		void queryClient.invalidateQueries({ queryKey: ["admin", "task-runs"] });
 	};
 	const createSourceMutation = useMutation({
 		mutationFn: createPageRegistrySource,
@@ -77,11 +78,17 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 	});
 	const refreshSourceMutation = useMutation({
 		mutationFn: refreshPageRegistrySource,
-		onSuccess: invalidateSources,
+		onSuccess: (result) => {
+			toast.success(`已创建任务运行：${result.run.id}`);
+			invalidateSources();
+		},
 	});
 	const refreshAllSourcesMutation = useMutation({
 		mutationFn: refreshPageRegistrySources,
-		onSuccess: invalidateSources,
+		onSuccess: (result) => {
+			toast.success(`已创建任务运行：${result.run.id}`);
+			invalidateSources();
+		},
 	});
 	const mutationPending =
 		createSourceMutation.isPending ||

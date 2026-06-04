@@ -148,6 +148,7 @@ export function projectTaskRunForSession(
 		createdByUserId: run.createdByUserId,
 		skipReason: run.skipReason,
 		blockReason: run.blockReason,
+		runAfter: run.runAfter,
 		createdAt: run.createdAt,
 		startedAt: run.startedAt,
 		finishedAt: run.finishedAt,

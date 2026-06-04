@@ -7,7 +7,6 @@ export * from "./comments";
 export * from "./delayed-deletions";
 export * from "./engagement";
 export * from "./import-jobs";
-export * from "./maintenance-jobs";
 export * from "./notifications";
 export * from "./page-registry";
 export * from "./page-threads";

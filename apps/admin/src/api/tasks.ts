@@ -166,6 +166,7 @@ export interface TaskRunProjection {
 	createdByUserId: number | null;
 	skipReason: string | null;
 	blockReason: string | null;
+	runAfter: string | null;
 	createdAt: string;
 	startedAt: string | null;
 	finishedAt: string | null;
@@ -191,14 +192,15 @@ export interface TaskRunProjection {
 	lockConflictWithTaskName?: string | null;
 }
 
-export interface TaskEventLog {
+export interface TaskRunLogLine {
 	id: string;
 	taskRunId: string;
+	sequence: number;
+	stream: "stdout" | "stderr" | "system";
+	level: "debug" | "info" | "warn" | "error";
 	eventType: string;
-	level: string;
 	message: string;
-	data: unknown;
-	visibleToSiteAdmin: boolean;
+	data?: unknown;
 	createdAt: string;
 }
 
@@ -308,9 +310,26 @@ export function getTaskRun(id: string) {
 	);
 }
 
-export function listTaskRunEvents(id: string) {
-	return requestJson<{ items: TaskEventLog[]; totalCount: number }>(
-		`/api/admin/tasks/runs/${encodeURIComponent(id)}/events`,
+export function listTaskRunLogs(
+	id: string,
+	input: { afterSequence?: number; limit?: number } = {},
+) {
+	const params = new URLSearchParams();
+	if (input.afterSequence !== undefined) {
+		params.set("afterSequence", String(input.afterSequence));
+	}
+	if (input.limit !== undefined) {
+		params.set("limit", String(input.limit));
+	}
+	const query = params.toString();
+	return requestJson<{
+		items: TaskRunLogLine[];
+		nextSequence: number;
+		hasMore: boolean;
+	}>(
+		`/api/admin/tasks/runs/${encodeURIComponent(id)}/logs${
+			query ? `?${query}` : ""
+		}`,
 	);
 }
 

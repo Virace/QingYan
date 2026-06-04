@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createDatabaseClients } from "../../src/db/client";
 import { applyDatabaseMigrations } from "../../src/db/migrations";
 import {
-	maintenanceJobs,
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
@@ -16,9 +15,9 @@ import {
 	sitePageRegistrySourcePages,
 	sites,
 } from "../../src/db/schema";
-import { MaintenanceJobRepository } from "../../src/modules/ops/maintenance-job-repository";
 import { PageSourceRefreshService } from "../../src/modules/page-registry/source-refresh-service";
 import { PageSourceRepository } from "../../src/modules/page-registry/source-repository";
+import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
 
 const cleanups: Array<() => void> = [];
 
@@ -40,6 +39,25 @@ function createFixture() {
 	return clients;
 }
 
+function createTaskContext(): Pick<
+	TaskRunnerContext,
+	"log" | "updateProgress" | "signal"
+> {
+	return {
+		log: {
+			stdout: async () => undefined,
+			stderr: async () => undefined,
+			system: async () => undefined,
+			info: async () => undefined,
+			warn: async () => undefined,
+			error: async () => undefined,
+			debug: async () => undefined,
+			write: async () => undefined,
+		},
+		updateProgress: async () => undefined,
+	};
+}
+
 async function seedSite(fixture: ReturnType<typeof createFixture>) {
 	await fixture.db.insert(sites).values({
 		id: 1,
@@ -58,24 +76,17 @@ function createService(
 		options: { timeoutMs?: number; maxBytes?: number },
 	) => Promise<string>,
 ) {
-	const jobs = new MaintenanceJobRepository(fixture.db);
-	return new PageSourceRefreshService(fixture.db, jobs, {
-		fetchText,
-		loadAllowedOriginsForSite: async () => ["https://example.com"],
-		createTitleRefreshJob: async (input) => {
-			await jobs.create({
-				type: "page_metadata_refresh",
-				siteKey: input.siteKey,
-				scope: {
-					siteKey: input.siteKey,
-					pageKeys: input.pageKeys,
-					onlyMissingTitle: true,
-					trigger: "source_refresh",
-				},
-				concurrencyKey: `page-title:${input.siteKey}`,
-			});
-		},
-	});
+	const titleRefreshRuns: Array<{ siteKey: string; pageKeys: string[] }> = [];
+	return {
+		titleRefreshRuns,
+		service: new PageSourceRefreshService(fixture.db, {
+			fetchText,
+			loadAllowedOriginsForSite: async () => ["https://example.com"],
+			createTitleRefreshRun: async (input) => {
+				titleRefreshRuns.push(input);
+			},
+		}),
+	};
 }
 
 async function createSource(
@@ -101,7 +112,7 @@ describe("PageSourceRefreshService", () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
 		const source = await createSource(fixture);
-		const service = createService(fixture, async () =>
+		const { service } = createService(fixture, async () =>
 			[
 				"<urlset>",
 				"<url><loc>https://example.com/posts/a/</loc></url>",
@@ -110,12 +121,14 @@ describe("PageSourceRefreshService", () => {
 			].join(""),
 		);
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const pages = await fixture.db.select().from(sitePageRegistry);
 		const sourcePages = await fixture.db
@@ -137,18 +150,13 @@ describe("PageSourceRefreshService", () => {
 			]),
 		);
 		expect(sourcePages).toHaveLength(2);
-		expect(
-			await new MaintenanceJobRepository(fixture.db).getRequired(job.id),
-		).toMatchObject({
-			status: "succeeded",
-			result: {
-				processed: 2,
-				created: 2,
-				updated: 0,
-				stale: 0,
-				skipped: 0,
-				failed: 0,
-			},
+		expect(result).toMatchObject({
+			processed: 2,
+			created: 2,
+			updated: 0,
+			stale: 0,
+			skipped: 0,
+			failed: 0,
 		});
 	});
 
@@ -159,18 +167,20 @@ describe("PageSourceRefreshService", () => {
 			sourceType: "rss",
 			sourceUrl: "https://example.com/feed.xml",
 		});
-		const service = createService(
+		const { service } = createService(
 			fixture,
 			async () =>
 				"<rss><channel><item><title>Hello</title><link>https://example.com/hello/</link></item></channel></rss>",
 		);
 
-		await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [page] = await fixture.db
 			.select()
@@ -194,23 +204,27 @@ describe("PageSourceRefreshService", () => {
 			"<url><loc>https://example.com/posts/missing/</loc></url>",
 			"</urlset>",
 		].join("");
-		const service = createService(fixture, async () => response);
+		const { service } = createService(fixture, async () => response);
 
-		await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 		response =
 			"<urlset><url><loc>https://example.com/posts/keep/</loc></url></urlset>";
 
-		const secondJob = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [missing] = await fixture.db
 			.select()
@@ -218,11 +232,7 @@ describe("PageSourceRefreshService", () => {
 			.where(eq(sitePageRegistry.pageKey, "posts/missing/"));
 
 		expect(missing?.status).toBe("stale");
-		expect(
-			await new MaintenanceJobRepository(fixture.db).getRequired(secondJob.id),
-		).toMatchObject({
-			result: expect.objectContaining({ processed: 1, stale: 1 }),
-		});
+		expect(result).toMatchObject({ processed: 1, stale: 1 });
 	});
 
 	it("does not restore protected page statuses during refresh", async () => {
@@ -236,18 +246,20 @@ describe("PageSourceRefreshService", () => {
 			title: "Old",
 			status: "trash",
 		});
-		const service = createService(
+		const { service } = createService(
 			fixture,
 			async () =>
 				"<urlset><url><loc>https://example.com/posts/trash/</loc></url></urlset>",
 		);
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [page] = await fixture.db
 			.select()
@@ -258,11 +270,7 @@ describe("PageSourceRefreshService", () => {
 			pageUrl: "/posts/trash/",
 			status: "trash",
 		});
-		expect(
-			await new MaintenanceJobRepository(fixture.db).getRequired(job.id),
-		).toMatchObject({
-			result: expect.objectContaining({ skipped: 1, created: 0 }),
-		});
+		expect(result).toMatchObject({ skipped: 1, created: 0 });
 	});
 
 	it("reports processed, updated, skipped, failed, and stale counters", async () => {
@@ -287,7 +295,7 @@ describe("PageSourceRefreshService", () => {
 			pageUrl: "/posts/ignored/",
 			status: "ignored",
 		});
-		const service = createService(fixture, async () =>
+		const { service } = createService(fixture, async () =>
 			[
 				"<urlset>",
 				"<url><loc>https://example.com/posts/stale-seed/</loc></url>",
@@ -297,16 +305,15 @@ describe("PageSourceRefreshService", () => {
 			].join(""),
 		);
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
-
-		const saved = await new MaintenanceJobRepository(fixture.db).getRequired(
-			job.id,
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
 		);
+
 		const [owned] = await fixture.db
 			.select()
 			.from(sitePageRegistrySourcePages)
@@ -318,14 +325,7 @@ describe("PageSourceRefreshService", () => {
 			);
 
 		expect(owned).toBeDefined();
-		expect(saved.progress).toMatchObject({
-			phase: "refreshing",
-			processed: 3,
-			updated: 1,
-			skipped: 1,
-			failed: 1,
-		});
-		expect(saved.result).toMatchObject({
+		expect(result).toMatchObject({
 			processed: 3,
 			created: 0,
 			updated: 1,
@@ -335,7 +335,7 @@ describe("PageSourceRefreshService", () => {
 		});
 	});
 
-	it("creates scheduled jobs only for due enabled sources", async () => {
+	it("returns due refresh inputs only for due enabled sources", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
 		const repository = new PageSourceRepository(fixture.db);
@@ -353,19 +353,19 @@ describe("PageSourceRefreshService", () => {
 			sourceId: futureSource.id,
 			patch: { nextRefreshAt: "2026-05-29T02:00:00.000Z" },
 		});
-		const service = createService(fixture, async () => "<urlset />");
+		const { service } = createService(fixture, async () => "<urlset />");
 
-		const jobs = await service.runDueSources(
+		const inputs = await service.listDueRefreshInputs(
 			new Date("2026-05-29T01:00:00.000Z"),
 		);
 
-		expect(jobs).toHaveLength(1);
-		expect(jobs[0]?.type).toBe("page_source_refresh");
-		expect(jobs[0]?.scope).toMatchObject({
-			siteKey: "fangyuan",
-			sourceIds: [dueSource.id],
-			trigger: "scheduled",
-		});
+		expect(inputs).toEqual([
+			{
+				siteKey: "fangyuan",
+				sourceIds: [dueSource.id],
+				trigger: "scheduled",
+			},
+		]);
 	});
 
 	it("auto-approves pending unknown pages when a source confirms them", async () => {
@@ -385,18 +385,20 @@ describe("PageSourceRefreshService", () => {
 			fingerprint: "visitor-a",
 			hitCount: 1,
 		});
-		const service = createService(
+		const { service } = createService(
 			fixture,
 			async () =>
 				"<urlset><url><loc>https://example.com/posts/source-confirmed/</loc></url></urlset>",
 		);
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [candidate] = await fixture.db
 			.select()
@@ -406,9 +408,6 @@ describe("PageSourceRefreshService", () => {
 			.select()
 			.from(pageThreads)
 			.where(eq(pageThreads.pageKey, "posts/source-confirmed/"));
-		const saved = await new MaintenanceJobRepository(fixture.db).getRequired(
-			job.id,
-		);
 
 		expect(candidate).toMatchObject({ status: "approved" });
 		expect(thread).toMatchObject({
@@ -416,44 +415,34 @@ describe("PageSourceRefreshService", () => {
 			pageUrl: "/posts/source-confirmed/",
 			pageViewCount: 1,
 		});
-		expect(saved.result).toMatchObject({ approvedPending: 1 });
+		expect(result).toMatchObject({ approvedPending: 1 });
 	});
 
-	it("queues a lazy title refresh job for URL-only source entries", async () => {
+	it("queues a lazy title refresh run for URL-only source entries", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
 		const source = await createSource(fixture);
-		const service = createService(
+		const { service, titleRefreshRuns } = createService(
 			fixture,
 			async () =>
 				"<urlset><url><loc>https://example.com/posts/title-later/</loc></url></urlset>",
 		);
 
-		await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
-
-		const jobs = await fixture.db.select().from(maintenanceJobs);
-		expect(jobs).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					type: "page_metadata_refresh",
-					status: "queued",
-					siteKey: "fangyuan",
-					concurrencyKey: "page-title:fangyuan",
-				}),
-			]),
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+			},
+			createTaskContext(),
 		);
-		const titleJob = jobs.find((job) => job.type === "page_metadata_refresh");
-		expect(titleJob ? JSON.parse(titleJob.scopeJson) : null).toMatchObject({
-			siteKey: "fangyuan",
-			pageKeys: ["posts/title-later/"],
-			onlyMissingTitle: true,
-			trigger: "source_refresh",
-		});
+
+		expect(titleRefreshRuns).toEqual([
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/title-later/"],
+			},
+		]);
 	});
 
 	it("passes task timeout and max bytes to source fetch", async () => {
@@ -464,22 +453,21 @@ describe("PageSourceRefreshService", () => {
 			url: string;
 			options: { timeoutMs?: number; maxBytes?: number };
 		}> = [];
-		const service = createService(fixture, async (url, options) => {
+		const { service } = createService(fixture, async (url, options) => {
 			fetchCalls.push({ url, options });
 			return "<urlset><url><loc>https://example.com/posts/options/</loc></url></urlset>";
 		});
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			sourceIds: [source.id],
-			trigger: "manual",
-			timeoutMs: 12_000,
-			maxBytes: 1_048_576,
-			runAfter: "2026-05-29T00:00:00.000Z",
-			maxAttempts: 4,
-			retryDelaySec: 120,
-		});
-		await service.runNextQueuedJob();
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+				timeoutMs: 12_000,
+				maxBytes: 1_048_576,
+			},
+			createTaskContext(),
+		);
 
 		expect(fetchCalls).toEqual([
 			{
@@ -490,41 +478,5 @@ describe("PageSourceRefreshService", () => {
 				},
 			},
 		]);
-		expect(
-			await new MaintenanceJobRepository(fixture.db).getRequired(job.id),
-		).toMatchObject({
-			maxAttempts: 4,
-			retryDelaySec: 120,
-			scope: expect.objectContaining({
-				timeoutMs: 12_000,
-				maxBytes: 1_048_576,
-			}),
-		});
-	});
-
-	it("only consumes runnable page source refresh jobs", async () => {
-		const fixture = createFixture();
-		await seedSite(fixture);
-		await createSource(fixture);
-		const jobs = new MaintenanceJobRepository(fixture.db);
-		await jobs.create({
-			type: "page_metadata_refresh",
-			siteKey: "fangyuan",
-			scope: { siteKey: "fangyuan" },
-			concurrencyKey: "page-title:fangyuan",
-		});
-		const service = new PageSourceRefreshService(fixture.db, jobs, {
-			fetchText: async () => "<urlset />",
-			loadAllowedOriginsForSite: async () => ["https://example.com"],
-		});
-
-		const result = await service.runNextQueuedJob();
-
-		expect(result).toBeNull();
-		const [metadataJob] = await fixture.db
-			.select()
-			.from(maintenanceJobs)
-			.where(eq(maintenanceJobs.type, "page_metadata_refresh"));
-		expect(metadataJob?.status).toBe("queued");
 	});
 });

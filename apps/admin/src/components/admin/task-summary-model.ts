@@ -93,7 +93,7 @@ function firstNumber(...values: Array<string | undefined>) {
 export function summarizeTask(job: AdminTaskCenterItem): TaskSummaryModel {
 	const generic = genericSummary(job);
 
-	if (job.source === "task_run" && job.category === "notification") {
+	if (job.category === "notification") {
 		const details = notificationTaskDetails(job);
 		const errorMessage = formatError(job.error);
 		return {

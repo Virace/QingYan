@@ -1,8 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { PageRegistryService } from "../page-registry/service";
-import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
-import { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
-import { AppError, InvalidRequestError } from "../shared/errors";
+import { InvalidRequestError } from "../shared/errors";
+import { AdminTaskService } from "../tasks/admin-task-service";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import { DeletionPolicyService } from "./deletion-policy-service";
@@ -30,35 +29,7 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 	const pageRegistryService = new PageRegistryService(fastify.db);
 	const deletionPolicyService = new DeletionPolicyService(fastify.db);
-	const titleRefresh = new PageMetadataRefreshService(
-		fastify.db,
-		new MaintenanceJobRepository(fastify.db),
-		{
-			fetchHtml:
-				fastify.pageTitleFetchHtml ??
-				(async (url, options) => {
-					const controller = new AbortController();
-					const timeout = setTimeout(
-						() => controller.abort(),
-						options.timeoutMs,
-					);
-					try {
-						const response = await fetch(url, { signal: controller.signal });
-						const text = await response.text();
-						if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
-							throw new AppError(
-								413,
-								"PAGE_TITLE_HTML_TOO_LARGE",
-								"页面 HTML 内容超过大小限制。",
-							);
-						}
-						return { status: response.status, text };
-					} finally {
-						clearTimeout(timeout);
-					}
-				}),
-		},
-	);
+	const adminTasks = new AdminTaskService(fastify.db, fastify.siteRegistry);
 
 	fastify.get("/", async (request) => {
 		const session = await sessionService.requireSession(request);
@@ -227,21 +198,27 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsedBody.data.siteKey,
 			permission: "pages.update",
 		});
-		const job = await titleRefresh.createRefreshJob({
-			siteKey: parsedBody.data.siteKey,
-			pageKeys: [parsedParams.data.pageKey],
-			forceTitle: true,
-			trigger: "manual",
-			runAfter: parsedBody.data.runAfter ?? null,
-			maxAttempts: parsedBody.data.maxAttempts,
-			retryDelaySec: parsedBody.data.retryDelaySec,
-		});
-		void titleRefresh.runNextQueuedJob();
-		return {
-			job: {
-				...job,
+		const run = await adminTasks.createManualRun(
+			{
+				type: "page_metadata_refresh",
 				siteKey: parsedBody.data.siteKey,
+				payload: {
+					siteKey: parsedBody.data.siteKey,
+					scope: "force",
+					trigger: "manual",
+					pageKeys: [parsedParams.data.pageKey],
+					timeoutMs: parsedBody.data.timeoutMs,
+					maxBytes: parsedBody.data.maxBytes,
+				},
+				runAfter: parsedBody.data.runAfter ?? null,
+				maxAttempts: parsedBody.data.maxAttempts,
+				retryDelaySec: parsedBody.data.retryDelaySec,
 			},
+			session,
+			request.context?.requestId,
+		);
+		return {
+			run,
 		};
 	});
 };

@@ -325,7 +325,7 @@ Query：
 
 ### `POST /api/admin/pages/{pageKey}/title/refresh`
 
-为单个页面创建服务端异步 title 刷新任务。该接口只创建任务，页面 HTML 抓取在服务端 maintenance job 中执行。
+为单个页面创建服务端异步 title 刷新任务。该接口只创建 `task_runs` 运行记录，页面 HTML 抓取由统一任务运行器执行。
 
 请求：
 
@@ -342,7 +342,7 @@ Query：
 
 ```ts
 {
-  job: MaintenanceJob;
+  run: TaskRunProjection;
 }
 ```
 
@@ -425,7 +425,7 @@ Query：
 
 ```ts
 {
-  job: MaintenanceJob;
+  run: TaskRunProjection;
 }
 ```
 
@@ -443,18 +443,6 @@ Query：
 ```
 
 来源刷新如果命中待处理未知页面，会自动放行 pending candidate 并合并待处理访问量。
-
-### `GET /api/admin/page-registry/maintenance-jobs/{jobId}`
-
-获取页面来源维护任务。
-
-响应：
-
-```ts
-{
-  job: MaintenanceJob | null;
-}
-```
 
 ### `GET /api/admin/commenters`
 
@@ -1712,6 +1700,29 @@ Query：
 }
 ```
 
+### `GET /api/admin/tasks/runs/{runId}/logs`
+
+按 sequence 增量读取任务 console 日志。任务详情 console 使用该接口轮询 stdout/stderr/system 日志流；只有具备日志权限的用户可以访问。
+
+Query：
+
+```ts
+{
+  afterSequence?: number;
+  limit?: number; // default 100, max 500
+}
+```
+
+响应：
+
+```ts
+{
+  items: TaskRunLogLine[];
+  nextSequence: number;
+  hasMore: boolean;
+}
+```
+
 ### `POST /api/admin/tasks/runs/{runId}/cancel`
 
 取消任务运行记录。当前实现写入 `cancelled` 状态和 `TASK_RUN_CANCELLED` 错误快照。
@@ -1960,7 +1971,7 @@ Query：
 
 ### `GET /api/admin/ops/tasks`
 
-任务中心列表。该接口聚合旧 `maintenance_jobs` 与新 `task_runs` 投影；导入任务仍由 import-export job API 管理。
+任务中心列表。该接口只读取 `task_runs` 投影；导入任务仍由 import-export job API 管理。
 
 Query：
 
@@ -1981,42 +1992,6 @@ Query：
   totalCount: number;
   limit: number;
   offset: number;
-}
-```
-
-`MaintenanceJob`：
-
-```ts
-{
-  id: string;
-  type:
-    | "ip_region_update"
-    | "comment_ip_refresh"
-    | "page_source_refresh"
-    | "page_metadata_refresh";
-  status:
-    | "queued"
-    | "delayed"
-    | "running"
-    | "retrying"
-    | "succeeded"
-    | "failed"
-    | "cancelled";
-  siteKey: string | null;
-  scope: unknown;
-  progress: unknown;
-  result: unknown;
-  error: unknown;
-  runAfter: string | null;
-  attempts: number;
-  maxAttempts: number;
-  retryDelaySec: number;
-  concurrencyKey: string | null;
-  lastHeartbeatAt: string | null;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  updatedAt: string;
 }
 ```
 

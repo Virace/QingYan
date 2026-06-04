@@ -37,6 +37,9 @@ export interface TaskQueuePayload {
 	idempotencyKey?: string | null;
 	runAfter?: string | null;
 	maxAttempts?: number;
+	retryDelaySec?: number;
+	priority?: number;
+	concurrencyKey?: string | null;
 	queueMessageId?: string | null;
 }
 

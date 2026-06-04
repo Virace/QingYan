@@ -508,10 +508,6 @@ export const adminPageRegistryRefreshBodySchema =
 		})
 		.optional();
 
-export const adminPageRegistryMaintenanceJobParamsSchema = z.object({
-	jobId: z.string().min(1),
-});
-
 export const adminMaintenanceTasksQuerySchema = z.object({
 	siteKey: z.string().min(1).optional(),
 	type: z.string().min(1).optional(),

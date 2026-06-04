@@ -10,6 +10,8 @@ export const taskEventLogs = sqliteTable(
 		taskRunId: text("task_run_id")
 			.notNull()
 			.references(() => taskRuns.id),
+		sequence: integer("sequence").notNull().default(0),
+		stream: text("stream").notNull().default("system"),
 		eventType: text("event_type").notNull(),
 		level: text("level").notNull(),
 		message: text("message").notNull(),
@@ -22,6 +24,10 @@ export const taskEventLogs = sqliteTable(
 		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
+		index("task_event_logs_run_sequence_idx").on(
+			table.taskRunId,
+			table.sequence,
+		),
 		index("task_event_logs_run_created_idx").on(
 			table.taskRunId,
 			table.createdAt,

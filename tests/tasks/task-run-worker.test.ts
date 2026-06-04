@@ -137,6 +137,9 @@ function createRegistry() {
 					message: "worker_test_executed",
 					visibleToSiteAdmin: true,
 				});
+				await context.log.system("Worker test started.");
+				await context.log.stdout("Processed one item.", { count: 1 });
+				await context.log.stderr("Worker test warning.", { code: "WARN" });
 				return { ok: true };
 			},
 		},
@@ -207,6 +210,26 @@ describe("TaskRunWorker", () => {
 		expect(saved.finishedAt).not.toBeNull();
 		expect(events.items.map((event) => event.eventType)).toContain(
 			"worker_test_executed",
+		);
+		expect(events.items).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					sequence: 2,
+					stream: "system",
+					message: "Worker test started.",
+				}),
+				expect.objectContaining({
+					sequence: 3,
+					stream: "stdout",
+					message: "Processed one item.",
+				}),
+				expect.objectContaining({
+					sequence: 4,
+					stream: "stderr",
+					level: "warn",
+					message: "Worker test warning.",
+				}),
+			]),
 		);
 	});
 
@@ -304,8 +327,9 @@ describe("TaskRunWorker", () => {
 			status: "succeeded",
 			workerId: expect.stringMatching(/^task-worker:/),
 			result: expect.objectContaining({
-				type: "page_metadata_refresh",
-				status: "queued",
+				processed: 0,
+				updated: 0,
+				failed: 0,
 			}),
 		});
 	});

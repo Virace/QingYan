@@ -28,7 +28,7 @@ describe("built-in task type registry", () => {
 			dangerous: false,
 			reuse: {
 				service: "PageSourceRefreshService",
-				method: "createRefreshJob",
+				method: "executeRefresh",
 				file: "src/modules/page-registry/source-refresh-service.ts",
 			},
 		});
@@ -49,6 +49,7 @@ describe("built-in task type registry", () => {
 			siteKey: "fangyuan",
 			sourceIds: [1, 2],
 			mode: "replace",
+			trigger: "scheduled",
 			timeoutMs: 10_000,
 			maxBytes: 512_000,
 		});

@@ -6,10 +6,11 @@ import {
 	adminUsers,
 	auditLogs,
 	delayedDeletions,
-	maintenanceJobs,
 	sitePageRegistry,
 	sites,
+	taskRuns,
 } from "../../src/db/schema";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import type {
 	ServiceControlController,
 	ServiceState,
@@ -345,14 +346,15 @@ describe("admin ops routes", () => {
 		cleanups.push(fixture.cleanup);
 		await seedInstalledBootstrap(fixture);
 		const admin = await loginAsAdmin(fixture.app);
-		await fixture.app.db.insert(maintenanceJobs).values({
+		await new TaskRunRepository(fixture.app.db).create({
 			id: "maintenance_task_center",
 			type: "page_metadata_refresh",
+			category: "maintenance",
 			status: "queued",
 			siteKey: "fangyuan",
-			scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
-			runAfter: null,
-			attempts: 0,
+			payload: { siteKey: "fangyuan" },
+			payloadSummary: { siteKey: "fangyuan" },
+			input: { siteKey: "fangyuan" },
 			maxAttempts: 2,
 			retryDelaySec: 30,
 			concurrencyKey: "page-title:fangyuan",
@@ -371,7 +373,7 @@ describe("admin ops routes", () => {
 			items: [
 				{
 					id: "maintenance_task_center",
-					source: "maintenance",
+					source: "task_run",
 					type: "page_metadata_refresh",
 					status: "queued",
 					siteKey: "fangyuan",
@@ -385,36 +387,37 @@ describe("admin ops routes", () => {
 		cleanups.push(fixture.cleanup);
 		await seedInstalledBootstrap(fixture);
 		const admin = await loginAsAdmin(fixture.app);
-		await fixture.app.db.insert(maintenanceJobs).values([
-			{
+		const taskRunRepository = new TaskRunRepository(fixture.app.db);
+		await taskRunRepository.create({
 				id: "maintenance_task_delayed",
 				type: "page_metadata_refresh",
-				status: "delayed",
+				category: "maintenance",
 				siteKey: "fangyuan",
-				scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
+				payload: { siteKey: "fangyuan" },
+				payloadSummary: { siteKey: "fangyuan" },
+				input: { siteKey: "fangyuan" },
 				runAfter: "2099-01-01T00:00:00.000Z",
-				attempts: 0,
 				maxAttempts: 3,
 				retryDelaySec: 60,
 				concurrencyKey: "page-title:fangyuan",
 				createdAt: "2026-05-30T00:00:02.000Z",
 				updatedAt: "2026-05-30T00:00:02.000Z",
-			},
-			{
+		});
+		await taskRunRepository.create({
 				id: "maintenance_task_older",
 				type: "page_metadata_refresh",
+				category: "maintenance",
 				status: "queued",
 				siteKey: "fangyuan",
-				scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
-				runAfter: null,
-				attempts: 0,
+				payload: { siteKey: "fangyuan" },
+				payloadSummary: { siteKey: "fangyuan" },
+				input: { siteKey: "fangyuan" },
 				maxAttempts: 1,
 				retryDelaySec: 0,
 				concurrencyKey: "page-title:fangyuan-older",
 				createdAt: "2026-05-30T00:00:01.000Z",
 				updatedAt: "2026-05-30T00:00:01.000Z",
-			},
-		]);
+		});
 
 		const response = await fixture.app.inject({
 			method: "GET",
@@ -446,54 +449,6 @@ describe("admin ops routes", () => {
 		);
 	});
 
-	it("runs delayed tasks now and raises queued task priority", async () => {
-		const fixture = await createTestApp();
-		cleanups.push(fixture.cleanup);
-		await seedInstalledBootstrap(fixture);
-		const admin = await loginAsAdmin(fixture.app);
-		await fixture.app.db.insert(maintenanceJobs).values({
-			id: "maintenance_task_prioritize",
-			type: "page_metadata_refresh",
-			status: "delayed",
-			siteKey: "fangyuan",
-			scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
-			runAfter: "2099-01-01T00:00:00.000Z",
-			attempts: 0,
-			maxAttempts: 1,
-			retryDelaySec: 0,
-			concurrencyKey: "page-title:fangyuan",
-		});
-
-		const runNowResponse = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/ops/tasks/maintenance_task_prioritize/run-now",
-			...withAdminWriteAuth(admin),
-		});
-
-		expect(runNowResponse.statusCode).toBe(200);
-		expect(runNowResponse.json()).toMatchObject({
-			job: {
-				id: "maintenance_task_prioritize",
-				status: "queued",
-				runAfter: null,
-			},
-		});
-
-		const prioritizeResponse = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/ops/tasks/maintenance_task_prioritize/prioritize",
-			...withAdminWriteAuth(admin),
-		});
-
-		expect(prioritizeResponse.statusCode).toBe(200);
-		expect(prioritizeResponse.json()).toMatchObject({
-			job: {
-				id: "maintenance_task_prioritize",
-				priority: 1,
-			},
-		});
-	});
-
 	it("creates a missing-title refresh task from the task center", async () => {
 		const fixture = await createTestApp({
 			pageTitleFetchHtml: async () => ({
@@ -520,19 +475,27 @@ describe("admin ops routes", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			job: {
+			run: {
 				type: "page_metadata_refresh",
 				siteKey: "fangyuan",
 				status: "queued",
 				maxAttempts: 3,
 				retryDelaySec: 90,
-				scope: {
+				input: {
 					siteKey: "fangyuan",
-					onlyMissingTitle: true,
+					scope: "missing_only",
 					batchSize: 25,
 					trigger: "manual",
 				},
 			},
+		});
+		const [run] = await fixture.app.db.select().from(taskRuns);
+		expect(run).toMatchObject({
+			type: "page_metadata_refresh",
+			status: "queued",
+			siteKey: "fangyuan",
+			maxAttempts: 3,
+			retryDelaySec: 90,
 		});
 	});
 

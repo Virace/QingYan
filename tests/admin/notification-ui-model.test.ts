@@ -71,9 +71,11 @@ function commenter(input: Partial<AdminCommenter> = {}) {
 }
 
 function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
-	return {
+	const item: TaskRunCenterItem = {
 		source: "task_run",
 		id: "task_1",
+		scheduledTaskId: null,
+		scheduledTaskNameSnapshot: null,
 		queueBackend: "database",
 		queueMessageId: "msg_1",
 		type: "comment_notification",
@@ -81,6 +83,14 @@ function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
 		status: "retrying",
 		siteId: 1,
 		siteKey: "default",
+		scopeKind: "site",
+		trigger: "scheduled",
+		ownerUserIdSnapshot: 1,
+		createdByUserId: null,
+		skipReason: null,
+		blockReason: null,
+		visibility: "run_detail",
+		canViewLogs: true,
 		actorType: "system",
 		actorId: null,
 		subjectType: "comment",
@@ -95,6 +105,9 @@ function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
 		},
 		payload: null,
 		scope: null,
+		triggerSnapshot: null,
+		input: null,
+		actionConfigSnapshot: null,
 		progress: null,
 		result: { providerMessageId: "provider_msg_1" },
 		error: { providerMessage: "remote 500" },
@@ -102,6 +115,12 @@ function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
 		runAfter: "2026-06-02T00:05:00.000Z",
 		attempts: 2,
 		maxAttempts: 3,
+		retryDelaySec: 60,
+		priority: 0,
+		concurrencyKey: null,
+		workerId: null,
+		lockConflictWithRunId: null,
+		lockConflictWithTaskName: null,
 		createdAt: "2026-06-02T00:00:00.000Z",
 		startedAt: null,
 		finishedAt: null,
@@ -112,7 +131,8 @@ function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
 			readyAt: "2026-06-02T00:05:00.000Z",
 		},
 		...input,
-	} satisfies TaskRunCenterItem;
+	};
+	return item;
 }
 
 function mailSettings(

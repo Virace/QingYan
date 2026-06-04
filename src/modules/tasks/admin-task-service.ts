@@ -81,6 +81,17 @@ export interface ScheduledTaskWriteInput {
 	retentionCount?: number;
 }
 
+export interface ManualTaskRunInput {
+	type: string;
+	siteKey?: string | null;
+	payload: Record<string, unknown>;
+	runAfter?: string | null;
+	maxAttempts?: number;
+	retryDelaySec?: number;
+	priority?: number;
+	concurrencyKey?: string | null;
+}
+
 export class AdminTaskService {
 	private readonly registry = createBuiltInTaskTypeRegistry();
 	private readonly scheduledTasks: ScheduledTaskRepository;
@@ -265,6 +276,83 @@ export class AdminTaskService {
 		await this.writeAudit(session, "task.scheduled.run", task, {
 			runId: run.id,
 			runStatus: run.status,
+			requestId,
+		});
+		return projectTaskRunForSession(run, {
+			session: toVisibilitySession(session),
+		});
+	}
+
+	public async createManualRun(
+		input: ManualTaskRunInput,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const definition = this.registry.get(input.type);
+		if (!definition) {
+			throw new ValidationFailedError([
+				validationField("type", "任务类型不存在。"),
+			]);
+		}
+		const parsedPayload = definition.payloadSchema.safeParse(input.payload);
+		if (!parsedPayload.success) {
+			throw new ValidationFailedError(
+				toValidationFields(
+					parsedPayload.error.issues as z.core.$ZodIssue[],
+					input.payload,
+				).map((field) => ({ ...field, path: `payload.${field.path}` })),
+			);
+		}
+		const payload = parsedPayload.data as Record<string, unknown>;
+		const payloadSiteKey =
+			typeof payload.siteKey === "string" ? payload.siteKey : input.siteKey;
+		const site =
+			typeof payloadSiteKey === "string"
+				? this.siteRegistry.getRegisteredSite(payloadSiteKey)
+				: undefined;
+		if (payloadSiteKey && !site) {
+			throw new ValidationFailedError([
+				validationField("siteKey", "站点不存在。"),
+			]);
+		}
+		if (
+			site &&
+			!session.isAdmin &&
+			!session.isInitialAdmin &&
+			!session.siteIds.includes(site.id)
+		) {
+			throw new AppError(403, "ADMIN_SITE_ACCESS_REQUIRED", "没有该站点权限。");
+		}
+		const run = await this.taskRuns.create({
+			type: definition.type,
+			category: definition.category,
+			siteId: site?.id ?? null,
+			siteKey: site?.siteKey ?? null,
+			actorType: "admin_user",
+			actorId: String(session.user.id),
+			trigger: "manual",
+			triggerSnapshot: {
+				actorType: "admin_user",
+				actorId: session.user.id,
+			},
+			scopeKind: definition.scope,
+			scope: site ? { siteKey: site.siteKey } : {},
+			payloadSummary: {
+				type: definition.type,
+				siteKey: site?.siteKey ?? null,
+			},
+			payload,
+			input: payload,
+			runAfter: input.runAfter ?? null,
+			maxAttempts: input.maxAttempts ?? definition.defaultPolicy.maxAttempts,
+			retryDelaySec:
+				input.retryDelaySec ?? definition.defaultPolicy.retryDelaySec,
+			priority: input.priority ?? 0,
+			concurrencyKey: input.concurrencyKey ?? null,
+			ownerUserIdSnapshot: session.user.id,
+			createdByUserId: session.user.id,
+		});
+		await this.writeRunAudit(session, "task.run.create_manual", run, {
 			requestId,
 		});
 		return projectTaskRunForSession(run, {

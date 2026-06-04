@@ -1,5 +1,6 @@
 import { requestJson } from "./client";
 import type { TaskExecutionOptions } from "./ops";
+import type { TaskRunProjection } from "./tasks";
 
 export interface Page<T> {
 	items: T[];
@@ -32,14 +33,6 @@ export type AdminPageSortBy =
 	| "title"
 	| "pageKey";
 export type AdminPageSortOrder = "asc" | "desc";
-export type MaintenanceJobStatus =
-	| "queued"
-	| "delayed"
-	| "running"
-	| "retrying"
-	| "succeeded"
-	| "failed"
-	| "cancelled";
 export type ModerationMode =
 	| "none"
 	| "akismet_auto"
@@ -190,31 +183,6 @@ export interface PageRegistrySource {
 	lastError: string | null;
 	nextRefreshAt: string | null;
 	createdAt: string;
-	updatedAt: string;
-}
-
-export interface MaintenanceJob {
-	id: string;
-	type:
-		| "ip_region_update"
-		| "comment_ip_refresh"
-		| "page_source_refresh"
-		| "page_metadata_refresh";
-	status: MaintenanceJobStatus;
-	siteKey: string | null;
-	scope: unknown;
-	progress: unknown;
-	result: unknown;
-	error: unknown;
-	runAfter: string | null;
-	attempts: number;
-	maxAttempts: number;
-	retryDelaySec: number;
-	concurrencyKey: string | null;
-	lastHeartbeatAt: string | null;
-	createdAt: string;
-	startedAt: string | null;
-	finishedAt: string | null;
 	updatedAt: string;
 }
 
@@ -854,7 +822,7 @@ export function clearPageTrash(input: { siteKey?: string }) {
 }
 
 export function refreshPageTitle(input: { pageKey: string; siteKey: string }) {
-	return requestJson<{ job: MaintenanceJob }>(
+	return requestJson<{ run: TaskRunProjection }>(
 		`/api/admin/pages/${encodeURIComponent(input.pageKey)}/title/refresh`,
 		{
 			method: "POST",
@@ -952,7 +920,7 @@ export function refreshPageRegistrySource(input: {
 	sourceId: number;
 	options?: TaskExecutionOptions;
 }) {
-	return requestJson<{ job: MaintenanceJob }>(
+	return requestJson<{ run: TaskRunProjection }>(
 		`/api/admin/page-registry/sources/${input.sourceId}/refresh`,
 		{
 			method: "POST",
@@ -967,18 +935,12 @@ export function refreshPageRegistrySources(
 		mode?: PageSourceMode;
 	} & TaskExecutionOptions,
 ) {
-	return requestJson<{ job: MaintenanceJob }>(
+	return requestJson<{ run: TaskRunProjection }>(
 		"/api/admin/page-registry/refresh",
 		{
 			method: "POST",
 			body: JSON.stringify(input),
 		},
-	);
-}
-
-export function fetchPageRegistryMaintenanceJob(jobId: string) {
-	return requestJson<{ job: MaintenanceJob | null }>(
-		`/api/admin/page-registry/maintenance-jobs/${encodeURIComponent(jobId)}`,
 	);
 }
 

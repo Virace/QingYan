@@ -177,9 +177,6 @@ describe("initial migration", () => {
 				pk: number;
 				type: string;
 			}>;
-			const maintenanceJobColumns = fixture.sqlite
-				.prepare("PRAGMA table_info(maintenance_jobs)")
-				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const pageRegistryColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(site_page_registry)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -479,28 +476,6 @@ describe("initial migration", () => {
 						notnull: 1,
 						type: "TEXT",
 					}),
-				]),
-			);
-			expect(maintenanceJobColumns.map((column) => column.name)).toEqual(
-				expect.arrayContaining([
-					"id",
-					"type",
-					"status",
-					"site_key",
-					"scope_json",
-					"progress_json",
-					"result_json",
-					"error_json",
-					"run_after",
-					"attempts",
-					"max_attempts",
-					"retry_delay_sec",
-					"concurrency_key",
-					"last_heartbeat_at",
-					"created_at",
-					"started_at",
-					"finished_at",
-					"updated_at",
 				]),
 			);
 			expect(pageRegistryColumns.map((column) => column.name)).toEqual(
@@ -921,6 +896,8 @@ describe("initial migration", () => {
 				expect.arrayContaining([
 					"id",
 					"task_run_id",
+					"sequence",
+					"stream",
 					"event_type",
 					"level",
 					"message",
@@ -931,6 +908,9 @@ describe("initial migration", () => {
 			);
 			expect(taskEventLogIndexes).toEqual(
 				expect.arrayContaining([
+					expect.objectContaining({
+						name: "task_event_logs_run_sequence_idx",
+					}),
 					expect.objectContaining({
 						name: "task_event_logs_run_created_idx",
 					}),
@@ -1167,14 +1147,6 @@ describe("initial migration", () => {
 					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
 				);
-				CREATE TABLE maintenance_jobs (
-					id text PRIMARY KEY NOT NULL,
-					type text NOT NULL,
-					status text NOT NULL,
-					scope_json text NOT NULL,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-				);
 				CREATE TABLE site_page_registry (
 					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 					site_id integer NOT NULL,
@@ -1194,6 +1166,26 @@ describe("initial migration", () => {
 					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
 				);
+				CREATE TABLE task_runs (
+					id text PRIMARY KEY NOT NULL,
+					type text NOT NULL,
+					category text DEFAULT 'maintenance' NOT NULL,
+					status text DEFAULT 'queued' NOT NULL,
+					payload_summary_json text NOT NULL,
+					payload_json text NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE task_event_logs (
+					id text PRIMARY KEY NOT NULL,
+					task_run_id text NOT NULL,
+					event_type text NOT NULL,
+					level text NOT NULL,
+					message text NOT NULL,
+					data_json text,
+					visible_to_site_admin integer DEFAULT false NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
 				CREATE TABLE __qingyan_migrations (
 					name text PRIMARY KEY NOT NULL,
 					applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -1212,11 +1204,14 @@ describe("initial migration", () => {
 			const siteSettingsColumns = sqlite
 				.prepare("PRAGMA table_info(site_settings)")
 				.all() as Array<{ name: string }>;
-			const maintenanceJobColumns = sqlite
-				.prepare("PRAGMA table_info(maintenance_jobs)")
-				.all() as Array<{ name: string }>;
 			const visitorRequestMetadataColumns = sqlite
 				.prepare("PRAGMA table_info(visitor_request_metadata)")
+				.all() as Array<{ name: string }>;
+			const taskEventLogColumns = sqlite
+				.prepare("PRAGMA table_info(task_event_logs)")
+				.all() as Array<{ name: string }>;
+			const taskEventLogIndexes = sqlite
+				.prepare("PRAGMA index_list(task_event_logs)")
 				.all() as Array<{ name: string }>;
 
 			expect(tables.map((table) => table.name)).toEqual(
@@ -1255,9 +1250,6 @@ describe("initial migration", () => {
 			expect(siteSettingsColumns.map((column) => column.name)).toContain(
 				"engagement_json",
 			);
-			expect(maintenanceJobColumns.map((column) => column.name)).toContain(
-				"priority",
-			);
 			expect(
 				visitorRequestMetadataColumns.map((column) => column.name),
 			).toEqual(
@@ -1273,6 +1265,22 @@ describe("initial migration", () => {
 				.all() as Array<{ name: string }>;
 			expect(taskRunColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining(["payload_json", "idempotency_key"]),
+			);
+			expect(taskEventLogColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining(["sequence", "stream"]),
+			);
+			expect(taskEventLogIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "task_event_logs_run_sequence_idx",
+					}),
+					expect.objectContaining({
+						name: "task_event_logs_run_created_idx",
+					}),
+					expect.objectContaining({
+						name: "task_event_logs_level_created_idx",
+					}),
+				]),
 			);
 			const notificationChannelConfigColumns = sqlite
 				.prepare("PRAGMA table_info(notification_channel_configs)")

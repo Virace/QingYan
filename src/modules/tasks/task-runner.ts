@@ -4,6 +4,7 @@ import type {
 	TaskRunnerContext,
 	TaskRunnerServices,
 } from "./task-runner-context";
+import { createTaskLogWriter } from "./task-log-writer";
 import type { TaskTypeRegistry } from "./task-type-registry";
 import type { TaskRunRecord } from "./types";
 
@@ -57,6 +58,10 @@ export class TaskRunner {
 				scheduledTaskId: run.scheduledTaskId,
 				actor: { type: "system" },
 				services: this.options.services ?? {},
+				log: createTaskLogWriter({
+					taskRunId: run.id,
+					eventLogs: this.options.eventLogs,
+				}),
 				now: this.now,
 				writeEvent: async (event) => {
 					await this.options.eventLogs.append({

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import {
 	createCommentIpRefreshJob,
@@ -63,15 +64,21 @@ export function IpMaintenanceTaskPanel({ siteKey }: { siteKey: string }) {
 	});
 	const invalidate = () => {
 		void ipRegionQuery.refetch();
-		void queryClient.invalidateQueries({ queryKey: ["admin", "tasks"] });
+		void queryClient.invalidateQueries({ queryKey: ["admin", "task-runs"] });
 	};
 	const ipRegionUpdateMutation = useMutation({
 		mutationFn: createIpRegionUpdateJob,
-		onSuccess: invalidate,
+		onSuccess: (result) => {
+			toast.success(`已创建任务运行：${result.run.id}`);
+			invalidate();
+		},
 	});
 	const commentIpRefreshMutation = useMutation({
 		mutationFn: createCommentIpRefreshJob,
-		onSuccess: invalidate,
+		onSuccess: (result) => {
+			toast.success(`已创建任务运行：${result.run.id}`);
+			invalidate();
+		},
 	});
 	const activeJob = ipRegionQuery.data?.recentJobs.find((job) =>
 		["queued", "delayed", "running", "retrying"].includes(job.status),

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { maintenanceJobs, sitePageRegistry } from "../../src/db/schema";
+import { taskRuns } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -75,24 +75,24 @@ describe("admin page registry sources", () => {
 
 		expect(refreshResponse.statusCode).toBe(200);
 		expect(refreshResponse.json()).toMatchObject({
-			job: {
+			run: {
 				type: "page_source_refresh",
 				status: "queued",
+				siteKey: "fangyuan",
+				input: {
+					siteKey: "fangyuan",
+					sourceIds: [sourceId],
+					trigger: "manual",
+				},
 			},
 		});
-
-		const [job] = await fixture.app.db.select().from(maintenanceJobs);
-		expect(job).toMatchObject({
-			type: "page_source_refresh",
-			status: "succeeded",
-		});
-		const [page] = await fixture.app.db
+		const [run] = await fixture.app.db
 			.select()
-			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "posts/from-sitemap/"));
-		expect(page).toMatchObject({
-			pageUrl: "/posts/from-sitemap/",
-			status: "active",
+			.from(taskRuns)
+			.where(eq(taskRuns.type, "page_source_refresh"));
+		expect(run).toMatchObject({
+			status: "queued",
+			siteKey: "fangyuan",
 		});
 	});
 
@@ -250,12 +250,12 @@ describe("admin page registry sources", () => {
 		});
 
 		expect(singleResponse.statusCode).toBe(200);
-		expect(singleResponse.json().job).toMatchObject({
+		expect(singleResponse.json().run).toMatchObject({
 			status: "delayed",
 			runAfter: "2099-01-01T00:00:00.000Z",
 			maxAttempts: 4,
 			retryDelaySec: 120,
-			scope: {
+			input: {
 				timeoutMs: 12_000,
 				maxBytes: 1_048_576,
 			},
@@ -282,10 +282,10 @@ describe("admin page registry sources", () => {
 		});
 
 		expect(allResponse.statusCode).toBe(200);
-		expect(allResponse.json().job).toMatchObject({
+		expect(allResponse.json().run).toMatchObject({
 			maxAttempts: 3,
 			retryDelaySec: 90,
-			scope: {
+			input: {
 				siteKey: "fangyuan",
 				timeoutMs: 15_000,
 				maxBytes: 2_097_152,

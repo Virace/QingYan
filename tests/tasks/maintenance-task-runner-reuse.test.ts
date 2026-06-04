@@ -11,6 +11,16 @@ function createContext(
 		scheduledTaskId: "scheduled_task_1",
 		actor: { type: "admin_user", id: "1" },
 		services: {},
+		log: {
+			stdout: vi.fn(),
+			stderr: vi.fn(),
+			system: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			debug: vi.fn(),
+			write: vi.fn(),
+		},
 		writeEvent: vi.fn(),
 		updateProgress: vi.fn(),
 		writeAudit: vi.fn(),
@@ -23,7 +33,7 @@ function createContext(
 describe("maintenance task runner reuse wrappers", () => {
 	it("delegates page source refresh to PageSourceRefreshService", async () => {
 		const service = {
-			createRefreshJob: vi.fn().mockResolvedValue({ id: "job_1" }),
+			executeRefresh: vi.fn().mockResolvedValue({ processed: 2 }),
 		};
 		const context = createContext({
 			services: { pageSourceRefresh: service },
@@ -36,29 +46,31 @@ describe("maintenance task runner reuse wrappers", () => {
 					siteKey: "fangyuan",
 					sourceIds: [1],
 					mode: "append",
+					trigger: "scheduled",
 				},
 				context,
 			);
 
-		expect(service.createRefreshJob).toHaveBeenCalledWith({
-			siteKey: "fangyuan",
-			sourceIds: [1],
-			mode: "append",
-			trigger: "scheduled",
-			timeoutMs: undefined,
-			maxBytes: undefined,
-			maxAttempts: undefined,
-			retryDelaySec: undefined,
-		});
+		expect(service.executeRefresh).toHaveBeenCalledWith(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [1],
+				mode: "append",
+				trigger: "scheduled",
+				timeoutMs: undefined,
+				maxBytes: undefined,
+			},
+			context,
+		);
 		expect(context.writeEvent).toHaveBeenCalledWith(
 			expect.objectContaining({ eventType: "succeeded" }),
 		);
-		expect(result).toEqual({ id: "job_1" });
+		expect(result).toEqual({ processed: 2 });
 	});
 
 	it("delegates title refresh to PageMetadataRefreshService", async () => {
 		const service = {
-			createRefreshJob: vi.fn().mockResolvedValue({ id: "job_2" }),
+			executeRefresh: vi.fn().mockResolvedValue({ updated: 1 }),
 		};
 		const context = createContext({
 			services: { pageMetadataRefresh: service },
@@ -71,29 +83,31 @@ describe("maintenance task runner reuse wrappers", () => {
 					siteKey: "fangyuan",
 					scope: "missing_only",
 					pageKeys: ["/post/a"],
+					trigger: "scheduled",
 					batchSize: 20,
 				},
 				context,
 			);
 
-		expect(service.createRefreshJob).toHaveBeenCalledWith({
-			siteKey: "fangyuan",
-			pageKeys: ["/post/a"],
-			onlyMissingTitle: true,
-			forceTitle: false,
-			trigger: "scheduled",
-			batchSize: 20,
-			timeoutMs: undefined,
-			maxBytes: undefined,
-			maxAttempts: undefined,
-			retryDelaySec: undefined,
-		});
+		expect(service.executeRefresh).toHaveBeenCalledWith(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["/post/a"],
+				onlyMissingTitle: true,
+				forceTitle: false,
+				trigger: "scheduled",
+				batchSize: 20,
+				timeoutMs: undefined,
+				maxBytes: undefined,
+			},
+			context,
+		);
 	});
 
 	it("delegates comment IP refresh and IP region update to CommentIpMaintenanceService", async () => {
 		const service = {
-			createCommentIpRefreshJob: vi.fn().mockResolvedValue({ id: "job_3" }),
-			createIpRegionUpdateJob: vi.fn().mockResolvedValue({ id: "job_4" }),
+			executeCommentIpRefresh: vi.fn().mockResolvedValue({ refreshed: 1 }),
+			executeIpRegionUpdate: vi.fn().mockResolvedValue({ results: [] }),
 		};
 		const context = createContext({
 			services: { commentIpMaintenance: service },
@@ -117,20 +131,22 @@ describe("maintenance task runner reuse wrappers", () => {
 			context,
 		);
 
-		expect(service.createCommentIpRefreshJob).toHaveBeenCalledWith({
-			siteKey: "fangyuan",
-			scope: "stale",
-			ipVersions: ["v4", "v6"],
-			batchSize: 100,
-			maxAttempts: undefined,
-			retryDelaySec: undefined,
-		});
-		expect(service.createIpRegionUpdateJob).toHaveBeenCalledWith({
-			ipVersions: ["v4"],
-			timeoutMs: 30_000,
-			maxAttempts: undefined,
-			retryDelaySec: undefined,
-		});
+		expect(service.executeCommentIpRefresh).toHaveBeenCalledWith(
+			{
+				siteKey: "fangyuan",
+				scope: "stale",
+				ipVersions: ["v4", "v6"],
+				batchSize: 100,
+			},
+			context,
+		);
+		expect(service.executeIpRegionUpdate).toHaveBeenCalledWith(
+			{
+				ipVersions: ["v4"],
+				timeoutMs: 30_000,
+			},
+			context,
+		);
 	});
 
 	it("records blocked when the required existing service is not injected", async () => {

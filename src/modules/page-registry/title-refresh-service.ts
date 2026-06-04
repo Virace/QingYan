@@ -2,9 +2,8 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import { sitePageRegistry, sites } from "../../db/schema";
-import type { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
-import { defaultTaskQueueSettings } from "../ops/task-settings";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import type { TaskRunnerContext } from "../tasks/task-runner-context";
 
 type PageStatus =
 	| "active"
@@ -67,6 +66,11 @@ const SYSTEM_STATUSES = new Set([
 	"unreachable",
 	"not_found",
 ]);
+const defaultPageTitleRefreshSettings = {
+	batchSize: 50,
+	timeoutMs: 8_000,
+	maxBytes: 512 * 1024,
+};
 
 function normalizeTitle(raw: string): string | null {
 	const title = raw
@@ -122,61 +126,30 @@ function failureStatus(current: string, statusCode: number | null): PageStatus {
 export class PageMetadataRefreshService {
 	public constructor(
 		private readonly db: AppDatabase,
-		private readonly jobs: MaintenanceJobRepository,
 		private readonly options: PageMetadataRefreshOptions,
 	) {}
 
-	public async createRefreshJob(input: PageMetadataRefreshScope) {
-		const concurrencyKey =
-			input.pageKeys?.length === 1
-				? `page-title:${input.siteKey}:${input.pageKeys[0]}`
-				: `page-title:${input.siteKey}`;
-		return this.jobs.create({
-			type: "page_metadata_refresh",
-			siteKey: input.siteKey,
-			scope: input,
-			runAfter: input.runAfter ?? null,
-			maxAttempts:
-				input.maxAttempts ?? defaultTaskQueueSettings.defaultRetry.maxAttempts,
-			retryDelaySec:
-				input.retryDelaySec ??
-				defaultTaskQueueSettings.defaultRetry.retryDelaySec,
-			concurrencyKey,
-		});
-	}
-
-	public async runNextQueuedJob() {
-		const [job] = await this.jobs.listRunnable({
-			limit: 1,
-			maxConcurrentTotal: 1,
-			maxConcurrentByType: { page_metadata_refresh: 1 },
-		});
-		if (!job || job.type !== "page_metadata_refresh") {
-			return null;
-		}
-		await this.jobs.markRunning(job.id, {
+	public async executeRefresh(
+		input: PageMetadataRefreshScope,
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
+	) {
+		await context.log.info(`开始刷新页面 Title：站点 ${input.siteKey}。`);
+		await context.updateProgress({
 			phase: "refreshing_titles",
 			processed: 0,
 			updated: 0,
 			skipped: 0,
 			failed: 0,
 		});
-		try {
-			const result = await this.refreshTitles(
-				job.id,
-				job.scope as PageMetadataRefreshScope,
-			);
-			return this.jobs.markSucceeded(job.id, result);
-		} catch (error) {
-			return this.jobs.markFailedOrRetry(job.id, {
-				error: {
-					message: error instanceof Error ? error.message : String(error),
-				},
-			});
-		}
+		const result = await this.refreshTitlesWithContext(input, context);
+		await context.log.info("页面 Title 刷新完成。", result);
+		return result;
 	}
 
-	private async refreshTitles(jobId: string, scope: PageMetadataRefreshScope) {
+	private async refreshTitlesWithContext(
+		scope: PageMetadataRefreshScope,
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
+	) {
 		const rows = await this.listRows(scope);
 		let processed = 0;
 		let updated = 0;
@@ -186,10 +159,14 @@ export class PageMetadataRefreshService {
 		const batchSize =
 			scope.batchSize ??
 			this.options.settings?.batchSize ??
-			defaultTaskQueueSettings.pageTitleRefresh.batchSize;
+			defaultPageTitleRefreshSettings.batchSize;
 
 		for (const row of rows.slice(0, batchSize)) {
+			if (context.signal?.aborted) {
+				throw new Error("Task run aborted.");
+			}
 			processed += 1;
+			await context.log.info(`刷新页面 Title：${row.pageKey}`);
 			try {
 				if (scope.onlyMissingTitle && row.title && !scope.forceTitle) {
 					skipped += 1;
@@ -210,7 +187,7 @@ export class PageMetadataRefreshService {
 				const message = error instanceof Error ? error.message : String(error);
 				errors.push({ pageKey: row.pageKey, message });
 			}
-			await this.jobs.updateProgress(jobId, {
+			await context.updateProgress({
 				phase: "refreshing_titles",
 				total: rows.length,
 				processed,
@@ -241,11 +218,11 @@ export class PageMetadataRefreshService {
 				timeoutMs:
 					scope.timeoutMs ??
 					this.options.settings?.timeoutMs ??
-					defaultTaskQueueSettings.pageTitleRefresh.timeoutMs,
+					defaultPageTitleRefreshSettings.timeoutMs,
 				maxBytes:
 					scope.maxBytes ??
 					this.options.settings?.maxBytes ??
-					defaultTaskQueueSettings.pageTitleRefresh.maxBytes,
+					defaultPageTitleRefreshSettings.maxBytes,
 			});
 			if (response.status < 200 || response.status >= 300) {
 				const error = `http_${response.status}`;

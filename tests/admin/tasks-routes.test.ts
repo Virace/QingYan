@@ -170,23 +170,30 @@ describe("admin tasks api", () => {
 		});
 		const runId = runNow.json().id as string;
 		const eventLogs = new TaskEventLogRepository(fixture.app.db);
-		await eventLogs.append({
+		await eventLogs.appendLogLine({
 			taskRunId: runId,
-			eventType: "created",
+			stream: "stdout",
 			level: "info",
 			message: "Created",
 			visibleToSiteAdmin: true,
 		});
 
-		const events = await fixture.app.inject({
+		const logs = await fixture.app.inject({
 			method: "GET",
-			url: `/qingyan/api/admin/tasks/runs/${runId}/events`,
+			url: `/qingyan/api/admin/tasks/runs/${runId}/logs?afterSequence=0&limit=10`,
 			cookies: { qingyan_admin: admin.adminCookie.value },
 		});
-		expect(events.statusCode).toBe(200);
-		expect(events.json()).toMatchObject({
-			totalCount: 1,
-			items: [expect.objectContaining({ eventType: "created" })],
+		expect(logs.statusCode).toBe(200);
+		expect(logs.json()).toMatchObject({
+			nextSequence: 1,
+			hasMore: false,
+			items: [
+				expect.objectContaining({
+					sequence: 1,
+					stream: "stdout",
+					eventType: "log.stdout",
+				}),
+			],
 		});
 
 		const cancelResponse = await fixture.app.inject({

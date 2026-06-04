@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { AppDatabase } from "../../db/client";
-import type { MaintenanceJobRepository } from "../ops/maintenance-job-repository";
-import { AppError } from "../shared/errors";
+import type { TaskRunnerContext } from "../tasks/task-runner-context";
 import { PageRegistryService } from "./service";
 import {
 	getPageSourceEntryRejectionReason,
@@ -33,7 +32,7 @@ export interface PageSourceRefreshOptions {
 		options: { timeoutMs?: number; maxBytes?: number },
 	) => Promise<string>;
 	loadAllowedOriginsForSite: (siteKey: string) => Promise<string[]>;
-	createTitleRefreshJob?: (input: {
+	createTitleRefreshRun?: (input: {
 		siteKey: string;
 		pageKeys: string[];
 	}) => Promise<unknown>;
@@ -77,63 +76,27 @@ export class PageSourceRefreshService {
 
 	public constructor(
 		db: AppDatabase,
-		private readonly jobs: MaintenanceJobRepository,
 		private readonly options: PageSourceRefreshOptions,
 	) {
 		this.repository = new PageSourceRepository(db);
 		this.pageRegistry = new PageRegistryService(db);
 	}
 
-	public async createRefreshJob(input: PageSourceRefreshJobScope) {
-		const concurrencyKey = `page-source:${input.siteKey}`;
-		if (
-			await this.jobs.hasActiveJob({
-				type: "page_source_refresh",
-				concurrencyKey,
-			})
-		) {
-			throw new AppError(
-				409,
-				"MAINTENANCE_JOB_ALREADY_RUNNING",
-				"已有维护任务正在运行。",
-			);
-		}
-		return this.jobs.create({
-			type: "page_source_refresh",
-			siteKey: input.siteKey,
-			scope: input,
-			runAfter: input.runAfter ?? null,
-			maxAttempts: input.maxAttempts,
-			retryDelaySec: input.retryDelaySec,
-			concurrencyKey,
-		});
-	}
-
-	public async runNextQueuedJob() {
-		const active = (await this.jobs.listRunnable({ limit: 20 })).find(
-			(job) => job.type === "page_source_refresh",
-		);
-		if (!active) {
-			return null;
-		}
-		await this.jobs.markRunning(active.id, {
+	public async executeRefresh(
+		input: PageSourceRefreshJobScope,
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
+	) {
+		await context.log.info(`开始刷新页面来源：站点 ${input.siteKey}。`);
+		await context.updateProgress({
 			phase: "refreshing",
 			...emptyCounters(),
 		});
-		try {
-			const result = await this.refreshSources(
-				active.id,
-				active.scope as PageSourceRefreshJobScope,
-			);
-			return this.jobs.markSucceeded(active.id, result);
-		} catch (error) {
-			return this.jobs.markFailed(active.id, {
-				message: error instanceof Error ? error.message : String(error),
-			});
-		}
+		const result = await this.refreshSourcesWithContext(input, context);
+		await context.log.info("页面来源刷新完成。", result);
+		return result;
 	}
 
-	public async runDueSources(now = new Date()) {
+	public async listDueRefreshInputs(now = new Date()) {
 		const dueSources = await this.repository.listDueSources(now.toISOString());
 		const bySiteKey = new Map<string, number[]>();
 		for (const source of dueSources) {
@@ -142,22 +105,16 @@ export class PageSourceRefreshService {
 			bySiteKey.set(source.siteKey, sourceIds);
 		}
 
-		const jobs = [];
-		for (const [siteKey, sourceIds] of bySiteKey) {
-			jobs.push(
-				await this.createRefreshJob({
-					siteKey,
-					sourceIds,
-					trigger: "scheduled",
-				}),
-			);
-		}
-		return jobs;
+		return Array.from(bySiteKey, ([siteKey, sourceIds]) => ({
+			siteKey,
+			sourceIds,
+			trigger: "scheduled" as const,
+		}));
 	}
 
-	private async refreshSources(
-		jobId: string,
+	private async refreshSourcesWithContext(
 		scope: PageSourceRefreshJobScope,
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
 	) {
 		const sources = await this.repository.listEnabledSources({
 			sourceIds: scope.sourceIds,
@@ -169,6 +126,10 @@ export class PageSourceRefreshService {
 		const errors: Array<{ sourceId: number; url: string; reason: string }> = [];
 
 		for (const source of selectedSources) {
+			if (context.signal?.aborted) {
+				throw new Error("Task run aborted.");
+			}
+			await context.log.info(`刷新页面来源：${source.sourceUrl}`);
 			const sourceResult = await this.refreshSource(source, scope);
 			counters.processed += sourceResult.processed;
 			counters.created += sourceResult.created;
@@ -178,7 +139,7 @@ export class PageSourceRefreshService {
 			counters.failed += sourceResult.failed;
 			counters.approvedPending += sourceResult.approvedPending;
 			errors.push(...sourceResult.errors);
-			await this.jobs.updateProgress(jobId, {
+			await context.updateProgress({
 				phase: "refreshing",
 				...counters,
 			});
@@ -291,7 +252,7 @@ export class PageSourceRefreshService {
 				: null,
 		});
 		if (missingTitlePageKeys.length > 0) {
-			await this.options.createTitleRefreshJob?.({
+			await this.options.createTitleRefreshRun?.({
 				siteKey: source.siteKey,
 				pageKeys: Array.from(new Set(missingTitlePageKeys)),
 			});

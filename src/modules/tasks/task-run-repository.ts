@@ -135,6 +135,16 @@ export class TaskRunRepository {
 			result?: unknown;
 			error?: unknown;
 			attempts?: number;
+			input?: unknown;
+			trigger?: string | null;
+			triggerSnapshot?: unknown;
+			scopeKind?: string | null;
+			scope?: unknown;
+			retryDelaySec?: number;
+			priority?: number;
+			concurrencyKey?: string | null;
+			ownerUserIdSnapshot?: number | null;
+			createdByUserId?: number | null;
 			startedAt?: string | null;
 			finishedAt?: string | null;
 			createdAt?: string;
@@ -164,11 +174,14 @@ export class TaskRunRepository {
 			status,
 			siteId: input.siteId ?? null,
 			siteKey: input.siteKey ?? null,
-			scopeKind: null,
-			trigger: null,
-			triggerSnapshotJson: null,
-			scopeJson: null,
-			inputJson: null,
+			scopeKind: input.scopeKind ?? null,
+			trigger: input.trigger ?? null,
+			triggerSnapshotJson:
+				input.triggerSnapshot === undefined
+					? null
+					: stringifyJson(input.triggerSnapshot),
+			scopeJson: input.scope === undefined ? null : stringifyJson(input.scope),
+			inputJson: input.input === undefined ? null : stringifyJson(input.input),
 			actionConfigSnapshotJson: null,
 			actorType: input.actorType ?? null,
 			actorId: input.actorId ?? null,
@@ -185,14 +198,14 @@ export class TaskRunRepository {
 			runAfter,
 			attempts: input.attempts ?? 0,
 			maxAttempts: input.maxAttempts ?? 1,
-			retryDelaySec: 0,
-			priority: 0,
-			concurrencyKey: null,
+			retryDelaySec: input.retryDelaySec ?? 0,
+			priority: input.priority ?? 0,
+			concurrencyKey: input.concurrencyKey ?? null,
 			workerId: null,
 			lockConflictWithRunId: null,
 			lockConflictWithTaskName: null,
-			ownerUserIdSnapshot: null,
-			createdByUserId: null,
+			ownerUserIdSnapshot: input.ownerUserIdSnapshot ?? null,
+			createdByUserId: input.createdByUserId ?? null,
 			skipReason: null,
 			blockReason: null,
 			createdAt: timestamp,
@@ -316,6 +329,7 @@ export class TaskRunRepository {
 
 	public async listForTaskCenter(input: {
 		siteKey?: string;
+		type?: string;
 		category?: TaskRunCategory;
 		status?: TaskRunStatus;
 		limit: number;
@@ -323,6 +337,7 @@ export class TaskRunRepository {
 	}) {
 		const whereCondition = and(
 			input.siteKey ? eq(taskRuns.siteKey, input.siteKey) : undefined,
+			input.type ? eq(taskRuns.type, input.type) : undefined,
 			input.category ? eq(taskRuns.category, input.category) : undefined,
 			input.status ? eq(taskRuns.status, input.status) : undefined,
 		);

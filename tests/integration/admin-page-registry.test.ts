@@ -6,7 +6,6 @@ import {
 	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
-	maintenanceJobs,
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
@@ -336,72 +335,4 @@ describe("admin page registry", () => {
 		});
 	});
 
-	it("scopes page registry maintenance job reads to granted sites", async () => {
-		const fixture = await createTestApp();
-		cleanups.push(fixture.cleanup);
-		await createSecondSite(fixture);
-		await createSiteAdmin(fixture, {
-			username: "page-registry-site-admin",
-			siteKeys: ["fangyuan"],
-		});
-		await fixture.app.db.insert(maintenanceJobs).values([
-			{
-				id: "maintenance_registry_granted",
-				type: "page_source_refresh",
-				status: "queued",
-				siteKey: "fangyuan",
-				scopeJson: JSON.stringify({ siteKey: "fangyuan" }),
-				runAfter: null,
-				attempts: 0,
-				maxAttempts: 1,
-				retryDelaySec: 0,
-				concurrencyKey: "page-source:fangyuan",
-			},
-			{
-				id: "maintenance_registry_denied",
-				type: "page_source_refresh",
-				status: "queued",
-				siteKey: "qingyan",
-				scopeJson: JSON.stringify({ siteKey: "qingyan" }),
-				runAfter: null,
-				attempts: 0,
-				maxAttempts: 1,
-				retryDelaySec: 0,
-				concurrencyKey: "page-source:qingyan",
-			},
-		]);
-		const admin = await loginAsAdmin(fixture.app, {
-			username: "page-registry-site-admin",
-			password: "replace-me",
-		});
-
-		const granted = await fixture.app.inject({
-			method: "GET",
-			url: "/qingyan/api/admin/page-registry/maintenance-jobs/maintenance_registry_granted",
-			cookies: {
-				qingyan_admin: admin.adminCookie.value,
-			},
-		});
-		expect(granted.statusCode).toBe(200);
-		expect(granted.json()).toMatchObject({
-			job: {
-				id: "maintenance_registry_granted",
-				siteKey: "fangyuan",
-			},
-		});
-
-		const denied = await fixture.app.inject({
-			method: "GET",
-			url: "/qingyan/api/admin/page-registry/maintenance-jobs/maintenance_registry_denied",
-			cookies: {
-				qingyan_admin: admin.adminCookie.value,
-			},
-		});
-		expect(denied.statusCode).toBe(403);
-		expect(denied.json()).toMatchObject({
-			error: {
-				code: "ADMIN_SITE_ACCESS_REQUIRED",
-			},
-		});
-	});
 });

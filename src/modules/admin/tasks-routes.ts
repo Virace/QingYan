@@ -9,6 +9,10 @@ import { TaskEventLogRepository } from "../tasks/task-event-log-repository";
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
 const runIdParamsSchema = z.object({ id: z.string().min(1) });
+const logsQuerySchema = z.object({
+	afterSequence: z.coerce.number().int().min(0).optional(),
+	limit: z.coerce.number().int().min(1).max(500).default(100),
+});
 const transferOwnerSchema = z.object({
 	ownerUserId: z.number().int().positive(),
 });
@@ -179,6 +183,19 @@ export const adminTasksRoutes: FastifyPluginAsync = async (fastify) => {
 			taskRunId: id,
 			limit: 100,
 			offset: 0,
+			includePrivate: true,
+		});
+	});
+
+	fastify.get("/runs/:id/logs", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const { id } = parseParams(runIdParamsSchema, request.params);
+		const query = logsQuerySchema.parse(request.query ?? {});
+		await service.assertCanViewRunLogs(id, session);
+		return eventLogs.listForRunAfter({
+			taskRunId: id,
+			afterSequence: query.afterSequence,
+			limit: query.limit,
 			includePrivate: true,
 		});
 	});

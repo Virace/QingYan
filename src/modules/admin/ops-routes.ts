@@ -13,19 +13,13 @@ import {
 } from "./service-control";
 import { CommentIpMaintenanceService } from "../comments/metadata/comment-ip-maintenance-service";
 import { GitHubReleaseClient } from "../ops/github-release-client";
-import {
-	MaintenanceJobRepository,
-	type MaintenanceJobStatus,
-	type MaintenanceJobType,
-} from "../ops/maintenance-job-repository";
 import { OpsStatusService } from "../ops/ops-status-service";
-import { defaultTaskQueueSettings } from "../ops/task-settings";
 import { UpdateCheckService } from "../ops/update-check-service";
-import { PageMetadataRefreshService } from "../page-registry/title-refresh-service";
 import { PageRegistryService } from "../page-registry/service";
 import { AppError } from "../shared/errors";
 import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { AdminTaskService } from "../tasks/admin-task-service";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskRunCategory, TaskRunStatus } from "../tasks/types";
 import { UpgradeService } from "../upgrade/upgrade-service";
@@ -48,9 +42,6 @@ const commentIpRefreshBodySchema = z.object({
 	runAfter: z.string().datetime().nullable().optional(),
 	maxAttempts: z.number().int().min(1).max(10).optional(),
 	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
-});
-const maintenanceJobParamsSchema = z.object({
-	jobId: z.string().min(1),
 });
 const serviceRestartBodySchema = z.object({
 	confirm: z.literal(serviceRestartConfirmation),
@@ -151,47 +142,14 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	const serviceControl = resolveAdminServiceControl({
 		injected: fastify.serviceControl,
 	});
-	const maintenanceJobs = new MaintenanceJobRepository(fastify.db);
 	const taskRuns = new TaskRunRepository(fastify.db);
+	const adminTasks = new AdminTaskService(fastify.db, fastify.siteRegistry);
 	const pageRegistryService = new PageRegistryService(fastify.db);
 	const deletionPolicyService = new DeletionPolicyService(fastify.db);
-	const titleRefresh = new PageMetadataRefreshService(
-		fastify.db,
-		maintenanceJobs,
-		{
-			fetchHtml:
-				fastify.pageTitleFetchHtml ??
-				(async (url, options) => {
-					const controller = new AbortController();
-					const timeout = setTimeout(
-						() => controller.abort(),
-						options.timeoutMs,
-					);
-					try {
-						const response = await fetch(url, { signal: controller.signal });
-						const text = await response.text();
-						if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
-							throw new AppError(
-								413,
-								"PAGE_TITLE_HTML_TOO_LARGE",
-								"页面 HTML 内容超过大小限制。",
-							);
-						}
-						return { status: response.status, text };
-					} finally {
-						clearTimeout(timeout);
-					}
-				}),
-		},
-	);
 	const systemSettings = new RuntimeSystemSettingsService(fastify.db);
-	const ipMaintenance = new CommentIpMaintenanceService(
-		fastify.db,
-		maintenanceJobs,
-		{
-			loadIpRegionSettings: () => systemSettings.getIpRegionSettings(),
-		},
-	);
+	const ipMaintenance = new CommentIpMaintenanceService(fastify.db, {
+		loadIpRegionSettings: () => systemSettings.getIpRegionSettings(),
+	});
 
 	async function hardDeleteDelayedRecord(record: {
 		resourceType: string;
@@ -347,7 +305,18 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.get("/ip-region", async (request) => {
 		const session = await sessionService.requireSession(request);
 		requirePermission(session, "ops.read");
-		return ipMaintenance.getStatus();
+		const status = await ipMaintenance.getStatus();
+		const recentRuns = await taskRuns.listForTaskCenter({
+			category: "maintenance",
+			limit: 10,
+			offset: 0,
+		});
+		return {
+			...status,
+			recentJobs: recentRuns.items.filter((run) =>
+				["ip_region_update", "comment_ip_refresh"].includes(run.type),
+			),
+		};
 	});
 
 	fastify.post("/ip-region/update", async (request) => {
@@ -359,9 +328,21 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 				issues: parsed.error.issues,
 			});
 		}
-		const job = await ipMaintenance.createIpRegionUpdateJob(parsed.data);
-		void ipMaintenance.runNextQueuedJob();
-		return { job };
+		const run = await adminTasks.createManualRun(
+			{
+				type: "ip_region_update",
+				payload: {
+					ipVersions: parsed.data.ipVersions,
+					timeoutMs: parsed.data.timeoutMs,
+				},
+				runAfter: parsed.data.runAfter ?? null,
+				maxAttempts: parsed.data.maxAttempts,
+				retryDelaySec: parsed.data.retryDelaySec,
+			},
+			session,
+			request.context?.requestId,
+		);
+		return { run };
 	});
 
 	fastify.post("/comment-ip/refresh", async (request) => {
@@ -378,23 +359,24 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 			siteRegistry: fastify.siteRegistry,
 			siteKey: parsed.data.siteKey,
 		});
-		const job = await ipMaintenance.createCommentIpRefreshJob(parsed.data);
-		void ipMaintenance.runNextQueuedJob();
-		return { job };
-	});
-
-	fastify.get("/maintenance-jobs/:jobId", async (request) => {
-		const session = await sessionService.requireSession(request);
-		requirePermission(session, "tasks.read");
-		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
-		if (!parsed.success) {
-			throw new InvalidRequestError({
-				issues: parsed.error.issues,
-			});
-		}
-		return {
-			job: await maintenanceJobs.get(parsed.data.jobId),
-		};
+		const run = await adminTasks.createManualRun(
+			{
+				type: "comment_ip_refresh",
+				siteKey: parsed.data.siteKey,
+				payload: {
+					siteKey: parsed.data.siteKey,
+					scope: parsed.data.scope,
+					ipVersions: parsed.data.ipVersions,
+					batchSize: parsed.data.batchSize,
+				},
+				runAfter: parsed.data.runAfter ?? null,
+				maxAttempts: parsed.data.maxAttempts,
+				retryDelaySec: parsed.data.retryDelaySec,
+			},
+			session,
+			request.context?.requestId,
+		);
+		return { run };
 	});
 
 	fastify.get("/tasks", async (request) => {
@@ -411,30 +393,13 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 			siteRegistry: fastify.siteRegistry,
 			siteKey: parsed.data.siteKey,
 		});
-		const maintenancePage = await maintenanceJobs.listForTaskCenter({
-			siteKey: parsed.data.siteKey,
-			type: parsed.data.type as MaintenanceJobType | undefined,
-			status: parsed.data.status as MaintenanceJobStatus | undefined,
-			limit: parsed.data.limit,
-			offset: parsed.data.offset,
-		});
 		const taskRunPage = await taskRuns.listForTaskCenter({
 			siteKey: parsed.data.siteKey,
-			category: parsed.data.type as TaskRunCategory | undefined,
+			type: parsed.data.type,
 			status: parsed.data.status as TaskRunStatus | undefined,
 			limit: parsed.data.limit,
 			offset: parsed.data.offset,
 		});
-		const maintenanceItems = await Promise.all(
-			maintenancePage.items.map(async (job) => ({
-				source: "maintenance" as const,
-				...job,
-				queueState: await maintenanceJobs.describeQueueState(
-					job,
-					defaultTaskQueueSettings,
-				),
-			})),
-		);
 		const taskRunItems = taskRunPage.items.map((task) => ({
 			source: "task_run" as const,
 			...task,
@@ -456,14 +421,14 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 				readyAt: task.runAfter ?? task.updatedAt,
 			},
 		}));
-		const items = [...maintenanceItems, ...taskRunItems]
+		const items = taskRunItems
 			.sort((left, right) =>
 				(right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
 			)
 			.slice(0, parsed.data.limit);
 		return {
 			items,
-			totalCount: maintenancePage.totalCount + taskRunPage.totalCount,
+			totalCount: taskRunPage.totalCount,
 			limit: parsed.data.limit,
 			offset: parsed.data.offset,
 		};
@@ -567,34 +532,6 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		return result;
 	});
 
-	fastify.post("/tasks/:jobId/run-now", async (request) => {
-		const session = await sessionService.requireSession(request);
-		requirePermission(session, "tasks.run");
-		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
-		if (!parsed.success) {
-			throw new InvalidRequestError({
-				issues: parsed.error.issues,
-			});
-		}
-		return {
-			job: await maintenanceJobs.runNow(parsed.data.jobId),
-		};
-	});
-
-	fastify.post("/tasks/:jobId/prioritize", async (request) => {
-		const session = await sessionService.requireSession(request);
-		requirePermission(session, "tasks.run");
-		const parsed = maintenanceJobParamsSchema.safeParse(request.params);
-		if (!parsed.success) {
-			throw new InvalidRequestError({
-				issues: parsed.error.issues,
-			});
-		}
-		return {
-			job: await maintenanceJobs.prioritize(parsed.data.jobId),
-		};
-	});
-
 	fastify.post("/tasks/page-title-refresh", async (request) => {
 		const session = await sessionService.requireSession(request);
 		const parsed = pageTitleRefreshTaskBodySchema.safeParse(request.body);
@@ -609,20 +546,30 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsed.data.siteKey,
 			permission: "tasks.run",
 		});
-		return {
-			job: await titleRefresh.createRefreshJob({
+		const run = await adminTasks.createManualRun(
+			{
+				type: "page_metadata_refresh",
 				siteKey: parsed.data.siteKey,
-				pageKeys: parsed.data.pageKeys,
-				onlyMissingTitle: parsed.data.onlyMissingTitle,
-				forceTitle: parsed.data.forceTitle,
-				batchSize: parsed.data.batchSize,
-				timeoutMs: parsed.data.timeoutMs,
-				maxBytes: parsed.data.maxBytes,
-				trigger: "manual",
+				payload: {
+					siteKey: parsed.data.siteKey,
+					scope: parsed.data.forceTitle
+						? "force"
+						: parsed.data.pageKeys?.length
+							? "page_keys"
+							: "missing_only",
+					trigger: "manual",
+					pageKeys: parsed.data.pageKeys,
+					batchSize: parsed.data.batchSize,
+					timeoutMs: parsed.data.timeoutMs,
+					maxBytes: parsed.data.maxBytes,
+				},
 				runAfter: parsed.data.runAfter ?? null,
 				maxAttempts: parsed.data.maxAttempts,
 				retryDelaySec: parsed.data.retryDelaySec,
-			}),
-		};
+			},
+			session,
+			request.context?.requestId,
+		);
+		return { run };
 	});
 };

@@ -10,6 +10,7 @@ import type { BackupTaskService } from "./built-in/backup-task";
 import type { BlacklistAutomationTaskService } from "./built-in/blacklist-automation-task";
 import type { DailySiteDigestTaskService } from "./built-in/daily-site-digest-task";
 import type { SiteSettingsActionTaskService } from "./built-in/site-settings-action-task";
+import type { TaskLogWriter } from "./task-log-writer";
 
 export interface TaskRunnerActor {
 	type: "admin_user" | "system";
@@ -37,6 +38,7 @@ export interface TaskRunnerContext {
 	scheduledTaskId?: string | null;
 	actor: TaskRunnerActor;
 	services: TaskRunnerServices;
+	log: TaskLogWriter;
 	writeEvent: (event: TaskRunnerEventInput) => Promise<void> | void;
 	updateProgress: (progress: unknown) => Promise<void> | void;
 	writeAudit: (event: unknown) => Promise<void> | void;
@@ -46,32 +48,30 @@ export interface TaskRunnerContext {
 
 export interface TaskRunnerServices {
 	pageSourceRefresh?: {
-		createRefreshJob(input: {
+		executeRefresh(input: {
 			siteKey: string;
 			sourceIds?: number[];
 			mode?: "append" | "replace";
 			trigger: PageSourceRefreshTrigger;
 			timeoutMs?: number;
 			maxBytes?: number;
-			maxAttempts?: number;
-			retryDelaySec?: number;
-		}): Promise<unknown>;
+		}, context: TaskRunnerContext): Promise<unknown>;
 	};
 	pageMetadataRefresh?: {
-		createRefreshJob(input: PageMetadataRefreshScope): Promise<unknown>;
+		executeRefresh(
+			input: PageMetadataRefreshScope,
+			context: TaskRunnerContext,
+		): Promise<unknown>;
 	};
-	commentIpMaintenance?: Pick<
-		CommentIpMaintenanceService,
-		"createCommentIpRefreshJob" | "createIpRegionUpdateJob"
-	> & {
-		createCommentIpRefreshJob(input: CommentIpRefreshInput): Promise<unknown>;
-		createIpRegionUpdateJob(input: {
+	commentIpMaintenance?: {
+		executeCommentIpRefresh(
+			input: CommentIpRefreshInput,
+			context: TaskRunnerContext,
+		): Promise<unknown>;
+		executeIpRegionUpdate(input: {
 			ipVersions: IpVersion[];
 			timeoutMs?: number;
-			runAfter?: string | null;
-			maxAttempts?: number;
-			retryDelaySec?: number;
-		}): Promise<unknown>;
+		}, context: TaskRunnerContext): Promise<unknown>;
 	};
 	backup?: BackupTaskService;
 	siteSettingsAction?: SiteSettingsActionTaskService;

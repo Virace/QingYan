@@ -201,15 +201,6 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			addColumnIfMissing(sqlite, "site_settings", "engagement_json", "text");
 		}
 
-		if (tableExists(sqlite, "maintenance_jobs")) {
-			addColumnIfMissing(
-				sqlite,
-				"maintenance_jobs",
-				"priority",
-				"integer DEFAULT 0 NOT NULL",
-			);
-		}
-
 		if (tableExists(sqlite, "site_page_registry_sources")) {
 			sqlite.exec(`
 				CREATE TABLE IF NOT EXISTS site_page_registry_source_pages (
@@ -257,10 +248,6 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action
 			);
-			CREATE INDEX IF NOT EXISTS task_runs_status_run_after_idx ON task_runs (status, run_after);
-			CREATE INDEX IF NOT EXISTS task_runs_category_created_idx ON task_runs (category, created_at);
-			CREATE INDEX IF NOT EXISTS task_runs_site_idx ON task_runs (site_id);
-			CREATE UNIQUE INDEX IF NOT EXISTS task_runs_idempotency_idx ON task_runs (idempotency_key);
 
 			CREATE TABLE IF NOT EXISTS notification_deliveries (
 				id text PRIMARY KEY NOT NULL,
@@ -675,6 +662,38 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 		}
 
 		if (tableExists(sqlite, "task_runs")) {
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"queue_backend",
+				"text DEFAULT 'database' NOT NULL",
+			);
+			addColumnIfMissing(sqlite, "task_runs", "queue_message_id", "text");
+			addColumnIfMissing(sqlite, "task_runs", "site_id", "integer");
+			addColumnIfMissing(sqlite, "task_runs", "site_key", "text");
+			addColumnIfMissing(sqlite, "task_runs", "actor_type", "text");
+			addColumnIfMissing(sqlite, "task_runs", "actor_id", "text");
+			addColumnIfMissing(sqlite, "task_runs", "subject_type", "text");
+			addColumnIfMissing(sqlite, "task_runs", "subject_id", "text");
+			addColumnIfMissing(sqlite, "task_runs", "progress_json", "text");
+			addColumnIfMissing(sqlite, "task_runs", "result_json", "text");
+			addColumnIfMissing(sqlite, "task_runs", "error_json", "text");
+			addColumnIfMissing(sqlite, "task_runs", "idempotency_key", "text");
+			addColumnIfMissing(sqlite, "task_runs", "run_after", "text");
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"attempts",
+				"integer DEFAULT 0 NOT NULL",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"task_runs",
+				"max_attempts",
+				"integer DEFAULT 1 NOT NULL",
+			);
+			addColumnIfMissing(sqlite, "task_runs", "started_at", "text");
+			addColumnIfMissing(sqlite, "task_runs", "finished_at", "text");
 			addColumnIfMissing(sqlite, "task_runs", "scheduled_task_id", "text");
 			addColumnIfMissing(
 				sqlite,
@@ -730,9 +749,13 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			addColumnIfMissing(sqlite, "task_runs", "created_by_user_id", "integer");
 			sqlite.exec(`
 				CREATE INDEX IF NOT EXISTS task_runs_scheduled_task_created_idx ON task_runs (scheduled_task_id, created_at);
+				CREATE INDEX IF NOT EXISTS task_runs_status_run_after_idx ON task_runs (status, run_after);
 				CREATE INDEX IF NOT EXISTS task_runs_type_status_run_after_idx ON task_runs (type, status, run_after);
+				CREATE INDEX IF NOT EXISTS task_runs_category_created_idx ON task_runs (category, created_at);
+				CREATE INDEX IF NOT EXISTS task_runs_site_idx ON task_runs (site_id);
 				CREATE INDEX IF NOT EXISTS task_runs_site_created_idx ON task_runs (site_id, created_at);
 				CREATE INDEX IF NOT EXISTS task_runs_concurrency_status_idx ON task_runs (concurrency_key, status);
+				CREATE UNIQUE INDEX IF NOT EXISTS task_runs_idempotency_idx ON task_runs (idempotency_key);
 			`);
 		}
 
@@ -740,6 +763,8 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			CREATE TABLE IF NOT EXISTS task_event_logs (
 				id text PRIMARY KEY NOT NULL,
 				task_run_id text NOT NULL,
+				sequence integer DEFAULT 0 NOT NULL,
+				stream text DEFAULT 'system' NOT NULL,
 				event_type text NOT NULL,
 				level text NOT NULL,
 				message text NOT NULL,
@@ -748,9 +773,26 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 				FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON UPDATE no action ON DELETE no action
 			);
-			CREATE INDEX IF NOT EXISTS task_event_logs_run_created_idx ON task_event_logs (task_run_id, created_at);
-			CREATE INDEX IF NOT EXISTS task_event_logs_level_created_idx ON task_event_logs (level, created_at);
 		`);
+		if (tableExists(sqlite, "task_event_logs")) {
+			addColumnIfMissing(
+				sqlite,
+				"task_event_logs",
+				"sequence",
+				"integer DEFAULT 0 NOT NULL",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"task_event_logs",
+				"stream",
+				"text DEFAULT 'system' NOT NULL",
+			);
+			sqlite.exec(`
+				CREATE INDEX IF NOT EXISTS task_event_logs_run_sequence_idx ON task_event_logs (task_run_id, sequence);
+				CREATE INDEX IF NOT EXISTS task_event_logs_run_created_idx ON task_event_logs (task_run_id, created_at);
+				CREATE INDEX IF NOT EXISTS task_event_logs_level_created_idx ON task_event_logs (level, created_at);
+			`);
+		}
 
 		sqlite.exec(`
 			CREATE TABLE IF NOT EXISTS task_metric_rollups (

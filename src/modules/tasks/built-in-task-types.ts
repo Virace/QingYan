@@ -48,6 +48,7 @@ const pageSourceRefreshPayloadSchema = z.object({
 	siteKey: z.string().min(1),
 	sourceIds: z.array(z.number().int().positive()).optional(),
 	mode: z.enum(["append", "replace"]).optional(),
+	trigger: z.enum(["manual", "scheduled", "webhook"]).default("scheduled"),
 	timeoutMs: z.number().int().positive().optional(),
 	maxBytes: z.number().int().positive().optional(),
 	maxAttempts: z.number().int().positive().optional(),
@@ -58,6 +59,7 @@ const pageMetadataRefreshPayloadSchema = z.object({
 	siteKey: z.string().min(1),
 	scope: z.enum(["missing_only", "force", "page_keys"]).default("missing_only"),
 	pageKeys: z.array(z.string().min(1)).optional(),
+	trigger: z.enum(["manual", "source_refresh", "scheduled"]).default("scheduled"),
 	batchSize: z.number().int().positive().optional(),
 	timeoutMs: z.number().int().positive().optional(),
 	maxBytes: z.number().int().positive().optional(),
@@ -165,13 +167,13 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			description: "刷新站点 sitemap/RSS/Atom 来源并更新页面注册表。",
 			scope: "site",
 			payloadSchema: pageSourceRefreshPayloadSchema,
-			defaultPayload: { siteKey: "" },
+			defaultPayload: { siteKey: "", trigger: "scheduled" },
 			defaultPolicy,
 			schedule,
 			dangerous: false,
 			reuse: {
 				service: "PageSourceRefreshService",
-				method: "createRefreshJob",
+				method: "executeRefresh",
 				file: "src/modules/page-registry/source-refresh-service.ts",
 			},
 			run(payload, context) {
@@ -180,18 +182,19 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 					context,
 					async (validated, runnerContext) => {
 						const service = await requireService<{
-							createRefreshJob(input: unknown): Promise<unknown>;
+							executeRefresh(
+								input: unknown,
+								context: TaskRunnerContext,
+							): Promise<unknown>;
 						}>(runnerContext, "pageSourceRefresh");
-						return service.createRefreshJob({
+						return service.executeRefresh({
 							siteKey: validated.siteKey,
 							sourceIds: validated.sourceIds,
 							mode: validated.mode,
-							trigger: "scheduled",
+							trigger: validated.trigger,
 							timeoutMs: validated.timeoutMs,
 							maxBytes: validated.maxBytes,
-							maxAttempts: validated.maxAttempts,
-							retryDelaySec: validated.retryDelaySec,
-						});
+						}, runnerContext);
 					},
 				);
 			},
@@ -204,13 +207,17 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			description: "刷新页面 HTML title 元数据。",
 			scope: "site",
 			payloadSchema: pageMetadataRefreshPayloadSchema,
-			defaultPayload: { siteKey: "", scope: "missing_only" },
+			defaultPayload: {
+				siteKey: "",
+				scope: "missing_only",
+				trigger: "scheduled",
+			},
 			defaultPolicy,
 			schedule,
 			dangerous: false,
 			reuse: {
 				service: "PageMetadataRefreshService",
-				method: "createRefreshJob",
+				method: "executeRefresh",
 				file: "src/modules/page-registry/title-refresh-service.ts",
 			},
 			run(payload, context) {
@@ -219,20 +226,21 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 					context,
 					async (validated, runnerContext) => {
 						const service = await requireService<{
-							createRefreshJob(input: unknown): Promise<unknown>;
+							executeRefresh(
+								input: unknown,
+								context: TaskRunnerContext,
+							): Promise<unknown>;
 						}>(runnerContext, "pageMetadataRefresh");
-						return service.createRefreshJob({
+						return service.executeRefresh({
 							siteKey: validated.siteKey,
 							pageKeys: validated.pageKeys,
 							onlyMissingTitle: validated.scope === "missing_only",
 							forceTitle: validated.scope === "force",
-							trigger: "scheduled",
+							trigger: validated.trigger,
 							batchSize: validated.batchSize,
 							timeoutMs: validated.timeoutMs,
 							maxBytes: validated.maxBytes,
-							maxAttempts: validated.maxAttempts,
-							retryDelaySec: validated.retryDelaySec,
-						});
+						}, runnerContext);
 					},
 				);
 			},
@@ -251,7 +259,7 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			dangerous: false,
 			reuse: {
 				service: "CommentIpMaintenanceService",
-				method: "createCommentIpRefreshJob",
+				method: "executeCommentIpRefresh",
 				file: "src/modules/comments/metadata/comment-ip-maintenance-service.ts",
 			},
 			run(payload, context) {
@@ -260,16 +268,17 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 					context,
 					async (validated, runnerContext) => {
 						const service = await requireService<{
-							createCommentIpRefreshJob(input: unknown): Promise<unknown>;
+							executeCommentIpRefresh(
+								input: unknown,
+								context: TaskRunnerContext,
+							): Promise<unknown>;
 						}>(runnerContext, "commentIpMaintenance");
-						return service.createCommentIpRefreshJob({
+						return service.executeCommentIpRefresh({
 							siteKey: validated.siteKey,
 							scope: validated.scope,
 							ipVersions: validated.ipVersions,
 							batchSize: validated.batchSize,
-							maxAttempts: validated.maxAttempts,
-							retryDelaySec: validated.retryDelaySec,
-						});
+						}, runnerContext);
 					},
 				);
 			},
@@ -288,7 +297,7 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			dangerous: false,
 			reuse: {
 				service: "CommentIpMaintenanceService",
-				method: "createIpRegionUpdateJob",
+				method: "executeIpRegionUpdate",
 				file: "src/modules/comments/metadata/comment-ip-maintenance-service.ts",
 			},
 			run(payload, context) {
@@ -297,14 +306,15 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 					context,
 					async (validated, runnerContext) => {
 						const service = await requireService<{
-							createIpRegionUpdateJob(input: unknown): Promise<unknown>;
+							executeIpRegionUpdate(
+								input: unknown,
+								context: TaskRunnerContext,
+							): Promise<unknown>;
 						}>(runnerContext, "commentIpMaintenance");
-						return service.createIpRegionUpdateJob({
+						return service.executeIpRegionUpdate({
 							ipVersions: validated.ipVersions,
 							timeoutMs: validated.timeoutMs,
-							maxAttempts: validated.maxAttempts,
-							retryDelaySec: validated.retryDelaySec,
-						});
+						}, runnerContext);
 					},
 				);
 			},
