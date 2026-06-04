@@ -168,9 +168,14 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 - 滥用保护和自动黑名单策略。
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
+- 页面来源注册设置：`pageRegistry.mode`、权威 sitemap source、未知页面响应、健康宽限时间和紧急锁定。
 - 邮件通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
+
+页面来源注册设置是站点级 DB setting，不属于 startup YAML。公开运行时页面身份由允许 `Referer` 的 URL pathname 派生：保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash；请求参数中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段。`discovery` 模式下未知页面会继续写入 pending candidate / pending PV 供后台审核；`authoritative` 模式下未知页面默认返回 inactive payload，不创建 visitor、pending、PV、captcha、thread、评论、投票或页面反馈记录。若 `unknownPageResponse=forbidden` 或 `emergencyLockdown=true`，未知页面返回 `PAGE_NOT_REGISTERED`。
+
+开启 `authoritative` 必须选择当前站点至少一个 enabled 且健康的 sitemap source，RSS/Atom 不能单独作为权威来源。保存后系统会在任务中心幂等维护一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 为 `page_registry:authoritative_source_refresh:<siteKey>`，payload 中的 `sourceIds` 与设置一致。被权威模式引用的 source 默认不能删除或禁用；需要危险操作时必须显式切回 discovery 并清理引用。
 
 可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台评论者聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
 

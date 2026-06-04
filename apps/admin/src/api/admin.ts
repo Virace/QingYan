@@ -915,11 +915,17 @@ export function createPageRegistrySource(input: {
 	);
 }
 
-export function deletePageRegistrySource(sourceId: number) {
+export function deletePageRegistrySource(input: {
+	sourceId: number;
+	disableAuthoritativeMode?: boolean;
+}) {
 	return requestJson<{ ok: true }>(
-		`/api/admin/page-registry/sources/${sourceId}`,
+		`/api/admin/page-registry/sources/${input.sourceId}`,
 		{
 			method: "DELETE",
+			body: input.disableAuthoritativeMode
+				? JSON.stringify({ disableAuthoritativeMode: true })
+				: undefined,
 		},
 	);
 }

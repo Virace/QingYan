@@ -138,12 +138,12 @@ describe("PageSourceRefreshService", () => {
 		expect(pages).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					pageKey: "posts/a/",
+					pageKey: "/posts/a/",
 					pageUrl: "/posts/a/",
 					status: "active",
 				}),
 				expect.objectContaining({
-					pageKey: "posts/b/",
+					pageKey: "/posts/b/",
 					pageUrl: "/posts/b/",
 					status: "active",
 				}),
@@ -185,7 +185,7 @@ describe("PageSourceRefreshService", () => {
 		const [page] = await fixture.db
 			.select()
 			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "hello/"));
+			.where(eq(sitePageRegistry.pageKey, "/hello/"));
 
 		expect(page).toMatchObject({
 			pageUrl: "/hello/",
@@ -229,7 +229,7 @@ describe("PageSourceRefreshService", () => {
 		const [missing] = await fixture.db
 			.select()
 			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "posts/missing/"));
+			.where(eq(sitePageRegistry.pageKey, "/posts/missing/"));
 
 		expect(missing?.status).toBe("stale");
 		expect(result).toMatchObject({ processed: 1, stale: 1 });
@@ -241,7 +241,7 @@ describe("PageSourceRefreshService", () => {
 		const source = await createSource(fixture);
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
-			pageKey: "posts/trash/",
+			pageKey: "/posts/trash/",
 			pageUrl: "/old/",
 			title: "Old",
 			status: "trash",
@@ -264,7 +264,7 @@ describe("PageSourceRefreshService", () => {
 		const [page] = await fixture.db
 			.select()
 			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "posts/trash/"));
+			.where(eq(sitePageRegistry.pageKey, "/posts/trash/"));
 
 		expect(page).toMatchObject({
 			pageUrl: "/posts/trash/",
@@ -280,7 +280,7 @@ describe("PageSourceRefreshService", () => {
 		const repository = new PageSourceRepository(fixture.db);
 		const staleSeed = await repository.upsertRegistryPage({
 			siteId: 1,
-			pageKey: "posts/stale-seed/",
+			pageKey: "/posts/stale-seed/",
 			pageUrl: "/posts/stale-seed/",
 			nowIso: "2026-05-29T00:00:00.000Z",
 		});
@@ -291,7 +291,7 @@ describe("PageSourceRefreshService", () => {
 		});
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
-			pageKey: "posts/ignored/",
+			pageKey: "/posts/ignored/",
 			pageUrl: "/posts/ignored/",
 			status: "ignored",
 		});
@@ -374,14 +374,14 @@ describe("PageSourceRefreshService", () => {
 		const source = await createSource(fixture);
 		await fixture.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
-			pageKey: "posts/source-confirmed/",
+			pageKey: "/posts/source-confirmed/",
 			pageUrl: "/posts/source-confirmed/",
 			hitCount: 1,
 			status: "pending",
 		});
 		await fixture.db.insert(pendingPageViewSessions).values({
 			siteKey: "fangyuan",
-			pageKey: "posts/source-confirmed/",
+			pageKey: "/posts/source-confirmed/",
 			fingerprint: "visitor-a",
 			hitCount: 1,
 		});
@@ -403,15 +403,15 @@ describe("PageSourceRefreshService", () => {
 		const [candidate] = await fixture.db
 			.select()
 			.from(pendingPageCandidates)
-			.where(eq(pendingPageCandidates.pageKey, "posts/source-confirmed/"));
+			.where(eq(pendingPageCandidates.pageKey, "/posts/source-confirmed/"));
 		const [thread] = await fixture.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "posts/source-confirmed/"));
+			.where(eq(pageThreads.pageKey, "/posts/source-confirmed/"));
 
 		expect(candidate).toMatchObject({ status: "approved" });
 		expect(thread).toMatchObject({
-			pageKey: "posts/source-confirmed/",
+			pageKey: "/posts/source-confirmed/",
 			pageUrl: "/posts/source-confirmed/",
 			pageViewCount: 1,
 		});
@@ -440,7 +440,7 @@ describe("PageSourceRefreshService", () => {
 		expect(titleRefreshRuns).toEqual([
 			{
 				siteKey: "fangyuan",
-				pageKeys: ["posts/title-later/"],
+				pageKeys: ["/posts/title-later/"],
 			},
 		]);
 	});

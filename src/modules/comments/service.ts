@@ -1,5 +1,10 @@
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
+import { mergePageRegistrySettings } from "../shared/page-registry-settings";
+import {
+	assertPublicPageAdmission,
+	resolvePublicPageAdmission,
+} from "../shared/public-page-admission";
 import {
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
@@ -135,12 +140,22 @@ export class CommentsService {
 			siteId: site.id,
 			pageKey: input.pageKey,
 		});
-		const pageInteractive =
-			registryPage?.status !== "trash" &&
-			registryPage?.status !== "deleted" &&
-			registryPage?.status !== "ignored";
-		const pageRegistered = Boolean(registryPage);
 		const settings = await this.repository.getSiteSettings(site.id);
+		const pageRegistrySettings = mergePageRegistrySettings(
+			settings?.pageRegistryJson,
+		);
+		const admission = resolvePublicPageAdmission({
+			registryPage,
+			settings: pageRegistrySettings,
+		});
+		if (
+			admission.kind === "unknown" &&
+			!admission.allowDiscoveryWrites &&
+			admission.response === "forbidden"
+		) {
+			assertPublicPageAdmission(admission);
+		}
+		const pageInteractive = admission.pageInteractive;
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
@@ -195,7 +210,7 @@ export class CommentsService {
 		if (
 			!thread &&
 			pageInteractive &&
-			pageRegistered &&
+			admission.kind === "registered" &&
 			engagement.pageViews.enabled
 		) {
 			thread = await this.repository.ensurePageThreadForRegisteredPage({
@@ -222,7 +237,8 @@ export class CommentsService {
 		if (
 			!thread &&
 			pageInteractive &&
-			!pageRegistered &&
+			admission.kind === "unknown" &&
+			admission.allowDiscoveryWrites &&
 			engagement.pageViews.enabled
 		) {
 			if (engagement.visitors.enabled) {

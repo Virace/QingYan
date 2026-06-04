@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { sitePageRegistry, siteSettings, sites } from "../../src/db/schema";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -32,10 +33,11 @@ async function seedPage(
 	pageKey: string,
 	status: "active" | "trash" = "active",
 ) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status,
 	});
 }
@@ -73,7 +75,7 @@ describe("public API contract", () => {
 			schemaVersion: "2026-05-31",
 			site: { siteKey: "fangyuan" },
 			page: {
-				pageKey: "posts/public-contract/",
+				pageKey: "/posts/public-contract/",
 				status: "active",
 			},
 			features: {

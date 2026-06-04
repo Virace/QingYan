@@ -759,7 +759,7 @@ AdminSettings
 
 ### `PUT /api/admin/sites/{siteKey}/settings`
 
-更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
+更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`pageRegistry`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
 
 Admin Settings API 的 canonical 开关路径：
 
@@ -769,10 +769,23 @@ Admin Settings API 的 canonical 开关路径：
 - 页面浏览量：`engagement.pageViews.enabled`
 - 页面点赞：`engagement.pageLikes.enabled`
 - 访客记录：`engagement.visitors.enabled`
+- 页面来源模式：`pageRegistry.mode`
+- 权威 sitemap 来源：`pageRegistry.authoritativeSourceIds`
 - 当前站点邮件通知：`notifications.emailEnabled`
 - 当前站点后台用户通知接收人：`notifications.recipients`
 
 `pageFeedback.allowLike` 是过渡同步字段；新 UI 和新调用代码应以 `engagement.pageLikes.enabled` 为页面点赞 canonical 开关。
+
+页面来源权威模式说明：
+
+- 公开运行时页面身份只来自允许 `Referer` 的 URL pathname。Canonical Page Key 保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash；请求体或 query 中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段。
+- `pageRegistry.mode="discovery"` 时，未登记页面保持发现模式：bootstrap 可写入 pending candidate / pending PV，等待后台审核。
+- `pageRegistry.mode="authoritative"` 时，`authoritativeSourceIds` 必须至少包含一个当前站点 enabled、健康、最近成功刷新的 sitemap source；RSS/Atom 不能单独作为权威来源。
+- 权威模式下未知页面默认按 `unknownPageResponse="inactive_payload"` 返回 200 inactive payload，`features.*.enabled=false` 且 `data={}`，不会创建 visitor、visitor metadata、pending candidate、pending PV、page thread、PV、captcha challenge、评论、投票或页面反馈记录。
+- `unknownPageResponse="forbidden"` 或 `emergencyLockdown=true` 时，未知页面返回 403 `PAGE_NOT_REGISTERED`，同样不做业务写入。
+- 非 active registry page 返回非交互行为或 403 `PAGE_NOT_INTERACTIVE`，公开写入口不会继续创建 visitor、captcha、thread 或业务记录。
+- 保存 authoritative 设置会幂等 ensure 一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 固定为 `page_registry:authoritative_source_refresh:<siteKey>`，payload `sourceIds` 与 `pageRegistry.authoritativeSourceIds` 保持一致。
+- 被 `pageRegistry.authoritativeSourceIds` 引用的 source 默认不能删除或禁用，会返回 `AUTHORITATIVE_SOURCE_IN_USE`；危险路径必须显式提交 `disableAuthoritativeMode: true`，后端会同步切回 discovery、清理引用并释放或更新任务保护。
 
 请求：
 
@@ -865,6 +878,14 @@ AdminSettings
     commentVotes: {
       enabled: boolean;
     };
+  };
+  pageRegistry: {
+    mode: "discovery" | "authoritative";
+    authoritativeSourceIds: number[];
+    unknownPageResponse: "inactive_payload" | "forbidden";
+    requireHealthySource: boolean;
+    sourceFreshnessGraceSec: number;
+    emergencyLockdown: boolean;
   };
   notifications: {
     emailEnabled: boolean;

@@ -17,6 +17,7 @@ import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/veri
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -32,6 +33,7 @@ async function seedActivePage(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 	pageKey: string,
 ) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -55,8 +57,8 @@ async function seedActivePage(
 		.where(eq(siteSettings.siteId, site.id));
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 	return site;

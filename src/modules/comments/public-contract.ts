@@ -55,9 +55,7 @@ export function buildPublicFeatures(input: {
 			commentCaptcha: disabledFeature("page_inactive"),
 			pageViews: disabledFeature("page_inactive"),
 			pageLikes: disabledFeature("page_inactive"),
-			visitors: input.engagement.visitors.enabled
-				? enabledFeature()
-				: disabledFeature("feature_disabled"),
+			visitors: disabledFeature("page_inactive"),
 		};
 	}
 

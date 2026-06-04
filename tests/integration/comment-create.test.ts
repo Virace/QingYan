@@ -11,6 +11,7 @@ import {
 	visitors,
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -25,6 +26,7 @@ function refererFor(pageKey: string) {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -34,8 +36,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -98,7 +100,7 @@ describe("POST /qingyan/api/comments", () => {
 		}
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/trashed-comment/",
+			pageKey: "/posts/trashed-comment/",
 			pageUrl: "/posts/trashed-comment/",
 			status: "trash",
 			trashedAt: "2026-05-29T00:00:00.000Z",
@@ -113,6 +115,52 @@ describe("POST /qingyan/api/comments", () => {
 				pageKey: "posts/trashed-comment/",
 				pageTitle: "Trashed",
 				pageUrl: "https://fangyuan.example.com/posts/trashed-comment/",
+				parentCommentId: null,
+				author: {
+					name: "Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "blocked",
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_INTERACTIVE",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
+	it("rejects comments for stale registry pages without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "/posts/stale-comment/",
+			pageUrl: "/posts/stale-comment/",
+			status: "stale",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: refererFor("posts/stale-comment/"),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/stale-comment/",
+				pageTitle: "Stale",
+				pageUrl: "https://fangyuan.example.com/posts/stale-comment/",
 				parentCommentId: null,
 				author: {
 					name: "Alice",
@@ -330,7 +378,7 @@ describe("POST /qingyan/api/comments", () => {
 		const [thread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:create-comment"));
+			.where(eq(pageThreads.pageKey, "/post:create-comment"));
 		expect(thread?.commentCount).toBe(1);
 		expect(thread?.rootCommentCount).toBe(1);
 		expect(thread?.pageUrl).toBe("/post:create-comment");
@@ -372,7 +420,7 @@ describe("POST /qingyan/api/comments", () => {
 		const [thread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:path-only-comment"));
+			.where(eq(pageThreads.pageKey, "/post:path-only-comment"));
 		expect(thread?.pageUrl).toBe("/post:path-only-comment");
 	});
 

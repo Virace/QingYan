@@ -1,4 +1,5 @@
 import type { PageSourceEntry } from "./source-parser";
+import { deriveCanonicalPageKeyFromPathname } from "../shared/canonical-page-key";
 
 export interface NormalizePageSourceEntryInput {
 	entry: PageSourceEntry;
@@ -63,17 +64,6 @@ function hasAssetExtension(pathname: string): boolean {
 	return ASSET_EXTENSIONS.has(lastSegment.slice(dotIndex).toLowerCase());
 }
 
-function normalizeDirectoryPath(pathname: string): string {
-	if (pathname === "/") {
-		return "/";
-	}
-	if (pathname.endsWith("/")) {
-		return pathname;
-	}
-	const lastSegment = pathname.split("/").at(-1) ?? "";
-	return lastSegment.includes(".") ? pathname : `${pathname}/`;
-}
-
 export function getPageSourceEntryRejectionReason(
 	input: NormalizePageSourceEntryInput,
 ): PageSourceEntryRejectionReason | null {
@@ -127,8 +117,8 @@ export function normalizePageSourceEntry(
 	}
 
 	const parsed = new URL(input.entry.url);
-	const pageUrl = normalizeDirectoryPath(parsed.pathname);
-	const pageKey = pageUrl.replace(/^\/+/, "");
+	const pageUrl = parsed.pathname || "/";
+	const pageKey = deriveCanonicalPageKeyFromPathname(pageUrl);
 
 	return {
 		pageKey,

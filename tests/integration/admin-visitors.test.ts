@@ -506,7 +506,7 @@ describe("admin visitors", () => {
 			ip: "127.0.0.1",
 			userAgent: "QingYan Metadata Browser",
 			seenCount: 1,
-			lastSeenPageKey: "posts/visitor-metadata/",
+			lastSeenPageKey: "/posts/visitor-metadata/",
 			lastSeenPageUrl: "/posts/visitor-metadata/",
 		});
 
@@ -538,7 +538,7 @@ describe("admin visitors", () => {
 					},
 					ipLocations: expect.any(Array),
 					devices: expect.any(Array),
-					lastSeenPageKey: "posts/visitor-metadata/",
+					lastSeenPageKey: "/posts/visitor-metadata/",
 					lastSeenPageUrl: "http://localhost:4321/posts/visitor-metadata/",
 				},
 			],

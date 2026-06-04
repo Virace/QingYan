@@ -435,11 +435,7 @@ export class CommentsRepository {
 		if (!page) {
 			throw new AppError(403, "PAGE_NOT_REGISTERED", "页面尚未登记。");
 		}
-		if (
-			page?.status === "trash" ||
-			page?.status === "deleted" ||
-			page?.status === "ignored"
-		) {
+		if (page.status !== "active") {
 			throw new AppError(403, "PAGE_NOT_INTERACTIVE", "页面当前不可交互。");
 		}
 	}

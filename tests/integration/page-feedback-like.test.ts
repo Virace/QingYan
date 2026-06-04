@@ -13,6 +13,7 @@ import {
 	type EngagementSettings,
 	serializeEngagementSettings,
 } from "../../src/modules/shared/site-settings-defaults";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -20,6 +21,7 @@ const cleanups: Array<() => Promise<void>> = [];
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -29,8 +31,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -100,7 +102,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		}
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/deleted-like/",
+			pageKey: "/posts/deleted-like/",
 			pageUrl: "/posts/deleted-like/",
 			status: "deleted",
 			deletedAt: "2026-05-29T00:00:00.000Z",
@@ -214,7 +216,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		const threads = await fixture.app.db.select().from(pageThreads);
 		expect(threads).toHaveLength(1);
 		expect(threads[0]).toMatchObject({
-			pageKey: "lol_voice_collation.html",
+			pageKey: "/lol_voice_collation.html",
 			pageUrl: "/lol_voice_collation.html",
 			pageTitle: "Like HTML Page",
 			pageLikeCount: 1,

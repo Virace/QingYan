@@ -23,6 +23,7 @@ import {
 } from "../../src/modules/comments/verified-author";
 import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin } from "../support/admin-login";
 import {
 	applyInitialMigration,
@@ -132,6 +133,7 @@ async function createCustomTestApp(options?: {
 }
 
 async function seedActivePage(fixture: CustomFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -141,8 +143,8 @@ async function seedActivePage(fixture: CustomFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -284,10 +286,10 @@ describe("POST /qingyan/api/comments", () => {
 		const [thread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "lol_voice_collation.html"))
+			.where(eq(pageThreads.pageKey, "/lol_voice_collation.html"))
 			.limit(1);
 		expect(thread).toMatchObject({
-			pageKey: "lol_voice_collation.html",
+			pageKey: "/lol_voice_collation.html",
 			pageUrl: "/lol_voice_collation.html",
 			pageTitle: "HTML Comment Page",
 			commentCount: 1,

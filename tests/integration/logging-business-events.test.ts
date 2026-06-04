@@ -15,6 +15,7 @@ import {
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
 } from "../support/captcha";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -36,6 +37,7 @@ function readAppJsonl(logsDirectory: string): string {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -45,8 +47,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }

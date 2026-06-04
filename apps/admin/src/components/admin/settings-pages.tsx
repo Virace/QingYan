@@ -1717,6 +1717,7 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 
 export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
+	const confirm = useAdminConfirmDialog();
 	const resolvedSiteKey = siteKey ?? "";
 	const query = useQuery({
 		queryKey: ["admin", "settings", resolvedSiteKey],
@@ -1862,6 +1863,27 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		setNotificationRecipients(nextRecipients);
 		setRecipientDialog(null);
 	};
+	const saveSiteSettingsSection = async () => {
+		if (
+			siteTab === "pageRegistry" &&
+			query.data?.pageRegistry.mode !== "authoritative" &&
+			draft.pageRegistry.mode === "authoritative"
+		) {
+			const confirmed = await confirm({
+				title: "切换到权威模式",
+				description:
+					"权威模式必须使用健康 sitemap 来源，RSS 或 Atom 不能单独作为权威来源；未登记页面将不再写入 pending 记录，默认只返回 inactive payload。",
+				confirmText: "启用权威模式",
+			});
+			if (!confirmed) {
+				return;
+			}
+		}
+		mutation.mutate({
+			section: siteTab,
+			payload: buildSiteSettingsSectionPayload(siteTab, draft),
+		});
+	};
 
 	return (
 		<Card>
@@ -1874,10 +1896,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 					className="grid gap-4 md:grid-cols-2"
 					onSubmit={(event) => {
 						event.preventDefault();
-						mutation.mutate({
-							section: siteTab,
-							payload: buildSiteSettingsSectionPayload(siteTab, draft),
-						});
+						void saveSiteSettingsSection();
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="站点设置保存失败" />

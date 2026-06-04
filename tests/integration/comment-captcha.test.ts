@@ -8,6 +8,7 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { decodeSvgDataUrl } from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -22,6 +23,7 @@ function refererFor(pageKey: string) {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -31,8 +33,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -56,7 +58,7 @@ describe("comment captcha", () => {
 		}
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/ignored-captcha/",
+			pageKey: "/posts/ignored-captcha/",
 			pageUrl: "/posts/ignored-captcha/",
 			status: "ignored",
 		});

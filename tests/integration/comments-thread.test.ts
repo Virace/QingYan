@@ -85,7 +85,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:thread-only",
+			pageKey: "/post:thread-only",
 			pageTitle: "Thread Only",
 			commentCount: 1,
 			rootCommentCount: 1,
@@ -95,7 +95,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:thread-only"));
+			.where(eq(pageThreads.pageKey, "/post:thread-only"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -191,16 +191,16 @@ describe("GET /qingyan/api/comments/thread", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:external-avatar-thread",
+			pageKey: "/post:external-avatar-thread",
 			pageTitle: "External Avatar Thread",
-			pageUrl: "/posts/external-avatar-thread/",
+			pageUrl: "/post:external-avatar-thread",
 			commentCount: 1,
 			rootCommentCount: 1,
 		});
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:external-avatar-thread"));
+			.where(eq(pageThreads.pageKey, "/post:external-avatar-thread"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -277,7 +277,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:thread-metadata",
+			pageKey: "/post:thread-metadata",
 			pageTitle: "Thread Metadata",
 			commentCount: 1,
 			rootCommentCount: 1,
@@ -285,7 +285,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:thread-metadata"));
+			.where(eq(pageThreads.pageKey, "/post:thread-metadata"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}

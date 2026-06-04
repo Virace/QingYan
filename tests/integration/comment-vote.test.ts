@@ -15,6 +15,7 @@ import {
 	type EngagementSettings,
 	serializeEngagementSettings,
 } from "../../src/modules/shared/site-settings-defaults";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -28,6 +29,7 @@ function refererFor(pageKey: string) {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -37,8 +39,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -70,6 +72,7 @@ async function seedApprovedComment(
 	},
 ) {
 	await seedActivePage(fixture, input.pageKey);
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(input.pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -80,13 +83,13 @@ async function seedApprovedComment(
 
 	await fixture.app.db.insert(pageThreads).values({
 		siteId: site.id,
-		pageKey: input.pageKey,
+		pageKey: canonicalPageKey,
 		pageTitle: "Vote Post",
 	});
 	const [thread] = await fixture.app.db
 		.select()
 		.from(pageThreads)
-		.where(eq(pageThreads.pageKey, input.pageKey));
+		.where(eq(pageThreads.pageKey, canonicalPageKey));
 	if (!thread) {
 		throw new Error("Expected thread to exist");
 	}

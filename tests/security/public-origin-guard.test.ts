@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import type { AppConfig } from "../../src/config/types";
 import { sitePageRegistry, siteSettings, sites } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -53,6 +54,7 @@ function refererFor(pageKey: string, origin = "http://localhost:4321") {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -62,8 +64,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
