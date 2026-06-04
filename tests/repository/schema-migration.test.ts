@@ -119,6 +119,7 @@ describe("initial migration", () => {
 			);
 			expect(combinedMigrationSql).toContain("`comment_metadata_json` text");
 			expect(combinedMigrationSql).toContain("`engagement_json` text");
+			expect(combinedMigrationSql).toContain("`page_registry_json` text");
 			expect(combinedMigrationSql).toContain("`staff_display_json` text");
 			expect(combinedMigrationSql).toContain("CREATE TABLE `system_settings`");
 			expect(combinedMigrationSql).toContain(
@@ -416,6 +417,7 @@ describe("initial migration", () => {
 					"auto_blacklist_ttl_sec",
 					"comment_metadata_json",
 					"engagement_json",
+					"page_registry_json",
 					"staff_display_json",
 				]),
 			);
@@ -730,6 +732,8 @@ describe("initial migration", () => {
 					"timezone",
 					"payload_json",
 					"payload_schema_version",
+					"system_key",
+					"protection_json",
 					"policy_json",
 					"trigger_json",
 					"trigger_schema_version",
@@ -761,6 +765,9 @@ describe("initial migration", () => {
 					}),
 					expect.objectContaining({
 						name: "scheduled_tasks_claim_expires_idx",
+					}),
+					expect.objectContaining({
+						name: "scheduled_tasks_system_key_idx",
 					}),
 					expect.objectContaining({
 						name: "scheduled_tasks_site_type_idx",
@@ -1249,6 +1256,9 @@ describe("initial migration", () => {
 			);
 			expect(siteSettingsColumns.map((column) => column.name)).toContain(
 				"engagement_json",
+			);
+			expect(siteSettingsColumns.map((column) => column.name)).toContain(
+				"page_registry_json",
 			);
 			expect(
 				visitorRequestMetadataColumns.map((column) => column.name),

@@ -199,6 +199,7 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 	const applyBackfill = sqlite.transaction(() => {
 		if (tableExists(sqlite, "site_settings")) {
 			addColumnIfMissing(sqlite, "site_settings", "engagement_json", "text");
+			addColumnIfMissing(sqlite, "site_settings", "page_registry_json", "text");
 		}
 
 		if (tableExists(sqlite, "site_page_registry_sources")) {
@@ -608,6 +609,8 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 				timezone text,
 				payload_json text NOT NULL,
 				payload_schema_version integer DEFAULT 1 NOT NULL,
+				system_key text,
+				protection_json text,
 				policy_json text NOT NULL,
 				trigger_json text NOT NULL,
 				trigger_schema_version integer DEFAULT 1 NOT NULL,
@@ -633,7 +636,6 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 				FOREIGN KEY (transferred_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
 			);
 			CREATE INDEX IF NOT EXISTS scheduled_tasks_enabled_next_run_idx ON scheduled_tasks (enabled, next_run_at);
-			CREATE INDEX IF NOT EXISTS scheduled_tasks_claim_expires_idx ON scheduled_tasks (claim_expires_at);
 			CREATE INDEX IF NOT EXISTS scheduled_tasks_site_type_idx ON scheduled_tasks (site_id, type);
 			CREATE INDEX IF NOT EXISTS scheduled_tasks_owner_idx ON scheduled_tasks (owner_user_id);
 			CREATE INDEX IF NOT EXISTS scheduled_tasks_deleted_idx ON scheduled_tasks (deleted_at);
@@ -656,8 +658,11 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 		if (tableExists(sqlite, "scheduled_tasks")) {
 			addColumnIfMissing(sqlite, "scheduled_tasks", "claim_worker_id", "text");
 			addColumnIfMissing(sqlite, "scheduled_tasks", "claim_expires_at", "text");
+			addColumnIfMissing(sqlite, "scheduled_tasks", "system_key", "text");
+			addColumnIfMissing(sqlite, "scheduled_tasks", "protection_json", "text");
 			sqlite.exec(`
 				CREATE INDEX IF NOT EXISTS scheduled_tasks_claim_expires_idx ON scheduled_tasks (claim_expires_at);
+				CREATE INDEX IF NOT EXISTS scheduled_tasks_system_key_idx ON scheduled_tasks (system_key);
 			`);
 		}
 

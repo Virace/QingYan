@@ -37,7 +37,7 @@ export function TaskRunConsole({
 			return;
 		}
 		node.scrollTop = node.scrollHeight;
-	}, [lines.length]);
+	});
 
 	return (
 		<div
@@ -53,8 +53,13 @@ export function TaskRunConsole({
 			{lines.length ? (
 				<div className="grid gap-1">
 					{lines.map((line) => (
-						<div key={line.id} className={`grid grid-cols-[auto_auto_1fr] gap-2 ${lineClass(line)}`}>
-							<span className="text-zinc-500">{formatLogTime(line.createdAt)}</span>
+						<div
+							key={line.id}
+							className={`grid grid-cols-[auto_auto_1fr] gap-2 ${lineClass(line)}`}
+						>
+							<span className="text-zinc-500">
+								{formatLogTime(line.createdAt)}
+							</span>
 							<span className="uppercase text-zinc-400">{line.stream}</span>
 							<span className="break-words">{line.message}</span>
 						</div>

@@ -40,7 +40,7 @@ async function enableTrustedPageViews(
 	});
 }
 
-async function createSecondSite(
+async function _createSecondSite(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 ) {
 	const repository = new AdminRepository(fixture.app.db);
@@ -52,7 +52,7 @@ async function createSecondSite(
 	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
 }
 
-async function createSiteAdmin(
+async function _createSiteAdmin(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 	input: {
 		username: string;
@@ -334,5 +334,4 @@ describe("admin page registry", () => {
 			status: "approved",
 		});
 	});
-
 });

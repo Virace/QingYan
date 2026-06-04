@@ -1,5 +1,5 @@
 import { requestJson } from "./client";
-import type { TaskRunProjection, TaskRunStatus } from "./tasks";
+import type { TaskRunProjection } from "./tasks";
 
 export interface OpsStatus {
 	version: {

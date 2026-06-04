@@ -11,6 +11,12 @@ import {
 	sites,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { permissionsForGroup } from "../../src/modules/admin/permissions";
+import {
+	PAGE_REGISTRY_SYSTEM_USERNAME,
+	SYSTEM_BUILTIN_GROUP_KEY,
+	SystemPrincipalService,
+} from "../../src/modules/tasks/system-principal";
 import {
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
@@ -81,6 +87,97 @@ async function createUser(
 }
 
 describe("admin users api", () => {
+	it("keeps the system principal hidden, unprivileged, and unable to log in", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const service = new SystemPrincipalService(fixture.app.db);
+
+		const firstPrincipal = await service.ensurePageRegistryPrincipal();
+		await fixture.app.db
+			.update(adminUsers)
+			.set({
+				displayName: "Drifted System User",
+				status: "active",
+				loginBlockedUntil: null,
+			})
+			.where(eq(adminUsers.id, firstPrincipal.id));
+		const repairedPrincipal = await service.ensurePageRegistryPrincipal();
+		const repeatedPrincipal = await service.ensurePageRegistryPrincipal();
+
+		expect(repairedPrincipal.id).toBe(firstPrincipal.id);
+		expect(repeatedPrincipal.id).toBe(firstPrincipal.id);
+		expect(repairedPrincipal).toMatchObject({
+			username: PAGE_REGISTRY_SYSTEM_USERNAME,
+			displayName: "系统：页面注册表",
+			status: "system",
+			loginBlockedUntil: "9999-12-31T23:59:59.999Z",
+			deletedAt: null,
+		});
+		expect(permissionsForGroup(SYSTEM_BUILTIN_GROUP_KEY)).toEqual([]);
+
+		const memberships = await fixture.app.db
+			.select({
+				groupKey: adminGroups.key,
+			})
+			.from(adminUserGroups)
+			.innerJoin(adminGroups, eq(adminGroups.id, adminUserGroups.groupId))
+			.where(eq(adminUserGroups.userId, firstPrincipal.id));
+		expect(memberships).toEqual([{ groupKey: SYSTEM_BUILTIN_GROUP_KEY }]);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const groupsResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/groups",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(groupsResponse.statusCode).toBe(200);
+		expect(
+			groupsResponse.json().groups.map((group: { key: string }) => group.key),
+		).toEqual(["admin", "site_admin", "site_moderator"]);
+
+		const usersResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/users",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(usersResponse.statusCode).toBe(200);
+		expect(
+			usersResponse
+				.json()
+				.users.map((user: { username: string }) => user.username),
+		).toEqual(["admin"]);
+
+		const loginResponse = await withForcedTestCaptchaAnswer(async () => {
+			const captchaResponse = await fixture.app.inject({
+				method: "GET",
+				url: "/qingyan/api/admin/session/captcha",
+			});
+			const { challenge } = captchaResponse.json() as {
+				challenge: { challengeId: string };
+			};
+			return fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/admin/session/login",
+				payload: {
+					username: PAGE_REGISTRY_SYSTEM_USERNAME,
+					password: "replace-me",
+					challengeId: challenge.challengeId,
+					captchaValue: getForcedTestCaptchaAnswer(),
+				},
+			});
+		});
+		expect(loginResponse.statusCode).toBe(401);
+		expect(loginResponse.json()).toMatchObject({
+			error: {
+				code: "ADMIN_CREDENTIALS_INVALID",
+			},
+		});
+	});
+
 	it("lets admins list users and fixed groups", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

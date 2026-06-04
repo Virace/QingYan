@@ -31,6 +31,8 @@ const scheduledTask = {
 	cronExpression: null,
 	timezone: null,
 	payload: { siteKey: "fangyuan", scope: "missing_only" },
+	systemKey: null,
+	protection: null,
 	policy: { maxAttempts: 2 },
 	trigger: { everyMinutes: 30 },
 	nextRunAt: "2026-06-04T10:30:00.000Z",

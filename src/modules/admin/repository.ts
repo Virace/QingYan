@@ -2076,6 +2076,7 @@ export class AdminRepository {
 			verifiedAuthorJson?: string;
 			staffDisplayJson?: string;
 			moderationJson?: string;
+			pageRegistryJson?: string;
 			engagementJson?: string;
 			emailNotificationsEnabled?: boolean;
 		},
@@ -2103,6 +2104,7 @@ export class AdminRepository {
 				verifiedAuthorJson: input.verifiedAuthorJson,
 				staffDisplayJson: input.staffDisplayJson,
 				moderationJson: input.moderationJson,
+				pageRegistryJson: input.pageRegistryJson,
 				engagementJson: input.engagementJson,
 				emailNotificationsEnabled: input.emailNotificationsEnabled,
 				updatedAt: new Date().toISOString(),

@@ -11,6 +11,7 @@ import {
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
+import { AdminTaskService } from "../../src/modules/tasks/admin-task-service";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -588,5 +589,152 @@ describe("admin tasks api", () => {
 			disabledReason: "owner_disabled",
 			ownerUserId: initialAdmin?.id,
 		});
+	});
+
+	it("protects system-managed authoritative page source refresh tasks in Admin API", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const targetOwner = await createScopedUser(fixture, {
+			username: "protected-target-owner",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		const service = new AdminTaskService(
+			fixture.app.db,
+			fixture.app.siteRegistry,
+		);
+		const ensured = await service.ensureAuthoritativePageSourceRefreshTask({
+			siteKey: "fangyuan",
+			sourceIds: [1, 2],
+			requestId: "protected-task-test",
+		});
+		const taskId = ensured.task.id;
+
+		const detail = await fixture.app.inject({
+			method: "GET",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}`,
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(detail.statusCode).toBe(200);
+		expect(detail.json()).toMatchObject({
+			visibility: "definition",
+			systemManaged: true,
+			systemKey: "page_registry:authoritative_source_refresh:fangyuan",
+			protectionKind: "authoritative_page_source_refresh",
+			protectedActions: {
+				delete: true,
+				disable: true,
+				transferOwner: true,
+			},
+			canDelete: false,
+			canDisable: false,
+			canTransferOwner: false,
+			payload: { siteKey: "fangyuan", sourceIds: [1, 2] },
+		});
+
+		const allowedPatch = await fixture.app.inject({
+			method: "PATCH",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}`,
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: {
+				name: "Protected refresh hourly",
+				trigger: { everyMinutes: 120 },
+				payload: {
+					siteKey: "fangyuan",
+					sourceIds: [1, 2],
+					trigger: "scheduled",
+					timeoutMs: 5000,
+				},
+			},
+		});
+		expect(allowedPatch.statusCode).toBe(200);
+		expect(allowedPatch.json()).toMatchObject({
+			name: "Protected refresh hourly",
+			trigger: { everyMinutes: 120 },
+			payload: {
+				siteKey: "fangyuan",
+				sourceIds: [1, 2],
+				timeoutMs: 5000,
+			},
+		});
+
+		const lockedPayloadPatch = await fixture.app.inject({
+			method: "PATCH",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}`,
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: {
+				payload: {
+					siteKey: "fangyuan",
+					sourceIds: [999],
+					trigger: "scheduled",
+					timeoutMs: 5000,
+				},
+			},
+		});
+		expect(lockedPayloadPatch.statusCode).toBe(409);
+		expect(lockedPayloadPatch.json()).toMatchObject({
+			error: { code: "SCHEDULED_TASK_PROTECTED_FIELD" },
+		});
+
+		const disable = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}/disable`,
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: { reason: "try_disable" },
+		});
+		expect(disable.statusCode).toBe(409);
+		expect(disable.json()).toMatchObject({
+			error: { code: "SCHEDULED_TASK_PROTECTED" },
+		});
+
+		const transfer = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}/transfer-owner`,
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: { ownerUserId: targetOwner.id },
+		});
+		expect(transfer.statusCode).toBe(409);
+		expect(transfer.json()).toMatchObject({
+			error: { code: "SYSTEM_TASK_OWNER_IMMUTABLE" },
+		});
+
+		const deleted = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}`,
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: { reason: "try_delete" },
+		});
+		expect(deleted.statusCode).toBe(409);
+		expect(deleted.json()).toMatchObject({
+			error: { code: "SCHEDULED_TASK_PROTECTED" },
+		});
+
+		const auditRows = await fixture.app.db
+			.select()
+			.from(auditLogs)
+			.where(eq(auditLogs.targetId, taskId));
+		expect(auditRows.map((row) => row.action)).toEqual(
+			expect.arrayContaining([
+				"task.scheduled.system_created",
+				"task.scheduled.update",
+				"task.scheduled.protected_operation_denied",
+			]),
+		);
 	});
 });

@@ -470,6 +470,14 @@ export interface AdminSettings {
 		allowLike: boolean;
 	};
 	engagement: AdminEngagementSettings;
+	pageRegistry: {
+		mode: "discovery" | "authoritative";
+		authoritativeSourceIds: number[];
+		unknownPageResponse: "inactive_payload" | "forbidden";
+		requireHealthySource: boolean;
+		sourceFreshnessGraceSec: number;
+		emergencyLockdown: boolean;
+	};
 	notifications: {
 		emailEnabled: boolean;
 		recipients?: SiteNotificationRecipient[];
@@ -1072,7 +1080,8 @@ export function updateSettings(siteKey: string, input: Partial<AdminSettings>) {
 export type AdminSiteSettingsSection =
 	| "comments"
 	| "engagement"
-	| "notifications";
+	| "notifications"
+	| "pageRegistry";
 
 export function patchAdminSiteSettingsSection(
 	siteKey: string,

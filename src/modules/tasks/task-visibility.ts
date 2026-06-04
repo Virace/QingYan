@@ -1,4 +1,6 @@
 import type { AdminGroupKey } from "../admin/permissions";
+import type { AdminPermission } from "../admin/permissions";
+import { protectedTaskReason } from "./protected-task-policy";
 import type {
 	ScheduledTaskDeletedSnapshotRecord,
 	ScheduledTaskRecord,
@@ -11,6 +13,7 @@ export interface TaskVisibilitySession {
 	isAdmin: boolean;
 	isInitialAdmin: boolean;
 	siteIds: number[];
+	permissions?: AdminPermission[];
 }
 
 export type TaskVisibilityLevel =
@@ -34,11 +37,24 @@ function hasSiteAccess(
 }
 
 export function canManageScheduledTask(
-	task: Pick<ScheduledTaskRecord, "ownerUserId" | "siteId">,
+	task: Pick<
+		ScheduledTaskRecord,
+		"ownerUserId" | "siteId" | "systemKey" | "protection"
+	>,
 	session: TaskVisibilitySession,
 ): boolean {
 	if (session.isAdmin || session.isInitialAdmin) {
 		return true;
+	}
+	if (task.systemKey || task.protection) {
+		return (
+			session.groupKey === "site_admin" &&
+			hasSiteAccess(session, task.siteId) &&
+			Boolean(
+				session.permissions?.includes("page_registry.update") ||
+					session.permissions?.includes("site_settings.update"),
+			)
+		);
 	}
 	return (
 		session.groupKey === "site_admin" &&
@@ -48,9 +64,19 @@ export function canManageScheduledTask(
 }
 
 export function canRunScheduledTask(
-	task: Pick<ScheduledTaskRecord, "ownerUserId" | "siteId">,
+	task: Pick<
+		ScheduledTaskRecord,
+		"ownerUserId" | "siteId" | "systemKey" | "protection"
+	>,
 	session: TaskVisibilitySession,
 ): boolean {
+	if (task.systemKey || task.protection) {
+		return (
+			session.isAdmin ||
+			session.isInitialAdmin ||
+			(session.groupKey === "site_admin" && hasSiteAccess(session, task.siteId))
+		);
+	}
 	return canManageScheduledTask(task, session);
 }
 
@@ -78,6 +104,10 @@ export function projectScheduledTaskForSession(
 	const canManage = canManageScheduledTask(task, input.session);
 	const canRun = canRunScheduledTask(task, input.session);
 	const canViewLogs = canManage;
+	const protectedReason = protectedTaskReason(task.protection);
+	const lockedDelete = task.protection?.lockedDelete === true;
+	const lockedDisable = task.protection?.lockedDisable === true;
+	const lockedOwnerTransfer = task.protection?.lockedOwnerTransfer === true;
 	const base = {
 		id: task.id,
 		name: task.name,
@@ -96,6 +126,20 @@ export function projectScheduledTaskForSession(
 		lastRunId: task.lastRunId,
 		lastStatus: task.lastStatus,
 		ownerUserId: task.ownerUserId,
+		ownerDisplayName: task.systemKey ? "系统托管" : null,
+		systemKey: task.systemKey,
+		systemManaged: Boolean(task.systemKey),
+		protectionKind: task.protection?.kind ?? null,
+		managedBy: task.protection?.managedBy ?? null,
+		protectedReason,
+		protectedActions: {
+			delete: lockedDelete,
+			disable: lockedDisable,
+			transferOwner: lockedOwnerTransfer,
+		},
+		canDelete: canManage && !lockedDelete,
+		canDisable: canManage && !(task.enabled && lockedDisable),
+		canTransferOwner: canManage && !lockedOwnerTransfer,
 		createdByUserId: task.createdByUserId,
 		updatedByUserId: task.updatedByUserId,
 		createdAt: task.createdAt,
@@ -116,6 +160,7 @@ export function projectScheduledTaskForSession(
 		scope: task.scope,
 		payload: task.payload,
 		payloadSchemaVersion: task.payloadSchemaVersion,
+		protection: task.protection,
 		policy: task.policy,
 		trigger: task.trigger,
 		triggerSchemaVersion: task.triggerSchemaVersion,

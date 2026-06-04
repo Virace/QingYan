@@ -24,6 +24,8 @@ export const scheduledTasks = sqliteTable(
 		payloadSchemaVersion: integer("payload_schema_version")
 			.notNull()
 			.default(1),
+		systemKey: text("system_key"),
+		protectionJson: text("protection_json"),
 		policyJson: text("policy_json").notNull(),
 		triggerJson: text("trigger_json").notNull(),
 		triggerSchemaVersion: integer("trigger_schema_version")
@@ -59,6 +61,7 @@ export const scheduledTasks = sqliteTable(
 			table.nextRunAt,
 		),
 		index("scheduled_tasks_claim_expires_idx").on(table.claimExpiresAt),
+		index("scheduled_tasks_system_key_idx").on(table.systemKey),
 		index("scheduled_tasks_site_type_idx").on(table.siteId, table.type),
 		index("scheduled_tasks_owner_idx").on(table.ownerUserId),
 		index("scheduled_tasks_deleted_idx").on(table.deletedAt),

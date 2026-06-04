@@ -73,7 +73,8 @@ export class TaskEventLogRepository {
 		createdAt?: string;
 	}) {
 		const id = input.id ?? createTaskEventLogId();
-		const sequence = input.sequence ?? (await this.nextSequence(input.taskRunId));
+		const sequence =
+			input.sequence ?? (await this.nextSequence(input.taskRunId));
 		await this.db.insert(taskEventLogs).values({
 			id,
 			taskRunId: input.taskRunId,

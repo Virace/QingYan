@@ -59,7 +59,9 @@ const pageMetadataRefreshPayloadSchema = z.object({
 	siteKey: z.string().min(1),
 	scope: z.enum(["missing_only", "force", "page_keys"]).default("missing_only"),
 	pageKeys: z.array(z.string().min(1)).optional(),
-	trigger: z.enum(["manual", "source_refresh", "scheduled"]).default("scheduled"),
+	trigger: z
+		.enum(["manual", "source_refresh", "scheduled"])
+		.default("scheduled"),
 	batchSize: z.number().int().positive().optional(),
 	timeoutMs: z.number().int().positive().optional(),
 	maxBytes: z.number().int().positive().optional(),
@@ -187,14 +189,17 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 								context: TaskRunnerContext,
 							): Promise<unknown>;
 						}>(runnerContext, "pageSourceRefresh");
-						return service.executeRefresh({
-							siteKey: validated.siteKey,
-							sourceIds: validated.sourceIds,
-							mode: validated.mode,
-							trigger: validated.trigger,
-							timeoutMs: validated.timeoutMs,
-							maxBytes: validated.maxBytes,
-						}, runnerContext);
+						return service.executeRefresh(
+							{
+								siteKey: validated.siteKey,
+								sourceIds: validated.sourceIds,
+								mode: validated.mode,
+								trigger: validated.trigger,
+								timeoutMs: validated.timeoutMs,
+								maxBytes: validated.maxBytes,
+							},
+							runnerContext,
+						);
 					},
 				);
 			},
@@ -231,16 +236,19 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 								context: TaskRunnerContext,
 							): Promise<unknown>;
 						}>(runnerContext, "pageMetadataRefresh");
-						return service.executeRefresh({
-							siteKey: validated.siteKey,
-							pageKeys: validated.pageKeys,
-							onlyMissingTitle: validated.scope === "missing_only",
-							forceTitle: validated.scope === "force",
-							trigger: validated.trigger,
-							batchSize: validated.batchSize,
-							timeoutMs: validated.timeoutMs,
-							maxBytes: validated.maxBytes,
-						}, runnerContext);
+						return service.executeRefresh(
+							{
+								siteKey: validated.siteKey,
+								pageKeys: validated.pageKeys,
+								onlyMissingTitle: validated.scope === "missing_only",
+								forceTitle: validated.scope === "force",
+								trigger: validated.trigger,
+								batchSize: validated.batchSize,
+								timeoutMs: validated.timeoutMs,
+								maxBytes: validated.maxBytes,
+							},
+							runnerContext,
+						);
 					},
 				);
 			},
@@ -273,12 +281,15 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 								context: TaskRunnerContext,
 							): Promise<unknown>;
 						}>(runnerContext, "commentIpMaintenance");
-						return service.executeCommentIpRefresh({
-							siteKey: validated.siteKey,
-							scope: validated.scope,
-							ipVersions: validated.ipVersions,
-							batchSize: validated.batchSize,
-						}, runnerContext);
+						return service.executeCommentIpRefresh(
+							{
+								siteKey: validated.siteKey,
+								scope: validated.scope,
+								ipVersions: validated.ipVersions,
+								batchSize: validated.batchSize,
+							},
+							runnerContext,
+						);
 					},
 				);
 			},
@@ -311,10 +322,13 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 								context: TaskRunnerContext,
 							): Promise<unknown>;
 						}>(runnerContext, "commentIpMaintenance");
-						return service.executeIpRegionUpdate({
-							ipVersions: validated.ipVersions,
-							timeoutMs: validated.timeoutMs,
-						}, runnerContext);
+						return service.executeIpRegionUpdate(
+							{
+								ipVersions: validated.ipVersions,
+								timeoutMs: validated.timeoutMs,
+							},
+							runnerContext,
+						);
 					},
 				);
 			},

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { taskRuns } from "../../src/db/schema";
+import { sitePageRegistrySources, taskRuns } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -213,6 +213,91 @@ describe("admin page registry sources", () => {
 			},
 		});
 		expect(listResponse.json()).toMatchObject({ items: [] });
+	});
+
+	it("blocks disabling or deleting authoritative sources unless authoritative mode is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const sourceResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/sources",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				sourceType: "sitemap",
+				sourceUrl: "http://localhost:4321/sitemap.xml",
+				enabled: true,
+				mode: "append",
+			},
+		});
+		expect(sourceResponse.statusCode).toBe(200);
+		const sourceId = sourceResponse.json().source.id as number;
+		await fixture.app.db
+			.update(sitePageRegistrySources)
+			.set({ lastSuccessAt: new Date().toISOString() })
+			.where(eq(sitePageRegistrySources.id, sourceId));
+
+		const settingsResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth(admin),
+			payload: {
+				pageRegistry: {
+					mode: "authoritative",
+					authoritativeSourceIds: [sourceId],
+				},
+			},
+		});
+		expect(settingsResponse.statusCode).toBe(200);
+
+		const disableResponse = await fixture.app.inject({
+			method: "PATCH",
+			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
+			...withAdminWriteAuth(admin),
+			payload: {
+				enabled: false,
+			},
+		});
+		expect(disableResponse.statusCode).toBe(409);
+		expect(disableResponse.json()).toMatchObject({
+			error: {
+				code: "AUTHORITATIVE_SOURCE_IN_USE",
+			},
+		});
+
+		const deleteResponse = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(deleteResponse.statusCode).toBe(409);
+
+		const forcedDisable = await fixture.app.inject({
+			method: "PATCH",
+			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
+			...withAdminWriteAuth(admin),
+			payload: {
+				enabled: false,
+				disableAuthoritativeMode: true,
+			},
+		});
+		expect(forcedDisable.statusCode).toBe(200);
+		expect(forcedDisable.json().source.enabled).toBe(false);
+
+		const readSettings = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: admin.adminCookie.value,
+			},
+		});
+		expect(readSettings.statusCode).toBe(200);
+		expect(readSettings.json().pageRegistry).toMatchObject({
+			mode: "discovery",
+			authoritativeSourceIds: [],
+		});
 	});
 
 	it("stores execution options on single page source refresh jobs", async () => {

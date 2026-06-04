@@ -1,5 +1,5 @@
 import { Dialog } from "@radix-ui/themes";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -22,7 +22,9 @@ function JsonBlock({ title, value }: { title: string; value: unknown }) {
 	}
 	return (
 		<details className="rounded-md border bg-muted/20 p-3">
-			<summary className="cursor-pointer text-sm font-semibold">{title}</summary>
+			<summary className="cursor-pointer text-sm font-semibold">
+				{title}
+			</summary>
 			<pre className="mt-2 max-h-56 overflow-auto rounded-md border bg-background/80 p-3 text-xs leading-5">
 				{JSON.stringify(value, null, 2)}
 			</pre>
@@ -49,6 +51,7 @@ export function TaskRunDetailDialog({
 	const detail = runQuery.data ?? run;
 	const [logLines, setLogLines] = useState<TaskRunLogLine[]>([]);
 	const [afterSequence, setAfterSequence] = useState<number | undefined>();
+	const previousRunIdRef = useRef<string | null>(null);
 	const isRunning = detail ? runningStatuses.has(detail.status) : false;
 	const logQuery = useQuery({
 		queryKey: ["admin", "task-run-logs", run?.id, afterSequence ?? 0],
@@ -64,9 +67,14 @@ export function TaskRunDetailDialog({
 	const canViewLogs = Boolean(detail?.canViewLogs);
 
 	useEffect(() => {
+		const runId = run?.id ?? null;
+		if (previousRunIdRef.current === runId) {
+			return;
+		}
+		previousRunIdRef.current = runId;
 		setLogLines([]);
 		setAfterSequence(undefined);
-	}, [run?.id]);
+	});
 
 	useEffect(() => {
 		const data = logQuery.data;
@@ -101,9 +109,7 @@ export function TaskRunDetailDialog({
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Content maxWidth="900px">
 				<Dialog.Title>运行详情</Dialog.Title>
-				<Dialog.Description size="2">
-					{title}
-				</Dialog.Description>
+				<Dialog.Description size="2">{title}</Dialog.Description>
 				{detail ? (
 					<div className="mt-4 grid gap-4">
 						<div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-4">

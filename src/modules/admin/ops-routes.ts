@@ -21,7 +21,7 @@ import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { AdminTaskService } from "../tasks/admin-task-service";
 import { TaskRunRepository } from "../tasks/task-run-repository";
-import type { TaskRunCategory, TaskRunStatus } from "../tasks/types";
+import type { TaskRunStatus } from "../tasks/types";
 import { UpgradeService } from "../upgrade/upgrade-service";
 import { requirePermission, requireSiteAccess } from "./authorization";
 import { DeletionPolicyService } from "./deletion-policy-service";

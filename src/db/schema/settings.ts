@@ -60,6 +60,7 @@ export const siteSettings = sqliteTable(
 		verifiedAuthorJson: text("verified_author_json"),
 		staffDisplayJson: text("staff_display_json"),
 		moderationJson: text("moderation_json"),
+		pageRegistryJson: text("page_registry_json"),
 		emailNotificationsEnabled: integer("email_notifications_enabled", {
 			mode: "boolean",
 		})

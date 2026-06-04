@@ -97,7 +97,12 @@ import {
 	writeSettingsTabToSearch,
 } from "./notification-ui-model";
 
-const siteSettingsTabs = ["comments", "engagement", "notifications"] as const;
+const siteSettingsTabs = [
+	"comments",
+	"engagement",
+	"notifications",
+	"pageRegistry",
+] as const;
 type SiteSettingsTab = (typeof siteSettingsTabs)[number];
 
 const systemSettingsTabs = [
@@ -121,6 +126,9 @@ function buildSiteSettingsSectionPayload(
 	}
 	if (section === "engagement") {
 		return draft.engagement;
+	}
+	if (section === "pageRegistry") {
+		return draft.pageRegistry;
 	}
 	return draft.notifications;
 }
@@ -161,6 +169,7 @@ const siteSectionSaveLabels: Record<SiteSettingsTab, string> = {
 	comments: "保存评论设置",
 	engagement: "保存访客与计数设置",
 	notifications: "保存站点通知设置",
+	pageRegistry: "保存页面注册设置",
 };
 
 const systemSectionSaveLabels: Record<SystemSettingsTab, string> = {
@@ -1881,6 +1890,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							<Tabs.Trigger value="comments">评论</Tabs.Trigger>
 							<Tabs.Trigger value="engagement">访客与计数</Tabs.Trigger>
 							<Tabs.Trigger value="notifications">通知</Tabs.Trigger>
+							<Tabs.Trigger value="pageRegistry">页面注册</Tabs.Trigger>
 						</Tabs.List>
 						<div className="pt-4">
 							<Tabs.Content value="comments">
@@ -2705,6 +2715,188 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 											{notificationRecipients.length === 0 ? (
 												<EmptyState text="暂无后台通知接收人" />
 											) : null}
+										</div>
+									</SettingsSection>
+								</div>
+							</Tabs.Content>
+							<Tabs.Content value="pageRegistry">
+								<div className="grid gap-4 md:grid-cols-2">
+									<SettingsSection
+										title="页面来源"
+										description="权威模式会以选定的 sitemap 来源作为页面登记准入依据，并由任务中心托管刷新任务。"
+									>
+										<div className="grid gap-4 md:grid-cols-2">
+											<Field label="模式">
+												<select
+													className={inputClass}
+													value={draft.pageRegistry.mode}
+													onChange={(event) =>
+														setDraft({
+															...draft,
+															pageRegistry: {
+																...draft.pageRegistry,
+																mode: event.target
+																	.value as AdminSettings["pageRegistry"]["mode"],
+																requireHealthySource:
+																	event.target.value === "authoritative"
+																		? true
+																		: draft.pageRegistry.requireHealthySource,
+															},
+														})
+													}
+												>
+													<option value="discovery">发现模式</option>
+													<option value="authoritative">权威模式</option>
+												</select>
+											</Field>
+											<Field label="未知页面响应">
+												<select
+													className={inputClass}
+													value={draft.pageRegistry.unknownPageResponse}
+													onChange={(event) =>
+														setDraft({
+															...draft,
+															pageRegistry: {
+																...draft.pageRegistry,
+																unknownPageResponse: event.target
+																	.value as AdminSettings["pageRegistry"]["unknownPageResponse"],
+															},
+														})
+													}
+												>
+													<option value="inactive_payload">
+														返回 inactive
+													</option>
+													<option value="forbidden">拒绝访问</option>
+												</select>
+											</Field>
+											<Field
+												label="权威来源 ID"
+												description="填写页面来源列表中的 sitemap source ID；可用逗号、空格或换行分隔。"
+												error={firstFieldError(
+													saveError,
+													"pageRegistry.authoritativeSourceIds",
+												)}
+											>
+												<textarea
+													className={textareaClass}
+													value={draft.pageRegistry.authoritativeSourceIds.join(
+														"\n",
+													)}
+													onChange={(event) =>
+														setDraft({
+															...draft,
+															pageRegistry: {
+																...draft.pageRegistry,
+																authoritativeSourceIds: event.target.value
+																	.split(/[\s,]+/)
+																	.map((value) => Number(value.trim()))
+																	.filter(
+																		(value) =>
+																			Number.isInteger(value) && value > 0,
+																	),
+															},
+														})
+													}
+												/>
+											</Field>
+											<Field
+												label="健康宽限秒数"
+												description="权威模式下，最近成功刷新超过该时间会阻止保存。"
+												error={firstFieldError(
+													saveError,
+													"pageRegistry.sourceFreshnessGraceSec",
+												)}
+											>
+												<Input
+													type="number"
+													min={0}
+													value={draft.pageRegistry.sourceFreshnessGraceSec}
+													onChange={(event) =>
+														setDraft({
+															...draft,
+															pageRegistry: {
+																...draft.pageRegistry,
+																sourceFreshnessGraceSec: Number(
+																	event.target.value,
+																),
+															},
+														})
+													}
+												/>
+											</Field>
+											<BooleanField
+												label="要求健康来源"
+												description="权威模式会固定要求健康来源；发现模式下可提前打开该约束。"
+												checked={draft.pageRegistry.requireHealthySource}
+												onCheckedChange={(requireHealthySource) =>
+													setDraft({
+														...draft,
+														pageRegistry: {
+															...draft.pageRegistry,
+															requireHealthySource:
+																draft.pageRegistry.mode === "authoritative"
+																	? true
+																	: requireHealthySource,
+														},
+													})
+												}
+											/>
+											<BooleanField
+												label="紧急锁定"
+												description="用于快速阻断非权威页面进入活跃登记。"
+												checked={draft.pageRegistry.emergencyLockdown}
+												onCheckedChange={(emergencyLockdown) =>
+													setDraft({
+														...draft,
+														pageRegistry: {
+															...draft.pageRegistry,
+															emergencyLockdown,
+														},
+													})
+												}
+											/>
+											<div className="rounded-md border bg-background p-3 text-sm leading-6 md:col-span-2">
+												<div className="flex flex-wrap items-center gap-2">
+													<Badge
+														variant={
+															draft.pageRegistry.mode === "authoritative"
+																? "secondary"
+																: "outline"
+														}
+													>
+														{draft.pageRegistry.mode === "authoritative"
+															? "权威模式"
+															: "发现模式"}
+													</Badge>
+													<span className="text-muted-foreground">
+														{draft.pageRegistry.authoritativeSourceIds.length >
+														0
+															? `来源 ID：${draft.pageRegistry.authoritativeSourceIds.join(", ")}`
+															: "未选择权威来源"}
+													</span>
+												</div>
+												{draft.pageRegistry.mode === "authoritative" ? (
+													<div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+														<p>
+															保障刷新任务由任务中心系统托管，系统键：
+															<code className="rounded bg-muted px-1 py-0.5">
+																{`page_registry:authoritative_source_refresh:${draft.siteKey}`}
+															</code>
+														</p>
+														<a
+															className="font-medium text-primary underline-offset-4 hover:underline"
+															href="?view=tasks"
+														>
+															打开任务中心
+														</a>
+													</div>
+												) : (
+													<p className="mt-3 text-xs text-muted-foreground">
+														发现模式不会删除既有刷新任务；从权威模式关闭后，相关任务会保留但解除保护。
+													</p>
+												)}
+											</div>
 										</div>
 									</SettingsSection>
 								</div>

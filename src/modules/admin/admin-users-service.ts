@@ -68,38 +68,45 @@ export class AdminUsersService {
 		offset: number;
 	}) {
 		const rows = await this.repository.listUsers(input);
+		const assignableGroupKeys = new Set(systemGroups.map((group) => group.key));
 		const sessionStats = await this.repository.listActiveSessionStats(
 			rows.map((row) => row.id),
 			new Date().toISOString(),
 		);
+		const users = await Promise.all(
+			rows.map(async (row) => {
+				const user = await this.serializeUser(row.id);
+				const stats = sessionStats.get(row.id) ?? {
+					activeSessionCount: 0,
+					lastSessionSeenAt: null,
+				};
+				return {
+					...user,
+					activeSessionCount: stats.activeSessionCount,
+					lastSessionSeenAt: stats.lastSessionSeenAt,
+				};
+			}),
+		);
 		return {
-			users: await Promise.all(
-				rows.map(async (row) => {
-					const user = await this.serializeUser(row.id);
-					const stats = sessionStats.get(row.id) ?? {
-						activeSessionCount: 0,
-						lastSessionSeenAt: null,
-					};
-					return {
-						...user,
-						activeSessionCount: stats.activeSessionCount,
-						lastSessionSeenAt: stats.lastSessionSeenAt,
-					};
-				}),
+			users: users.filter((user) =>
+				assignableGroupKeys.has(user.groupKey as AdminGroupKey),
 			),
 		};
 	}
 
 	public async listGroups() {
+		const assignableGroupKeys = new Set(systemGroups.map((group) => group.key));
 		return {
-			groups: (await this.repository.listGroups()).map((group) => ({
-				id: group.id,
-				key: group.key,
-				name: group.name,
-				description: group.description,
-				kind: group.kind,
-				permissions: permissionsForGroup(group.key as AdminGroupKey),
-			})),
+			groups: (await this.repository.listGroups())
+				.filter((group) => assignableGroupKeys.has(group.key as AdminGroupKey))
+				.map((group) => ({
+					id: group.id,
+					key: group.key,
+					name: group.name,
+					description: group.description,
+					kind: group.kind,
+					permissions: permissionsForGroup(group.key as AdminGroupKey),
+				})),
 		};
 	}
 

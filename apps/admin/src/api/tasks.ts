@@ -114,6 +114,20 @@ export interface ScheduledTaskProjection {
 	lastRunId: string | null;
 	lastStatus: TaskRunStatus | null;
 	ownerUserId: number;
+	ownerDisplayName?: string | null;
+	systemKey?: string | null;
+	systemManaged?: boolean;
+	protectionKind?: string | null;
+	managedBy?: string | null;
+	protectedReason?: string;
+	protectedActions?: {
+		delete: boolean;
+		disable: boolean;
+		transferOwner: boolean;
+	};
+	canDelete?: boolean;
+	canDisable?: boolean;
+	canTransferOwner?: boolean;
 	createdByUserId: number | null;
 	updatedByUserId: number | null;
 	createdAt: string;
@@ -125,6 +139,18 @@ export interface ScheduledTaskProjection {
 	scope?: unknown;
 	payload?: Record<string, unknown>;
 	payloadSchemaVersion?: number;
+	protection?: {
+		kind: string;
+		managedBy: string;
+		lockedDelete?: boolean;
+		lockedDisable?: boolean;
+		lockedOwnerTransfer?: boolean;
+		lockedType?: boolean;
+		lockedSite?: boolean;
+		lockedPayloadPaths?: string[];
+		editablePayloadPaths?: string[];
+		editableFields?: string[];
+	} | null;
 	policy?: TaskPolicyInput;
 	trigger?: TaskTriggerInput;
 	triggerSchemaVersion?: number;

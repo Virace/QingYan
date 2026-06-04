@@ -101,6 +101,9 @@ export function TaskDefinitionTable({
 											<Badge variant={task.enabled ? "secondary" : "outline"}>
 												{task.enabled ? "启用" : "停用"}
 											</Badge>
+											{task.systemManaged ? (
+												<Badge variant="outline">系统托管</Badge>
+											) : null}
 											{task.visibility === "summary" ? (
 												<Badge variant="outline">摘要</Badge>
 											) : null}
@@ -111,6 +114,11 @@ export function TaskDefinitionTable({
 										{task.description ? (
 											<p className="max-w-[22rem] truncate text-xs text-muted-foreground">
 												{task.description}
+											</p>
+										) : null}
+										{task.protectedReason ? (
+											<p className="max-w-[24rem] truncate text-xs text-muted-foreground">
+												{task.protectedReason}
 											</p>
 										) : null}
 									</div>
@@ -133,7 +141,9 @@ export function TaskDefinitionTable({
 								</td>
 								<td className="px-3 py-3 align-top">
 									<div className="grid gap-1 text-xs">
-										<span>#{task.ownerUserId}</span>
+										<span>
+											{task.ownerDisplayName ?? `#${task.ownerUserId}`}
+										</span>
 										<span className="text-muted-foreground">
 											更新 #{task.updatedByUserId ?? "-"}
 										</span>
@@ -178,7 +188,7 @@ export function TaskDefinitionTable({
 											type="button"
 											size="sm"
 											variant="outline"
-											disabled={!task.canManage || busy}
+											disabled={!task.canManage || !task.canDisable || busy}
 											onClick={() =>
 												task.enabled ? onDisable(task) : onEnable(task)
 											}
@@ -195,7 +205,7 @@ export function TaskDefinitionTable({
 											type="button"
 											size="sm"
 											variant="destructive"
-											disabled={!task.canManage || busy}
+											disabled={!task.canManage || !task.canDelete || busy}
 											onClick={() => onDelete(task)}
 											aria-label="删除任务"
 										>

@@ -502,7 +502,7 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
 	`email_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `engagement_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `engagement_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text, `page_registry_json` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_settings_site_id_idx` ON `site_settings` (`site_id`);--> statement-breakpoint
@@ -628,6 +628,8 @@ CREATE TABLE `scheduled_tasks` (
 	`timezone` text,
 	`payload_json` text NOT NULL,
 	`payload_schema_version` integer DEFAULT 1 NOT NULL,
+	`system_key` text,
+	`protection_json` text,
 	`policy_json` text NOT NULL,
 	`trigger_json` text NOT NULL,
 	`trigger_schema_version` integer DEFAULT 1 NOT NULL,
@@ -654,6 +656,7 @@ CREATE TABLE `scheduled_tasks` (
 );--> statement-breakpoint
 CREATE INDEX `scheduled_tasks_enabled_next_run_idx` ON `scheduled_tasks` (`enabled`,`next_run_at`);--> statement-breakpoint
 CREATE INDEX `scheduled_tasks_claim_expires_idx` ON `scheduled_tasks` (`claim_expires_at`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_system_key_idx` ON `scheduled_tasks` (`system_key`);--> statement-breakpoint
 CREATE INDEX `scheduled_tasks_site_type_idx` ON `scheduled_tasks` (`site_id`,`type`);--> statement-breakpoint
 CREATE INDEX `scheduled_tasks_owner_idx` ON `scheduled_tasks` (`owner_user_id`);--> statement-breakpoint
 CREATE INDEX `scheduled_tasks_deleted_idx` ON `scheduled_tasks` (`deleted_at`);--> statement-breakpoint

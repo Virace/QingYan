@@ -4,6 +4,10 @@ import { and, desc, eq, isNull, lte } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import { scheduledTaskDeletedSnapshots, scheduledTasks } from "../../db/schema";
+import {
+	parseProtectedTaskPolicy,
+	type ProtectedTaskPolicy,
+} from "./protected-task-policy";
 import { stringifyJson, type TaskRunStatus } from "./types";
 
 const DEFAULT_RETENTION_COUNT_MAX = 30;
@@ -36,6 +40,8 @@ export interface ScheduledTaskCreateInput {
 	timezone?: string | null;
 	payload: unknown;
 	payloadSchemaVersion?: number;
+	systemKey?: string | null;
+	protection?: ProtectedTaskPolicy | null;
 	policy: unknown;
 	trigger: unknown;
 	triggerSchemaVersion?: number;
@@ -69,6 +75,8 @@ export interface ScheduledTaskUpdateInput {
 	timezone?: string | null;
 	payload?: unknown;
 	payloadSchemaVersion?: number;
+	systemKey?: string | null;
+	protection?: ProtectedTaskPolicy | null;
 	policy?: unknown;
 	trigger?: unknown;
 	triggerSchemaVersion?: number;
@@ -102,6 +110,8 @@ export interface ScheduledTaskRecord {
 	timezone: string | null;
 	payload: unknown;
 	payloadSchemaVersion: number;
+	systemKey: string | null;
+	protection: ProtectedTaskPolicy | null;
 	policy: unknown;
 	trigger: unknown;
 	triggerSchemaVersion: number;
@@ -152,6 +162,10 @@ function serializeScheduledTask(
 		timezone: row.timezone,
 		payload: JSON.parse(row.payloadJson) as unknown,
 		payloadSchemaVersion: row.payloadSchemaVersion,
+		systemKey: row.systemKey,
+		protection: parseProtectedTaskPolicy(
+			row.protectionJson ? JSON.parse(row.protectionJson) : null,
+		),
 		policy: JSON.parse(row.policyJson) as unknown,
 		trigger: JSON.parse(row.triggerJson) as unknown,
 		triggerSchemaVersion: row.triggerSchemaVersion,
@@ -218,6 +232,11 @@ export class ScheduledTaskRepository {
 			timezone: input.timezone ?? null,
 			payloadJson: stringifyJson(input.payload),
 			payloadSchemaVersion: input.payloadSchemaVersion ?? 1,
+			systemKey: input.systemKey ?? null,
+			protectionJson:
+				input.protection === undefined || input.protection === null
+					? null
+					: stringifyJson(input.protection),
 			policyJson: stringifyJson(input.policy),
 			triggerJson: stringifyJson(input.trigger),
 			triggerSchemaVersion: input.triggerSchemaVersion ?? 1,
@@ -262,6 +281,13 @@ export class ScheduledTaskRepository {
 						? undefined
 						: stringifyJson(input.payload),
 				payloadSchemaVersion: input.payloadSchemaVersion,
+				systemKey: input.systemKey,
+				protectionJson:
+					input.protection === undefined
+						? undefined
+						: input.protection === null
+							? null
+							: stringifyJson(input.protection),
 				policyJson:
 					input.policy === undefined ? undefined : stringifyJson(input.policy),
 				triggerJson:
@@ -304,6 +330,20 @@ export class ScheduledTaskRepository {
 			throw new Error(`Scheduled task not found: ${id}`);
 		}
 		return task;
+	}
+
+	public async getBySystemKey(systemKey: string) {
+		const [row] = await this.db
+			.select()
+			.from(scheduledTasks)
+			.where(
+				and(
+					eq(scheduledTasks.systemKey, systemKey),
+					isNull(scheduledTasks.deletedAt),
+				),
+			)
+			.limit(1);
+		return row ? serializeScheduledTask(row) : null;
 	}
 
 	public async list(input?: { limit?: number; offset?: number }) {

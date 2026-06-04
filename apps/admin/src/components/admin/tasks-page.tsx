@@ -138,8 +138,9 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 				: false,
 	});
 	const settingsQuery = useQuery({
-		queryKey: ["admin", "settings", siteKey],
+		queryKey: ["admin", "settings", siteKey || ""],
 		queryFn: () => getSettings(siteKey),
+		enabled: Boolean(siteKey),
 	});
 	const auditQuery = useQuery({
 		queryKey: ["admin", "task-audit"],

@@ -12,6 +12,7 @@ import { AdminRepository } from "./repository";
 import {
 	adminPageRegistryRefreshBodySchema,
 	adminPageRegistrySourceCreateBodySchema,
+	adminPageRegistrySourceDeleteBodySchema,
 	adminPageRegistrySourceParamsSchema,
 	adminPageRegistrySourcePatchBodySchema,
 	adminPageRegistrySourceRefreshBodySchema,
@@ -22,6 +23,8 @@ import {
 } from "./schemas";
 import { AdminSessionService } from "./session-service";
 import { requireSiteAccess, requireSiteIdAccess } from "./authorization";
+import { mergePageRegistrySettings } from "../shared/page-registry-settings";
+import { AdminManagementService } from "./management-service";
 
 export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new AdminRepository(fastify.db);
@@ -34,6 +37,11 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 	const service = new PageRegistryService(fastify.db);
 	const sourceRepository = new PageSourceRepository(fastify.db);
 	const adminTasks = new AdminTaskService(fastify.db, fastify.siteRegistry);
+	const managementService = new AdminManagementService(
+		fastify.security,
+		fastify.siteRegistry,
+		repository,
+	);
 
 	function parseOrThrow<T>(
 		result:
@@ -57,6 +65,42 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 				"页面来源 URL 必须属于站点允许的 Origin。",
 			);
 		}
+	}
+
+	async function handleAuthoritativeSourceProtection(input: {
+		source: Awaited<ReturnType<PageSourceRepository["getSource"]>>;
+		disableAuthoritativeMode?: boolean;
+		requestId?: string;
+		actorUserId: number;
+	}) {
+		if (!input.source) {
+			return;
+		}
+		const settings = await repository.getSiteSettings(input.source.siteId);
+		const pageRegistry = mergePageRegistrySettings(settings?.pageRegistryJson);
+		if (
+			pageRegistry.mode !== "authoritative" ||
+			!pageRegistry.authoritativeSourceIds.includes(input.source.id)
+		) {
+			return;
+		}
+		if (!input.disableAuthoritativeMode) {
+			throw new AppError(
+				409,
+				"AUTHORITATIVE_SOURCE_IN_USE",
+				"页面来源正被权威模式使用，不能删除或禁用。",
+			);
+		}
+		await managementService.updateSettings(input.source.siteKey, {
+			pageRegistry: {
+				mode: "discovery",
+				authoritativeSourceIds: pageRegistry.authoritativeSourceIds.filter(
+					(sourceId) => sourceId !== input.source?.id,
+				),
+			},
+			requestId: input.requestId,
+			actorUserId: input.actorUserId,
+		});
 	}
 
 	fastify.get("/pending", async (request) => {
@@ -155,10 +199,22 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 				: [];
 			assertSourceUrlAllowed(patch.sourceUrl, allowedOrigins);
 		}
+		if (patch.enabled === false) {
+			await handleAuthoritativeSourceProtection({
+				source,
+				disableAuthoritativeMode: patch.disableAuthoritativeMode,
+				requestId: request.context?.requestId,
+				actorUserId: session.user.id,
+			});
+		}
+		const {
+			disableAuthoritativeMode: _disableAuthoritativeMode,
+			...sourcePatch
+		} = patch;
 		return {
 			source: await sourceRepository.updateSource({
 				sourceId: params.sourceId,
-				patch,
+				patch: sourcePatch,
 			}),
 		};
 	});
@@ -168,11 +224,20 @@ export const adminPageRegistryRoutes: FastifyPluginAsync = async (fastify) => {
 		const params = parseOrThrow(
 			adminPageRegistrySourceParamsSchema.safeParse(request.params),
 		);
+		const body = parseOrThrow(
+			adminPageRegistrySourceDeleteBodySchema.safeParse(request.body),
+		);
 		const source = await sourceRepository.getSource(params.sourceId);
 		requireSiteIdAccess({
 			session,
 			siteId: source?.siteId,
 			permission: "page_registry.update",
+		});
+		await handleAuthoritativeSourceProtection({
+			source,
+			disableAuthoritativeMode: body?.disableAuthoritativeMode,
+			requestId: request.context?.requestId,
+			actorUserId: session.user.id,
 		});
 		await sourceRepository.deleteSource(params.sourceId);
 		return { ok: true };

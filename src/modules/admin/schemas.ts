@@ -221,7 +221,7 @@ export const adminSystemSettingsSectionParamsSchema = z.object({
 
 export const adminSiteSettingsSectionParamsSchema = z.object({
 	siteKey: z.string().min(1),
-	section: z.enum(["comments", "engagement", "notifications"]),
+	section: z.enum(["comments", "engagement", "notifications", "pageRegistry"]),
 });
 
 export const adminSectionPatchBodySchema = sectionPatchBodySchema;
@@ -474,10 +474,17 @@ export const adminPageRegistrySourcePatchBodySchema = z
 		mode: pageSourceModeSchema.optional(),
 		refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
 		nextRefreshAt: z.string().datetime().nullable().optional(),
+		disableAuthoritativeMode: z.boolean().optional(),
 	})
 	.refine((value) => Object.keys(value).length > 0, {
 		message: "至少需要一个更新字段",
 	});
+
+export const adminPageRegistrySourceDeleteBodySchema = z
+	.object({
+		disableAuthoritativeMode: z.boolean().optional(),
+	})
+	.optional();
 
 export const adminPageRegistrySourceParamsSchema = z.object({
 	sourceId: z.coerce.number().int().positive(),
@@ -654,6 +661,18 @@ export const adminSettingsBodySchema = z
 			})
 			.optional(),
 		engagement: engagementSettingsSchema.optional(),
+		pageRegistry: z
+			.object({
+				mode: z.enum(["discovery", "authoritative"]).optional(),
+				authoritativeSourceIds: z.array(z.number().int().positive()).optional(),
+				unknownPageResponse: z
+					.enum(["inactive_payload", "forbidden"])
+					.optional(),
+				requireHealthySource: z.boolean().optional(),
+				sourceFreshnessGraceSec: z.number().int().min(0).optional(),
+				emergencyLockdown: z.boolean().optional(),
+			})
+			.optional(),
 		notifications: z
 			.object({
 				emailEnabled: z.boolean().optional(),

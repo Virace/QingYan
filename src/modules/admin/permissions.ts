@@ -1,4 +1,8 @@
-export type AdminGroupKey = "admin" | "site_admin" | "site_moderator";
+export type AdminGroupKey =
+	| "admin"
+	| "site_admin"
+	| "site_moderator"
+	| "system_builtin";
 
 export type AdminPermission =
 	| "system_settings.read"
@@ -167,11 +171,17 @@ export function permissionsForGroup(
 	if (groupKey === "site_admin") {
 		return siteAdminPermissions;
 	}
+	if (groupKey === "system_builtin") {
+		return [];
+	}
 	return siteModeratorPermissions;
 }
 
 export function isAdminGroupKey(value: string): value is AdminGroupKey {
 	return (
-		value === "admin" || value === "site_admin" || value === "site_moderator"
+		value === "admin" ||
+		value === "site_admin" ||
+		value === "site_moderator" ||
+		value === "system_builtin"
 	);
 }

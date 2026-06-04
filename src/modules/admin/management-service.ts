@@ -18,11 +18,20 @@ import {
 } from "../comments/verified-author";
 import { CommentsWriteRepository } from "../comments/write-repository";
 import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
+import { PageSourceRepository } from "../page-registry/source-repository";
 import {
 	AppError,
 	InvalidRequestError,
 	ResourceNotFoundError,
+	ValidationFailedError,
 } from "../shared/errors";
+import {
+	mergePageRegistrySettings,
+	mergePageRegistrySettingsPatch,
+	type PageRegistrySettings,
+	type PageRegistrySettingsPatch,
+	serializePageRegistrySettings,
+} from "../shared/page-registry-settings";
 import { buildPaginationResult } from "../shared/pagination";
 import type { SiteRegistry } from "../shared/site-registry";
 import {
@@ -39,6 +48,7 @@ import {
 	sanitizeOptionalSafeHttpUrl,
 } from "../shared/url-policy";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { AdminTaskService } from "../tasks/admin-task-service";
 import type { AdminRepository } from "./repository";
 
 type CommentMetadataPatch = {
@@ -1043,6 +1053,7 @@ export class AdminManagementService {
 				allowLike: settings.allowPageLike,
 			},
 			engagement: mergeEngagementSettings(settings.engagementJson),
+			pageRegistry: mergePageRegistrySettings(settings.pageRegistryJson),
 			notifications: {
 				emailEnabled: settings.emailNotificationsEnabled,
 				channelConfigs,
@@ -1113,6 +1124,78 @@ export class AdminManagementService {
 		}
 	}
 
+	private async validateAuthoritativePageRegistrySettings(input: {
+		siteId: number;
+		siteKey: string;
+		allowedOrigins: string[];
+		settings: PageRegistrySettings;
+	}) {
+		if (input.settings.mode !== "authoritative") {
+			return;
+		}
+		const fail = (message: string): never => {
+			throw new ValidationFailedError([
+				{
+					path: "pageRegistry.authoritativeSourceIds",
+					code: "AUTHORITATIVE_SOURCE_REQUIRED",
+					message,
+					received: "unknown",
+				},
+			]);
+		};
+		if (input.settings.authoritativeSourceIds.length === 0) {
+			fail("Authoritative mode requires at least one healthy sitemap source.");
+		}
+		const sources = await new PageSourceRepository(
+			this.repository.database,
+		).listSources({
+			siteId: input.siteId,
+		});
+		const selectedSources = input.settings.authoritativeSourceIds.map(
+			(sourceId) => sources.find((source) => source.id === sourceId),
+		);
+		if (selectedSources.some((source) => !source)) {
+			fail("Authoritative source must exist and belong to the site.");
+		}
+		const selected = selectedSources.filter(
+			(source): source is NonNullable<(typeof selectedSources)[number]> =>
+				Boolean(source),
+		);
+		const sitemapSources = selected.filter(
+			(source) => source.sourceType === "sitemap",
+		);
+		if (sitemapSources.length === 0) {
+			fail("Authoritative mode requires a sitemap source.");
+		}
+		const now = Date.now();
+		const graceMs = input.settings.sourceFreshnessGraceSec * 1000;
+		for (const source of sitemapSources) {
+			if (!source.enabled) {
+				fail("Authoritative sitemap source must be enabled.");
+			}
+			let sourceOrigin: string;
+			try {
+				sourceOrigin = new URL(source.sourceUrl).origin;
+			} catch {
+				fail("Authoritative sitemap source URL is invalid.");
+				return;
+			}
+			if (!input.allowedOrigins.includes(sourceOrigin)) {
+				fail(
+					"Authoritative sitemap source origin must be allowed for the site.",
+				);
+			}
+			const lastSuccessAt = source.lastSuccessAt;
+			if (typeof lastSuccessAt !== "string" || lastSuccessAt.length === 0) {
+				fail("Authoritative sitemap source must have a successful refresh.");
+			}
+			const refreshedAt = Date.parse(lastSuccessAt ?? "");
+			if (!Number.isFinite(refreshedAt) || now - refreshedAt > graceMs) {
+				fail("Authoritative sitemap source is stale.");
+			}
+		}
+	}
+
 	public async updateSettings(
 		siteKey: string,
 		input: {
@@ -1153,6 +1236,7 @@ export class AdminManagementService {
 				emailEnabled?: boolean;
 				recipients?: NotificationRecipientInput[];
 			};
+			pageRegistry?: PageRegistrySettingsPatch;
 			requestId?: string;
 			actorUserId?: number;
 		},
@@ -1170,10 +1254,24 @@ export class AdminManagementService {
 		const nextEngagement = input.engagement
 			? mergeEngagementSettingsPatch(currentEngagement, input.engagement)
 			: undefined;
+		const currentPageRegistry = mergePageRegistrySettings(
+			existingSettings.pageRegistryJson,
+		);
+		const nextPageRegistry = input.pageRegistry
+			? mergePageRegistrySettingsPatch(currentPageRegistry, input.pageRegistry)
+			: undefined;
 		await this.validateNotificationRecipients({
 			siteId: registeredSite.id,
 			recipients: input.notifications?.recipients,
 		});
+		if (nextPageRegistry) {
+			await this.validateAuthoritativePageRegistrySettings({
+				siteId: registeredSite.id,
+				siteKey,
+				allowedOrigins: registeredSite.allowedOrigins,
+				settings: nextPageRegistry,
+			});
+		}
 
 		await this.repository.updateSiteSettings(registeredSite.id, {
 			commentsEnabled: input.comments?.enabled,
@@ -1216,6 +1314,9 @@ export class AdminManagementService {
 			engagementJson: nextEngagement
 				? serializeEngagementSettings(nextEngagement)
 				: undefined,
+			pageRegistryJson: nextPageRegistry
+				? serializePageRegistrySettings(nextPageRegistry)
+				: undefined,
 			emailNotificationsEnabled: input.notifications?.emailEnabled,
 		});
 		if (input.notifications?.recipients) {
@@ -1238,9 +1339,34 @@ export class AdminManagementService {
 				comments: input.comments,
 				pageFeedback: input.pageFeedback,
 				engagement: input.engagement,
+				pageRegistry: input.pageRegistry,
 				notifications: input.notifications,
 			},
 		});
+
+		if (nextPageRegistry?.mode === "authoritative") {
+			await new AdminTaskService(
+				this.repository.database,
+				this.siteRegistry,
+			).ensureAuthoritativePageSourceRefreshTask({
+				siteKey,
+				sourceIds: nextPageRegistry.authoritativeSourceIds,
+				actorUserId: input.actorUserId,
+				requestId: input.requestId,
+			});
+		} else if (
+			nextPageRegistry?.mode === "discovery" &&
+			currentPageRegistry.mode === "authoritative"
+		) {
+			await new AdminTaskService(
+				this.repository.database,
+				this.siteRegistry,
+			).releaseAuthoritativePageSourceRefreshTaskProtection({
+				siteKey,
+				actorUserId: input.actorUserId,
+				requestId: input.requestId,
+			});
+		}
 
 		return this.getSettings(siteKey);
 	}

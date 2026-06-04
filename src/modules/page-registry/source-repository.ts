@@ -136,7 +136,7 @@ export class PageSourceRepository {
 			.update(sitePageRegistrySources)
 			.set({ ...input.patch, updatedAt: new Date().toISOString() })
 			.where(eq(sitePageRegistrySources.id, input.sourceId));
-		return this.getSource(input.sourceId);
+		return this.getSourceById(input.sourceId);
 	}
 
 	public async deleteSource(sourceId: number) {
@@ -151,6 +151,11 @@ export class PageSourceRepository {
 	public async getSource(sourceId: number) {
 		const sources = await this.listEnabledSources({ sourceIds: [sourceId] });
 		return sources[0] ?? null;
+	}
+
+	public async getSourceById(sourceId: number) {
+		const rows = await this.listSources();
+		return rows.find((source) => source.id === sourceId) ?? null;
 	}
 
 	public async listEnabledSources(input: {

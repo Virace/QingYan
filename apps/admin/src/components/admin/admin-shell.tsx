@@ -38,7 +38,7 @@ import {
 	UsersPage,
 	ProfilePage,
 } from "./admin-pages";
-import { inputClass } from "./admin-ui";
+import { EmptyState, inputClass } from "./admin-ui";
 import { TasksPage } from "./tasks-page";
 
 export type AdminView =
@@ -257,6 +257,9 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			case "profile":
 				return <ProfilePage />;
 			case "settings":
+				if (!activeSiteKey) {
+					return <EmptyState text="请选择站点" />;
+				}
 				return <SiteSettingsPage siteKey={activeSiteKey} />;
 			case "system":
 				return <SystemSettingsPage siteKey={activeSiteKey} />;

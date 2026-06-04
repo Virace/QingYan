@@ -25,9 +25,18 @@ import {
 } from "./schedule-calculator";
 import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
 import {
+	isJsonEqual,
+	isRecord,
+	readPath,
+	setPath,
+	protectedOperationReason,
+	type ProtectedTaskOperation,
+} from "./protected-task-policy";
+import {
 	ScheduledTaskRepository,
 	type ScheduledTaskRecord,
 } from "./scheduled-task-repository";
+import { SystemManagedTaskService } from "./system-managed-task-service";
 import { TaskRunRepository } from "./task-run-repository";
 import type { TaskRunRecord } from "./types";
 import {
@@ -51,6 +60,7 @@ function toVisibilitySession(
 		isAdmin: session.isAdmin,
 		isInitialAdmin: session.isInitialAdmin,
 		siteIds: session.siteIds,
+		permissions: session.permissions,
 	};
 }
 
@@ -98,6 +108,7 @@ export class AdminTaskService {
 	private readonly taskRuns: TaskRunRepository;
 	private readonly channelConfigs: NotificationChannelConfigsRepository;
 	private readonly notificationRecipients: BackendUserNotificationRecipientsRepository;
+	private readonly systemManagedTasks: SystemManagedTaskService;
 
 	public constructor(
 		private readonly db: AppDatabase,
@@ -110,6 +121,7 @@ export class AdminTaskService {
 		this.channelConfigs = new NotificationChannelConfigsRepository(db);
 		this.notificationRecipients =
 			new BackendUserNotificationRecipientsRepository(db);
+		this.systemManagedTasks = new SystemManagedTaskService(db, siteRegistry);
 	}
 
 	public listDefinitions() {
@@ -191,6 +203,7 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		this.assertProtectedUpdateAllowed(task, input);
 		const merged = {
 			name: input.name ?? task.name,
 			description:
@@ -367,6 +380,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		await this.assertProtectedOperationAllowed(
+			task,
+			"delete",
+			session,
+			requestId,
+		);
 		const snapshot = await this.scheduledTasks.deleteWithSnapshot(id, {
 			deletedByUserId: session.user.id,
 			deleteReason: reason,
@@ -401,6 +420,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		await this.assertProtectedOperationAllowed(
+			task,
+			"disable",
+			session,
+			requestId,
+		);
 		const updated = await this.scheduledTasks.disable(task.id, {
 			reason,
 			updatedByUserId: session.user.id,
@@ -420,6 +445,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		await this.assertProtectedOperationAllowed(
+			task,
+			"transfer_owner",
+			session,
+			requestId,
+		);
 		await this.assertCanOwnTask(ownerUserId, task);
 		const updated = await this.scheduledTasks.update(task.id, {
 			ownerUserId,
@@ -451,6 +482,9 @@ export class AdminTaskService {
 			if (task.ownerUserId !== ownerUserId) {
 				continue;
 			}
+			if (task.systemKey && task.protection) {
+				continue;
+			}
 			const updated = await this.scheduledTasks.update(task.id, {
 				enabled: false,
 				disabledReason: reason,
@@ -470,6 +504,70 @@ export class AdminTaskService {
 			);
 		}
 		return { updatedTaskIds };
+	}
+
+	public async ensureAuthoritativePageSourceRefreshTask(input: {
+		siteKey: string;
+		sourceIds: number[];
+		session?: AuthenticatedAdminSession;
+		actorUserId?: number;
+		requestId?: string;
+		timeoutMs?: number;
+		maxBytes?: number;
+		maxAttempts?: number;
+		retryDelaySec?: number;
+	}) {
+		const ensured =
+			await this.systemManagedTasks.ensureAuthoritativePageSourceRefresh({
+				siteKey: input.siteKey,
+				sourceIds: input.sourceIds,
+				actorUserId: input.session?.user.id ?? input.actorUserId ?? null,
+				timeoutMs: input.timeoutMs,
+				maxBytes: input.maxBytes,
+				maxAttempts: input.maxAttempts,
+				retryDelaySec: input.retryDelaySec,
+			});
+		await this.writeAudit(
+			input.session,
+			`task.scheduled.system_${ensured.action}`,
+			ensured.task,
+			{
+				requestId: input.requestId,
+				systemKey: ensured.task.systemKey ?? undefined,
+				protectionKind: ensured.task.protection?.kind,
+				actorUserId: input.actorUserId,
+			},
+		);
+		return ensured;
+	}
+
+	public async releaseAuthoritativePageSourceRefreshTaskProtection(input: {
+		siteKey: string;
+		session?: AuthenticatedAdminSession;
+		actorUserId?: number;
+		requestId?: string;
+	}) {
+		const task =
+			await this.systemManagedTasks.releaseAuthoritativePageSourceRefreshProtection(
+				{
+					siteKey: input.siteKey,
+					actorUserId: input.session?.user.id ?? input.actorUserId ?? null,
+				},
+			);
+		if (task) {
+			await this.writeAudit(
+				input.session,
+				"task.scheduled.system_protection_released",
+				task,
+				{
+					requestId: input.requestId,
+					systemKey: task.systemKey ?? undefined,
+					protectionKind: "authoritative_page_source_refresh",
+					actorUserId: input.actorUserId,
+				},
+			);
+		}
+		return task;
 	}
 
 	public async listRuns(session: AuthenticatedAdminSession) {
@@ -880,6 +978,165 @@ export class AdminTaskService {
 		return task;
 	}
 
+	private async assertProtectedOperationAllowed(
+		task: ScheduledTaskRecord,
+		operation: ProtectedTaskOperation,
+		session: AuthenticatedAdminSession,
+		requestId?: string,
+	) {
+		const policy = task.protection;
+		if (!policy) {
+			return;
+		}
+		const blocked =
+			(operation === "delete" && policy.lockedDelete) ||
+			(operation === "disable" && policy.lockedDisable) ||
+			(operation === "transfer_owner" && policy.lockedOwnerTransfer);
+		if (!blocked) {
+			return;
+		}
+		await this.writeAudit(
+			session,
+			"task.scheduled.protected_operation_denied",
+			task,
+			{
+				requestId,
+				systemKey: task.systemKey ?? undefined,
+				protectionKind: policy.kind,
+				deniedOperation: operation,
+			},
+		);
+		throw new AppError(
+			operation === "transfer_owner" ? 409 : 409,
+			operation === "transfer_owner"
+				? "SYSTEM_TASK_OWNER_IMMUTABLE"
+				: "SCHEDULED_TASK_PROTECTED",
+			protectedOperationReason(policy, operation),
+			{
+				systemKey: task.systemKey,
+				protectionKind: policy.kind,
+				operation,
+			},
+		);
+	}
+
+	private assertProtectedUpdateAllowed(
+		task: ScheduledTaskRecord,
+		input: ScheduledTaskWriteInput,
+	) {
+		const policy = task.protection;
+		if (!policy) {
+			return;
+		}
+		const fields: Array<{ path: string; message: string }> = [];
+		const siteKey = task.siteId ? this.siteKeyForId(task.siteId) : null;
+		if (
+			policy.lockedType &&
+			input.type !== undefined &&
+			input.type !== task.type
+		) {
+			fields.push({ path: "type", message: "系统托管任务不能修改任务类型。" });
+		}
+		if (
+			policy.lockedSite &&
+			input.siteKey !== undefined &&
+			input.siteKey !== siteKey
+		) {
+			fields.push({
+				path: "siteKey",
+				message: "系统托管任务不能修改所属站点。",
+			});
+		}
+		if (
+			policy.lockedSite &&
+			input.scopeKind !== undefined &&
+			input.scopeKind !== task.scopeKind
+		) {
+			fields.push({
+				path: "scopeKind",
+				message: "系统托管任务不能修改任务范围。",
+			});
+		}
+		if (
+			policy.lockedSite &&
+			input.scope !== undefined &&
+			!isJsonEqual(input.scope, task.scope)
+		) {
+			fields.push({ path: "scope", message: "系统托管任务不能修改任务范围。" });
+		}
+		if (policy.lockedDisable && input.enabled === false && task.enabled) {
+			fields.push({ path: "enabled", message: "系统托管任务不能停用。" });
+		}
+		if (input.payload !== undefined) {
+			if (!isRecord(input.payload) || !isRecord(task.payload)) {
+				fields.push({ path: "payload", message: "任务 payload 格式无效。" });
+			} else {
+				for (const path of policy.lockedPayloadPaths ?? []) {
+					if (
+						!isJsonEqual(
+							readPath(input.payload, path),
+							readPath(task.payload, path),
+						)
+					) {
+						fields.push({
+							path: `payload.${path}`,
+							message: "系统托管任务的受保护 payload 字段不能修改。",
+						});
+					}
+				}
+				let allowedPayload = structuredClone(task.payload);
+				for (const path of policy.editablePayloadPaths ?? []) {
+					const value = readPath(input.payload, path);
+					if (value !== undefined) {
+						allowedPayload = setPath(allowedPayload, path, value);
+					}
+				}
+				if (!isJsonEqual(input.payload, allowedPayload)) {
+					fields.push({
+						path: "payload",
+						message: "系统托管任务只能修改白名单 payload 字段。",
+					});
+				}
+			}
+		}
+		const editableFields = new Set(policy.editableFields ?? []);
+		const guardedFields: Array<keyof ScheduledTaskWriteInput> = [
+			"name",
+			"description",
+			"scheduleKind",
+			"schedulePreset",
+			"cronExpression",
+			"timezone",
+			"trigger",
+			"policy",
+			"retentionCount",
+		];
+		for (const field of guardedFields) {
+			if (
+				input[field] !== undefined &&
+				!editableFields.has(field) &&
+				!isJsonEqual(input[field], task[field as keyof ScheduledTaskRecord])
+			) {
+				fields.push({
+					path: field,
+					message: "系统托管任务的该字段不允许修改。",
+				});
+			}
+		}
+		if (fields.length > 0) {
+			throw new AppError(
+				409,
+				"SCHEDULED_TASK_PROTECTED_FIELD",
+				protectedOperationReason(policy, "update"),
+				{
+					fields,
+					systemKey: task.systemKey,
+					protectionKind: policy.kind,
+				},
+			);
+		}
+	}
+
 	private async getTaskForRun(
 		id: string,
 		session: AuthenticatedAdminSession,
@@ -964,13 +1221,20 @@ export class AdminTaskService {
 	}
 
 	private async writeAudit(
-		session: AuthenticatedAdminSession,
+		session: AuthenticatedAdminSession | undefined,
 		action: string,
-		task: Pick<ScheduledTaskRecord, "id" | "siteId" | "type" | "name">,
+		task: Pick<
+			ScheduledTaskRecord,
+			"id" | "siteId" | "type" | "name" | "systemKey" | "protection"
+		>,
 		metadata: {
 			requestId?: string;
 			runId?: string;
 			runStatus?: TaskRunRecord["status"];
+			systemKey?: string;
+			protectionKind?: string;
+			deniedOperation?: string;
+			actorUserId?: number;
 		} = {},
 	) {
 		const siteKey =
@@ -979,8 +1243,12 @@ export class AdminTaskService {
 				: (this.siteKeyForId(task.siteId) ?? undefined);
 		await this.db.insert(auditLogs).values({
 			siteId: task.siteId,
-			actorType: "admin_user",
-			actorId: String(session.user.id),
+			actorType: session || metadata.actorUserId ? "admin_user" : "system",
+			actorId: session
+				? String(session.user.id)
+				: metadata.actorUserId
+					? String(metadata.actorUserId)
+					: null,
 			action,
 			targetType: "scheduled_task",
 			targetId: task.id,
@@ -988,6 +1256,9 @@ export class AdminTaskService {
 				taskName: task.name,
 				taskType: task.type,
 				siteKey,
+				systemKey: metadata.systemKey ?? task.systemKey,
+				protectionKind: metadata.protectionKind ?? task.protection?.kind,
+				deniedOperation: metadata.deniedOperation,
 				requestId: metadata.requestId,
 				runId: metadata.runId,
 				runStatus: metadata.runStatus,

@@ -208,6 +208,10 @@ export function TaskEditorDialog({
 		channelConfigIds: [],
 		recipientIds: [],
 	};
+	const isProtected = Boolean(task?.protection);
+	const lockedType = Boolean(task?.protection?.lockedType);
+	const lockedSite = Boolean(task?.protection?.lockedSite);
+	const lockedDisable = Boolean(task?.protection?.lockedDisable);
 
 	const updateDraft = (patch: Partial<TaskDraft>) => {
 		setDraft((current) => ({ ...current, ...patch }));
@@ -259,8 +263,10 @@ export function TaskEditorDialog({
 					{mode === "create" ? "添加计划任务" : "编辑计划任务"}
 				</Dialog.Title>
 				<Dialog.Description size="2">
-					选择内置任务类型，填写专属参数和调度策略。原始 JSON
-					不作为主要编辑入口。
+					{isProtected
+						? (task?.protectedReason ??
+							"该任务由系统托管，只有白名单字段可编辑。")
+						: "选择内置任务类型，填写专属参数和调度策略。原始 JSON 不作为主要编辑入口。"}
 				</Dialog.Description>
 				<form
 					className="mt-4 grid gap-4"
@@ -275,7 +281,7 @@ export function TaskEditorDialog({
 							<select
 								className={inputClass}
 								value={draft.type}
-								disabled={mode === "edit"}
+								disabled={mode === "edit" || lockedType}
 								onChange={(event) => changeType(event.target.value)}
 							>
 								{definitions.map((definition) => (
@@ -304,6 +310,7 @@ export function TaskEditorDialog({
 							<select
 								className={inputClass}
 								value={draft.scopeKind}
+								disabled={lockedSite}
 								onChange={(event) =>
 									updateDraft({
 										scopeKind: event.target.value,
@@ -329,6 +336,7 @@ export function TaskEditorDialog({
 							<select
 								className={inputClass}
 								value={draft.enabled ? "enabled" : "disabled"}
+								disabled={draft.enabled && lockedDisable}
 								onChange={(event) =>
 									updateDraft({ enabled: event.target.value === "enabled" })
 								}

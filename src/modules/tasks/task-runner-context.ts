@@ -1,8 +1,5 @@
 import type { AppDatabase } from "../../db/client";
-import type {
-	CommentIpRefreshInput,
-	CommentIpMaintenanceService,
-} from "../comments/metadata/comment-ip-maintenance-service";
+import type { CommentIpRefreshInput } from "../comments/metadata/comment-ip-maintenance-service";
 import type { IpVersion } from "../comments/metadata/ip-region-updater";
 import type { PageSourceRefreshTrigger } from "../page-registry/source-refresh-service";
 import type { PageMetadataRefreshScope } from "../page-registry/title-refresh-service";
@@ -48,14 +45,17 @@ export interface TaskRunnerContext {
 
 export interface TaskRunnerServices {
 	pageSourceRefresh?: {
-		executeRefresh(input: {
-			siteKey: string;
-			sourceIds?: number[];
-			mode?: "append" | "replace";
-			trigger: PageSourceRefreshTrigger;
-			timeoutMs?: number;
-			maxBytes?: number;
-		}, context: TaskRunnerContext): Promise<unknown>;
+		executeRefresh(
+			input: {
+				siteKey: string;
+				sourceIds?: number[];
+				mode?: "append" | "replace";
+				trigger: PageSourceRefreshTrigger;
+				timeoutMs?: number;
+				maxBytes?: number;
+			},
+			context: TaskRunnerContext,
+		): Promise<unknown>;
 	};
 	pageMetadataRefresh?: {
 		executeRefresh(
@@ -68,10 +68,13 @@ export interface TaskRunnerServices {
 			input: CommentIpRefreshInput,
 			context: TaskRunnerContext,
 		): Promise<unknown>;
-		executeIpRegionUpdate(input: {
-			ipVersions: IpVersion[];
-			timeoutMs?: number;
-		}, context: TaskRunnerContext): Promise<unknown>;
+		executeIpRegionUpdate(
+			input: {
+				ipVersions: IpVersion[];
+				timeoutMs?: number;
+			},
+			context: TaskRunnerContext,
+		): Promise<unknown>;
 	};
 	backup?: BackupTaskService;
 	siteSettingsAction?: SiteSettingsActionTaskService;
