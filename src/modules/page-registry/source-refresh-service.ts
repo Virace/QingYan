@@ -7,7 +7,11 @@ import {
 	getPageSourceEntryRejectionReason,
 	normalizePageSourceEntry,
 } from "./source-normalizer";
-import { parsePageSourceXml } from "./source-parser";
+import {
+	parsePageSourceXml,
+	type PageSourceEntry,
+	type ParsedPageSource,
+} from "./source-parser";
 import {
 	PageSourceRepository,
 	type PageRegistrySourceRecord,
@@ -68,6 +72,38 @@ function hashText(text: string): string {
 
 function addSeconds(date: Date, seconds: number): string {
 	return new Date(date.getTime() + seconds * 1000).toISOString();
+}
+
+const MAX_SITEMAP_INDEX_DEPTH = 3;
+
+function normalizeAllowedOrigin(value: string): string | null {
+	try {
+		const parsed = new URL(value);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return null;
+		}
+		return parsed.origin;
+	} catch {
+		return null;
+	}
+}
+
+function assertAllowedSitemapUrl(url: string, allowedOrigins: string[]) {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new Error(`Invalid sitemap URL: ${url}`);
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw new Error(`Unsupported sitemap URL protocol: ${url}`);
+	}
+	const allowed = allowedOrigins
+		.map((origin) => normalizeAllowedOrigin(origin))
+		.some((origin) => origin === parsed.origin);
+	if (!allowed) {
+		throw new Error(`Sitemap URL is outside allowed origins: ${url}`);
+	}
 }
 
 export class PageSourceRefreshService {
@@ -171,7 +207,12 @@ export class PageSourceRefreshService {
 			timeoutMs: scope.timeoutMs,
 			maxBytes: scope.maxBytes,
 		});
-		const parsed = parsePageSourceXml(xml, source.sourceType);
+		const parsed = await this.collectParsedEntries({
+			source,
+			scope,
+			xml,
+			allowedOrigins,
+		});
 
 		for (const entry of parsed.entries) {
 			counters.processed += 1;
@@ -246,7 +287,7 @@ export class PageSourceRefreshService {
 		await this.repository.markSourceSuccess({
 			sourceId: source.id,
 			nowIso,
-			hash: hashText(xml),
+			hash: hashText(parsed.hashText),
 			nextRefreshAt: source.refreshIntervalSec
 				? addSeconds(now, source.refreshIntervalSec)
 				: null,
@@ -263,5 +304,71 @@ export class PageSourceRefreshService {
 			approvedPending,
 			errors,
 		};
+	}
+
+	private async collectParsedEntries(input: {
+		source: PageRegistrySourceRecord;
+		scope: PageSourceRefreshJobScope;
+		xml: string;
+		allowedOrigins: string[];
+	}): Promise<{ entries: PageSourceEntry[]; hashText: string }> {
+		const rootParsed = parsePageSourceXml(input.xml, input.source.sourceType);
+		if (
+			input.source.sourceType !== "sitemap" ||
+			rootParsed.sitemapUrls.length === 0
+		) {
+			return { entries: rootParsed.entries, hashText: input.xml };
+		}
+
+		const visitedSitemapUrls = new Set([input.source.sourceUrl]);
+		const entries: PageSourceEntry[] = [...rootParsed.entries];
+		const hashParts = [input.xml];
+		await this.collectSitemapIndexEntries({
+			sitemapUrls: rootParsed.sitemapUrls,
+			scope: input.scope,
+			allowedOrigins: input.allowedOrigins,
+			visitedSitemapUrls,
+			entries,
+			hashParts,
+			depth: 1,
+		});
+
+		return { entries, hashText: hashParts.join("\n") };
+	}
+
+	private async collectSitemapIndexEntries(input: {
+		sitemapUrls: string[];
+		scope: PageSourceRefreshJobScope;
+		allowedOrigins: string[];
+		visitedSitemapUrls: Set<string>;
+		entries: PageSourceEntry[];
+		hashParts: string[];
+		depth: number;
+	}) {
+		if (input.depth > MAX_SITEMAP_INDEX_DEPTH) {
+			throw new Error("Sitemap index nesting is too deep.");
+		}
+
+		for (const sitemapUrl of input.sitemapUrls) {
+			if (input.visitedSitemapUrls.has(sitemapUrl)) {
+				continue;
+			}
+			assertAllowedSitemapUrl(sitemapUrl, input.allowedOrigins);
+			input.visitedSitemapUrls.add(sitemapUrl);
+			const xml = await this.options.fetchText(sitemapUrl, {
+				timeoutMs: input.scope.timeoutMs,
+				maxBytes: input.scope.maxBytes,
+			});
+			input.hashParts.push(xml);
+			const parsed: ParsedPageSource = parsePageSourceXml(xml, "sitemap");
+			input.entries.push(...parsed.entries);
+			if (parsed.sitemapUrls.length > 0) {
+				await this.collectSitemapIndexEntries({
+					...input,
+					sitemapUrls: parsed.sitemapUrls,
+					depth: input.depth + 1,
+				});
+			}
+		}
 	}
 }

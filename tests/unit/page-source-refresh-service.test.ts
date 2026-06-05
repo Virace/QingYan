@@ -160,6 +160,95 @@ describe("PageSourceRefreshService", () => {
 		});
 	});
 
+	it("creates active registry pages from sitemap index child sitemaps", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const source = await createSource(fixture, {
+			sourceUrl: "https://example.com/sitemap-index.xml",
+		});
+		const fetchCalls: Array<{
+			url: string;
+			options: { timeoutMs?: number; maxBytes?: number };
+		}> = [];
+		const { service } = createService(fixture, async (url, options) => {
+			fetchCalls.push({ url, options });
+			if (url === "https://example.com/sitemap-index.xml") {
+				return [
+					"<sitemapindex>",
+					"<sitemap><loc>https://example.com/post-sitemap.xml</loc></sitemap>",
+					"<sitemap><loc>https://example.com/page-sitemap.xml</loc></sitemap>",
+					"</sitemapindex>",
+				].join("");
+			}
+			if (url === "https://example.com/post-sitemap.xml") {
+				return "<urlset><url><loc>https://example.com/posts/a/</loc></url></urlset>";
+			}
+			if (url === "https://example.com/page-sitemap.xml") {
+				return "<urlset><url><loc>https://example.com/about/</loc></url></urlset>";
+			}
+			throw new Error(`Unexpected fetch URL: ${url}`);
+		});
+
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sourceIds: [source.id],
+				trigger: "manual",
+				timeoutMs: 12_000,
+				maxBytes: 1_048_576,
+			},
+			createTaskContext(),
+		);
+
+		const pages = await fixture.db.select().from(sitePageRegistry);
+
+		expect(pages).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					pageKey: "/posts/a/",
+					pageUrl: "/posts/a/",
+					status: "active",
+				}),
+				expect.objectContaining({
+					pageKey: "/about/",
+					pageUrl: "/about/",
+					status: "active",
+				}),
+			]),
+		);
+		expect(fetchCalls).toEqual([
+			{
+				url: "https://example.com/sitemap-index.xml",
+				options: {
+					timeoutMs: 12_000,
+					maxBytes: 1_048_576,
+				},
+			},
+			{
+				url: "https://example.com/post-sitemap.xml",
+				options: {
+					timeoutMs: 12_000,
+					maxBytes: 1_048_576,
+				},
+			},
+			{
+				url: "https://example.com/page-sitemap.xml",
+				options: {
+					timeoutMs: 12_000,
+					maxBytes: 1_048_576,
+				},
+			},
+		]);
+		expect(result).toMatchObject({
+			processed: 2,
+			created: 2,
+			updated: 0,
+			stale: 0,
+			skipped: 0,
+			failed: 0,
+		});
+	});
+
 	it("stores RSS item titles as registry title hints", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
