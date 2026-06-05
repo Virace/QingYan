@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useState,
+	type ComponentType,
+	type Dispatch,
+	type SetStateAction,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BadgeCheckIcon,
@@ -19,27 +28,94 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 
-import { fetchAdminMe, logoutAdmin } from "@/api/session";
+import {
+	fetchAdminMe,
+	logoutAdmin,
+	type AdminSiteSummary,
+} from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
-import {
-	BlacklistPage,
-	CommentsPage,
-	DataPage,
-	OverviewPage,
-	OpsPage,
-	PagesPage,
-	SiteSettingsPage,
-	SitesPage,
-	SystemSettingsPage,
-	CommentersPage,
-	VisitorsPage,
-	UsersPage,
-	ProfilePage,
-} from "./admin-pages";
 import { EmptyState, inputClass } from "../shared/admin-ui";
-import { TasksPage } from "../tasks/tasks-page";
+
+function lazyAdminPage<TProps extends object, TExportName extends string>(
+	loader: () => Promise<Record<TExportName, ComponentType<TProps>>>,
+	exportName: TExportName,
+) {
+	return lazy(async () => {
+		const module = await loader();
+		return { default: module[exportName] };
+	});
+}
+
+type OpenCommentsInput = { pageKey?: string; search?: string };
+type OpenComments = (input: OpenCommentsInput) => void;
+type OpenSite = (siteKey: string, nextView: AdminView) => void;
+
+type CommentsPageProps = {
+	siteKey?: string;
+	search: string;
+	setSearch: Dispatch<SetStateAction<string>>;
+	pageKey: string;
+	setPageKey: Dispatch<SetStateAction<string>>;
+};
+
+const OverviewPage = lazyAdminPage<object, "OverviewPage">(
+	() => import("../overview/overview-page"),
+	"OverviewPage",
+);
+const CommentsPage = lazyAdminPage<CommentsPageProps, "CommentsPage">(
+	() => import("../content/comments-page"),
+	"CommentsPage",
+);
+const PagesPage = lazyAdminPage<
+	{ siteKey?: string; openComments: OpenComments },
+	"PagesPage"
+>(() => import("../content/pages-page"), "PagesPage");
+const CommentersPage = lazyAdminPage<
+	{ siteKey?: string; openComments: OpenComments },
+	"CommentersPage"
+>(() => import("../content/commenters-page"), "CommentersPage");
+const VisitorsPage = lazyAdminPage<
+	{ siteKey?: string; openComments: OpenComments },
+	"VisitorsPage"
+>(() => import("../content/visitors-page"), "VisitorsPage");
+const BlacklistPage = lazyAdminPage<{ siteKey?: string }, "BlacklistPage">(
+	() => import("../settings/blacklist-page"),
+	"BlacklistPage",
+);
+const SitesPage = lazyAdminPage<{ openSite: OpenSite }, "SitesPage">(
+	() => import("../content/sites-page"),
+	"SitesPage",
+);
+const DataPage = lazyAdminPage<{ site: AdminSiteSummary }, "DataPage">(
+	() => import("../data/data-page"),
+	"DataPage",
+);
+const TasksPage = lazyAdminPage<{ siteKey: string }, "TasksPage">(
+	() => import("../tasks/tasks-page"),
+	"TasksPage",
+);
+const OpsPage = lazyAdminPage<object, "OpsPage">(
+	() => import("../ops/ops-page"),
+	"OpsPage",
+);
+const UsersPage = lazyAdminPage<{ isInitialAdmin: boolean }, "UsersPage">(
+	() => import("../users/users-page"),
+	"UsersPage",
+);
+const ProfilePage = lazyAdminPage<object, "ProfilePage">(
+	() => import("../profile/profile-page"),
+	"ProfilePage",
+);
+const SiteSettingsPage = lazyAdminPage<
+	{ siteKey?: string },
+	"SiteSettingsPage"
+>(() => import("../settings/site-settings-page"), "SiteSettingsPage");
+const SystemSettingsPage = lazyAdminPage<
+	{ siteKey: string },
+	"SystemSettingsPage"
+>(() => import("../settings/system-settings-page"), "SystemSettingsPage");
 
 export type AdminView =
 	| "overview"
@@ -365,7 +441,9 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 					data-testid="admin-content"
 					className="mx-auto flex w-full max-w-screen-2xl flex-1 flex-col gap-4 p-4 md:p-6"
 				>
-					{renderView()}
+					<Suspense fallback={<EmptyState text="正在载入" />}>
+						{renderView()}
+					</Suspense>
 				</section>
 			</main>
 		</div>
