@@ -10,10 +10,10 @@ import { toast, Toaster } from "sonner";
 
 import { adminUiErrorMessage, ApiError, logAdminApiError } from "@/api/client";
 import { fetchAdminMe } from "@/api/session";
-import { AdminShell } from "@/components/admin/admin-shell";
-import { AdminConfirmDialogProvider } from "@/components/admin/confirm-dialog";
-import { LoginPage } from "@/components/admin/login-page";
-import { PasswordChangePage } from "@/components/admin/password-change-page";
+import { AdminShell } from "@/components/admin/shell/admin-shell";
+import { AdminConfirmDialogProvider } from "@/components/admin/shared/confirm-dialog";
+import { LoginPage } from "@/components/admin/auth/login-page";
+import { PasswordChangePage } from "@/components/admin/auth/password-change-page";
 import {
 	Card,
 	CardDescription,
