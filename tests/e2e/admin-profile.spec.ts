@@ -119,8 +119,56 @@ test("profile password form sends confirm password without clearing the active s
 		});
 	});
 	await page.getByRole("tab", { name: "资料" }).click();
+	await page.getByLabel("昵称").fill("Administrator CSRF");
 	await page.getByRole("button", { name: "保存资料" }).click();
 	await expect.poll(() => profilePatchCsrfHeader).toBeTruthy();
+});
+
+test("profile save reports unchanged and successful states", async ({
+	page,
+}) => {
+	await openProfile(page);
+
+	let profilePatchCount = 0;
+	await page.route("**/qingyan/api/admin/profile", async (route) => {
+		if (route.request().method() !== "PATCH") {
+			await route.fallback();
+			return;
+		}
+		profilePatchCount += 1;
+		await route.fulfill({
+			status: 200,
+			contentType: "application/json",
+			body: JSON.stringify({
+				user: {
+					id: 1,
+					username: "admin",
+					email: "admin@example.com",
+					displayName: "Administrator Saved",
+					website: "https://admin.example.test",
+					avatarUrl: "",
+					groupKey: "admin",
+					groupName: "系统管理员",
+					isInitialAdmin: true,
+					passwordChangeRequired: false,
+				},
+				sites: [],
+				session: {
+					expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+				},
+			}),
+		});
+	});
+
+	await page.getByRole("button", { name: "保存资料" }).click();
+	await expect(page.getByText("资料无变化")).toBeVisible();
+	await expect.poll(() => profilePatchCount).toBe(0);
+
+	await page.getByLabel("昵称").fill("Administrator Saved");
+	await page.getByLabel("网站").fill("https://admin.example.test");
+	await page.getByRole("button", { name: "保存资料" }).click();
+	await expect(page.getByText("个人资料已保存")).toBeVisible();
+	await expect.poll(() => profilePatchCount).toBe(1);
 });
 
 test("profile email form requires current password and renders verification state", async ({

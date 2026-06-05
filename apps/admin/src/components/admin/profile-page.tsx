@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "@radix-ui/themes";
 import { KeyRoundIcon, MailIcon, SaveIcon, UserRoundIcon } from "lucide-react";
+import { toast } from "sonner";
 
+import { adminUiErrorMessage } from "@/api/client";
 import {
 	confirmAdminProfilePasswordChange,
 	confirmAdminProfileEmailChange,
 	fetchAdminProfile,
 	requestAdminProfileEmailChange,
+	type AdminProfilePayload,
 	updateAdminProfile,
 	updateAdminProfilePassword,
 } from "@/api/profile";
@@ -31,6 +34,21 @@ function formatDateTime(value?: string) {
 		return "未知";
 	}
 	return new Date(value).toLocaleString();
+}
+
+function isSameProfilePayload(
+	profile: AdminProfilePayload,
+	input: {
+		displayName: string;
+		website: string;
+		avatarUrl: string;
+	},
+) {
+	return (
+		profile.user.displayName === input.displayName &&
+		(profile.user.website ?? "") === input.website &&
+		(profile.user.avatarUrl ?? "") === input.avatarUrl
+	);
 }
 
 export function ProfilePage() {
@@ -69,42 +87,48 @@ export function ProfilePage() {
 
 	const updateProfileMutation = useMutation({
 		mutationFn: updateAdminProfile,
+		meta: { suppressGlobalToast: true },
 		onSuccess(payload) {
 			setProfileMessage("");
 			setDisplayName(payload.user.displayName);
 			setWebsite(payload.user.website ?? "");
 			setAvatarUrl(payload.user.avatarUrl ?? "");
+			toast.success("个人资料已保存");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 		onError(error) {
-			setProfileMessage(
-				error instanceof Error ? error.message : "个人资料保存失败。",
-			);
+			const message = adminUiErrorMessage(error, "个人资料保存失败。");
+			setProfileMessage(message);
+			toast.error(message);
 		},
 	});
 	const updatePasswordMutation = useMutation({
 		mutationFn: updateAdminProfilePassword,
+		meta: { suppressGlobalToast: true },
 		onSuccess(payload) {
 			setPasswordMessage("");
 			if ("status" in payload) {
 				setPasswordVerificationCode("");
 				setPendingPasswordExpiresAt(payload.expiresAt);
+				toast.success("密码验证码已发送");
 				return;
 			}
 			setCurrentPassword("");
 			setNextPassword("");
 			setConfirmPassword("");
 			setPendingPasswordExpiresAt("");
+			toast.success("密码已修改");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 		onError(error) {
-			setPasswordMessage(
-				error instanceof Error ? error.message : "密码修改失败。",
-			);
+			const message = adminUiErrorMessage(error, "密码修改失败。");
+			setPasswordMessage(message);
+			toast.error(message);
 		},
 	});
 	const confirmPasswordMutation = useMutation({
 		mutationFn: confirmAdminProfilePasswordChange,
+		meta: { suppressGlobalToast: true },
 		onSuccess() {
 			setPasswordMessage("");
 			setCurrentPassword("");
@@ -112,48 +136,54 @@ export function ProfilePage() {
 			setConfirmPassword("");
 			setPasswordVerificationCode("");
 			setPendingPasswordExpiresAt("");
+			toast.success("密码变更已确认");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 			void queryClient.invalidateQueries({ queryKey: ["admin", "profile"] });
 		},
 		onError(error) {
-			setPasswordMessage(
-				error instanceof Error ? error.message : "密码确认失败。",
-			);
+			const message = adminUiErrorMessage(error, "密码确认失败。");
+			setPasswordMessage(message);
+			toast.error(message);
 		},
 	});
 	const emailChangeMutation = useMutation({
 		mutationFn: requestAdminProfileEmailChange,
+		meta: { suppressGlobalToast: true },
 		onSuccess(payload) {
 			setEmailMessage("");
 			setEmailPassword("");
 			if (payload.status === "pending_verification") {
 				setVerificationCode("");
 				setPendingEmailExpiresAt(payload.expiresAt);
+				toast.success("邮箱验证码已发送");
 				return;
 			}
 			setPendingEmailExpiresAt("");
+			toast.success("邮箱已更新");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 		},
 		onError(error) {
-			setEmailMessage(
-				error instanceof Error ? error.message : "邮箱修改失败。",
-			);
+			const message = adminUiErrorMessage(error, "邮箱修改失败。");
+			setEmailMessage(message);
+			toast.error(message);
 		},
 	});
 	const confirmEmailMutation = useMutation({
 		mutationFn: confirmAdminProfileEmailChange,
+		meta: { suppressGlobalToast: true },
 		onSuccess(payload) {
 			setEmailMessage("");
 			setVerificationCode("");
 			setPendingEmailExpiresAt("");
 			setEmail(payload.user.email);
+			toast.success("邮箱变更已确认");
 			void queryClient.invalidateQueries({ queryKey: ["admin"] });
 			void queryClient.invalidateQueries({ queryKey: ["admin", "profile"] });
 		},
 		onError(error) {
-			setEmailMessage(
-				error instanceof Error ? error.message : "邮箱确认失败。",
-			);
+			const message = adminUiErrorMessage(error, "邮箱确认失败。");
+			setEmailMessage(message);
+			toast.error(message);
 		},
 	});
 
@@ -188,11 +218,16 @@ export function ProfilePage() {
 								className="grid gap-4"
 								onSubmit={(event) => {
 									event.preventDefault();
-									updateProfileMutation.mutate({
+									const payload = {
 										displayName: displayName.trim(),
 										website: website.trim(),
 										avatarUrl: avatarUrl.trim(),
-									});
+									};
+									if (isSameProfilePayload(profile, payload)) {
+										toast.info("资料无变化");
+										return;
+									}
+									updateProfileMutation.mutate(payload);
 								}}
 							>
 								{profileMessage ? (

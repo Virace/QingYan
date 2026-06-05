@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Dialog, Tabs } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import {
 	createBlacklist,
@@ -30,7 +31,7 @@ import {
 	type SiteNotificationRecipient,
 	updateNotificationTemplate,
 } from "@/api/admin";
-import { ApiError } from "@/api/client";
+import { adminUiErrorMessage } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -174,6 +175,10 @@ function buildSystemSettingsSectionPayload(
 		case "anti-spam":
 			return sanitized.antiSpam;
 	}
+}
+
+function isSameSettingsPayload(current: unknown, next: unknown) {
+	return JSON.stringify(current) === JSON.stringify(next);
 }
 
 const siteSectionSaveLabels: Record<SiteSettingsTab, string> = {
@@ -1027,8 +1032,8 @@ function NotificationTemplatePreview({
 		let error: string | null = null;
 		try {
 			formatted = JSON.stringify(JSON.parse(preview.body), null, 2);
-		} catch (caught) {
-			error = caught instanceof Error ? caught.message : String(caught);
+		} catch {
+			error = "内容不是合法 JSON。";
 		}
 		return (
 			<div className="grid gap-2 rounded-md border p-3 text-sm">
@@ -1755,12 +1760,17 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 				input.section,
 				input.payload,
 			),
+		meta: { suppressGlobalToast: true },
 		onSuccess: (settings) => {
 			setDraft(settings);
 			queryClient.setQueryData(
 				["admin", "settings", resolvedSiteKey],
 				settings,
 			);
+			toast.success("站点设置已保存");
+		},
+		onError: (error) => {
+			toast.error(adminUiErrorMessage(error, "站点设置保存失败。"));
 		},
 	});
 
@@ -1782,11 +1792,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			return <EmptyState text="请选择站点" />;
 		}
 		if (query.isError) {
-			const error = query.error;
-			const message =
-				error instanceof ApiError
-					? `${error.message}${error.code ? ` (${error.code})` : ""}`
-					: "站点设置加载失败。";
+			const message = adminUiErrorMessage(query.error, "站点设置加载失败。");
 			return <EmptyState text={message} />;
 		}
 		return <EmptyState text="加载中" />;
@@ -1875,6 +1881,14 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		setRecipientDialog(null);
 	};
 	const saveSiteSettingsSection = async () => {
+		const nextPayload = buildSiteSettingsSectionPayload(siteTab, draft);
+		const currentPayload = query.data
+			? buildSiteSettingsSectionPayload(siteTab, query.data)
+			: null;
+		if (currentPayload && isSameSettingsPayload(currentPayload, nextPayload)) {
+			toast.info("配置无变化");
+			return;
+		}
 		if (
 			siteTab === "pageRegistry" &&
 			query.data?.pageRegistry.mode !== "authoritative" &&
@@ -1892,7 +1906,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		}
 		mutation.mutate({
 			section: siteTab,
-			payload: buildSiteSettingsSectionPayload(siteTab, draft),
+			payload: nextPayload,
 		});
 	};
 
@@ -3032,10 +3046,15 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 	const mutation = useMutation({
 		mutationFn: (input: { section: SystemSettingsTab; payload: unknown }) =>
 			patchAdminSystemSettingsSection(input.section, input.payload),
+		meta: { suppressGlobalToast: true },
 		onSuccess: (settings) => {
 			setDraft(settings);
 			setSavedMailSettings(settings.mail);
 			queryClient.setQueryData(["admin", "system-settings"], settings);
+			toast.success("系统设置已保存");
+		},
+		onError: (error) => {
+			toast.error(adminUiErrorMessage(error, "系统设置保存失败。"));
 		},
 	});
 	const channelTestMutation = useMutation({
@@ -3157,6 +3176,20 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 					className="grid gap-4 md:grid-cols-2"
 					onSubmit={async (event) => {
 						event.preventDefault();
+						const nextPayload = buildSystemSettingsSectionPayload(
+							systemTab,
+							draft,
+						);
+						const currentPayload = query.data
+							? buildSystemSettingsSectionPayload(systemTab, query.data)
+							: null;
+						if (
+							currentPayload &&
+							isSameSettingsPayload(currentPayload, nextPayload)
+						) {
+							toast.info("配置无变化");
+							return;
+						}
 						if (draft.admin.deletion.retentionDays === 0) {
 							const confirmed = await confirm({
 								title: "立即永久删除",
@@ -3171,7 +3204,7 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 						}
 						mutation.mutate({
 							section: systemTab,
-							payload: buildSystemSettingsSectionPayload(systemTab, draft),
+							payload: nextPayload,
 						});
 					}}
 				>

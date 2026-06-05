@@ -1,4 +1,8 @@
-import { ApiError, type ApiFieldError } from "@/api/client";
+import {
+	adminUiErrorMessage,
+	ApiError,
+	type ApiFieldError,
+} from "@/api/client";
 
 export type SettingsFieldErrors = Record<string, ApiFieldError[]>;
 
@@ -27,7 +31,7 @@ export function buildSettingsErrorModel(
 	}
 	if (error instanceof ApiError) {
 		return {
-			message: error.message || fallback,
+			message: adminUiErrorMessage(error, fallback),
 			requestId: error.requestId,
 			code: error.code,
 			fields: error.fields,
@@ -37,7 +41,7 @@ export function buildSettingsErrorModel(
 	}
 	if (error instanceof Error) {
 		return {
-			message: error.message || fallback,
+			message: adminUiErrorMessage(error, fallback),
 			fields: [],
 			fieldsByPath: {},
 			raw: error,
@@ -45,7 +49,7 @@ export function buildSettingsErrorModel(
 	}
 	if (typeof error === "string") {
 		return {
-			message: error || fallback,
+			message: adminUiErrorMessage(error, fallback),
 			fields: [],
 			fieldsByPath: {},
 			raw: error,

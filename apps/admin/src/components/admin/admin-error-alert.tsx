@@ -1,10 +1,8 @@
+import { adminUiErrorMessage } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export function adminErrorMessage(error: unknown, fallback: string) {
-	if (typeof error === "string" && error) {
-		return error;
-	}
-	return error instanceof Error ? error.message : fallback;
+	return adminUiErrorMessage(error, fallback);
 }
 
 export function AdminErrorAlert({

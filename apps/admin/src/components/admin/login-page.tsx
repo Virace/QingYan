@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 
-import { ApiError } from "@/api/client";
+import { adminUiErrorMessage, ApiError } from "@/api/client";
 import {
 	fetchAdminCaptcha,
 	loginAdmin,
@@ -40,7 +40,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
 			onLogin();
 		},
 		onError(error) {
-			const text = error instanceof Error ? error.message : "管理员登录失败。";
+			const text = adminUiErrorMessage(error, "管理员登录失败。");
 			setMessage(text);
 			if (!(error instanceof ApiError) || error.code !== "ADMIN_BLACKLISTED") {
 				void captchaQuery.refetch();

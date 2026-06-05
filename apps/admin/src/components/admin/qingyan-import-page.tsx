@@ -97,7 +97,7 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 						disabled={dryRunMutation.isPending || !siteKey}
 					>
 						<FileSearchIcon data-icon="inline-start" />
-						{dryRunMutation.isPending ? "检查中" : "Dry-run"}
+						{dryRunMutation.isPending ? "检查中" : "写入前检查"}
 					</Button>
 					<Button
 						type="button"
@@ -109,7 +109,7 @@ export function QingYanImportPage({ siteKey }: { siteKey: string }) {
 						}
 					>
 						<UploadIcon data-icon="inline-start" />
-						{applyMutation.isPending ? "导入中" : "Apply"}
+						{applyMutation.isPending ? "导入中" : "执行导入"}
 					</Button>
 				</div>
 				{dryRunMutation.data ? (

@@ -68,6 +68,7 @@ export function IpMaintenanceTaskPanel({ siteKey }: { siteKey: string }) {
 	};
 	const ipRegionUpdateMutation = useMutation({
 		mutationFn: createIpRegionUpdateJob,
+		meta: { suppressGlobalSuccessToast: true },
 		onSuccess: (result) => {
 			toast.success(`已创建任务运行：${result.run.id}`);
 			invalidate();
@@ -75,6 +76,7 @@ export function IpMaintenanceTaskPanel({ siteKey }: { siteKey: string }) {
 	});
 	const commentIpRefreshMutation = useMutation({
 		mutationFn: createCommentIpRefreshJob,
+		meta: { suppressGlobalSuccessToast: true },
 		onSuccess: (result) => {
 			toast.success(`已创建任务运行：${result.run.id}`);
 			invalidate();

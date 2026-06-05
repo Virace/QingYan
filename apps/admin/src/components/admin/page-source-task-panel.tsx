@@ -68,6 +68,7 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 	};
 	const createSourceMutation = useMutation({
 		mutationFn: createPageRegistrySource,
+		meta: { successMessage: "页面来源已添加" },
 		onSuccess: () => {
 			setSourceUrl("");
 			invalidateSources();
@@ -75,10 +76,12 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 	});
 	const deleteSourceMutation = useMutation({
 		mutationFn: deletePageRegistrySource,
+		meta: { successMessage: "页面来源已删除" },
 		onSuccess: invalidateSources,
 	});
 	const refreshSourceMutation = useMutation({
 		mutationFn: refreshPageRegistrySource,
+		meta: { suppressGlobalSuccessToast: true },
 		onSuccess: (result) => {
 			toast.success(`已创建任务运行：${result.run.id}`);
 			invalidateSources();
@@ -86,6 +89,7 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 	});
 	const refreshAllSourcesMutation = useMutation({
 		mutationFn: refreshPageRegistrySources,
+		meta: { suppressGlobalSuccessToast: true },
 		onSuccess: (result) => {
 			toast.success(`已创建任务运行：${result.run.id}`);
 			invalidateSources();

@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import path from "node:path";
 
 import { parse } from "yaml";
@@ -23,6 +24,8 @@ interface DevConfig {
 const DEFAULT_API_PORT = 4401;
 const DEFAULT_ADMIN_PATH = "/admin";
 const DEFAULT_PUBLIC_PATH = "/qingyan";
+const API_READY_TIMEOUT_MS = 15_000;
+const API_READY_RETRY_MS = 100;
 
 async function readAdminPathFromDatabase(
 	configPath: string,
@@ -102,8 +105,51 @@ function startProcess(
 	child.on("error", (error) => {
 		console.error(`[${name}] failed to start:`, error);
 	});
+	child.on("exit", (code, signal) => {
+		if (!stopping) {
+			console.error(`[${name}] dev process exited: ${signal ?? code ?? 1}`);
+			stopAll(code ?? 1);
+		}
+	});
 
 	return child;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
+function canConnectTcp(origin: string): Promise<boolean> {
+	const url = new URL(origin);
+	const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+	const host = url.hostname.replace(/^\[|\]$/gu, "");
+	return new Promise((resolve) => {
+		const socket = createConnection({ host, port });
+		const finish = (connected: boolean) => {
+			socket.removeAllListeners();
+			socket.destroy();
+			resolve(connected);
+		};
+		socket.setTimeout(1_000);
+		socket.once("connect", () => finish(true));
+		socket.once("error", () => finish(false));
+		socket.once("timeout", () => finish(false));
+	});
+}
+
+async function waitForApiOrigin(origin: string): Promise<void> {
+	const deadline = Date.now() + API_READY_TIMEOUT_MS;
+	while (Date.now() < deadline) {
+		if (await canConnectTcp(origin)) {
+			return;
+		}
+		await sleep(API_READY_RETRY_MS);
+	}
+	throw new Error(
+		`API 开发服务未在 ${API_READY_TIMEOUT_MS}ms 内监听：${origin}`,
+	);
 }
 
 function buildAdminDevPaths(adminPath: string): string {
@@ -144,15 +190,6 @@ function stopAll(exitCode: number): void {
 		}
 	}
 	process.exitCode = exitCode;
-}
-
-for (const child of children) {
-	child.on("exit", (code, signal) => {
-		if (!stopping) {
-			console.error(`Dev process exited: ${signal ?? code ?? 1}`);
-			stopAll(code ?? 1);
-		}
-	});
 }
 
 process.on("SIGINT", () => stopAll(0));
@@ -197,6 +234,8 @@ async function main(): Promise<void> {
 	children.push(
 		startProcess("api", ["exec", "tsx", "watch", "src/server.ts"], devEnv),
 	);
+	await waitForApiOrigin(apiOrigin);
+	console.log(`QingYan API dev server ready: ${apiOrigin}`);
 	children.push(
 		startProcess(
 			"admin",

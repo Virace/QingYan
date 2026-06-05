@@ -6,9 +6,9 @@ import {
 	QueryClientProvider,
 	useQuery,
 } from "@tanstack/react-query";
-import { Toaster } from "sonner";
+import { toast, Toaster } from "sonner";
 
-import { ApiError } from "@/api/client";
+import { adminUiErrorMessage, ApiError, logAdminApiError } from "@/api/client";
 import { fetchAdminMe } from "@/api/session";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { AdminConfirmDialogProvider } from "@/components/admin/confirm-dialog";
@@ -21,19 +21,57 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 
+type AdminMutationMeta = {
+	suppressGlobalToast?: boolean;
+	suppressGlobalSuccessToast?: boolean;
+	suppressGlobalErrorToast?: boolean;
+	successMessage?: string;
+	errorMessage?: string;
+};
+
+function adminMutationMeta(meta: unknown): AdminMutationMeta {
+	return meta && typeof meta === "object" ? (meta as AdminMutationMeta) : {};
+}
+
 function createQueryClient(onUnauthorized: () => void) {
 	return new QueryClient({
 		queryCache: new QueryCache({
-			onError(error) {
+			onError(error, query) {
 				if (error instanceof ApiError && error.statusCode === 401) {
 					onUnauthorized();
+					return;
 				}
+				logAdminApiError(error, {
+					operation: "query",
+					queryKey: query.queryKey,
+				});
 			},
 		}),
 		mutationCache: new MutationCache({
-			onError(error) {
+			onSuccess(_data, _variables, _context, mutation) {
+				const meta = adminMutationMeta(mutation.options.meta);
+				if (!meta.suppressGlobalToast && !meta.suppressGlobalSuccessToast) {
+					toast.success(meta.successMessage ?? "操作已完成");
+				}
+			},
+			onError(error, _variables, _context, mutation) {
 				if (error instanceof ApiError && error.statusCode === 401) {
 					onUnauthorized();
+					return;
+				}
+				const meta = adminMutationMeta(mutation.options.meta);
+				logAdminApiError(error, {
+					operation: "mutation",
+					label: meta.errorMessage,
+					mutationKey: mutation.options.mutationKey,
+				});
+				if (!meta.suppressGlobalToast && !meta.suppressGlobalErrorToast) {
+					toast.error(
+						adminUiErrorMessage(
+							error,
+							meta.errorMessage ?? "操作失败，请查看控制台错误详情。",
+						),
+					);
 				}
 			},
 		}),

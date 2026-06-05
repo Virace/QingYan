@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { KeyRoundIcon } from "lucide-react";
 
+import { adminUiErrorMessage } from "@/api/client";
 import {
 	confirmAdminProfilePasswordChange,
 	updateAdminProfilePassword,
@@ -40,7 +41,7 @@ export function PasswordChangePage({ onChanged }: { onChanged: () => void }) {
 			onChanged();
 		},
 		onError(error) {
-			setMessage(error instanceof Error ? error.message : "密码修改失败。");
+			setMessage(adminUiErrorMessage(error, "密码修改失败。"));
 		},
 	});
 	const confirmMutation = useMutation({
@@ -56,7 +57,7 @@ export function PasswordChangePage({ onChanged }: { onChanged: () => void }) {
 			onChanged();
 		},
 		onError(error) {
-			setMessage(error instanceof Error ? error.message : "密码确认失败。");
+			setMessage(adminUiErrorMessage(error, "密码确认失败。"));
 		},
 	});
 

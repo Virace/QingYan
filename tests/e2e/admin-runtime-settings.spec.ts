@@ -521,6 +521,28 @@ test("system settings captcha provider shows only matching fields", async ({
 test("site settings save failure shows request id and field errors", async ({
 	page,
 }) => {
+	const apiConsoleErrors: string[] = [];
+	page.on("console", (message) => {
+		if (
+			message.type() !== "error" ||
+			!message.text().includes("QingYan Admin API error")
+		) {
+			return;
+		}
+		void (async () => {
+			const values = await Promise.all(
+				message.args().map(async (argument) => {
+					try {
+						return await argument.jsonValue();
+					} catch {
+						return message.text();
+					}
+				}),
+			);
+			apiConsoleErrors.push(JSON.stringify(values));
+		})();
+	});
+
 	await page.route("**/api/admin/settings/*/sections/*", async (route) => {
 		if (route.request().method() === "PATCH") {
 			await route.fulfill({
@@ -550,6 +572,17 @@ test("site settings save failure shows request id and field errors", async ({
 
 	await openSiteSettings(page);
 	await selectSettingsTab(page, "访客与计数");
+	const commentVotesSwitch = page.getByRole("switch", {
+		name: "评论投票",
+		exact: true,
+	});
+	const commentVotesChecked = await commentVotesSwitch.evaluate((element) => {
+		const maybeInput = element as { checked?: unknown };
+		return typeof maybeInput.checked === "boolean"
+			? maybeInput.checked
+			: element.getAttribute("aria-checked") === "true";
+	});
+	await ensureSwitchState(page, "评论投票", !commentVotesChecked);
 	await page.getByRole("button", { name: "保存访客与计数设置" }).click();
 	await expect(page.getByText("站点设置保存失败")).toBeVisible();
 	await expect(page.getByText("req_settings_visible")).toBeVisible();
@@ -557,6 +590,64 @@ test("site settings save failure shows request id and field errors", async ({
 	await expect(
 		page.getByText("必须是 JSON boolean，不能使用 0/1。").first(),
 	).toBeVisible();
+	await expect
+		.poll(() => apiConsoleErrors.join("\n"))
+		.toContain("req_settings_visible");
+	await expect
+		.poll(() => apiConsoleErrors.join("\n"))
+		.toContain("engagement.commentVotes.enabled");
+});
+
+test("settings save reports unchanged and successful states", async ({
+	page,
+}) => {
+	let sitePatchCount = 0;
+	let systemPatchCount = 0;
+	await page.route(
+		"**/qingyan/api/admin/settings/*/sections/*",
+		async (route) => {
+			if (route.request().method() === "PATCH") {
+				sitePatchCount += 1;
+			}
+			await route.fallback();
+		},
+	);
+	await page.route(
+		"**/qingyan/api/admin/system-settings/sections/*",
+		async (route) => {
+			if (route.request().method() === "PATCH") {
+				systemPatchCount += 1;
+			}
+			await route.fallback();
+		},
+	);
+
+	await openSiteSettings(page);
+	await page.getByRole("button", { name: "保存评论设置" }).click();
+	await expect(page.getByText("配置无变化")).toBeVisible();
+	await expect.poll(() => sitePatchCount).toBe(0);
+
+	await selectSettingsTab(page, "访客与计数");
+	const pageViewsSwitch = page.getByRole("switch", {
+		name: "页面浏览量",
+		exact: true,
+	});
+	const pageViewsChecked = await pageViewsSwitch.evaluate((element) => {
+		const maybeInput = element as { checked?: unknown };
+		return typeof maybeInput.checked === "boolean"
+			? maybeInput.checked
+			: element.getAttribute("aria-checked") === "true";
+	});
+	await ensureSwitchState(page, "页面浏览量", !pageViewsChecked);
+	await page.getByRole("button", { name: "保存访客与计数设置" }).click();
+	await expect(page.getByText("站点设置已保存")).toBeVisible();
+	await expect.poll(() => sitePatchCount).toBe(1);
+
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "后台与安全");
+	await page.getByRole("button", { name: "保存后台与安全设置" }).click();
+	await expect(page.getByText("配置无变化")).toBeVisible();
+	await expect.poll(() => systemPatchCount).toBe(0);
 });
 
 test("site settings keeps independent counters visible when visitors are off", async ({

@@ -31,6 +31,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 
+import { AdminErrorAlert } from "./admin-error-alert";
 import { Field, inputClass, textareaClass } from "./admin-ui";
 import { useAdminConfirmDialog } from "./confirm-dialog";
 import {
@@ -516,24 +517,18 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 						</Button>
 					</div>
 					{analyzeMutation.error ? (
-						<Alert variant="destructive">
-							<AlertTitle>分析失败</AlertTitle>
-							<AlertDescription>
-								{analyzeMutation.error instanceof Error
-									? analyzeMutation.error.message
-									: "请求失败。"}
-							</AlertDescription>
-						</Alert>
+						<AdminErrorAlert
+							error={analyzeMutation.error}
+							title="分析失败"
+							fallback="请求失败。"
+						/>
 					) : null}
 					{acceptAndImportMutation.error ? (
-						<Alert variant="destructive">
-							<AlertTitle>接受或导入失败</AlertTitle>
-							<AlertDescription>
-								{acceptAndImportMutation.error instanceof Error
-									? acceptAndImportMutation.error.message
-									: "请求失败。"}
-							</AlertDescription>
-						</Alert>
+						<AdminErrorAlert
+							error={acceptAndImportMutation.error}
+							title="接受或导入失败"
+							fallback="请求失败。"
+						/>
 					) : null}
 				</CardContent>
 			</Card>
@@ -810,14 +805,11 @@ export function WordPressMigrationPage({ site }: { site: AdminSiteSummary }) {
 									</Button>
 								</div>
 								{applyMutation.error ? (
-									<Alert variant="destructive">
-										<AlertTitle>导入失败</AlertTitle>
-										<AlertDescription>
-											{applyMutation.error instanceof Error
-												? applyMutation.error.message
-												: "请求失败。"}
-										</AlertDescription>
-									</Alert>
+									<AdminErrorAlert
+										error={applyMutation.error}
+										title="导入失败"
+										fallback="请求失败。"
+									/>
 								) : null}
 								{planError ? (
 									<Alert variant="destructive">

@@ -26,7 +26,7 @@ import {
 	type TaskRunProjection,
 	type TaskRunStatus,
 } from "@/api/tasks";
-import { ApiError } from "@/api/client";
+import { adminUiErrorMessage } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -63,13 +63,7 @@ const taskStatuses: Array<[TaskRunStatus | "", string]> = [
 ];
 
 function errorMessage(error: unknown, fallback: string): string {
-	if (error instanceof ApiError) {
-		return error.message;
-	}
-	if (error instanceof Error) {
-		return error.message;
-	}
-	return fallback;
+	return adminUiErrorMessage(error, fallback);
 }
 
 function includesText(value: unknown, search: string): boolean {
@@ -164,6 +158,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 
 	const createMutation = useMutation({
 		mutationFn: createScheduledTask,
+		meta: { suppressGlobalToast: true },
 		onSuccess(task) {
 			toast.success("计划任务已创建");
 			setEditorOpen(false);
@@ -185,6 +180,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 			id: string;
 			input: ScheduledTaskWriteInput;
 		}) => updateScheduledTask(id, input),
+		meta: { suppressGlobalToast: true },
 		onSuccess(task) {
 			toast.success("计划任务已保存");
 			setEditorOpen(false);
@@ -198,6 +194,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 	});
 	const runMutation = useMutation({
 		mutationFn: runScheduledTask,
+		meta: { suppressGlobalToast: true },
 		onSuccess(run) {
 			toast.success("任务已加入运行记录");
 			setActiveTab("runs");
@@ -210,6 +207,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 	});
 	const enableMutation = useMutation({
 		mutationFn: enableScheduledTask,
+		meta: { suppressGlobalToast: true },
 		onSuccess() {
 			toast.success("任务已启用");
 			invalidateTaskQueries();
@@ -220,6 +218,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 	});
 	const disableMutation = useMutation({
 		mutationFn: (id: string) => disableScheduledTask(id),
+		meta: { suppressGlobalToast: true },
 		onSuccess() {
 			toast.success("任务已停用");
 			invalidateTaskQueries();
@@ -230,6 +229,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 	});
 	const deleteMutation = useMutation({
 		mutationFn: (id: string) => deleteScheduledTask(id),
+		meta: { suppressGlobalToast: true },
 		onSuccess() {
 			toast.success("任务已删除，并保留删除快照");
 			invalidateTaskQueries();
@@ -240,6 +240,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 	});
 	const cancelMutation = useMutation({
 		mutationFn: cancelTaskRun,
+		meta: { suppressGlobalToast: true },
 		onSuccess() {
 			toast.success("运行已取消");
 			invalidateTaskQueries();
@@ -250,6 +251,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 	});
 	const retryMutation = useMutation({
 		mutationFn: retryTaskRun,
+		meta: { suppressGlobalToast: true },
 		onSuccess() {
 			toast.success("运行已标记为重试");
 			invalidateTaskQueries();
