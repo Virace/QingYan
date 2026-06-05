@@ -37,6 +37,10 @@ import {
 	type ScheduledTaskRecord,
 } from "./scheduled-task-repository";
 import { SystemManagedTaskService } from "./system-managed-task-service";
+import {
+	PageSourceRefreshPolicyService,
+	readPageSourceRefreshSiteKey,
+} from "./page-source-refresh-policy";
 import { TaskRunRepository } from "./task-run-repository";
 import type { TaskRunRecord } from "./types";
 import {
@@ -109,6 +113,7 @@ export class AdminTaskService {
 	private readonly channelConfigs: NotificationChannelConfigsRepository;
 	private readonly notificationRecipients: BackendUserNotificationRecipientsRepository;
 	private readonly systemManagedTasks: SystemManagedTaskService;
+	private readonly pageSourceRefreshPolicy: PageSourceRefreshPolicyService;
 
 	public constructor(
 		private readonly db: AppDatabase,
@@ -122,6 +127,10 @@ export class AdminTaskService {
 		this.notificationRecipients =
 			new BackendUserNotificationRecipientsRepository(db);
 		this.systemManagedTasks = new SystemManagedTaskService(db, siteRegistry);
+		this.pageSourceRefreshPolicy = new PageSourceRefreshPolicyService(
+			db,
+			siteRegistry,
+		);
 	}
 
 	public listDefinitions() {
@@ -178,6 +187,11 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const normalized = this.validateWriteInput(input, session);
+		await this.assertPageSourceRefreshAllowed({
+			type: normalized.type,
+			siteKey: input.siteKey,
+			payload: normalized.payload,
+		});
 		await this.validateFailureNotificationPolicy(
 			normalized.policy,
 			normalized.siteId,
@@ -229,6 +243,12 @@ export class AdminTaskService {
 			retentionCount: input.retentionCount ?? task.retentionCount,
 		};
 		const normalized = this.validateWriteInput(merged, session);
+		await this.assertPageSourceRefreshAllowed({
+			type: normalized.type,
+			siteKey: merged.siteKey,
+			systemKey: task.systemKey,
+			payload: normalized.payload,
+		});
 		await this.validateFailureNotificationPolicy(
 			normalized.policy,
 			normalized.siteId,
@@ -266,6 +286,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForRun(id, session);
+		await this.assertPageSourceRefreshAllowed({
+			type: task.type,
+			siteKey: task.siteId ? this.siteKeyForId(task.siteId) : null,
+			systemKey: task.systemKey,
+			payload: task.payload,
+		});
 		const run = await this.taskRuns.createScheduledTaskRun({
 			scheduledTask: task,
 			trigger: "manual",
@@ -317,6 +343,11 @@ export class AdminTaskService {
 			);
 		}
 		const payload = parsedPayload.data as Record<string, unknown>;
+		await this.assertPageSourceRefreshAllowed({
+			type: definition.type,
+			siteKey: input.siteKey,
+			payload,
+		});
 		const payloadSiteKey =
 			typeof payload.siteKey === "string" ? payload.siteKey : input.siteKey;
 		const site =
@@ -402,6 +433,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		await this.assertPageSourceRefreshAllowed({
+			type: task.type,
+			siteKey: task.siteId ? this.siteKeyForId(task.siteId) : null,
+			systemKey: task.systemKey,
+			payload: task.payload,
+		});
 		const updated = await this.scheduledTasks.enable(task.id, {
 			updatedByUserId: session.user.id,
 		});
@@ -508,7 +545,7 @@ export class AdminTaskService {
 
 	public async ensureAuthoritativePageSourceRefreshTask(input: {
 		siteKey: string;
-		sourceIds: number[];
+		sitemapUrls: string[];
 		session?: AuthenticatedAdminSession;
 		actorUserId?: number;
 		requestId?: string;
@@ -520,7 +557,7 @@ export class AdminTaskService {
 		const ensured =
 			await this.systemManagedTasks.ensureAuthoritativePageSourceRefresh({
 				siteKey: input.siteKey,
-				sourceIds: input.sourceIds,
+				sitemapUrls: input.sitemapUrls,
 				actorUserId: input.session?.user.id ?? input.actorUserId ?? null,
 				timeoutMs: input.timeoutMs,
 				maxBytes: input.maxBytes,
@@ -541,23 +578,21 @@ export class AdminTaskService {
 		return ensured;
 	}
 
-	public async releaseAuthoritativePageSourceRefreshTaskProtection(input: {
+	public async disableAuthoritativePageSourceRefreshTask(input: {
 		siteKey: string;
 		session?: AuthenticatedAdminSession;
 		actorUserId?: number;
 		requestId?: string;
 	}) {
 		const task =
-			await this.systemManagedTasks.releaseAuthoritativePageSourceRefreshProtection(
-				{
-					siteKey: input.siteKey,
-					actorUserId: input.session?.user.id ?? input.actorUserId ?? null,
-				},
-			);
+			await this.systemManagedTasks.disableAuthoritativePageSourceRefresh({
+				siteKey: input.siteKey,
+				actorUserId: input.session?.user.id ?? input.actorUserId ?? null,
+			});
 		if (task) {
 			await this.writeAudit(
 				input.session,
-				"task.scheduled.system_protection_released",
+				"task.scheduled.system_disabled",
 				task,
 				{
 					requestId: input.requestId,
@@ -727,6 +762,38 @@ export class AdminTaskService {
 			);
 		}
 		return projectDeletedSnapshotForSession(snapshot);
+	}
+
+	private async assertPageSourceRefreshAllowed(input: {
+		type: string;
+		siteKey?: string | null;
+		systemKey?: string | null;
+		payload?: unknown;
+	}) {
+		if (input.type !== "page_source_refresh") {
+			return;
+		}
+		const siteKey =
+			input.siteKey ?? readPageSourceRefreshSiteKey(input.payload);
+		if (!siteKey) {
+			return;
+		}
+		const result = await this.pageSourceRefreshPolicy.checkRefreshAllowed({
+			siteKey,
+			systemKey: input.systemKey,
+			payload: input.payload,
+		});
+		if (result === "ok") {
+			return;
+		}
+		throw new AppError(
+			409,
+			"AUTHORITATIVE_PAGE_SOURCE_REFRESH_CONFLICT",
+			"权威模式已由系统托管任务负责同站点页面来源刷新。",
+			{
+				siteKey,
+			},
+		);
 	}
 
 	private validateWriteInput(

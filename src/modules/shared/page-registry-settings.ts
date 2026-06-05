@@ -3,7 +3,7 @@ export type UnknownPageResponse = "inactive_payload" | "forbidden";
 
 export interface PageRegistrySettings {
 	mode: PageRegistryMode;
-	authoritativeSourceIds: number[];
+	authoritativeSitemapUrls: string[];
 	unknownPageResponse: UnknownPageResponse;
 	requireHealthySource: boolean;
 	sourceFreshnessGraceSec: number;
@@ -14,7 +14,7 @@ export type PageRegistrySettingsPatch = Partial<PageRegistrySettings>;
 
 export const defaultPageRegistrySettings: PageRegistrySettings = {
 	mode: "discovery",
-	authoritativeSourceIds: [],
+	authoritativeSitemapUrls: [],
 	unknownPageResponse: "inactive_payload",
 	requireHealthySource: true,
 	sourceFreshnessGraceSec: 7200,
@@ -48,20 +48,30 @@ function normalizeNonNegativeInteger(value: unknown): number | undefined {
 	return value as number;
 }
 
-function normalizeSourceIds(value: unknown): number[] | undefined {
+function normalizeSitemapUrls(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) {
 		return undefined;
 	}
-	const seen = new Set<number>();
-	const ids: number[] = [];
+	const seen = new Set<string>();
+	const urls: string[] = [];
 	for (const item of value) {
-		if (!Number.isInteger(item) || item <= 0 || seen.has(item)) {
+		if (typeof item !== "string") {
 			continue;
 		}
-		seen.add(item);
-		ids.push(item);
+		try {
+			const parsed = new URL(item.trim());
+			if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+				continue;
+			}
+			const normalized = parsed.toString();
+			if (seen.has(normalized)) {
+				continue;
+			}
+			seen.add(normalized);
+			urls.push(normalized);
+		} catch {}
 	}
-	return ids;
+	return urls;
 }
 
 function normalizeSettings(input: unknown): PageRegistrySettings {
@@ -69,9 +79,9 @@ function normalizeSettings(input: unknown): PageRegistrySettings {
 	const mode = normalizeMode(record.mode) ?? defaultPageRegistrySettings.mode;
 	const settings: PageRegistrySettings = {
 		mode,
-		authoritativeSourceIds:
-			normalizeSourceIds(record.authoritativeSourceIds) ??
-			defaultPageRegistrySettings.authoritativeSourceIds,
+		authoritativeSitemapUrls:
+			normalizeSitemapUrls(record.authoritativeSitemapUrls) ??
+			defaultPageRegistrySettings.authoritativeSitemapUrls,
 		unknownPageResponse:
 			normalizeUnknownPageResponse(record.unknownPageResponse) ??
 			defaultPageRegistrySettings.unknownPageResponse,

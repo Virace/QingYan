@@ -46,6 +46,20 @@ function valueAtString(value: unknown, key: string) {
 	return typeof item === "string" && item.length > 0 ? item : undefined;
 }
 
+function valueAtStringArray(value: unknown, key: string) {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const item = value[key];
+	if (!Array.isArray(item)) {
+		return undefined;
+	}
+	const strings = item.filter(
+		(value): value is string => typeof value === "string" && value.length > 0,
+	);
+	return strings.length > 0 ? strings : undefined;
+}
+
 function formatError(value: unknown) {
 	if (typeof value === "string") {
 		return value;
@@ -131,11 +145,18 @@ export function summarizeTask(job: AdminTaskCenterItem): TaskSummaryModel {
 	}
 
 	if (job.type === "page_source_refresh") {
+		const sitemapUrls =
+			valueAtStringArray(job.payload, "sitemapUrls") ??
+			valueAtStringArray(job.input, "sitemapUrls");
 		return {
 			...generic,
 			title: "页面来源刷新",
 			metrics: [
 				...generic.metrics,
+				{
+					label: "sitemap",
+					value: sitemapUrls ? `${sitemapUrls.length} 个` : "-",
+				},
 				{
 					label: "处理页面",
 					value: firstNumber(

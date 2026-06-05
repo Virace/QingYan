@@ -68,6 +68,33 @@ describe("maintenance task runner reuse wrappers", () => {
 		expect(result).toEqual({ processed: 2 });
 	});
 
+	it("checks page source refresh ownership before runner execution", async () => {
+		const policy = {
+			checkRefreshAllowed: vi.fn().mockResolvedValue("blocked" as const),
+		};
+		const context = createContext({
+			scheduledTaskSystemKey: "ordinary:refresh",
+			services: { pageSourceRefreshPolicy: policy },
+		});
+		const payload = {
+			siteKey: "fangyuan",
+			sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+			mode: "replace" as const,
+			trigger: "scheduled" as const,
+		};
+
+		const precondition = await createBuiltInTaskTypeRegistry()
+			.getRequired("page_source_refresh")
+			.precondition?.(payload, context);
+
+		expect(precondition).toBe("blocked");
+		expect(policy.checkRefreshAllowed).toHaveBeenCalledWith({
+			siteKey: "fangyuan",
+			systemKey: "ordinary:refresh",
+			payload,
+		});
+	});
+
 	it("delegates title refresh to PageMetadataRefreshService", async () => {
 		const service = {
 			executeRefresh: vi.fn().mockResolvedValue({ updated: 1 }),

@@ -472,7 +472,7 @@ export interface AdminSettings {
 	engagement: AdminEngagementSettings;
 	pageRegistry: {
 		mode: "discovery" | "authoritative";
-		authoritativeSourceIds: number[];
+		authoritativeSitemapUrls: string[];
 		unknownPageResponse: "inactive_payload" | "forbidden";
 		requireHealthySource: boolean;
 		sourceFreshnessGraceSec: number;
@@ -915,17 +915,11 @@ export function createPageRegistrySource(input: {
 	);
 }
 
-export function deletePageRegistrySource(input: {
-	sourceId: number;
-	disableAuthoritativeMode?: boolean;
-}) {
+export function deletePageRegistrySource(input: { sourceId: number }) {
 	return requestJson<{ ok: true }>(
 		`/api/admin/page-registry/sources/${input.sourceId}`,
 		{
 			method: "DELETE",
-			body: input.disableAuthoritativeMode
-				? JSON.stringify({ disableAuthoritativeMode: true })
-				: undefined,
 		},
 	);
 }

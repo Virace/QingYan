@@ -33,6 +33,7 @@ export interface TaskRunnerContext {
 	};
 	runId: string;
 	scheduledTaskId?: string | null;
+	scheduledTaskSystemKey?: string | null;
 	actor: TaskRunnerActor;
 	services: TaskRunnerServices;
 	log: TaskLogWriter;
@@ -48,6 +49,7 @@ export interface TaskRunnerServices {
 		executeRefresh(
 			input: {
 				siteKey: string;
+				sitemapUrls?: string[];
 				sourceIds?: number[];
 				mode?: "append" | "replace";
 				trigger: PageSourceRefreshTrigger;
@@ -56,6 +58,13 @@ export interface TaskRunnerServices {
 			},
 			context: TaskRunnerContext,
 		): Promise<unknown>;
+	};
+	pageSourceRefreshPolicy?: {
+		checkRefreshAllowed(input: {
+			siteKey?: string | null;
+			systemKey?: string | null;
+			payload?: unknown;
+		}): Promise<"ok" | "blocked"> | "ok" | "blocked";
 	};
 	pageMetadataRefresh?: {
 		executeRefresh(

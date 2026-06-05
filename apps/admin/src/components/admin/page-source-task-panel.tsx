@@ -13,7 +13,6 @@ import {
 	refreshPageRegistrySource,
 	refreshPageRegistrySources,
 } from "@/api/admin";
-import { ApiError } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -98,22 +97,6 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 		refreshSourceMutation.isPending ||
 		refreshAllSourcesMutation.isPending;
 
-	const forceRemoveSource = async (source: PageRegistrySource) => {
-		const confirmed = await confirm({
-			title: "删除并关闭权威模式",
-			description:
-				"该来源正在支撑页面来源权威模式。继续会先把站点切回发现模式，清理权威来源引用，并同步释放相关刷新任务保护，然后删除该来源。",
-			confirmText: "关闭权威模式并删除",
-			destructive: true,
-		});
-		if (!confirmed) {
-			return;
-		}
-		deleteSourceMutation.mutate({
-			sourceId: source.id,
-			disableAuthoritativeMode: true,
-		});
-	};
 	const removeSource = async (source: PageRegistrySource) => {
 		const confirmed = await confirm({
 			title: "删除页面来源",
@@ -125,20 +108,7 @@ export function PageSourceTaskPanel({ siteKey }: { siteKey: string }) {
 		if (!confirmed) {
 			return;
 		}
-		deleteSourceMutation.mutate(
-			{ sourceId: source.id },
-			{
-				onError: (error) => {
-					if (
-						error instanceof ApiError &&
-						error.code === "AUTHORITATIVE_SOURCE_IN_USE"
-					) {
-						toast.error("该来源正在被权威模式使用，需要显式关闭权威模式。");
-						void forceRemoveSource(source);
-					}
-				},
-			},
-		);
+		deleteSourceMutation.mutate({ sourceId: source.id });
 	};
 
 	return (

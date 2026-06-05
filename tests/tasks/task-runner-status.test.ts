@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createDatabaseClients } from "../../src/db/client";
-import { adminUsers, sites } from "../../src/db/schema";
+import { adminUsers, siteSettings, sites } from "../../src/db/schema";
+import type { SiteRegistry } from "../../src/modules/shared/site-registry";
+import { createBuiltInTaskTypeRegistry } from "../../src/modules/tasks/built-in-task-types";
+import { PageSourceRefreshPolicyService } from "../../src/modules/tasks/page-source-refresh-policy";
 import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
+import { authoritativePageSourceRefreshSystemKey } from "../../src/modules/tasks/system-managed-task-service";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import {
@@ -20,6 +24,7 @@ import {
 
 interface Fixture {
 	workspace: TestWorkspace;
+	db: ReturnType<typeof createDatabaseClients>["db"];
 	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
 	scheduledTasks: ScheduledTaskRepository;
 	taskRuns: TaskRunRepository;
@@ -57,6 +62,7 @@ async function createFixture(): Promise<Fixture> {
 	const [adminUser] = await clients.db.select().from(adminUsers).limit(1);
 	const fixture = {
 		workspace,
+		db: clients.db,
 		sqlite: clients.sqlite,
 		scheduledTasks: new ScheduledTaskRepository(clients.db),
 		taskRuns: new TaskRunRepository(clients.db),
@@ -207,5 +213,108 @@ describe("TaskRunner status mapping", () => {
 		expect(saved[3]?.blockReason).toBe("precondition_blocked");
 		expect(saved[4]?.error).toMatchObject({ code: "TASK_RUN_CANCELLED" });
 		expect(saved[5]?.error).toMatchObject({ code: "TASK_RUN_SUPPRESSED" });
+	});
+
+	it("blocks ordinary page source refresh runs while authoritative mode owns the site", async () => {
+		const fixture = await createFixture();
+		const ordinaryTask = await fixture.scheduledTasks.create({
+			name: "Ordinary page source refresh",
+			type: "page_source_refresh",
+			siteId: fixture.siteId,
+			scopeKind: "site",
+			scope: { siteKey: "fangyuan" },
+			enabled: true,
+			scheduleKind: "manual_only",
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				mode: "replace",
+			},
+			policy: {},
+			trigger: { kind: "manual" },
+			retentionCount: 5,
+			ownerUserId: fixture.adminUserId,
+			createdByUserId: fixture.adminUserId,
+			updatedByUserId: fixture.adminUserId,
+		});
+		const systemTask = await fixture.scheduledTasks.create({
+			name: "System page source refresh",
+			type: "page_source_refresh",
+			siteId: fixture.siteId,
+			scopeKind: "site",
+			scope: { siteKey: "fangyuan" },
+			enabled: true,
+			scheduleKind: "manual_only",
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				mode: "replace",
+			},
+			systemKey: authoritativePageSourceRefreshSystemKey("fangyuan"),
+			policy: {},
+			trigger: { kind: "manual" },
+			retentionCount: 5,
+			ownerUserId: fixture.adminUserId,
+			createdByUserId: fixture.adminUserId,
+			updatedByUserId: fixture.adminUserId,
+		});
+		await fixture.db.insert(siteSettings).values({
+			siteId: fixture.siteId,
+			pageRegistryJson: JSON.stringify({
+				mode: "authoritative",
+				authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+			}),
+		});
+		const ordinaryRun = await fixture.taskRuns.createScheduledTaskRun({
+			scheduledTask: ordinaryTask,
+			trigger: "schedule",
+			triggerSnapshot: {},
+			input: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				mode: "replace",
+			},
+		});
+		const systemRun = await fixture.taskRuns.createScheduledTaskRun({
+			scheduledTask: systemTask,
+			trigger: "schedule",
+			triggerSnapshot: {},
+			input: systemTask.payload,
+		});
+		const pageSourceRefresh = {
+			executeRefresh: vi.fn().mockResolvedValue({ processed: 1 }),
+		};
+		const runner = new TaskRunner({
+			registry: createBuiltInTaskTypeRegistry(),
+			taskRuns: fixture.taskRuns,
+			scheduledTasks: fixture.scheduledTasks,
+			eventLogs: fixture.eventLogs,
+			workerId: "worker-a",
+			services: {
+				pageSourceRefresh,
+				pageSourceRefreshPolicy: new PageSourceRefreshPolicyService(
+					fixture.db,
+					{
+						getRegisteredSite: () => ({
+							id: fixture.siteId,
+							siteKey: "fangyuan",
+							name: "FangYuan",
+							allowedOrigins: ["http://localhost:4321"],
+						}),
+						listRegisteredSites: () => [],
+					} as unknown as SiteRegistry,
+				),
+			},
+		});
+
+		await runner.run(ordinaryRun.id);
+		await runner.run(systemRun.id);
+
+		const blocked = await fixture.taskRuns.getRequired(ordinaryRun.id);
+		const succeeded = await fixture.taskRuns.getRequired(systemRun.id);
+		expect(blocked.status).toBe("blocked");
+		expect(blocked.blockReason).toBe("precondition_blocked");
+		expect(succeeded.status).toBe("succeeded");
+		expect(pageSourceRefresh.executeRefresh).toHaveBeenCalledTimes(1);
 	});
 });

@@ -136,6 +136,73 @@ describe("initial migration", () => {
 		}
 	});
 
+	it("backfills legacy authoritative source IDs to sitemap URLs", () => {
+		const fixture = createMigratedDatabase();
+
+		try {
+			const site = fixture.sqlite
+				.prepare(
+					"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
+				)
+				.run("fangyuan", "FangYuan", '["http://localhost:4321"]');
+			const siteId = Number(site.lastInsertRowid);
+			const source = fixture.sqlite
+				.prepare(
+					`
+						INSERT INTO site_page_registry_sources (
+							site_id,
+							source_type,
+							source_url,
+							enabled,
+							mode
+						) VALUES (?, ?, ?, ?, ?)
+					`,
+				)
+				.run(
+					siteId,
+					"sitemap",
+					"http://localhost:4321/sitemap.xml",
+					1,
+					"replace",
+				);
+			const sourceId = Number(source.lastInsertRowid);
+			fixture.sqlite
+				.prepare(
+					"INSERT INTO site_settings (site_id, page_registry_json) VALUES (?, ?)",
+				)
+				.run(
+					siteId,
+					JSON.stringify({
+						mode: "authoritative",
+						authoritativeSourceIds: [sourceId],
+						unknownPageResponse: "inactive_payload",
+						requireHealthySource: true,
+						sourceFreshnessGraceSec: 7200,
+						emergencyLockdown: false,
+					}),
+				);
+
+			applyDatabaseMigrations(fixture.sqlite);
+
+			const row = fixture.sqlite
+				.prepare(
+					"SELECT page_registry_json FROM site_settings WHERE site_id = ?",
+				)
+				.get(siteId) as { page_registry_json: string };
+			const pageRegistry = JSON.parse(row.page_registry_json) as Record<
+				string,
+				unknown
+			>;
+			expect(pageRegistry).toMatchObject({
+				mode: "authoritative",
+				authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+			});
+			expect(pageRegistry).not.toHaveProperty("authoritativeSourceIds");
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
 	it("applies captcha and abuse guard schema changes to the migrated database", () => {
 		const fixture = createMigratedDatabase();
 

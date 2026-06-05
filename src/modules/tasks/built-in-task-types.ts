@@ -44,16 +44,39 @@ const defaultPolicy = {
 	retryDelaySec: 0,
 };
 
-const pageSourceRefreshPayloadSchema = z.object({
-	siteKey: z.string().min(1),
-	sourceIds: z.array(z.number().int().positive()).optional(),
-	mode: z.enum(["append", "replace"]).optional(),
-	trigger: z.enum(["manual", "scheduled", "webhook"]).default("scheduled"),
-	timeoutMs: z.number().int().positive().optional(),
-	maxBytes: z.number().int().positive().optional(),
-	maxAttempts: z.number().int().positive().optional(),
-	retryDelaySec: z.number().int().nonnegative().optional(),
-});
+const sitemapUrlSchema = z
+	.string()
+	.trim()
+	.url()
+	.refine((value) => {
+		const parsed = new URL(value);
+		return parsed.protocol === "http:" || parsed.protocol === "https:";
+	}, "Sitemap URL must use http or https.");
+
+const pageSourceRefreshPayloadSchema = z
+	.object({
+		siteKey: z.string().min(1),
+		sitemapUrls: z.array(sitemapUrlSchema).optional(),
+		sourceIds: z.array(z.number().int().positive()).optional(),
+		mode: z.enum(["append", "replace"]).optional(),
+		trigger: z.enum(["manual", "scheduled", "webhook"]).default("scheduled"),
+		timeoutMs: z.number().int().positive().optional(),
+		maxBytes: z.number().int().positive().optional(),
+		maxAttempts: z.number().int().positive().optional(),
+		retryDelaySec: z.number().int().nonnegative().optional(),
+	})
+	.superRefine((value, context) => {
+		if (
+			(!value.sitemapUrls || value.sitemapUrls.length === 0) &&
+			(!value.sourceIds || value.sourceIds.length === 0)
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["sitemapUrls"],
+				message: "Either sitemapUrls or sourceIds is required.",
+			});
+		}
+	});
 
 const pageMetadataRefreshPayloadSchema = z.object({
 	siteKey: z.string().min(1),
@@ -178,6 +201,15 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 				method: "executeRefresh",
 				file: "src/modules/page-registry/source-refresh-service.ts",
 			},
+			precondition(payload, context) {
+				return (
+					context.services.pageSourceRefreshPolicy?.checkRefreshAllowed({
+						siteKey: payload.siteKey,
+						systemKey: context.scheduledTaskSystemKey,
+						payload,
+					}) ?? "ok"
+				);
+			},
 			run(payload, context) {
 				return runWithEvents(
 					payload,
@@ -192,6 +224,7 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 						return service.executeRefresh(
 							{
 								siteKey: validated.siteKey,
+								sitemapUrls: validated.sitemapUrls,
 								sourceIds: validated.sourceIds,
 								mode: validated.mode,
 								trigger: validated.trigger,

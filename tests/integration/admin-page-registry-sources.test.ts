@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sitePageRegistrySources, taskRuns } from "../../src/db/schema";
+import { taskRuns } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -215,7 +215,7 @@ describe("admin page registry sources", () => {
 		expect(listResponse.json()).toMatchObject({ items: [] });
 	});
 
-	it("blocks disabling or deleting authoritative sources unless authoritative mode is disabled", async () => {
+	it("keeps authoritative sitemap settings separate from legacy source CRUD", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const admin = await loginAsAdmin(fixture.app);
@@ -234,10 +234,6 @@ describe("admin page registry sources", () => {
 		});
 		expect(sourceResponse.statusCode).toBe(200);
 		const sourceId = sourceResponse.json().source.id as number;
-		await fixture.app.db
-			.update(sitePageRegistrySources)
-			.set({ lastSuccessAt: new Date().toISOString() })
-			.where(eq(sitePageRegistrySources.id, sourceId));
 
 		const settingsResponse = await fixture.app.inject({
 			method: "PUT",
@@ -246,7 +242,7 @@ describe("admin page registry sources", () => {
 			payload: {
 				pageRegistry: {
 					mode: "authoritative",
-					authoritativeSourceIds: [sourceId],
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 				},
 			},
 		});
@@ -260,31 +256,15 @@ describe("admin page registry sources", () => {
 				enabled: false,
 			},
 		});
-		expect(disableResponse.statusCode).toBe(409);
-		expect(disableResponse.json()).toMatchObject({
-			error: {
-				code: "AUTHORITATIVE_SOURCE_IN_USE",
-			},
-		});
+		expect(disableResponse.statusCode).toBe(200);
+		expect(disableResponse.json().source.enabled).toBe(false);
 
 		const deleteResponse = await fixture.app.inject({
 			method: "DELETE",
 			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
 			...withAdminWriteAuth(admin),
 		});
-		expect(deleteResponse.statusCode).toBe(409);
-
-		const forcedDisable = await fixture.app.inject({
-			method: "PATCH",
-			url: `/qingyan/api/admin/page-registry/sources/${sourceId}`,
-			...withAdminWriteAuth(admin),
-			payload: {
-				enabled: false,
-				disableAuthoritativeMode: true,
-			},
-		});
-		expect(forcedDisable.statusCode).toBe(200);
-		expect(forcedDisable.json().source.enabled).toBe(false);
+		expect(deleteResponse.statusCode).toBe(200);
 
 		const readSettings = await fixture.app.inject({
 			method: "GET",
@@ -295,8 +275,8 @@ describe("admin page registry sources", () => {
 		});
 		expect(readSettings.statusCode).toBe(200);
 		expect(readSettings.json().pageRegistry).toMatchObject({
-			mode: "discovery",
-			authoritativeSourceIds: [],
+			mode: "authoritative",
+			authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 		});
 	});
 
@@ -353,6 +333,21 @@ describe("admin page registry sources", () => {
 		});
 		cleanups.push(fixture.cleanup);
 		const admin = await loginAsAdmin(fixture.app);
+		const sourceResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/page-registry/sources",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+				sourceType: "sitemap",
+				sourceUrl: "http://localhost:4321/sitemap.xml",
+				enabled: true,
+				mode: "append",
+			},
+		});
+		expect(sourceResponse.statusCode).toBe(200);
+		const sourceId = sourceResponse.json().source.id as number;
+
 		const allResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/admin/page-registry/refresh",
@@ -372,6 +367,7 @@ describe("admin page registry sources", () => {
 			retryDelaySec: 90,
 			input: {
 				siteKey: "fangyuan",
+				sourceIds: [sourceId],
 				timeoutMs: 15_000,
 				maxBytes: 2_097_152,
 			},

@@ -474,17 +474,12 @@ export const adminPageRegistrySourcePatchBodySchema = z
 		mode: pageSourceModeSchema.optional(),
 		refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
 		nextRefreshAt: z.string().datetime().nullable().optional(),
-		disableAuthoritativeMode: z.boolean().optional(),
 	})
 	.refine((value) => Object.keys(value).length > 0, {
 		message: "至少需要一个更新字段",
 	});
 
-export const adminPageRegistrySourceDeleteBodySchema = z
-	.object({
-		disableAuthoritativeMode: z.boolean().optional(),
-	})
-	.optional();
+export const adminPageRegistrySourceDeleteBodySchema = z.object({}).optional();
 
 export const adminPageRegistrySourceParamsSchema = z.object({
 	sourceId: z.coerce.number().int().positive(),
@@ -664,7 +659,7 @@ export const adminSettingsBodySchema = z
 		pageRegistry: z
 			.object({
 				mode: z.enum(["discovery", "authoritative"]).optional(),
-				authoritativeSourceIds: z.array(z.number().int().positive()).optional(),
+				authoritativeSitemapUrls: z.array(z.string().trim().url()).optional(),
 				unknownPageResponse: z
 					.enum(["inactive_payload", "forbidden"])
 					.optional(),

@@ -110,7 +110,7 @@ export function authoritativePageSourceRefreshPolicy(): ProtectedTaskPolicy {
 		lockedOwnerTransfer: true,
 		lockedType: true,
 		lockedSite: true,
-		lockedPayloadPaths: ["siteKey", "sourceIds"],
+		lockedPayloadPaths: ["siteKey", "sitemapUrls"],
 		editablePayloadPaths: [
 			"timeoutMs",
 			"maxBytes",
@@ -146,7 +146,7 @@ export class SystemManagedTaskService {
 
 	public async ensureAuthoritativePageSourceRefresh(input: {
 		siteKey: string;
-		sourceIds: number[];
+		sitemapUrls: string[];
 		actorUserId?: number | null;
 		timeoutMs?: number;
 		maxBytes?: number;
@@ -162,7 +162,8 @@ export class SystemManagedTaskService {
 			description: "页面来源权威模式保障任务，定时刷新权威 sitemap。",
 			payload: {
 				siteKey: input.siteKey,
-				sourceIds: input.sourceIds,
+				sitemapUrls: input.sitemapUrls,
+				mode: "replace",
 				trigger: "scheduled",
 				timeoutMs: input.timeoutMs,
 				maxBytes: input.maxBytes,
@@ -182,7 +183,7 @@ export class SystemManagedTaskService {
 		});
 	}
 
-	public async releaseAuthoritativePageSourceRefreshProtection(input: {
+	public async disableAuthoritativePageSourceRefresh(input: {
 		siteKey: string;
 		actorUserId?: number | null;
 	}) {
@@ -193,7 +194,8 @@ export class SystemManagedTaskService {
 			return null;
 		}
 		return this.scheduledTasks.update(existing.id, {
-			protection: null,
+			enabled: false,
+			disabledReason: "authoritative_disabled",
 			updatedByUserId: input.actorUserId ?? null,
 		});
 	}

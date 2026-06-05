@@ -1,7 +1,7 @@
 import type { TaskTypeDefinition } from "@/api/tasks";
 import { Input } from "@/components/ui/input";
 
-import { Field, inputClass } from "./admin-ui";
+import { Field, inputClass, textareaClass } from "./admin-ui";
 
 export type TaskPayloadDraft = Record<string, unknown>;
 
@@ -19,7 +19,7 @@ function readNumberList(value: unknown): string {
 
 function readStringList(value: unknown): string {
 	return Array.isArray(value)
-		? value.filter((item) => typeof item === "string").join(", ")
+		? value.filter((item) => typeof item === "string").join("\n")
 		: "";
 }
 
@@ -32,8 +32,20 @@ function parseNumberList(value: string): number[] | undefined {
 }
 
 function parseStringList(value: string): string[] | undefined {
+	const items = Array.from(
+		new Set(
+			value
+				.split(/[\s,]+/)
+				.map((item) => item.trim())
+				.filter(Boolean),
+		),
+	);
+	return items.length > 0 ? items : undefined;
+}
+
+function parseCommaStringList(value: string): string[] | undefined {
 	const items = value
-		.split(",")
+		.split(/[,，]/)
 		.map((item) => item.trim())
 		.filter(Boolean);
 	return items.length > 0 ? items : undefined;
@@ -96,6 +108,31 @@ function PayloadInput({
 	);
 }
 
+function PayloadTextarea({
+	label,
+	value,
+	onChange,
+	description,
+	placeholder,
+}: {
+	label: string;
+	value: string;
+	onChange: (value: string) => void;
+	description?: string;
+	placeholder?: string;
+}) {
+	return (
+		<Field label={label} description={description}>
+			<textarea
+				className={textareaClass}
+				value={value}
+				placeholder={placeholder}
+				onChange={(event) => onChange(event.target.value)}
+			/>
+		</Field>
+	);
+}
+
 export function TaskTypePayloadForm({
 	definition,
 	payload,
@@ -137,17 +174,26 @@ export function TaskTypePayloadForm({
 					<Field label="刷新模式">
 						<select
 							className={inputClass}
-							value={readText(payload.mode) || "append"}
+							value={readText(payload.mode) || "replace"}
 							onChange={(event) => setValue("mode", event.target.value)}
 						>
 							<option value="append">追加/更新</option>
 							<option value="replace">按来源替换</option>
 						</select>
 					</Field>
+					<PayloadTextarea
+						label="sitemap 地址"
+						description="填写一个或多个 sitemap 或 sitemap index URL；可用逗号、空格或换行分隔。"
+						value={readStringList(payload.sitemapUrls)}
+						placeholder="https://example.com/sitemap-index.xml"
+						onChange={(value) =>
+							setValue("sitemapUrls", parseStringList(value))
+						}
+					/>
 					<PayloadInput
-						label="来源 ID"
+						label="兼容 sourceIds"
 						value={readNumberList(payload.sourceIds)}
-						placeholder="例如 1, 2, 3；留空为全部来源"
+						placeholder="仅旧来源刷新任务使用，例如 1, 2, 3"
 						onChange={(value) => setValue("sourceIds", parseNumberList(value))}
 					/>
 					<PayloadInput
@@ -179,9 +225,13 @@ export function TaskTypePayloadForm({
 					</Field>
 					<PayloadInput
 						label="页面 Key"
-						value={readStringList(payload.pageKeys)}
+						value={
+							Array.isArray(payload.pageKeys) ? payload.pageKeys.join(", ") : ""
+						}
 						placeholder="仅指定页面时填写，逗号分隔"
-						onChange={(value) => setValue("pageKeys", parseStringList(value))}
+						onChange={(value) =>
+							setValue("pageKeys", parseCommaStringList(value))
+						}
 					/>
 					<PayloadInput
 						label="批量大小"

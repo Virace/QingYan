@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
+import { eq } from "drizzle-orm";
+
 import type { AppDatabase } from "../../db/client";
+import { sites } from "../../db/schema";
 import type { TaskRunnerContext } from "../tasks/task-runner-context";
 import { PageRegistryService } from "./service";
 import {
@@ -44,6 +47,7 @@ export interface PageSourceRefreshOptions {
 
 interface PageSourceRefreshJobScope {
 	siteKey: string;
+	sitemapUrls?: string[];
 	sourceIds?: number[];
 	mode?: PageSourceMode;
 	trigger: PageSourceRefreshTrigger;
@@ -53,6 +57,19 @@ interface PageSourceRefreshJobScope {
 	maxAttempts?: number;
 	retryDelaySec?: number;
 }
+
+type RefreshablePageSource =
+	| PageRegistrySourceRecord
+	| {
+			id: null;
+			siteId: number;
+			siteKey: string;
+			sourceType: "sitemap";
+			sourceUrl: string;
+			enabled: true;
+			mode: PageSourceMode;
+			refreshIntervalSec: null;
+	  };
 
 function emptyCounters(): PageSourceRefreshCounters {
 	return {
@@ -111,7 +128,7 @@ export class PageSourceRefreshService {
 	private readonly pageRegistry: PageRegistryService;
 
 	public constructor(
-		db: AppDatabase,
+		private readonly db: AppDatabase,
 		private readonly options: PageSourceRefreshOptions,
 	) {
 		this.repository = new PageSourceRepository(db);
@@ -152,14 +169,13 @@ export class PageSourceRefreshService {
 		scope: PageSourceRefreshJobScope,
 		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
 	) {
-		const sources = await this.repository.listEnabledSources({
-			sourceIds: scope.sourceIds,
-		});
-		const selectedSources = sources.filter(
-			(source) => source.siteKey === scope.siteKey,
-		);
+		const selectedSources = await this.listSelectedSources(scope);
 		const counters = emptyCounters();
-		const errors: Array<{ sourceId: number; url: string; reason: string }> = [];
+		const errors: Array<{
+			sourceId: number | null;
+			url: string;
+			reason: string;
+		}> = [];
 
 		for (const source of selectedSources) {
 			if (context.signal?.aborted) {
@@ -187,19 +203,66 @@ export class PageSourceRefreshService {
 		};
 	}
 
+	private async listSelectedSources(
+		scope: PageSourceRefreshJobScope,
+	): Promise<RefreshablePageSource[]> {
+		const runtimeSources = await this.listRuntimeSitemapSources(scope);
+		const legacySources = await this.repository.listEnabledSources({
+			sourceIds: scope.sourceIds,
+		});
+		return [
+			...runtimeSources,
+			...legacySources.filter((source) => source.siteKey === scope.siteKey),
+		];
+	}
+
+	private async listRuntimeSitemapSources(
+		scope: PageSourceRefreshJobScope,
+	): Promise<RefreshablePageSource[]> {
+		if (!scope.sitemapUrls || scope.sitemapUrls.length === 0) {
+			return [];
+		}
+		const [site] = await this.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, scope.siteKey))
+			.limit(1);
+		if (!site) {
+			throw new Error(
+				`Site not found for page source refresh: ${scope.siteKey}`,
+			);
+		}
+		return scope.sitemapUrls.map((sourceUrl) => ({
+			id: null,
+			siteId: site.id,
+			siteKey: site.siteKey,
+			sourceType: "sitemap",
+			sourceUrl,
+			enabled: true,
+			mode: scope.mode ?? "replace",
+			refreshIntervalSec: null,
+		}));
+	}
+
 	private async refreshSource(
-		source: PageRegistrySourceRecord,
+		source: RefreshablePageSource,
 		scope: PageSourceRefreshJobScope,
 	) {
 		const now = new Date();
 		const nowIso = now.toISOString();
 		const counters = emptyCounters();
-		const errors: Array<{ sourceId: number; url: string; reason: string }> = [];
+		const errors: Array<{
+			sourceId: number | null;
+			url: string;
+			reason: string;
+		}> = [];
 		const seenPageRegistryIds: number[] = [];
 		const missingTitlePageKeys: string[] = [];
 		let approvedPending = 0;
 
-		await this.repository.markSourceAttempt(source.id, nowIso);
+		if (source.id !== null) {
+			await this.repository.markSourceAttempt(source.id, nowIso);
+		}
 		const allowedOrigins = await this.options.loadAllowedOriginsForSite(
 			source.siteKey,
 		);
@@ -250,11 +313,13 @@ export class PageSourceRefreshService {
 				missingTitlePageKeys.push(normalized.pageKey);
 			}
 			seenPageRegistryIds.push(upsert.page.id);
-			await this.repository.attachSourcePage({
-				sourceId: source.id,
-				pageRegistryId: upsert.page.id,
-				nowIso,
-			});
+			if (source.id !== null) {
+				await this.repository.attachSourcePage({
+					sourceId: source.id,
+					pageRegistryId: upsert.page.id,
+					nowIso,
+				});
+			}
 			const approved = await this.pageRegistry.approvePendingCandidateIfPending(
 				{
 					siteId: source.siteId,
@@ -276,7 +341,7 @@ export class PageSourceRefreshService {
 		}
 
 		const mode = scope.mode ?? source.mode;
-		if (mode === "replace") {
+		if (mode === "replace" && source.id !== null) {
 			counters.stale += await this.repository.markMissingSourcePagesStale({
 				sourceId: source.id,
 				seenPageRegistryIds,
@@ -284,14 +349,16 @@ export class PageSourceRefreshService {
 			});
 		}
 
-		await this.repository.markSourceSuccess({
-			sourceId: source.id,
-			nowIso,
-			hash: hashText(parsed.hashText),
-			nextRefreshAt: source.refreshIntervalSec
-				? addSeconds(now, source.refreshIntervalSec)
-				: null,
-		});
+		if (source.id !== null) {
+			await this.repository.markSourceSuccess({
+				sourceId: source.id,
+				nowIso,
+				hash: hashText(parsed.hashText),
+				nextRefreshAt: source.refreshIntervalSec
+					? addSeconds(now, source.refreshIntervalSec)
+					: null,
+			});
+		}
 		if (missingTitlePageKeys.length > 0) {
 			await this.options.createTitleRefreshRun?.({
 				siteKey: source.siteKey,
@@ -307,7 +374,7 @@ export class PageSourceRefreshService {
 	}
 
 	private async collectParsedEntries(input: {
-		source: PageRegistrySourceRecord;
+		source: RefreshablePageSource;
 		scope: PageSourceRefreshJobScope;
 		xml: string;
 		allowedOrigins: string[];

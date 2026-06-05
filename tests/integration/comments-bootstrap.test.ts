@@ -597,7 +597,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			.set({
 				pageRegistryJson: JSON.stringify({
 					mode: "authoritative",
-					authoritativeSourceIds: [1],
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 					unknownPageResponse: "inactive_payload",
 					requireHealthySource: true,
 					sourceFreshnessGraceSec: 7200,
@@ -689,7 +689,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			.set({
 				pageRegistryJson: JSON.stringify({
 					mode: "authoritative",
-					authoritativeSourceIds: [1],
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 					unknownPageResponse: "forbidden",
 					requireHealthySource: true,
 					sourceFreshnessGraceSec: 7200,
@@ -758,7 +758,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			.set({
 				pageRegistryJson: JSON.stringify({
 					mode: "discovery",
-					authoritativeSourceIds: [],
+					authoritativeSitemapUrls: [],
 					unknownPageResponse: "inactive_payload",
 					requireHealthySource: true,
 					sourceFreshnessGraceSec: 7200,

@@ -108,6 +108,61 @@ async function createSource(
 }
 
 describe("PageSourceRefreshService", () => {
+	it("creates active registry pages from sitemap URL payloads without source records", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const fetchCalls: string[] = [];
+		const { service } = createService(fixture, async (url) => {
+			fetchCalls.push(url);
+			return [
+				"<urlset>",
+				"<url><loc>https://example.com/posts/a/</loc></url>",
+				"<url><loc>https://example.com/posts/b/</loc></url>",
+				"</urlset>",
+			].join("");
+		});
+
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+				mode: "replace",
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
+
+		const pages = await fixture.db.select().from(sitePageRegistry);
+		const sourcePages = await fixture.db
+			.select()
+			.from(sitePageRegistrySourcePages);
+
+		expect(fetchCalls).toEqual(["https://example.com/sitemap.xml"]);
+		expect(pages).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					pageKey: "/posts/a/",
+					pageUrl: "/posts/a/",
+					status: "active",
+				}),
+				expect.objectContaining({
+					pageKey: "/posts/b/",
+					pageUrl: "/posts/b/",
+					status: "active",
+				}),
+			]),
+		);
+		expect(sourcePages).toEqual([]);
+		expect(result).toMatchObject({
+			processed: 2,
+			created: 2,
+			updated: 0,
+			stale: 0,
+			skipped: 0,
+			failed: 0,
+		});
+	});
+
 	it("creates active registry pages from sitemap entries", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);

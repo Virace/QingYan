@@ -606,7 +606,7 @@ describe("admin tasks api", () => {
 		);
 		const ensured = await service.ensureAuthoritativePageSourceRefreshTask({
 			siteKey: "fangyuan",
-			sourceIds: [1, 2],
+			sitemapUrls: ["http://localhost:4321/sitemap.xml"],
 			requestId: "protected-task-test",
 		});
 		const taskId = ensured.task.id;
@@ -630,7 +630,11 @@ describe("admin tasks api", () => {
 			canDelete: false,
 			canDisable: false,
 			canTransferOwner: false,
-			payload: { siteKey: "fangyuan", sourceIds: [1, 2] },
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				mode: "replace",
+			},
 		});
 
 		const allowedPatch = await fixture.app.inject({
@@ -645,7 +649,8 @@ describe("admin tasks api", () => {
 				trigger: { everyMinutes: 120 },
 				payload: {
 					siteKey: "fangyuan",
-					sourceIds: [1, 2],
+					sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+					mode: "replace",
 					trigger: "scheduled",
 					timeoutMs: 5000,
 				},
@@ -657,7 +662,8 @@ describe("admin tasks api", () => {
 			trigger: { everyMinutes: 120 },
 			payload: {
 				siteKey: "fangyuan",
-				sourceIds: [1, 2],
+				sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				mode: "replace",
 				timeoutMs: 5000,
 			},
 		});
@@ -672,7 +678,8 @@ describe("admin tasks api", () => {
 			payload: {
 				payload: {
 					siteKey: "fangyuan",
-					sourceIds: [999],
+					sitemapUrls: ["http://localhost:4321/other.xml"],
+					mode: "replace",
 					trigger: "scheduled",
 					timeoutMs: 5000,
 				},
@@ -736,5 +743,54 @@ describe("admin tasks api", () => {
 				"task.scheduled.protected_operation_denied",
 			]),
 		);
+	});
+
+	it("blocks ordinary same-site page source refresh tasks in authoritative mode", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+
+		const settingsResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: {
+				pageRegistry: {
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				},
+			},
+		});
+		expect(settingsResponse.statusCode).toBe(200);
+
+		const createResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/tasks/scheduled",
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: taskPayload({
+				name: "Ordinary page source refresh",
+				type: "page_source_refresh",
+				scheduleKind: "manual_only",
+				trigger: {},
+				payload: {
+					siteKey: "fangyuan",
+					sitemapUrls: ["http://localhost:4321/other.xml"],
+					mode: "replace",
+				},
+			}),
+		});
+
+		expect(createResponse.statusCode).toBe(409);
+		expect(createResponse.json()).toMatchObject({
+			error: {
+				code: "AUTHORITATIVE_PAGE_SOURCE_REFRESH_CONFLICT",
+			},
+		});
 	});
 });

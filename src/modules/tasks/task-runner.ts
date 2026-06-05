@@ -1,5 +1,6 @@
 import type { TaskEventLogRepository } from "./task-event-log-repository";
 import type { TaskRunRepository } from "./task-run-repository";
+import type { ScheduledTaskRepository } from "./scheduled-task-repository";
 import type {
 	TaskRunnerContext,
 	TaskRunnerServices,
@@ -11,6 +12,7 @@ import type { TaskRunRecord } from "./types";
 export interface TaskRunnerOptions {
 	registry: TaskTypeRegistry;
 	taskRuns: TaskRunRepository;
+	scheduledTasks?: ScheduledTaskRepository;
 	eventLogs: TaskEventLogRepository;
 	failureNotifications?: {
 		planForFailedRun(run: TaskRunRecord): Promise<unknown>;
@@ -53,9 +55,13 @@ export class TaskRunner {
 		try {
 			const definition = this.options.registry.getRequired(run.type);
 			const payload = definition.payloadSchema.parse(run.input ?? run.payload);
+			const scheduledTask = run.scheduledTaskId
+				? await this.options.scheduledTasks?.get(run.scheduledTaskId)
+				: null;
 			const context: TaskRunnerContext = {
 				runId: run.id,
 				scheduledTaskId: run.scheduledTaskId,
+				scheduledTaskSystemKey: scheduledTask?.systemKey ?? null,
 				actor: { type: "system" },
 				services: this.options.services ?? {},
 				log: createTaskLogWriter({

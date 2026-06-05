@@ -40,6 +40,18 @@ describe("built-in task type registry", () => {
 		expect(
 			registry.validatePayload("page_source_refresh", {
 				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap-index.xml"],
+				mode: "replace",
+			}),
+		).toEqual({
+			siteKey: "fangyuan",
+			sitemapUrls: ["https://example.com/sitemap-index.xml"],
+			mode: "replace",
+			trigger: "scheduled",
+		});
+		expect(
+			registry.validatePayload("page_source_refresh", {
+				siteKey: "fangyuan",
 				sourceIds: [1, 2],
 				mode: "replace",
 				timeoutMs: 10_000,

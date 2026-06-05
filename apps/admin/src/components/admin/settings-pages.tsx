@@ -117,6 +117,17 @@ const systemSettingsTabs = [
 ] as const;
 type SystemSettingsTab = (typeof systemSettingsTabs)[number];
 
+function parseSitemapUrlList(value: string) {
+	return Array.from(
+		new Set(
+			value
+				.split(/[\s,]+/)
+				.map((item) => item.trim())
+				.filter(Boolean),
+		),
+	);
+}
+
 function buildSiteSettingsSectionPayload(
 	section: SiteSettingsTab,
 	draft: AdminSettings,
@@ -2790,16 +2801,16 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 												</select>
 											</Field>
 											<Field
-												label="权威来源 ID"
-												description="填写页面来源列表中的 sitemap source ID；可用逗号、空格或换行分隔。"
+												label="权威 sitemap 地址"
+												description="填写一个或多个 sitemap 或 sitemap index URL；可用逗号、空格或换行分隔。"
 												error={firstFieldError(
 													saveError,
-													"pageRegistry.authoritativeSourceIds",
+													"pageRegistry.authoritativeSitemapUrls",
 												)}
 											>
 												<textarea
 													className={textareaClass}
-													value={draft.pageRegistry.authoritativeSourceIds.join(
+													value={draft.pageRegistry.authoritativeSitemapUrls.join(
 														"\n",
 													)}
 													onChange={(event) =>
@@ -2807,13 +2818,9 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															...draft,
 															pageRegistry: {
 																...draft.pageRegistry,
-																authoritativeSourceIds: event.target.value
-																	.split(/[\s,]+/)
-																	.map((value) => Number(value.trim()))
-																	.filter(
-																		(value) =>
-																			Number.isInteger(value) && value > 0,
-																	),
+																authoritativeSitemapUrls: parseSitemapUrlList(
+																	event.target.value,
+																),
 															},
 														})
 													}
@@ -2889,10 +2896,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															: "发现模式"}
 													</Badge>
 													<span className="text-muted-foreground">
-														{draft.pageRegistry.authoritativeSourceIds.length >
-														0
-															? `来源 ID：${draft.pageRegistry.authoritativeSourceIds.join(", ")}`
-															: "未选择权威来源"}
+														{draft.pageRegistry.authoritativeSitemapUrls
+															.length > 0
+															? `sitemap：${draft.pageRegistry.authoritativeSitemapUrls.join(", ")}`
+															: "未配置权威 sitemap"}
 													</span>
 												</div>
 												{draft.pageRegistry.mode === "authoritative" ? (
@@ -2912,7 +2919,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 													</div>
 												) : (
 													<p className="mt-3 text-xs text-muted-foreground">
-														发现模式不会删除既有刷新任务；从权威模式关闭后，相关任务会保留但解除保护。
+														发现模式不会删除既有刷新任务；从权威模式关闭后，系统托管任务会禁用并保留保护归属。
 													</p>
 												)}
 											</div>

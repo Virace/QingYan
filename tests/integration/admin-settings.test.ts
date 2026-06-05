@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import {
-	scheduledTasks,
-	sitePageRegistrySources,
-	siteSettings,
-	sites,
-} from "../../src/db/schema";
+import { scheduledTasks, siteSettings, sites } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -96,7 +91,7 @@ describe("admin settings", () => {
 			},
 			pageRegistry: {
 				mode: "discovery",
-				authoritativeSourceIds: [],
+				authoritativeSitemapUrls: [],
 				unknownPageResponse: "inactive_payload",
 				requireHealthySource: true,
 				sourceFreshnessGraceSec: 7200,
@@ -330,7 +325,7 @@ describe("admin settings", () => {
 		expect(updateResponse.statusCode).toBe(200);
 		expect(updateResponse.json().pageRegistry).toEqual({
 			mode: "discovery",
-			authoritativeSourceIds: [],
+			authoritativeSitemapUrls: [],
 			unknownPageResponse: "forbidden",
 			requireHealthySource: true,
 			sourceFreshnessGraceSec: 3600,
@@ -350,29 +345,10 @@ describe("admin settings", () => {
 		);
 	});
 
-	it("ensures and releases protected page source refresh tasks for authoritative mode", async () => {
+	it("ensures and disables protected page source refresh tasks for authoritative mode", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
-
-		const sourceResponse = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/page-registry/sources",
-			...withAdminWriteAuth({ adminCookie, csrfToken }),
-			payload: {
-				siteKey: "fangyuan",
-				sourceType: "sitemap",
-				sourceUrl: "http://localhost:4321/sitemap.xml",
-				enabled: true,
-				mode: "append",
-			},
-		});
-		expect(sourceResponse.statusCode).toBe(200);
-		const sourceId = sourceResponse.json().source.id as number;
-		await fixture.app.db
-			.update(sitePageRegistrySources)
-			.set({ lastSuccessAt: new Date().toISOString() })
-			.where(eq(sitePageRegistrySources.id, sourceId));
 
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
@@ -381,7 +357,7 @@ describe("admin settings", () => {
 			payload: {
 				pageRegistry: {
 					mode: "authoritative",
-					authoritativeSourceIds: [sourceId],
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 				},
 			},
 		});
@@ -389,7 +365,7 @@ describe("admin settings", () => {
 		expect(updateResponse.statusCode).toBe(200);
 		expect(updateResponse.json().pageRegistry).toMatchObject({
 			mode: "authoritative",
-			authoritativeSourceIds: [sourceId],
+			authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 			requireHealthySource: true,
 		});
 		const tasksAfterEnable = await fixture.app.db
@@ -406,6 +382,12 @@ describe("admin settings", () => {
 			type: "page_source_refresh",
 			enabled: true,
 			protectionJson: expect.any(String),
+			payloadJson: expect.any(String),
+		});
+		expect(JSON.parse(tasksAfterEnable[0].payloadJson)).toMatchObject({
+			siteKey: "fangyuan",
+			sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+			mode: "replace",
 		});
 
 		const repeatResponse = await fixture.app.inject({
@@ -415,7 +397,7 @@ describe("admin settings", () => {
 			payload: {
 				pageRegistry: {
 					mode: "authoritative",
-					authoritativeSourceIds: [sourceId],
+					authoritativeSitemapUrls: ["http://localhost:4321/other.xml"],
 				},
 			},
 		});
@@ -430,6 +412,11 @@ describe("admin settings", () => {
 				),
 			);
 		expect(tasksAfterRepeat).toHaveLength(1);
+		expect(JSON.parse(tasksAfterRepeat[0].payloadJson)).toMatchObject({
+			siteKey: "fangyuan",
+			sitemapUrls: ["http://localhost:4321/other.xml"],
+			mode: "replace",
+		});
 
 		const disableResponse = await fixture.app.inject({
 			method: "PUT",
@@ -448,7 +435,9 @@ describe("admin settings", () => {
 			.where(eq(scheduledTasks.id, tasksAfterEnable[0].id));
 		expect(releasedTask).toMatchObject({
 			systemKey: "page_registry:authoritative_source_refresh:fangyuan",
-			protectionJson: null,
+			enabled: false,
+			disabledReason: "authoritative_disabled",
+			protectionJson: expect.any(String),
 		});
 
 		const reenableResponse = await fixture.app.inject({
@@ -458,7 +447,7 @@ describe("admin settings", () => {
 			payload: {
 				pageRegistry: {
 					mode: "authoritative",
-					authoritativeSourceIds: [sourceId],
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
 				},
 			},
 		});
@@ -475,28 +464,15 @@ describe("admin settings", () => {
 		expect(tasksAfterReenable).toHaveLength(1);
 		expect(tasksAfterReenable[0]).toMatchObject({
 			id: tasksAfterEnable[0].id,
+			enabled: true,
 			protectionJson: expect.any(String),
 		});
 	});
 
-	it("rejects authoritative mode without a healthy sitemap source", async () => {
+	it("rejects authoritative mode without sitemap URLs", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
-
-		const sourceResponse = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/page-registry/sources",
-			...withAdminWriteAuth({ adminCookie, csrfToken }),
-			payload: {
-				siteKey: "fangyuan",
-				sourceType: "rss",
-				sourceUrl: "http://localhost:4321/feed.xml",
-				enabled: true,
-				mode: "append",
-			},
-		});
-		expect(sourceResponse.statusCode).toBe(200);
 
 		const response = await fixture.app.inject({
 			method: "PUT",
@@ -505,7 +481,7 @@ describe("admin settings", () => {
 			payload: {
 				pageRegistry: {
 					mode: "authoritative",
-					authoritativeSourceIds: [sourceResponse.json().source.id],
+					authoritativeSitemapUrls: [],
 				},
 			},
 		});
@@ -516,7 +492,7 @@ describe("admin settings", () => {
 				code: "VALIDATION_FAILED",
 				fields: [
 					{
-						path: "pageRegistry.authoritativeSourceIds",
+						path: "pageRegistry.authoritativeSitemapUrls",
 						code: "AUTHORITATIVE_SOURCE_REQUIRED",
 					},
 				],

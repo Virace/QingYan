@@ -11,7 +11,7 @@ describe("page registry settings", () => {
 	it("returns the default shape", () => {
 		expect(mergePageRegistrySettings()).toEqual({
 			mode: "discovery",
-			authoritativeSourceIds: [],
+			authoritativeSitemapUrls: [],
 			unknownPageResponse: "inactive_payload",
 			requireHealthySource: true,
 			sourceFreshnessGraceSec: 7200,
@@ -26,14 +26,25 @@ describe("page registry settings", () => {
 		);
 	});
 
-	it("deduplicates positive integer source ids in stable order", () => {
+	it("normalizes authoritative sitemap urls", () => {
 		const settings = mergePageRegistrySettings(
 			JSON.stringify({
-				authoritativeSourceIds: [3, 2, 3, 0, -1, 2, 5, "6"],
+				mode: "authoritative",
+				authoritativeSitemapUrls: [
+					"https://example.com/sitemap-index.xml",
+					"https://example.com/sitemap-index.xml",
+					"ftp://example.com/bad.xml",
+					"not-a-url",
+					"https://example.com/post-sitemap.xml",
+				],
 			}),
 		);
 
-		expect(settings.authoritativeSourceIds).toEqual([3, 2, 5]);
+		expect(settings.authoritativeSitemapUrls).toEqual([
+			"https://example.com/sitemap-index.xml",
+			"https://example.com/post-sitemap.xml",
+		]);
+		expect(settings.requireHealthySource).toBe(true);
 	});
 
 	it("forces healthy source requirement in authoritative mode", () => {
@@ -55,7 +66,10 @@ describe("page registry settings", () => {
 			defaultPageRegistrySettings,
 			{
 				mode: "authoritative",
-				authoritativeSourceIds: [1, 1, 2],
+				authoritativeSitemapUrls: [
+					"https://example.com/sitemap.xml",
+					"https://example.com/sitemap.xml",
+				],
 				requireHealthySource: false,
 				sourceFreshnessGraceSec: 0,
 				unknownPageResponse: "forbidden",
@@ -65,7 +79,7 @@ describe("page registry settings", () => {
 
 		expect(settings).toEqual({
 			mode: "authoritative",
-			authoritativeSourceIds: [1, 2],
+			authoritativeSitemapUrls: ["https://example.com/sitemap.xml"],
 			unknownPageResponse: "forbidden",
 			requireHealthySource: true,
 			sourceFreshnessGraceSec: 0,

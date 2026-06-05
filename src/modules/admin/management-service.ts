@@ -18,7 +18,6 @@ import {
 } from "../comments/verified-author";
 import { CommentsWriteRepository } from "../comments/write-repository";
 import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
-import { PageSourceRepository } from "../page-registry/source-repository";
 import {
 	AppError,
 	InvalidRequestError,
@@ -1136,62 +1135,38 @@ export class AdminManagementService {
 		const fail = (message: string): never => {
 			throw new ValidationFailedError([
 				{
-					path: "pageRegistry.authoritativeSourceIds",
+					path: "pageRegistry.authoritativeSitemapUrls",
 					code: "AUTHORITATIVE_SOURCE_REQUIRED",
 					message,
 					received: "unknown",
 				},
 			]);
 		};
-		if (input.settings.authoritativeSourceIds.length === 0) {
-			fail("Authoritative mode requires at least one healthy sitemap source.");
+		if (input.settings.authoritativeSitemapUrls.length === 0) {
+			fail("Authoritative mode requires at least one sitemap URL.");
 		}
-		const sources = await new PageSourceRepository(
-			this.repository.database,
-		).listSources({
-			siteId: input.siteId,
-		});
-		const selectedSources = input.settings.authoritativeSourceIds.map(
-			(sourceId) => sources.find((source) => source.id === sourceId),
+		const allowedOrigins = new Set(
+			input.allowedOrigins.map((origin) => {
+				try {
+					return new URL(origin).origin;
+				} catch {
+					return origin;
+				}
+			}),
 		);
-		if (selectedSources.some((source) => !source)) {
-			fail("Authoritative source must exist and belong to the site.");
-		}
-		const selected = selectedSources.filter(
-			(source): source is NonNullable<(typeof selectedSources)[number]> =>
-				Boolean(source),
-		);
-		const sitemapSources = selected.filter(
-			(source) => source.sourceType === "sitemap",
-		);
-		if (sitemapSources.length === 0) {
-			fail("Authoritative mode requires a sitemap source.");
-		}
-		const now = Date.now();
-		const graceMs = input.settings.sourceFreshnessGraceSec * 1000;
-		for (const source of sitemapSources) {
-			if (!source.enabled) {
-				fail("Authoritative sitemap source must be enabled.");
-			}
-			let sourceOrigin: string;
+		for (const sitemapUrl of input.settings.authoritativeSitemapUrls) {
 			try {
-				sourceOrigin = new URL(source.sourceUrl).origin;
+				const parsed = new URL(sitemapUrl);
+				if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+					fail("Authoritative sitemap URL must use http or https.");
+				}
+				if (!allowedOrigins.has(parsed.origin)) {
+					fail(
+						"Authoritative sitemap source origin must be allowed for the site.",
+					);
+				}
 			} catch {
 				fail("Authoritative sitemap source URL is invalid.");
-				return;
-			}
-			if (!input.allowedOrigins.includes(sourceOrigin)) {
-				fail(
-					"Authoritative sitemap source origin must be allowed for the site.",
-				);
-			}
-			const lastSuccessAt = source.lastSuccessAt;
-			if (typeof lastSuccessAt !== "string" || lastSuccessAt.length === 0) {
-				fail("Authoritative sitemap source must have a successful refresh.");
-			}
-			const refreshedAt = Date.parse(lastSuccessAt ?? "");
-			if (!Number.isFinite(refreshedAt) || now - refreshedAt > graceMs) {
-				fail("Authoritative sitemap source is stale.");
 			}
 		}
 	}
@@ -1350,7 +1325,7 @@ export class AdminManagementService {
 				this.siteRegistry,
 			).ensureAuthoritativePageSourceRefreshTask({
 				siteKey,
-				sourceIds: nextPageRegistry.authoritativeSourceIds,
+				sitemapUrls: nextPageRegistry.authoritativeSitemapUrls,
 				actorUserId: input.actorUserId,
 				requestId: input.requestId,
 			});
@@ -1361,7 +1336,7 @@ export class AdminManagementService {
 			await new AdminTaskService(
 				this.repository.database,
 				this.siteRegistry,
-			).releaseAuthoritativePageSourceRefreshTaskProtection({
+			).disableAuthoritativePageSourceRefreshTask({
 				siteKey,
 				actorUserId: input.actorUserId,
 				requestId: input.requestId,

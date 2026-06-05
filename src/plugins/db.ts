@@ -31,6 +31,7 @@ import { TaskRunWorker } from "../modules/tasks/task-run-worker";
 import { TaskRunner } from "../modules/tasks/task-runner";
 import { TaskScheduler } from "../modules/tasks/scheduler";
 import type { TaskRunnerServices } from "../modules/tasks/task-runner-context";
+import { PageSourceRefreshPolicyService } from "../modules/tasks/page-source-refresh-policy";
 
 async function fetchPageTitleHtml(
 	url: string,
@@ -100,6 +101,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	});
 	const taskRuns = new TaskRunRepository(db);
 	const eventLogs = new TaskEventLogRepository(db);
+	const scheduledTasks = new ScheduledTaskRepository(db);
 	const sourceRefresh = new PageSourceRefreshService(db, {
 		fetchText: fastify.pageSourceFetchText ?? fetchPageSourceText,
 		loadAllowedOriginsForSite: async (siteKey) =>
@@ -146,6 +148,10 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	});
 	const taskRunnerServices: TaskRunnerServices = {
 		pageSourceRefresh: sourceRefresh,
+		pageSourceRefreshPolicy: new PageSourceRefreshPolicyService(
+			db,
+			fastify.siteRegistry,
+		),
 		pageMetadataRefresh: titleRefresh,
 		commentIpMaintenance,
 		backup: backupTaskService,
@@ -155,7 +161,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		}),
 	};
 	const taskScheduler = new TaskScheduler({
-		scheduledTasks: new ScheduledTaskRepository(db),
+		scheduledTasks,
 		taskRuns,
 		eventLogs,
 		workerId: `scheduler:${process.pid}`,
@@ -170,6 +176,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		runner: new TaskRunner({
 			registry: taskTypeRegistry,
 			taskRuns,
+			scheduledTasks,
 			eventLogs,
 			workerId: `task-worker:${process.pid}`,
 			services: taskRunnerServices,
