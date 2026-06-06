@@ -20,6 +20,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { useAdminTheme } from "@/theme/admin-theme";
 
 type AdminMutationMeta = {
 	suppressGlobalToast?: boolean;
@@ -148,6 +149,7 @@ function AppContent({
 }
 
 export default function App() {
+	const { resolvedTheme } = useAdminTheme();
 	const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 	const queryClient = useMemo(
 		() =>
@@ -165,7 +167,7 @@ export default function App() {
 					setAuthenticated={setAuthenticated}
 				/>
 			</AdminConfirmDialogProvider>
-			<Toaster richColors position="top-right" />
+			<Toaster richColors position="top-right" theme={resolvedTheme} />
 		</QueryClientProvider>
 	);
 }

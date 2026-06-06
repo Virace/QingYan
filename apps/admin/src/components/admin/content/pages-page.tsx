@@ -371,7 +371,7 @@ export function PagesPage({
 								page.status === "stale" ||
 								page.status === "unreachable" ||
 								page.status === "not_found"
-									? "border-amber-300 bg-amber-50"
+									? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30"
 									: ""
 							}`}
 						>
@@ -384,7 +384,7 @@ export function PagesPage({
 										{page.pageUrl ?? page.pageKey}
 									</ExternalLinkText>
 									{page.titleRefreshError ? (
-										<p className="mt-1 text-xs text-amber-700">
+										<p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
 											Title 刷新错误：{page.titleRefreshError}
 											{page.titleRefreshStatusCode
 												? ` / HTTP ${page.titleRefreshStatusCode}`

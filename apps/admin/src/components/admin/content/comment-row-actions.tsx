@@ -21,8 +21,8 @@ export function CommentActionButton({
 			onClick={onClick}
 			className={cn(
 				"inline text-sm underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50",
-				tone === "success" && "text-emerald-700",
-				tone === "warning" && "text-amber-700",
+				tone === "success" && "text-emerald-700 dark:text-emerald-300",
+				tone === "warning" && "text-amber-700 dark:text-amber-300",
 				tone === "danger" && "text-destructive",
 				tone === "default" && "text-primary",
 			)}

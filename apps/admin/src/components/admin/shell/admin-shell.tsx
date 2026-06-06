@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
 import { EmptyState, inputClass } from "../shared/admin-ui";
+import { ThemeMenu } from "./theme-menu";
 
 function lazyAdminPage<TProps extends object, TExportName extends string>(
 	loader: () => Promise<Record<TExportName, ComponentType<TProps>>>,
@@ -417,6 +418,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 								</option>
 							))}
 						</select>
+						<ThemeMenu />
 						<Button
 							type="button"
 							variant="outline"

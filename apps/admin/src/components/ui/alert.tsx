@@ -1,41 +1,42 @@
 import type * as React from "react";
+import { Callout } from "@radix-ui/themes";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
-const alertVariants = cva(
-	"relative w-full rounded-lg border p-4 text-sm [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg+div]:translate-y-[-3px] [&>svg~*]:pl-7",
-	{
-		variants: {
-			variant: {
-				default: "bg-background text-foreground",
-				destructive:
-					"border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
-			},
-		},
-		defaultVariants: {
-			variant: "default",
+const alertVariants = cva("", {
+	variants: {
+		variant: {
+			default: "",
+			destructive: "",
 		},
 	},
-);
+	defaultVariants: {
+		variant: "default",
+	},
+});
 
-function Alert({
-	className,
-	variant,
-	...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+type AlertProps = Omit<
+	React.ComponentProps<typeof Callout.Root>,
+	"color" | "variant"
+> &
+	VariantProps<typeof alertVariants>;
+
+function Alert({ className, variant, ...props }: AlertProps) {
 	return (
-		<div
+		<Callout.Root
 			role="alert"
+			color={variant === "destructive" ? "red" : "gray"}
+			variant="surface"
 			className={cn(alertVariants({ variant }), className)}
 			{...props}
 		/>
 	);
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"h5">) {
+function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
 	return (
-		<h5
+		<div
 			className={cn("mb-1 font-medium leading-none tracking-normal", className)}
 			{...props}
 		/>

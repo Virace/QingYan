@@ -15,10 +15,10 @@ import { formatAdminCommentTime } from "../shared/time-format";
 
 function rowTone(status: CommentStatus) {
 	if (status === "pending") {
-		return "border-l-4 border-l-amber-500 bg-amber-50/70";
+		return "border-l-4 border-l-amber-500 bg-amber-50/70 dark:bg-amber-950/30";
 	}
 	if (status === "spam") {
-		return "border-l-4 border-l-destructive bg-red-50/70";
+		return "border-l-4 border-l-destructive bg-red-50/70 dark:bg-red-950/30";
 	}
 	if (status === "trash") {
 		return "border-l-4 border-l-muted-foreground bg-muted/50 opacity-85";

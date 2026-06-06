@@ -26,10 +26,18 @@ import { EmptyState } from "../shared/admin-ui";
 
 function StateText({ state }: { state?: string }) {
 	if (state === "normal_current") {
-		return <span className="font-medium text-emerald-700">当前版本</span>;
+		return (
+			<span className="font-medium text-emerald-700 dark:text-emerald-300">
+				当前版本
+			</span>
+		);
 	}
 	if (state === "upgrade_required") {
-		return <span className="font-medium text-amber-700">需要升级</span>;
+		return (
+			<span className="font-medium text-amber-700 dark:text-amber-300">
+				需要升级
+			</span>
+		);
 	}
 	if (state === "recovery_required" || state === "broken_config") {
 		return <span className="font-medium text-destructive">需要人工处理</span>;
@@ -48,21 +56,29 @@ function UpdateCheckStateText({ state }: { state: UpdateCheckState }) {
 	}[state];
 	const className =
 		state === "update_available"
-			? "font-medium text-amber-700"
+			? "font-medium text-amber-700 dark:text-amber-300"
 			: state === "check_failed" || state === "unsupported_release"
 				? "font-medium text-destructive"
 				: state === "current"
-					? "font-medium text-emerald-700"
+					? "font-medium text-emerald-700 dark:text-emerald-300"
 					: "font-medium";
 	return <span className={className}>{label}</span>;
 }
 
 function ServiceStateText({ state }: { state?: string }) {
 	if (state === "running") {
-		return <span className="font-medium text-emerald-700">运行中</span>;
+		return (
+			<span className="font-medium text-emerald-700 dark:text-emerald-300">
+				运行中
+			</span>
+		);
 	}
 	if (state === "stopped") {
-		return <span className="font-medium text-amber-700">已停止</span>;
+		return (
+			<span className="font-medium text-amber-700 dark:text-amber-300">
+				已停止
+			</span>
+		);
 	}
 	return <span className="font-medium text-muted-foreground">未知</span>;
 }
@@ -337,7 +353,9 @@ export function OpsPage() {
 						<p className="text-xs text-destructive">服务重启请求失败。</p>
 					) : null}
 					{restartMutation.isSuccess ? (
-						<p className="text-xs text-emerald-700">服务重启请求已提交。</p>
+						<p className="text-xs text-emerald-700 dark:text-emerald-300">
+							服务重启请求已提交。
+						</p>
 					) : null}
 				</CardContent>
 			</Card>
