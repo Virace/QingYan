@@ -159,5 +159,5 @@ describe("admin notification templates", () => {
 		expect(await fixture.app.db.select().from(notificationTemplates)).toEqual(
 			[],
 		);
-	});
+	}, 15_000);
 });

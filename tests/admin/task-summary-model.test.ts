@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TaskRunCenterItem } from "../../apps/admin/src/api/ops";
-import { summarizeTask } from "../../apps/admin/src/components/admin/task-summary-model";
+import { summarizeTask } from "../../apps/admin/src/components/admin/tasks/task-summary-model";
 
 function task(
 	input: Partial<TaskRunCenterItem> & { type: TaskRunCenterItem["type"] },

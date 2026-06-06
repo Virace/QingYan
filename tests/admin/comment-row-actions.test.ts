@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { commentActionsForStatus } from "../../apps/admin/src/components/admin/comment-actions";
+import { commentActionsForStatus } from "../../apps/admin/src/components/admin/content/comment-actions";
 
 describe("commentActionsForStatus", () => {
 	it("does not show duplicate pending action for approved comments", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatAdminCommentTime } from "../../apps/admin/src/components/admin/time-format";
+import { formatAdminCommentTime } from "../../apps/admin/src/components/admin/shared/time-format";
 
 describe("formatAdminCommentTime", () => {
 	it("formats comment creation timestamps for admin rows", () => {

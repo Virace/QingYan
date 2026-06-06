@@ -1,4 +1,4 @@
-import type { CommentStatus } from "@/api/admin";
+import type { CommentStatus } from "../../../api/admin";
 
 export type CommentActionId =
 	| "approve"

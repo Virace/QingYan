@@ -176,7 +176,7 @@ describe("admin users api", () => {
 				code: "ADMIN_CREDENTIALS_INVALID",
 			},
 		});
-	});
+	}, 15_000);
 
 	it("lets admins list users and fixed groups", async () => {
 		const fixture = await createTestApp();

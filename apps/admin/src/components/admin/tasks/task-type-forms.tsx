@@ -190,12 +190,21 @@ export function TaskTypePayloadForm({
 							setValue("sitemapUrls", parseStringList(value))
 						}
 					/>
-					<PayloadInput
-						label="兼容 sourceIds"
-						value={readNumberList(payload.sourceIds)}
-						placeholder="仅旧来源刷新任务使用，例如 1, 2, 3"
-						onChange={(value) => setValue("sourceIds", parseNumberList(value))}
-					/>
+					<details className="rounded-md border bg-muted/20 p-3 md:col-span-2">
+						<summary className="cursor-pointer select-none text-sm font-medium">
+							兼容 sourceIds（旧任务迁移/调试）
+						</summary>
+						<div className="mt-3">
+							<PayloadInput
+								label="sourceIds"
+								value={readNumberList(payload.sourceIds)}
+								placeholder="仅旧来源刷新任务使用，例如 1, 2, 3"
+								onChange={(value) =>
+									setValue("sourceIds", parseNumberList(value))
+								}
+							/>
+						</div>
+					</details>
 					<PayloadInput
 						label="超时毫秒"
 						value={payload.timeoutMs ? String(payload.timeoutMs) : ""}

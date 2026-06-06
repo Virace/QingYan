@@ -8,8 +8,8 @@ import type {
 	SiteNotificationRoute,
 	SiteNotificationEvent,
 	SiteNotificationRecipient,
-} from "@/api/admin";
-import type { AdminTaskCenterItem } from "@/api/ops";
+} from "../../../api/admin";
+import type { AdminTaskCenterItem } from "../../../api/ops";
 
 export const notificationChannelLabels: Record<NotificationChannel, string> = {
 	email: "邮件",

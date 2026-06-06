@@ -1,4 +1,4 @@
-import type { AdminTaskCenterItem } from "@/api/ops";
+import type { AdminTaskCenterItem } from "../../../api/ops";
 import { notificationTaskDetails } from "../content/notification-ui-model";
 
 export interface TaskSummaryMetric {

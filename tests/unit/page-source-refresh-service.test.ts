@@ -163,6 +163,54 @@ describe("PageSourceRefreshService", () => {
 		});
 	});
 
+	it("prefers canonical sitemap URL payloads over legacy sourceIds compatibility", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const legacySource = await createSource(fixture, {
+			sourceUrl: "https://example.com/legacy.xml",
+		});
+		const fetchCalls: string[] = [];
+		const { service } = createService(fixture, async (url) => {
+			fetchCalls.push(url);
+			return [
+				"<urlset>",
+				"<url><loc>https://example.com/posts/canonical/</loc></url>",
+				"</urlset>",
+			].join("");
+		});
+
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/canonical.xml"],
+				sourceIds: [legacySource.id],
+				mode: "replace",
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
+
+		const pages = await fixture.db.select().from(sitePageRegistry);
+		const sourcePages = await fixture.db
+			.select()
+			.from(sitePageRegistrySourcePages);
+
+		expect(fetchCalls).toEqual(["https://example.com/canonical.xml"]);
+		expect(pages).toEqual([
+			expect.objectContaining({
+				pageKey: "/posts/canonical/",
+				pageUrl: "/posts/canonical/",
+				status: "active",
+			}),
+		]);
+		expect(sourcePages).toEqual([]);
+		expect(result).toMatchObject({
+			processed: 1,
+			created: 1,
+			updated: 0,
+		});
+	});
+
 	it("creates active registry pages from sitemap entries", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);

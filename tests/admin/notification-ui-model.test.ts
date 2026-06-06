@@ -25,7 +25,7 @@ import {
 	toggleListValue,
 	writeSettingsTabToSearch,
 	upsertNotificationChannelConfig,
-} from "../../apps/admin/src/components/admin/notification-ui-model";
+} from "../../apps/admin/src/components/admin/content/notification-ui-model";
 
 function user(input: Partial<AdminUser> & Pick<AdminUser, "id" | "username">) {
 	return {

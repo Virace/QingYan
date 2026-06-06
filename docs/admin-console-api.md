@@ -770,7 +770,7 @@ Admin Settings API 的 canonical 开关路径：
 - 页面点赞：`engagement.pageLikes.enabled`
 - 访客记录：`engagement.visitors.enabled`
 - 页面来源模式：`pageRegistry.mode`
-- 权威 sitemap 来源：`pageRegistry.authoritativeSourceIds`
+- 权威 sitemap URL 列表：`pageRegistry.authoritativeSitemapUrls`
 - 当前站点邮件通知：`notifications.emailEnabled`
 - 当前站点后台用户通知接收人：`notifications.recipients`
 
@@ -780,12 +780,12 @@ Admin Settings API 的 canonical 开关路径：
 
 - 公开运行时页面身份只来自允许 `Referer` 的 URL pathname。Canonical Page Key 保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash；请求体或 query 中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段。
 - `pageRegistry.mode="discovery"` 时，未登记页面保持发现模式：bootstrap 可写入 pending candidate / pending PV，等待后台审核。
-- `pageRegistry.mode="authoritative"` 时，`authoritativeSourceIds` 必须至少包含一个当前站点 enabled、健康、最近成功刷新的 sitemap source；RSS/Atom 不能单独作为权威来源。
+- `pageRegistry.mode="authoritative"` 时，`authoritativeSitemapUrls` 必须至少包含一个当前站点允许 origin 下的 HTTP/HTTPS sitemap URL。
 - 权威模式下未知页面默认按 `unknownPageResponse="inactive_payload"` 返回 200 inactive payload，`features.*.enabled=false` 且 `data={}`，不会创建 visitor、visitor metadata、pending candidate、pending PV、page thread、PV、captcha challenge、评论、投票或页面反馈记录。
 - `unknownPageResponse="forbidden"` 或 `emergencyLockdown=true` 时，未知页面返回 403 `PAGE_NOT_REGISTERED`，同样不做业务写入。
 - 非 active registry page 返回非交互行为或 403 `PAGE_NOT_INTERACTIVE`，公开写入口不会继续创建 visitor、captcha、thread 或业务记录。
-- 保存 authoritative 设置会幂等 ensure 一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 固定为 `page_registry:authoritative_source_refresh:<siteKey>`，payload `sourceIds` 与 `pageRegistry.authoritativeSourceIds` 保持一致。
-- 被 `pageRegistry.authoritativeSourceIds` 引用的 source 默认不能删除或禁用，会返回 `AUTHORITATIVE_SOURCE_IN_USE`；危险路径必须显式提交 `disableAuthoritativeMode: true`，后端会同步切回 discovery、清理引用并释放或更新任务保护。
+- 保存 authoritative 设置会幂等 ensure 一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 固定为 `page_registry:authoritative_source_refresh:<siteKey>`，payload `sitemapUrls` 与 `pageRegistry.authoritativeSitemapUrls` 保持一致。
+- 页面来源 source CRUD 属于 legacy compatibility / 调试入口，不是 authoritative mode 的推荐配置路径。权威模式应通过站点设置中的 `authoritativeSitemapUrls` 管理 sitemap URL。
 
 请求：
 
@@ -881,7 +881,7 @@ AdminSettings
   };
   pageRegistry: {
     mode: "discovery" | "authoritative";
-    authoritativeSourceIds: number[];
+    authoritativeSitemapUrls: string[];
     unknownPageResponse: "inactive_payload" | "forbidden";
     requireHealthySource: boolean;
     sourceFreshnessGraceSec: number;

@@ -207,13 +207,13 @@ export class PageSourceRefreshService {
 		scope: PageSourceRefreshJobScope,
 	): Promise<RefreshablePageSource[]> {
 		const runtimeSources = await this.listRuntimeSitemapSources(scope);
+		if (runtimeSources.length > 0) {
+			return runtimeSources;
+		}
 		const legacySources = await this.repository.listEnabledSources({
 			sourceIds: scope.sourceIds,
 		});
-		return [
-			...runtimeSources,
-			...legacySources.filter((source) => source.siteKey === scope.siteKey),
-		];
+		return legacySources.filter((source) => source.siteKey === scope.siteKey);
 	}
 
 	private async listRuntimeSitemapSources(

@@ -34,7 +34,7 @@ describe("built-in task type registry", () => {
 		});
 	});
 
-	it("validates payloads through each task type schema", () => {
+	it("validates canonical sitemap URL payloads through the page source schema", () => {
 		const registry = createBuiltInTaskTypeRegistry();
 
 		expect(
@@ -49,6 +49,11 @@ describe("built-in task type registry", () => {
 			mode: "replace",
 			trigger: "scheduled",
 		});
+	});
+
+	it("validates legacy sourceIds compatibility through the page source schema", () => {
+		const registry = createBuiltInTaskTypeRegistry();
+
 		expect(
 			registry.validatePayload("page_source_refresh", {
 				siteKey: "fangyuan",
@@ -71,6 +76,11 @@ describe("built-in task type registry", () => {
 				sourceIds: ["not-a-number"],
 			}),
 		).toThrow(/Invalid task payload/);
+	});
+
+	it("validates non-page-source payloads through each task type schema", () => {
+		const registry = createBuiltInTaskTypeRegistry();
+
 		expect(() =>
 			registry.validatePayload("ip_region_update", {
 				ipVersions: ["v4", "v7"],

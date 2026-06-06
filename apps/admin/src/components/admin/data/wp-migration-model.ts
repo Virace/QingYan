@@ -1,4 +1,4 @@
-import type { MigrationReportItem } from "@/api/import-export";
+import type { MigrationReportItem } from "../../../api/import-export";
 
 export type AuthorCandidateDecision = "staff" | "verified" | "visitor";
 export type AuthorCandidateDecisionMap = Record<
