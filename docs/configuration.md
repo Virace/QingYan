@@ -361,7 +361,7 @@ WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内�
 
 当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
 
-启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，会通过 HttpOnly `qingyan_upgrade` cookie 完成一次性升级令牌校验。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
+启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，操作员需要输入启动日志或本机操作命令显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
 Web Upgrade Mode 暴露最小接口：
 

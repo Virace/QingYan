@@ -54,7 +54,7 @@ interface BuildAppOptions {
 	pageSourceFetchText?: typeof fetchPageSourceText;
 	pageTitleFetchHtml?: (
 		url: string,
-		options: { timeoutMs: number; maxBytes: number },
+		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
 	emailSender?: EmailSender;

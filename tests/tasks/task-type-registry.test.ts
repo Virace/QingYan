@@ -88,6 +88,46 @@ describe("built-in task type registry", () => {
 		).toThrow(/Invalid task payload/);
 	});
 
+	it("rejects caller-controlled backup output directories", () => {
+		const registry = createBuiltInTaskTypeRegistry();
+
+		expect(() =>
+			registry.validatePayload("backup", {
+				scope: "site",
+				siteKey: "fangyuan",
+				outputDirectory: "C:\\Windows\\Temp",
+			}),
+		).toThrow(/Invalid task payload/);
+		expect(() =>
+			registry.validatePayload("backup", {
+				scope: "site",
+				siteKey: "fangyuan",
+				outputDirectory: "../outside",
+			}),
+		).toThrow(/Invalid task payload/);
+		expect(
+			registry.validatePayload("backup", {
+				scope: "site",
+				siteKey: "fangyuan",
+				include: {
+					siteSettings: true,
+					pageThreads: true,
+					comments: true,
+				},
+				retentionCount: 5,
+			}),
+		).toEqual({
+			scope: "site",
+			siteKey: "fangyuan",
+			include: {
+				siteSettings: true,
+				pageThreads: true,
+				comments: true,
+			},
+			retentionCount: 5,
+		});
+	});
+
 	it("documents reuse boundaries for every registered task type", () => {
 		const registry = createBuiltInTaskTypeRegistry();
 

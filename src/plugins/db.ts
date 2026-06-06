@@ -32,23 +32,14 @@ import { TaskRunner } from "../modules/tasks/task-runner";
 import { TaskScheduler } from "../modules/tasks/scheduler";
 import type { TaskRunnerServices } from "../modules/tasks/task-runner-context";
 import { PageSourceRefreshPolicyService } from "../modules/tasks/page-source-refresh-policy";
+import { safeFetchText } from "../modules/shared/server-safe-fetch";
 
 async function fetchPageTitleHtml(
 	url: string,
-	options: { timeoutMs: number; maxBytes: number },
+	options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
 ): Promise<{ status: number; text: string }> {
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
-	try {
-		const response = await fetch(url, { signal: controller.signal });
-		const text = await response.text();
-		if (new TextEncoder().encode(text).byteLength > options.maxBytes) {
-			throw new Error("Page title HTML exceeded maxBytes.");
-		}
-		return { status: response.status, text };
-	} finally {
-		clearTimeout(timeout);
-	}
+	const response = await safeFetchText(url, options);
+	return { status: response.status, text: response.text };
 }
 
 function readPackageVersion(): string {

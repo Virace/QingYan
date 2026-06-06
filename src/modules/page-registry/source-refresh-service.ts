@@ -36,7 +36,11 @@ export interface PageSourceRefreshCounters {
 export interface PageSourceRefreshOptions {
 	fetchText: (
 		url: string,
-		options: { timeoutMs?: number; maxBytes?: number },
+		options: {
+			allowedOrigins: string[];
+			timeoutMs?: number;
+			maxBytes?: number;
+		},
 	) => Promise<string>;
 	loadAllowedOriginsForSite: (siteKey: string) => Promise<string[]>;
 	createTitleRefreshRun?: (input: {
@@ -232,6 +236,12 @@ export class PageSourceRefreshService {
 				`Site not found for page source refresh: ${scope.siteKey}`,
 			);
 		}
+		const allowedOrigins = await this.options.loadAllowedOriginsForSite(
+			site.siteKey,
+		);
+		for (const sourceUrl of scope.sitemapUrls) {
+			assertAllowedSitemapUrl(sourceUrl, allowedOrigins);
+		}
 		return scope.sitemapUrls.map((sourceUrl) => ({
 			id: null,
 			siteId: site.id,
@@ -267,6 +277,7 @@ export class PageSourceRefreshService {
 			source.siteKey,
 		);
 		const xml = await this.options.fetchText(source.sourceUrl, {
+			allowedOrigins,
 			timeoutMs: scope.timeoutMs,
 			maxBytes: scope.maxBytes,
 		});
@@ -423,6 +434,7 @@ export class PageSourceRefreshService {
 			assertAllowedSitemapUrl(sitemapUrl, input.allowedOrigins);
 			input.visitedSitemapUrls.add(sitemapUrl);
 			const xml = await this.options.fetchText(sitemapUrl, {
+				allowedOrigins: input.allowedOrigins,
 				timeoutMs: input.scope.timeoutMs,
 				maxBytes: input.scope.maxBytes,
 			});

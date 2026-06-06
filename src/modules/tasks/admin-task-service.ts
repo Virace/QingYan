@@ -24,6 +24,7 @@ import {
 	validateScheduleDefinition,
 } from "./schedule-calculator";
 import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
+import type { AnyTaskTypeDefinition } from "./task-type-registry";
 import {
 	isJsonEqual,
 	isRecord,
@@ -155,7 +156,10 @@ export class AdminTaskService {
 		const visibilitySession = toVisibilitySession(session);
 		const items = (await this.scheduledTasks.list({ limit: 200, offset: 0 }))
 			.map((task) =>
-				projectScheduledTaskForSession(task, { session: visibilitySession }),
+				projectScheduledTaskForSession(task, {
+					session: visibilitySession,
+					permissions: this.registry.get(task.type)?.permissions,
+				}),
 			)
 			.filter((item) => item !== null);
 		return { items, totalCount: items.length };
@@ -171,6 +175,7 @@ export class AdminTaskService {
 		}
 		const projected = projectScheduledTaskForSession(task, {
 			session: toVisibilitySession(session),
+			permissions: this.registry.get(task.type)?.permissions,
 		});
 		if (!projected) {
 			throw new ResourceNotFoundError(
@@ -187,9 +192,14 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const normalized = this.validateWriteInput(input, session);
+		this.requireTaskPermission({
+			definition: normalized.definition,
+			operation: "create",
+			session,
+		});
 		await this.assertPageSourceRefreshAllowed({
 			type: normalized.type,
-			siteKey: input.siteKey,
+			siteKey: normalized.siteKey,
 			payload: normalized.payload,
 		});
 		await this.validateFailureNotificationPolicy(
@@ -207,6 +217,7 @@ export class AdminTaskService {
 		});
 		return projectScheduledTaskForSession(task, {
 			session: toVisibilitySession(session),
+			permissions: normalized.definition.permissions,
 		});
 	}
 
@@ -217,6 +228,13 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		const existingDefinition = this.requireTaskDefinition(task.type);
+		this.requireTaskPermission({
+			definition: existingDefinition,
+			operation: "update",
+			session,
+			taskId: task.id,
+		});
 		this.assertProtectedUpdateAllowed(task, input);
 		const merged = {
 			name: input.name ?? task.name,
@@ -243,9 +261,23 @@ export class AdminTaskService {
 			retentionCount: input.retentionCount ?? task.retentionCount,
 		};
 		const normalized = this.validateWriteInput(merged, session);
+		if (normalized.type !== task.type) {
+			this.requireTaskPermission({
+				definition: normalized.definition,
+				operation: "create",
+				session,
+				taskId: task.id,
+			});
+			this.requireTaskPermission({
+				definition: normalized.definition,
+				operation: "update",
+				session,
+				taskId: task.id,
+			});
+		}
 		await this.assertPageSourceRefreshAllowed({
 			type: normalized.type,
-			siteKey: merged.siteKey,
+			siteKey: normalized.siteKey,
 			systemKey: task.systemKey,
 			payload: normalized.payload,
 		});
@@ -277,6 +309,7 @@ export class AdminTaskService {
 		});
 		return projectScheduledTaskForSession(updated, {
 			session: toVisibilitySession(session),
+			permissions: normalized.definition.permissions,
 		});
 	}
 
@@ -286,6 +319,13 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForRun(id, session);
+		const definition = this.requireTaskDefinition(task.type);
+		this.requireTaskPermission({
+			definition,
+			operation: "run",
+			session,
+			taskId: task.id,
+		});
 		await this.assertPageSourceRefreshAllowed({
 			type: task.type,
 			siteKey: task.siteId ? this.siteKeyForId(task.siteId) : null,
@@ -333,12 +373,22 @@ export class AdminTaskService {
 				validationField("type", "任务类型不存在。"),
 			]);
 		}
-		const parsedPayload = definition.payloadSchema.safeParse(input.payload);
+		this.requireTaskPermission({
+			definition,
+			operation: "run",
+			session,
+		});
+		const normalizedPayload = this.normalizeSiteScopedPayload({
+			definition,
+			topLevelSiteKey: input.siteKey ?? null,
+			payload: input.payload,
+		});
+		const parsedPayload = definition.payloadSchema.safeParse(normalizedPayload);
 		if (!parsedPayload.success) {
 			throw new ValidationFailedError(
 				toValidationFields(
 					parsedPayload.error.issues as z.core.$ZodIssue[],
-					input.payload,
+					normalizedPayload,
 				).map((field) => ({ ...field, path: `payload.${field.path}` })),
 			);
 		}
@@ -411,6 +461,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		this.requireTaskPermission({
+			definition: this.requireTaskDefinition(task.type),
+			operation: "delete",
+			session,
+			taskId: task.id,
+		});
 		await this.assertProtectedOperationAllowed(
 			task,
 			"delete",
@@ -433,6 +489,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		this.requireTaskPermission({
+			definition: this.requireTaskDefinition(task.type),
+			operation: "update",
+			session,
+			taskId: task.id,
+		});
 		await this.assertPageSourceRefreshAllowed({
 			type: task.type,
 			siteKey: task.siteId ? this.siteKeyForId(task.siteId) : null,
@@ -447,6 +509,7 @@ export class AdminTaskService {
 		});
 		return projectScheduledTaskForSession(updated, {
 			session: toVisibilitySession(session),
+			permissions: this.registry.get(updated.type)?.permissions,
 		});
 	}
 
@@ -457,6 +520,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		this.requireTaskPermission({
+			definition: this.requireTaskDefinition(task.type),
+			operation: "update",
+			session,
+			taskId: task.id,
+		});
 		await this.assertProtectedOperationAllowed(
 			task,
 			"disable",
@@ -472,6 +541,7 @@ export class AdminTaskService {
 		});
 		return projectScheduledTaskForSession(updated, {
 			session: toVisibilitySession(session),
+			permissions: this.registry.get(updated.type)?.permissions,
 		});
 	}
 
@@ -482,6 +552,12 @@ export class AdminTaskService {
 		requestId?: string,
 	) {
 		const task = await this.getTaskForManage(id, session);
+		this.requireTaskPermission({
+			definition: this.requireTaskDefinition(task.type),
+			operation: "update",
+			session,
+			taskId: task.id,
+		});
 		await this.assertProtectedOperationAllowed(
 			task,
 			"transfer_owner",
@@ -500,6 +576,7 @@ export class AdminTaskService {
 		});
 		return projectScheduledTaskForSession(updated, {
 			session: toVisibilitySession(session),
+			permissions: this.registry.get(updated.type)?.permissions,
 		});
 	}
 
@@ -649,7 +726,7 @@ export class AdminTaskService {
 		session: AuthenticatedAdminSession,
 		requestId?: string,
 	) {
-		await this.assertCanViewRunLogs(id, session);
+		await this.assertCanMutateRun(id, session);
 		const cancelled = await this.taskRuns.cancel(id, {
 			code: "TASK_RUN_CANCELLED",
 			reason: "manual_cancel",
@@ -668,7 +745,7 @@ export class AdminTaskService {
 		session: AuthenticatedAdminSession,
 		requestId?: string,
 	) {
-		await this.assertCanViewRunLogs(id, session);
+		await this.assertCanMutateRun(id, session);
 		const runAfter = new Date().toISOString();
 		const retrying = await this.taskRuns.markRetrying(
 			id,
@@ -796,6 +873,88 @@ export class AdminTaskService {
 		);
 	}
 
+	private requireTaskDefinition(type: string): AnyTaskTypeDefinition {
+		const definition = this.registry.get(type);
+		if (!definition) {
+			throw new AppError(400, "TASK_TYPE_UNKNOWN", "任务类型不存在。", {
+				taskType: type,
+			});
+		}
+		return definition;
+	}
+
+	private requireTaskPermission(input: {
+		definition: AnyTaskTypeDefinition;
+		operation: keyof AnyTaskTypeDefinition["permissions"];
+		session: AuthenticatedAdminSession;
+		taskId?: string;
+	}) {
+		const requiredPermission = input.definition.permissions[input.operation];
+		if (input.session.permissions.includes(requiredPermission)) {
+			return;
+		}
+		throw new AppError(403, "TASK_PERMISSION_DENIED", "没有任务类型权限。", {
+			taskType: input.definition.type,
+			operation: input.operation,
+			requiredPermission,
+			taskId: input.taskId,
+		});
+	}
+
+	private normalizeSiteScopedPayload(input: {
+		definition: AnyTaskTypeDefinition;
+		topLevelSiteKey: string | null;
+		payload: unknown;
+	}) {
+		if (input.definition.scope !== "site") {
+			return input.payload;
+		}
+		if (!input.topLevelSiteKey) {
+			throw new AppError(400, "TASK_SITE_REQUIRED", "站点任务必须指定站点。");
+		}
+		if (!isRecord(input.payload)) {
+			return { siteKey: input.topLevelSiteKey };
+		}
+		const payloadSiteKey =
+			typeof input.payload.siteKey === "string" ? input.payload.siteKey : null;
+		if (payloadSiteKey && payloadSiteKey !== input.topLevelSiteKey) {
+			throw new AppError(
+				403,
+				"TASK_SITE_BINDING_MISMATCH",
+				"任务 payload 站点与授权站点不一致。",
+				{ siteKey: input.topLevelSiteKey },
+			);
+		}
+		return { ...input.payload, siteKey: input.topLevelSiteKey };
+	}
+
+	private async assertCanMutateRun(
+		id: string,
+		session: AuthenticatedAdminSession,
+	) {
+		const run = await this.assertCanViewRunLogs(id, session);
+		if (run.scheduledTaskId) {
+			const task = await this.scheduledTasks.get(run.scheduledTaskId);
+			if (task) {
+				this.requireTaskPermission({
+					definition: this.requireTaskDefinition(task.type),
+					operation: "run",
+					session,
+					taskId: task.id,
+				});
+				return run;
+			}
+		}
+		if (!session.permissions.includes("tasks.run")) {
+			throw new AppError(403, "TASK_PERMISSION_DENIED", "没有任务类型权限。", {
+				taskType: run.type,
+				operation: "run",
+				requiredPermission: "tasks.run",
+			});
+		}
+		return run;
+	}
+
 	private validateWriteInput(
 		input: ScheduledTaskWriteInput,
 		session: AuthenticatedAdminSession,
@@ -819,6 +978,13 @@ export class AdminTaskService {
 		if (input.scopeKind === "site" && !site) {
 			fields.push(validationField("siteKey", "站点不存在。"));
 		}
+		const hasInvalidTaskScope =
+			definition?.scope === "site" &&
+			input.scopeKind !== undefined &&
+			input.scopeKind !== "site";
+		if (hasInvalidTaskScope) {
+			fields.push(validationField("scopeKind", "该任务类型只支持站点范围。"));
+		}
 		if (
 			site &&
 			!session.isAdmin &&
@@ -827,15 +993,26 @@ export class AdminTaskService {
 		) {
 			throw new AppError(403, "ADMIN_SITE_ACCESS_REQUIRED", "没有该站点权限。");
 		}
+		let normalizedPayload: unknown = input.payload;
+		let parsedPayload: unknown = input.payload;
 		if (definition) {
-			const parsed = definition.payloadSchema.safeParse(input.payload);
+			normalizedPayload = hasInvalidTaskScope
+				? input.payload
+				: this.normalizeSiteScopedPayload({
+						definition,
+						topLevelSiteKey: site?.siteKey ?? null,
+						payload: input.payload,
+					});
+			const parsed = definition.payloadSchema.safeParse(normalizedPayload);
 			if (!parsed.success) {
 				fields.push(
 					...toValidationFields(
 						parsed.error.issues as z.core.$ZodIssue[],
-						input.payload,
+						normalizedPayload,
 					).map((field) => ({ ...field, path: `payload.${field.path}` })),
 				);
+			} else {
+				parsedPayload = parsed.data;
 			}
 			if (definition.dangerous && input.enabled) {
 				fields.push(
@@ -882,19 +1059,24 @@ export class AdminTaskService {
 				now: new Date(),
 			})?.toISOString() ?? null;
 		return {
+			definition: definition as AnyTaskTypeDefinition,
 			name: String(input.name),
 			description: input.description ?? null,
 			type: String(input.type),
+			siteKey: site?.siteKey ?? null,
 			siteId: site?.id ?? null,
 			scopeKind: input.scopeKind ?? "global",
-			scope: input.scope ?? {},
+			scope:
+				definition?.scope === "site" && site
+					? { siteKey: site.siteKey }
+					: (input.scope ?? {}),
 			enabled: input.enabled ?? false,
 			disabledReason: input.enabled === false ? "manual_disabled" : null,
 			scheduleKind: input.scheduleKind ?? "manual_only",
 			schedulePreset: input.schedulePreset ?? null,
 			cronExpression: input.cronExpression ?? null,
 			timezone: input.timezone ?? null,
-			payload: input.payload,
+			payload: parsedPayload,
 			policy: input.policy ?? {},
 			trigger: input.trigger ?? {},
 			nextRunAt,

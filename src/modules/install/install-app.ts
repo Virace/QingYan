@@ -1,11 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
 import { type EnvMapping, envMappings } from "../../config/env-mapping";
-import {
-	joinPublicPath,
-	normalizePublicPath,
-	qingyanCookiePath,
-} from "../../config/public-path";
+import { joinPublicPath, normalizePublicPath } from "../../config/public-path";
 import { buildErrorResponse } from "../shared/error-response";
 import { AppError, InvalidRequestError } from "../shared/errors";
 import {
@@ -31,7 +27,6 @@ import { resolveInstallState } from "./state";
 
 const INSTALL_PATH = "/admin/install";
 const INSTALL_PLAN_PATH = "/admin/install/plan";
-const INSTALL_COOKIE_NAME = "qingyan_install";
 const INSTALL_RESTART_AFTER_MS = 1200;
 
 export interface InstallTransition {
@@ -47,25 +42,6 @@ function assertToken(token: unknown, expectedToken: string) {
 	if (token !== expectedToken) {
 		throw new AppError(403, "INSTALL_TOKEN_INVALID", "安装令牌无效。");
 	}
-}
-
-function readInstallCookie(
-	cookieHeader: string | undefined,
-): string | undefined {
-	if (!cookieHeader) {
-		return undefined;
-	}
-	for (const part of cookieHeader.split(";")) {
-		const [name, ...valueParts] = part.trim().split("=");
-		if (name === INSTALL_COOKIE_NAME) {
-			return decodeURIComponent(valueParts.join("="));
-		}
-	}
-	return undefined;
-}
-
-function createInstallCookie(token: string, publicPath: string): string {
-	return `${INSTALL_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${qingyanCookiePath(publicPath)}; HttpOnly; SameSite=Lax`;
 }
 
 function resolveDefaultPublicBaseUrl(input: MinimalInstallConfig): string {
@@ -181,6 +157,7 @@ function renderInstallHtml(
 ): string {
 	const publicPath = normalizePublicPath(input.publicPath);
 	const defaults = {
+		token: "",
 		server: {
 			host: "0.0.0.0",
 			port: input.port,
@@ -520,6 +497,10 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </section>
 <section class="step-panel" data-step="4" hidden>
 <fieldset>
+<legend>安装令牌</legend>
+<label>安装令牌<input data-path="token" autocomplete="one-time-code" required><span class="hint">使用 QingYan 启动日志或本机操作命令显示的安装令牌。</span></label>
+</fieldset>
+<fieldset>
 <legend>从 QingYan 站点导出 JSON 恢复</legend>
 <div class="restore-note">这是可选恢复入口。不选择文件则执行全新安装。选择文件时，浏览器会在本地读取文件内容并生成安装计划。</div>
 <label>选择 QingYan JSON 文件<input data-restore-file type="file" accept="application/json,.json"><span class="hint">这里仅接受 qingyan.export.v1 站点级 JSON，用于恢复评论、页面线程、访客和站点设置。整站 qyctl backup 包不能在这里恢复，请使用 qyctl restore。</span></label>
@@ -708,11 +689,32 @@ function updateCaptchaPanel() {
 	}
 }
 
-function renderList(items) {
+function createList(items) {
+	const list = document.createElement("ul");
 	if (!items.length) {
-		return "无";
+		const item = document.createElement("li");
+		item.textContent = "无";
+		list.append(item);
+		return list;
 	}
-	return "<ul>" + items.map((item) => "<li>" + item + "</li>").join("") + "</ul>";
+	for (const text of items) {
+		const item = document.createElement("li");
+		item.textContent = text;
+		list.append(item);
+	}
+	return list;
+}
+function appendPlanLine(container, label, value) {
+	const line = document.createElement("div");
+	const strong = document.createElement("strong");
+	strong.textContent = label + ": ";
+	line.append(strong, document.createTextNode(String(value ?? "")));
+	container.append(line);
+}
+function appendPlanText(container, text) {
+	const line = document.createElement("div");
+	line.textContent = text;
+	container.append(line);
 }
 
 function formatSource(source) {
@@ -765,6 +767,7 @@ async function collectPayload() {
 		setPath(raw, path, readFieldValue(field));
 	}
 	return {
+		token: raw.token,
 		server: raw.server,
 		database: raw.database,
 		admin: {
@@ -796,47 +799,57 @@ function renderPlan(plan) {
 			formatPathLabel(item.path) + ": " + (item.secret ? "已配置" : item.valuePreview) + "（" + item.envName + "）"
 		),
 	];
-	const envFields = plan.env.length
-		? plan.env.map((item) => item.envName + " -> " + formatPathLabel(item.path) + (item.secret ? "（已隐藏）" : "")).join(", ")
-		: "无";
+	const envFields = plan.env.map((item) => item.envName + " -> " + formatPathLabel(item.path) + (item.secret ? "（已隐藏）" : ""));
 	const verifiedAuthor = plan.siteSettings?.comments?.verifiedAuthor;
-	const verifiedAuthorText = verifiedAuthor
-		? "<br>可信评论作者: " + (verifiedAuthor.enabled ? "启用" : "关闭") +
-			" / " + verifiedAuthor.displayName +
-			" / " + verifiedAuthor.email +
-			" / " + verifiedAuthor.badgeLabel
-		: "";
 	const engagement = plan.siteSettings?.engagement;
-	const engagementText = engagement
-		? "<br>访客记录: " + (engagement.visitors.enabled ? "开启" : "关闭") +
-			"<br>PV 统计: " + (engagement.pageViews.enabled ? "开启" : "关闭") +
-			"<br>页面点赞: " + (engagement.pageLikes.enabled ? "开启" : "关闭") +
-			"<br>评论投票: " + (engagement.commentVotes.enabled ? "开启" : "关闭")
-		: "";
-const restoreText = plan.restore
-		? "<br>恢复来源: " + plan.restore.fileName +
-			"<br>恢复格式: QingYan 站点级 JSON" +
-			"<br>目标站点: " + plan.restore.siteKey +
-			"<br>将创建: 页面线程 " + plan.restore.dryRun.summary.willCreatePageThreads +
-			"，访客 " + plan.restore.dryRun.summary.willCreateVisitors +
-			"，评论 " + plan.restore.dryRun.summary.willCreateComments +
-			"<br>冲突: " + plan.restore.dryRun.summary.conflicts
-		: "";
+	const title = document.createElement("strong");
+	title.textContent = "安装计划";
+	review.replaceChildren(title);
 	review.dataset.kind = "success";
-	review.innerHTML =
-		"<strong>安装计划</strong><br>" +
-		"配置文件: " + plan.config.path + "<br>" +
-		"数据库: " + plan.database.sqliteFile + "<br>" +
-		"后台入口: " + plan.admin.consolePath + "<br>" +
-		"管理员: " + plan.admin.username + (plan.admin.passwordGenerated ? "（将随机生成初始密码）" : "") + "<br>" +
-		"默认站点: " + plan.site.siteKey + " / " + plan.site.name + "<br>" +
-		verifiedAuthorText +
-		engagementText +
-		"安装值: " + renderList(valueItems) +
-		"系统设置写入: " + renderList(systemReview) +
-		"环境变量锁定: " + envFields +
-		restoreText;
-	return plan.applyPayload;
+	appendPlanLine(review, "配置文件", plan.config.path);
+	appendPlanLine(review, "数据库", plan.database.sqliteFile);
+	appendPlanLine(review, "后台入口", plan.admin.consolePath);
+	appendPlanLine(review, "管理员", plan.admin.username + (plan.admin.passwordGenerated ? "（将随机生成初始密码）" : ""));
+	appendPlanLine(review, "默认站点", plan.site.siteKey + " / " + plan.site.name);
+	if (verifiedAuthor) {
+		appendPlanLine(
+			review,
+			"可信评论作者",
+			(verifiedAuthor.enabled ? "启用" : "关闭") +
+				" / " + verifiedAuthor.displayName +
+				" / " + verifiedAuthor.email +
+				" / " + verifiedAuthor.badgeLabel,
+		);
+	}
+	if (engagement) {
+		appendPlanLine(review, "访客记录", engagement.visitors.enabled ? "开启" : "关闭");
+		appendPlanLine(review, "PV 统计", engagement.pageViews.enabled ? "开启" : "关闭");
+		appendPlanLine(review, "页面点赞", engagement.pageLikes.enabled ? "开启" : "关闭");
+		appendPlanLine(review, "评论投票", engagement.commentVotes.enabled ? "开启" : "关闭");
+	}
+	appendPlanText(review, "安装值:");
+	review.append(createList(valueItems));
+	appendPlanText(review, "系统设置写入:");
+	review.append(createList(systemReview));
+	appendPlanText(review, "环境变量锁定:");
+	review.append(createList(envFields));
+	if (plan.restore) {
+		appendPlanLine(review, "恢复来源", plan.restore.fileName);
+		appendPlanLine(review, "恢复格式", "QingYan 站点级 JSON");
+		appendPlanLine(review, "目标站点", plan.restore.siteKey);
+		appendPlanLine(
+			review,
+			"将创建",
+			"页面线程 " + plan.restore.dryRun.summary.willCreatePageThreads +
+				"，访客 " + plan.restore.dryRun.summary.willCreateVisitors +
+				"，评论 " + plan.restore.dryRun.summary.willCreateComments,
+		);
+		appendPlanLine(review, "冲突", plan.restore.dryRun.summary.conflicts);
+	}
+	return {
+		...plan.applyPayload,
+		token: plannedPayload?.token,
+	};
 }
 async function requestJson(url, payload) {
 	const response = await fetch(url, {
@@ -951,12 +964,10 @@ function parseInstallPayload(body: unknown) {
 
 function resolveInstallToken(input: {
 	payloadToken?: string;
-	cookieHeader?: string;
 	expectedToken: string;
 }) {
-	const token = input.payloadToken ?? readInstallCookie(input.cookieHeader);
-	assertToken(token, input.expectedToken);
-	return token;
+	assertToken(input.payloadToken, input.expectedToken);
+	return input.payloadToken;
 }
 
 export function buildInstallApp(input: {
@@ -1004,10 +1015,6 @@ export function buildInstallApp(input: {
 			return reply.status(410).send({ installed: true });
 		}
 		return reply
-			.header(
-				"Set-Cookie",
-				createInstallCookie(input.minimalConfig.token, publicPath),
-			)
 			.type("text/html; charset=utf-8")
 			.send(renderInstallHtml(input.minimalConfig, input.environment));
 	});
@@ -1023,7 +1030,6 @@ export function buildInstallApp(input: {
 		}
 		const token = resolveInstallToken({
 			payloadToken: payload.token,
-			cookieHeader: request.headers.cookie,
 			expectedToken: input.minimalConfig.token,
 		});
 		return buildInstallPlan({
@@ -1048,7 +1054,6 @@ export function buildInstallApp(input: {
 		try {
 			const token = resolveInstallToken({
 				payloadToken: payload.token,
-				cookieHeader: request.headers.cookie,
 				expectedToken: input.minimalConfig.token,
 			});
 			const result = await applyInstall({

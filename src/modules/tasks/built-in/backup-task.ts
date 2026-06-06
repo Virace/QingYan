@@ -8,25 +8,26 @@ import type { QingYanExportService } from "../../import-export/qingyan/export-se
 import type { FullBackupService } from "../../backup/full-backup-service";
 import type { TaskRunnerContext } from "../task-runner-context";
 
-export const backupPayloadSchema = z.object({
-	scope: z.enum(["site", "full"]).default("site"),
-	siteKey: z.string().min(1).optional(),
-	outputDirectory: z.string().min(1).optional(),
-	include: z
-		.object({
-			siteSettings: z.boolean().optional(),
-			systemSettings: z.boolean().optional(),
-			pageThreads: z.boolean().optional(),
-			comments: z.boolean().optional(),
-			rawUserAgent: z.boolean().optional(),
-			visitors: z.boolean().optional(),
-			voteRecords: z.boolean().optional(),
-			pageFeedbackRecords: z.boolean().optional(),
-			blacklistRules: z.boolean().optional(),
-		})
-		.optional(),
-	retentionCount: z.number().int().min(1).max(30).optional(),
-});
+export const backupPayloadSchema = z
+	.object({
+		scope: z.enum(["site", "full"]).default("site"),
+		siteKey: z.string().min(1).optional(),
+		include: z
+			.object({
+				siteSettings: z.boolean().optional(),
+				systemSettings: z.boolean().optional(),
+				pageThreads: z.boolean().optional(),
+				comments: z.boolean().optional(),
+				rawUserAgent: z.boolean().optional(),
+				visitors: z.boolean().optional(),
+				voteRecords: z.boolean().optional(),
+				pageFeedbackRecords: z.boolean().optional(),
+				blacklistRules: z.boolean().optional(),
+			})
+			.optional(),
+		retentionCount: z.number().int().min(1).max(30).optional(),
+	})
+	.strict();
 
 export type BackupTaskPayload = z.infer<typeof backupPayloadSchema>;
 
@@ -56,10 +57,7 @@ export class DefaultBackupTaskService implements BackupTaskService {
 				throw new Error("FULL_BACKUP_SERVICE_NOT_CONFIGURED");
 			}
 			const result = await this.services.fullBackupService.createBackup({
-				outputPath: path.join(
-					input.outputDirectory ?? defaultOutputDirectory(),
-					`${input.runId}-full`,
-				),
+				outputPath: path.join(defaultOutputDirectory(), `${input.runId}-full`),
 			});
 			const manifestStat = statSync(result.manifestPath);
 			return {
@@ -75,7 +73,7 @@ export class DefaultBackupTaskService implements BackupTaskService {
 		if (!input.siteKey) {
 			throw new Error("SITE_KEY_REQUIRED");
 		}
-		const outputDirectory = input.outputDirectory ?? defaultOutputDirectory();
+		const outputDirectory = defaultOutputDirectory();
 		mkdirSync(outputDirectory, { recursive: true });
 		const data = this.services.exportService.exportSite({
 			siteKey: input.siteKey,

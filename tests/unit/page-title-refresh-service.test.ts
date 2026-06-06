@@ -9,6 +9,7 @@ import { createDatabaseClients } from "../../src/db/client";
 import { applyDatabaseMigrations } from "../../src/db/migrations";
 import { sitePageRegistry, sites } from "../../src/db/schema";
 import { PageMetadataRefreshService } from "../../src/modules/page-registry/title-refresh-service";
+import { AppError } from "../../src/modules/shared/errors";
 import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
 
 const cleanups: Array<() => void> = [];
@@ -95,7 +96,7 @@ function createService(
 	fixture: ReturnType<typeof createFixture>,
 	fetchHtml: (
 		url: string,
-		options: { timeoutMs: number; maxBytes: number },
+		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>,
 ) {
 	return new PageMetadataRefreshService(fixture.db, {
@@ -247,7 +248,11 @@ describe("PageMetadataRefreshService", () => {
 	it("passes task timeout and max bytes to HTML fetch", async () => {
 		const fixture = createFixture();
 		await seedSiteAndPages(fixture);
-		const seenOptions: Array<{ timeoutMs: number; maxBytes: number }> = [];
+		const seenOptions: Array<{
+			allowedOrigins: string[];
+			timeoutMs: number;
+			maxBytes: number;
+		}> = [];
 		const service = createService(fixture, async (_url, options) => {
 			seenOptions.push(options);
 			return {
@@ -268,6 +273,50 @@ describe("PageMetadataRefreshService", () => {
 			createTaskContext(),
 		);
 
-		expect(seenOptions).toEqual([{ timeoutMs: 4500, maxBytes: 131072 }]);
+		expect(seenOptions).toEqual([
+			{
+				allowedOrigins: ["https://example.com"],
+				timeoutMs: 4500,
+				maxBytes: 131072,
+			},
+		]);
+	});
+
+	it("records safe fetch rejections as title refresh failures", async () => {
+		const fixture = createFixture();
+		await seedSiteAndPages(fixture);
+		const service = createService(fixture, async () => {
+			throw new AppError(
+				403,
+				"SERVER_FETCH_DESTINATION_DENIED",
+				"服务器拉取目标地址不允许访问。",
+			);
+		});
+
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/ok/"],
+				forceTitle: true,
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
+
+		const [page] = await fixture.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.pageKey, "posts/ok/"));
+		expect(page).toMatchObject({
+			title: null,
+			status: "unreachable",
+			titleRefreshStatusCode: null,
+			titleRefreshError: "服务器拉取目标地址不允许访问。",
+		});
+		expect(result).toMatchObject({
+			processed: 1,
+			updated: 0,
+			failed: 1,
+		});
 	});
 });

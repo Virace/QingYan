@@ -73,6 +73,18 @@ async function createScopedUser(
 	return user;
 }
 
+async function createSite(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	input: { siteKey: string; name: string; allowedOrigins: string[] },
+) {
+	await fixture.app.db.insert(sites).values({
+		siteKey: input.siteKey,
+		name: input.name,
+		allowedOriginsJson: JSON.stringify(input.allowedOrigins),
+	});
+	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
+}
+
 function taskPayload(overrides: Record<string, unknown> = {}) {
 	return {
 		name: "Refresh FangYuan titles",
@@ -384,6 +396,201 @@ describe("admin tasks api", () => {
 		});
 	});
 
+	it("enforces task definition permissions on create and run operations", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createScopedUser(fixture, {
+			username: "site-admin-task-permissions",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		const siteAdmin = await loginAsAdmin(fixture.app, {
+			username: "site-admin-task-permissions",
+			password: "replace-me",
+		});
+
+		const backupCreate = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/tasks/scheduled",
+			...withAdminWriteAuth({
+				adminCookie: siteAdmin.adminCookie,
+				csrfToken: siteAdmin.csrfToken,
+			}),
+			payload: taskPayload({
+				name: "Site admin backup",
+				type: "backup",
+				enabled: false,
+				scheduleKind: "manual_only",
+				trigger: {},
+				payload: {
+					scope: "site",
+					siteKey: "fangyuan",
+					include: {
+						siteSettings: true,
+						pageThreads: true,
+						comments: true,
+					},
+				},
+			}),
+		});
+		expect(backupCreate.statusCode).toBe(403);
+		expect(backupCreate.json()).toMatchObject({
+			error: {
+				code: "TASK_PERMISSION_DENIED",
+				details: {
+					requiredPermission: "ops.backup",
+					taskType: "backup",
+					operation: "create",
+				},
+			},
+		});
+
+		const created = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/tasks/scheduled",
+			...withAdminWriteAuth({
+				adminCookie: siteAdmin.adminCookie,
+				csrfToken: siteAdmin.csrfToken,
+			}),
+			payload: taskPayload({ name: "Own task without run permission" }),
+		});
+		expect(created.statusCode).toBe(201);
+
+		const run = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/tasks/scheduled/${created.json().id}/run`,
+			...withAdminWriteAuth({
+				adminCookie: siteAdmin.adminCookie,
+				csrfToken: siteAdmin.csrfToken,
+			}),
+		});
+		expect(run.statusCode).toBe(403);
+		expect(run.json()).toMatchObject({
+			error: {
+				code: "TASK_PERMISSION_DENIED",
+				details: {
+					requiredPermission: "tasks.run",
+					taskType: "page_metadata_refresh",
+					operation: "run",
+				},
+			},
+		});
+	});
+
+	it("binds site-scoped task payloads to the authorized top-level site", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createSite(fixture, {
+			siteKey: "xitem",
+			name: "x-item",
+			allowedOrigins: ["https://x-item.example.test"],
+		});
+		await createScopedUser(fixture, {
+			username: "site-admin-task-binding",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		const siteAdmin = await loginAsAdmin(fixture.app, {
+			username: "site-admin-task-binding",
+			password: "replace-me",
+		});
+
+		const mismatchedCreate = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/tasks/scheduled",
+			...withAdminWriteAuth({
+				adminCookie: siteAdmin.adminCookie,
+				csrfToken: siteAdmin.csrfToken,
+			}),
+			payload: taskPayload({
+				name: "Cross-site source refresh",
+				type: "page_source_refresh",
+				scheduleKind: "manual_only",
+				trigger: {},
+				payload: {
+					siteKey: "xitem",
+					sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+					mode: "replace",
+				},
+			}),
+		});
+		expect(mismatchedCreate.statusCode).toBe(403);
+		expect(mismatchedCreate.json()).toMatchObject({
+			error: {
+				code: "TASK_SITE_BINDING_MISMATCH",
+				details: { siteKey: "fangyuan" },
+			},
+		});
+
+		const created = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/tasks/scheduled",
+			...withAdminWriteAuth({
+				adminCookie: siteAdmin.adminCookie,
+				csrfToken: siteAdmin.csrfToken,
+			}),
+			payload: taskPayload({ name: "Bound task" }),
+		});
+		expect(created.statusCode).toBe(201);
+		expect(created.json()).toMatchObject({
+			payload: { siteKey: "fangyuan" },
+		});
+
+		const mismatchedUpdate = await fixture.app.inject({
+			method: "PATCH",
+			url: `/qingyan/api/admin/tasks/scheduled/${created.json().id}`,
+			...withAdminWriteAuth({
+				adminCookie: siteAdmin.adminCookie,
+				csrfToken: siteAdmin.csrfToken,
+			}),
+			payload: {
+				payload: {
+					siteKey: "xitem",
+					scope: "force",
+				},
+			},
+		});
+		expect(mismatchedUpdate.statusCode).toBe(403);
+		expect(mismatchedUpdate.json()).toMatchObject({
+			error: {
+				code: "TASK_SITE_BINDING_MISMATCH",
+				details: { siteKey: "fangyuan" },
+			},
+		});
+
+		const admin = await loginAsAdmin(fixture.app);
+		const backupMismatch = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/tasks/scheduled",
+			...withAdminWriteAuth({
+				adminCookie: admin.adminCookie,
+				csrfToken: admin.csrfToken,
+			}),
+			payload: taskPayload({
+				name: "Admin cross-site backup",
+				type: "backup",
+				scheduleKind: "manual_only",
+				trigger: {},
+				payload: {
+					scope: "site",
+					siteKey: "xitem",
+					include: {
+						siteSettings: true,
+						pageThreads: true,
+						comments: true,
+					},
+				},
+			}),
+		});
+		expect(backupMismatch.statusCode).toBe(403);
+		expect(backupMismatch.json()).toMatchObject({
+			error: {
+				code: "TASK_SITE_BINDING_MISMATCH",
+				details: { siteKey: "fangyuan" },
+			},
+		});
+	});
+
 	it("creates manual backup runs with backup category", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -610,6 +817,15 @@ describe("admin tasks api", () => {
 			requestId: "protected-task-test",
 		});
 		const taskId = ensured.task.id;
+		await createScopedUser(fixture, {
+			username: "protected-site-admin",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		const protectedSiteAdmin = await loginAsAdmin(fixture.app, {
+			username: "protected-site-admin",
+			password: "replace-me",
+		});
 
 		const detail = await fixture.app.inject({
 			method: "GET",
@@ -665,6 +881,26 @@ describe("admin tasks api", () => {
 				sitemapUrls: ["http://localhost:4321/sitemap.xml"],
 				mode: "replace",
 				timeoutMs: 5000,
+			},
+		});
+
+		const siteAdminRun = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/tasks/scheduled/${taskId}/run`,
+			...withAdminWriteAuth({
+				adminCookie: protectedSiteAdmin.adminCookie,
+				csrfToken: protectedSiteAdmin.csrfToken,
+			}),
+		});
+		expect(siteAdminRun.statusCode).toBe(403);
+		expect(siteAdminRun.json()).toMatchObject({
+			error: {
+				code: "TASK_PERMISSION_DENIED",
+				details: {
+					requiredPermission: "tasks.run",
+					taskType: "page_source_refresh",
+					operation: "run",
+				},
 			},
 		});
 

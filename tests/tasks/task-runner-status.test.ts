@@ -15,7 +15,10 @@ import {
 	TaskRunner,
 	TaskRunSuppressedError,
 } from "../../src/modules/tasks/task-runner";
-import { TaskTypeRegistry } from "../../src/modules/tasks/task-type-registry";
+import {
+	type TaskTypePermissions,
+	TaskTypeRegistry,
+} from "../../src/modules/tasks/task-type-registry";
 import {
 	applyInitialMigration,
 	createTestWorkspace,
@@ -104,19 +107,20 @@ function createDefinition(input: {
 	precondition?: "ok" | "skipped" | "blocked";
 	run: () => Promise<unknown>;
 }) {
+	const permissions: TaskTypePermissions = {
+		read: "tasks.read",
+		create: "tasks.schedule.create",
+		run: "tasks.run",
+		update: "tasks.schedule.update",
+		delete: "tasks.schedule.delete",
+	};
 	return {
 		type: input.type,
 		label: input.type,
 		description: input.type,
 		category: "maintenance" as const,
 		scope: "site" as const,
-		permissions: {
-			read: "tasks.read",
-			create: "tasks.schedule.create",
-			run: "tasks.run",
-			update: "tasks.schedule.update",
-			delete: "tasks.schedule.delete",
-		},
+		permissions,
 		payloadSchema: z.object({ siteKey: z.string() }),
 		defaultPayload: { siteKey: "fangyuan" },
 		defaultPolicy: { maxAttempts: 1, retryDelaySec: 0 },

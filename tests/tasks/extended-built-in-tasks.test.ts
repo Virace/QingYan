@@ -190,10 +190,11 @@ describe("extended built-in task types", () => {
 	});
 
 	it("uses QingYanExportService for site backup output", async () => {
-		const outputDirectory = mkdtempSync(
+		const workspaceDirectory = mkdtempSync(
 			path.join(tmpdir(), "qingyan-backup-task-"),
 		);
-		tempDirectories.push(outputDirectory);
+		tempDirectories.push(workspaceDirectory);
+		const previousCwd = process.cwd();
 		const exportService = {
 			exportSite: vi.fn().mockReturnValue({
 				createdAt: "2026-06-04T10:00:00.000Z",
@@ -204,18 +205,23 @@ describe("extended built-in task types", () => {
 			exportService: exportService as never,
 		});
 
-		const result = await service.createBackup({
-			runId: "run_backup",
-			scope: "site",
-			siteKey: "fangyuan",
-			outputDirectory,
-			include: {
-				comments: true,
-				pageThreads: false,
-				rawUserAgent: false,
-			},
-			retentionCount: 4,
-		});
+		let result: Awaited<ReturnType<DefaultBackupTaskService["createBackup"]>>;
+		try {
+			process.chdir(workspaceDirectory);
+			result = await service.createBackup({
+				runId: "run_backup",
+				scope: "site",
+				siteKey: "fangyuan",
+				include: {
+					comments: true,
+					pageThreads: false,
+					rawUserAgent: false,
+				},
+				retentionCount: 4,
+			});
+		} finally {
+			process.chdir(previousCwd);
+		}
 
 		expect(exportService.exportSite).toHaveBeenCalledWith({
 			siteKey: "fangyuan",
@@ -233,6 +239,9 @@ describe("extended built-in task types", () => {
 			hash: expect.any(String),
 			retentionCount: 4,
 		});
+		expect(result.path).toContain(
+			path.join(workspaceDirectory, "data", "task-backups"),
+		);
 	});
 
 	it("creates a restore task run after applying a temporary site settings action", async () => {

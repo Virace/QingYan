@@ -34,7 +34,7 @@ export interface PageMetadataRefreshScope {
 export interface PageMetadataRefreshOptions {
 	fetchHtml: (
 		url: string,
-		options: { timeoutMs: number; maxBytes: number },
+		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	now?: () => Date;
 	settings?: {
@@ -215,6 +215,7 @@ export class PageMetadataRefreshService {
 		const fullUrl = resolvePageUrl(row.pageUrl, allowedOrigins);
 		try {
 			const response = await this.options.fetchHtml(fullUrl, {
+				allowedOrigins,
 				timeoutMs:
 					scope.timeoutMs ??
 					this.options.settings?.timeoutMs ??

@@ -73,7 +73,11 @@ function createService(
 	fixture: ReturnType<typeof createFixture>,
 	fetchText: (
 		url: string,
-		options: { timeoutMs?: number; maxBytes?: number },
+		options: {
+			allowedOrigins: string[];
+			timeoutMs?: number;
+			maxBytes?: number;
+		},
 	) => Promise<string>,
 ) {
 	const titleRefreshRuns: Array<{ siteKey: string; pageKeys: string[] }> = [];
@@ -161,6 +165,29 @@ describe("PageSourceRefreshService", () => {
 			skipped: 0,
 			failed: 0,
 		});
+	});
+
+	it("rejects runtime sitemap URLs outside allowed origins before fetch", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const fetchCalls: string[] = [];
+		const { service } = createService(fixture, async (url) => {
+			fetchCalls.push(url);
+			return "<urlset />";
+		});
+
+		await expect(
+			service.executeRefresh(
+				{
+					siteKey: "fangyuan",
+					sitemapUrls: ["http://169.254.169.254/latest/meta-data"],
+					mode: "replace",
+					trigger: "manual",
+				},
+				createTaskContext(),
+			),
+		).rejects.toThrow("Sitemap URL is outside allowed origins");
+		expect(fetchCalls).toEqual([]);
 	});
 
 	it("prefers canonical sitemap URL payloads over legacy sourceIds compatibility", async () => {
@@ -271,7 +298,11 @@ describe("PageSourceRefreshService", () => {
 		});
 		const fetchCalls: Array<{
 			url: string;
-			options: { timeoutMs?: number; maxBytes?: number };
+			options: {
+				allowedOrigins: string[];
+				timeoutMs?: number;
+				maxBytes?: number;
+			};
 		}> = [];
 		const { service } = createService(fixture, async (url, options) => {
 			fetchCalls.push({ url, options });
@@ -323,6 +354,7 @@ describe("PageSourceRefreshService", () => {
 			{
 				url: "https://example.com/sitemap-index.xml",
 				options: {
+					allowedOrigins: ["https://example.com"],
 					timeoutMs: 12_000,
 					maxBytes: 1_048_576,
 				},
@@ -330,6 +362,7 @@ describe("PageSourceRefreshService", () => {
 			{
 				url: "https://example.com/post-sitemap.xml",
 				options: {
+					allowedOrigins: ["https://example.com"],
 					timeoutMs: 12_000,
 					maxBytes: 1_048_576,
 				},
@@ -337,6 +370,7 @@ describe("PageSourceRefreshService", () => {
 			{
 				url: "https://example.com/page-sitemap.xml",
 				options: {
+					allowedOrigins: ["https://example.com"],
 					timeoutMs: 12_000,
 					maxBytes: 1_048_576,
 				},
@@ -350,6 +384,38 @@ describe("PageSourceRefreshService", () => {
 			skipped: 0,
 			failed: 0,
 		});
+	});
+
+	it("rejects sitemap index child URLs outside allowed origins", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		const source = await createSource(fixture, {
+			sourceUrl: "https://example.com/sitemap-index.xml",
+		});
+		const fetchCalls: string[] = [];
+		const { service } = createService(fixture, async (url) => {
+			fetchCalls.push(url);
+			if (url === "https://example.com/sitemap-index.xml") {
+				return [
+					"<sitemapindex>",
+					"<sitemap><loc>https://evil.example/sitemap.xml</loc></sitemap>",
+					"</sitemapindex>",
+				].join("");
+			}
+			return "<urlset />";
+		});
+
+		await expect(
+			service.executeRefresh(
+				{
+					siteKey: "fangyuan",
+					sourceIds: [source.id],
+					trigger: "manual",
+				},
+				createTaskContext(),
+			),
+		).rejects.toThrow("Sitemap URL is outside allowed origins");
+		expect(fetchCalls).toEqual(["https://example.com/sitemap-index.xml"]);
 	});
 
 	it("stores RSS item titles as registry title hints", async () => {
@@ -643,7 +709,11 @@ describe("PageSourceRefreshService", () => {
 		const source = await createSource(fixture);
 		const fetchCalls: Array<{
 			url: string;
-			options: { timeoutMs?: number; maxBytes?: number };
+			options: {
+				allowedOrigins: string[];
+				timeoutMs?: number;
+				maxBytes?: number;
+			};
 		}> = [];
 		const { service } = createService(fixture, async (url, options) => {
 			fetchCalls.push({ url, options });
@@ -665,6 +735,7 @@ describe("PageSourceRefreshService", () => {
 			{
 				url: "https://example.com/sitemap.xml",
 				options: {
+					allowedOrigins: ["https://example.com"],
 					timeoutMs: 12_000,
 					maxBytes: 1_048_576,
 				},

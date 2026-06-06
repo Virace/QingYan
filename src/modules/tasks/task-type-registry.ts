@@ -1,16 +1,17 @@
 import type { z } from "zod";
 
+import type { AdminPermission } from "../admin/permissions";
 import type { TaskRunCategory } from "./types";
 import type { TaskRunnerContext } from "./task-runner-context";
 
 export type TaskScopeKind = "global" | "site" | "multi_site" | "page";
 
 export interface TaskTypePermissions {
-	read: string;
-	create: string;
-	run: string;
-	update: string;
-	delete: string;
+	read: AdminPermission;
+	create: AdminPermission;
+	run: AdminPermission;
+	update: AdminPermission;
+	delete: AdminPermission;
 }
 
 export interface TaskTypeScheduleCapabilities {

@@ -6,6 +6,7 @@ import type {
 	ScheduledTaskRecord,
 } from "./scheduled-task-repository";
 import type { TaskRunRecord } from "./types";
+import type { TaskTypePermissions } from "./task-type-registry";
 
 export interface TaskVisibilitySession {
 	userId: number;
@@ -34,6 +35,16 @@ function hasSiteAccess(
 		return false;
 	}
 	return session.siteIds.includes(siteId);
+}
+
+function hasPermission(
+	session: TaskVisibilitySession,
+	permission?: AdminPermission,
+): boolean {
+	if (!permission) {
+		return true;
+	}
+	return session.permissions?.includes(permission) === true;
 }
 
 export function canManageScheduledTask(
@@ -96,13 +107,21 @@ export function canViewTaskLogs(
 
 export function projectScheduledTaskForSession(
 	task: ScheduledTaskRecord,
-	input: { session: TaskVisibilitySession },
+	input: { session: TaskVisibilitySession; permissions?: TaskTypePermissions },
 ) {
 	if (!hasSiteAccess(input.session, task.siteId)) {
 		return null;
 	}
-	const canManage = canManageScheduledTask(task, input.session);
-	const canRun = canRunScheduledTask(task, input.session);
+	const baseCanManage = canManageScheduledTask(task, input.session);
+	const baseCanRun = canRunScheduledTask(task, input.session);
+	const canUpdate = hasPermission(input.session, input.permissions?.update);
+	const canDeletePermission = hasPermission(
+		input.session,
+		input.permissions?.delete,
+	);
+	const canRunPermission = hasPermission(input.session, input.permissions?.run);
+	const canManage = baseCanManage && canUpdate;
+	const canRun = baseCanRun && canRunPermission;
 	const canViewLogs = canManage;
 	const protectedReason = protectedTaskReason(task.protection);
 	const lockedDelete = task.protection?.lockedDelete === true;
@@ -137,7 +156,7 @@ export function projectScheduledTaskForSession(
 			disable: lockedDisable,
 			transferOwner: lockedOwnerTransfer,
 		},
-		canDelete: canManage && !lockedDelete,
+		canDelete: canManage && canDeletePermission && !lockedDelete,
 		canDisable: canManage && !(task.enabled && lockedDisable),
 		canTransferOwner: canManage && !lockedOwnerTransfer,
 		createdByUserId: task.createdByUserId,

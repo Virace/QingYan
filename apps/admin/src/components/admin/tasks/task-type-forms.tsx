@@ -318,12 +318,9 @@ export function TaskTypePayloadForm({
 						placeholder="完整备份可留空"
 						onChange={(value) => setValue("siteKey", value.trim())}
 					/>
-					<PayloadInput
-						label="输出目录"
-						value={readText(payload.outputDirectory)}
-						placeholder="留空使用默认 task-backups 目录"
-						onChange={(value) => setValue("outputDirectory", value.trim())}
-					/>
+					<div className="text-sm text-muted-foreground md:col-span-2">
+						备份输出由系统写入任务备份目录。
+					</div>
 					<PayloadInput
 						label="保留份数"
 						value={payload.retentionCount ? String(payload.retentionCount) : ""}

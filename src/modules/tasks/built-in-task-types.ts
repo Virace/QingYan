@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import type { TaskTypeDefinition } from "./task-type-registry";
+import type {
+	TaskTypeDefinition,
+	TaskTypePermissions,
+} from "./task-type-registry";
 import { TaskTypeRegistry } from "./task-type-registry";
 import type { TaskRunnerContext } from "./task-runner-context";
 import {
@@ -24,7 +27,7 @@ import {
 	type SiteSettingsActionPayload,
 } from "./built-in/site-settings-action-task";
 
-const maintenancePermissions = {
+const maintenancePermissions: TaskTypePermissions = {
 	read: "tasks.read",
 	create: "tasks.schedule.create",
 	run: "tasks.run",
@@ -173,12 +176,16 @@ async function runWithEvents<TPayload>(
 function defineTaskType<TPayload>(
 	definition: Omit<TaskTypeDefinition<TPayload>, "category" | "permissions"> & {
 		category?: TaskTypeDefinition<TPayload>["category"];
+		permissions?: Partial<TaskTypeDefinition<TPayload>["permissions"]>;
 	},
 ): TaskTypeDefinition<TPayload> {
 	return {
 		...definition,
 		category: definition.category ?? "maintenance",
-		permissions: maintenancePermissions,
+		permissions: {
+			...maintenancePermissions,
+			...definition.permissions,
+		},
 	};
 }
 
@@ -191,6 +198,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			label: "页面来源刷新",
 			description: "刷新站点 sitemap/RSS/Atom 来源并更新页面注册表。",
 			scope: "site",
+			permissions: {
+				read: "page_registry.read",
+				create: "page_registry.update",
+				update: "page_registry.update",
+				delete: "page_registry.update",
+			},
 			payloadSchema: pageSourceRefreshPayloadSchema,
 			defaultPayload: { siteKey: "", trigger: "scheduled" },
 			defaultPolicy,
@@ -244,6 +257,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			label: "页面 Title 刷新",
 			description: "刷新页面 HTML title 元数据。",
 			scope: "site",
+			permissions: {
+				read: "pages.read",
+				create: "pages.update",
+				update: "pages.update",
+				delete: "pages.update",
+			},
 			payloadSchema: pageMetadataRefreshPayloadSchema,
 			defaultPayload: {
 				siteKey: "",
@@ -293,6 +312,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			label: "评论 IP 刷新",
 			description: "基于已有评论请求元数据补齐 IP 地域信息。",
 			scope: "site",
+			permissions: {
+				read: "visitors.read",
+				create: "comments.refresh_metadata",
+				update: "comments.refresh_metadata",
+				delete: "comments.refresh_metadata",
+			},
 			payloadSchema: commentIpRefreshPayloadSchema,
 			defaultPayload: { scope: "missing", ipVersions: ["v4", "v6"] },
 			defaultPolicy,
@@ -334,6 +359,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			label: "IP 库更新",
 			description: "更新 IPv4/IPv6 IP 地域数据库。",
 			scope: "global",
+			permissions: {
+				read: "ops.read",
+				create: "ip_region_settings.update",
+				update: "ip_region_settings.update",
+				delete: "ip_region_settings.update",
+			},
 			payloadSchema: ipRegionUpdatePayloadSchema,
 			defaultPayload: { ipVersions: ["v4", "v6"] },
 			defaultPolicy,
@@ -374,6 +405,13 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			description: "复用现有 QingYan 导出/备份服务生成任务备份结果。",
 			category: "backup",
 			scope: "site",
+			permissions: {
+				read: "ops.read",
+				create: "ops.backup",
+				run: "ops.backup",
+				update: "ops.backup",
+				delete: "ops.backup",
+			},
 			payloadSchema: backupPayloadSchema,
 			defaultPayload: {
 				scope: "site",
@@ -410,6 +448,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			description: "临时关闭评论、访客、PV、互动或提升验证码，并记录恢复快照。",
 			category: "system",
 			scope: "site",
+			permissions: {
+				read: "site_settings.read",
+				create: "site_settings.update",
+				update: "site_settings.update",
+				delete: "site_settings.update",
+			},
 			payloadSchema: siteSettingsActionPayloadSchema,
 			defaultPayload: {
 				siteKey: "",
@@ -436,6 +480,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			description: "按条件结果创建短期站点黑名单规则，并在日志中脱敏目标值。",
 			category: "system",
 			scope: "site",
+			permissions: {
+				read: "blacklist.read",
+				create: "blacklist.create",
+				update: "blacklist.create",
+				delete: "blacklist.delete",
+			},
 			payloadSchema: blacklistAutomationPayloadSchema,
 			defaultPayload: {
 				siteKey: "",
@@ -465,6 +515,12 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			description: "复用后台用户通知收件人和通知任务模型创建每日摘要投递任务。",
 			category: "notification",
 			scope: "site",
+			permissions: {
+				read: "site_settings.read",
+				create: "site_settings.update",
+				update: "site_settings.update",
+				delete: "site_settings.update",
+			},
 			payloadSchema: dailySiteDigestPayloadSchema,
 			defaultPayload: {
 				siteKey: "",

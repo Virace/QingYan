@@ -38,6 +38,9 @@ export type AdminPermission =
 	| "wordpress_migration.plan"
 	| "wordpress_migration.apply"
 	| "tasks.read"
+	| "tasks.schedule.create"
+	| "tasks.schedule.update"
+	| "tasks.schedule.delete"
 	| "tasks.run"
 	| "tasks.cancel"
 	| "ops.read"
@@ -110,6 +113,9 @@ export const allAdminPermissions: AdminPermission[] = [
 	"wordpress_migration.plan",
 	"wordpress_migration.apply",
 	"tasks.read",
+	"tasks.schedule.create",
+	"tasks.schedule.update",
+	"tasks.schedule.delete",
 	"tasks.run",
 	"tasks.cancel",
 	"ops.read",
