@@ -500,7 +500,8 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_enabled` integer DEFAULT true NOT NULL,
 	`auto_blacklist_scope` text DEFAULT 'post' NOT NULL,
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
-	`email_notifications_enabled` integer DEFAULT false NOT NULL,
+	`commenter_reply_email_enabled` integer DEFAULT false NOT NULL,
+	`backend_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `engagement_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text, `page_registry_json` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action

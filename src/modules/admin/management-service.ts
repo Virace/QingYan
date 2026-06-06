@@ -1054,28 +1054,33 @@ export class AdminManagementService {
 			engagement: mergeEngagementSettings(settings.engagementJson),
 			pageRegistry: mergePageRegistrySettings(settings.pageRegistryJson),
 			notifications: {
-				emailEnabled: settings.emailNotificationsEnabled,
-				channelConfigs,
-				recipients: recipients.map((recipient) => ({
-					id: recipient.id,
-					userId: recipient.userId,
-					username: recipient.username,
-					email: recipient.email,
-					displayName: recipient.displayName,
-					channels: recipient.channels,
-					events: recipient.events,
-					routes: recipient.routes.map((route) => ({
-						id: route.id,
-						eventType: route.eventType,
-						channelConfigId: route.channelConfigId,
-						channelType: route.channelType,
-						channelName: route.channelName,
-						enabled: route.enabled,
+				commenter: {
+					replyEmailEnabled: settings.commenterReplyEmailEnabled,
+				},
+				backend: {
+					enabled: settings.backendNotificationsEnabled,
+					recipients: recipients.map((recipient) => ({
+						id: recipient.id,
+						userId: recipient.userId,
+						username: recipient.username,
+						email: recipient.email,
+						displayName: recipient.displayName,
+						channels: recipient.channels,
+						events: recipient.events,
+						routes: recipient.routes.map((route) => ({
+							id: route.id,
+							eventType: route.eventType,
+							channelConfigId: route.channelConfigId,
+							channelType: route.channelType,
+							channelName: route.channelName,
+							enabled: route.enabled,
+						})),
+						includeCommentContent: recipient.includeCommentContent,
+						rateLimitProfile: recipient.rateLimitProfile,
+						enabled: recipient.enabled,
 					})),
-					includeCommentContent: recipient.includeCommentContent,
-					rateLimitProfile: recipient.rateLimitProfile,
-					enabled: recipient.enabled,
-				})),
+				},
+				channelConfigs,
 			},
 		};
 	}
@@ -1208,8 +1213,13 @@ export class AdminManagementService {
 			};
 			engagement?: EngagementSettingsPatch;
 			notifications?: {
-				emailEnabled?: boolean;
-				recipients?: NotificationRecipientInput[];
+				commenter?: {
+					replyEmailEnabled?: boolean;
+				};
+				backend?: {
+					enabled?: boolean;
+					recipients?: NotificationRecipientInput[];
+				};
 			};
 			pageRegistry?: PageRegistrySettingsPatch;
 			requestId?: string;
@@ -1237,7 +1247,7 @@ export class AdminManagementService {
 			: undefined;
 		await this.validateNotificationRecipients({
 			siteId: registeredSite.id,
-			recipients: input.notifications?.recipients,
+			recipients: input.notifications?.backend?.recipients,
 		});
 		if (nextPageRegistry) {
 			await this.validateAuthoritativePageRegistrySettings({
@@ -1292,12 +1302,14 @@ export class AdminManagementService {
 			pageRegistryJson: nextPageRegistry
 				? serializePageRegistrySettings(nextPageRegistry)
 				: undefined,
-			emailNotificationsEnabled: input.notifications?.emailEnabled,
+			commenterReplyEmailEnabled:
+				input.notifications?.commenter?.replyEmailEnabled,
+			backendNotificationsEnabled: input.notifications?.backend?.enabled,
 		});
-		if (input.notifications?.recipients) {
+		if (input.notifications?.backend?.recipients) {
 			await this.repository.replaceSiteNotificationRecipients({
 				siteId: registeredSite.id,
-				recipients: input.notifications.recipients,
+				recipients: input.notifications.backend.recipients,
 			});
 		}
 

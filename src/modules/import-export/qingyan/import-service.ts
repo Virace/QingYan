@@ -127,7 +127,8 @@ const siteSettingsWritableColumns = [
 	"verified_author_json",
 	"staff_display_json",
 	"moderation_json",
-	"email_notifications_enabled",
+	"commenter_reply_email_enabled",
+	"backend_notifications_enabled",
 ] as const;
 
 function isSecretSystemSetting(row: { category: string; key: string }) {
@@ -155,6 +156,22 @@ function normalizeSqlValue(value: unknown): unknown {
 		return value ? 1 : 0;
 	}
 	return value;
+}
+
+function normalizeSiteSettingsForImport(
+	settings: QingYanExportSiteSettings,
+): Record<string, unknown> {
+	const normalized: Record<string, unknown> = { ...settings };
+	if (
+		!("commenter_reply_email_enabled" in normalized) &&
+		"email_notifications_enabled" in normalized
+	) {
+		// Legacy exports used one ambiguous site email switch; import it only as the ordinary commenter reply email setting.
+		normalized.commenter_reply_email_enabled =
+			normalized.email_notifications_enabled;
+	}
+	delete normalized.email_notifications_enabled;
+	return normalized;
 }
 
 export class QingYanImportService {
@@ -946,13 +963,15 @@ export class QingYanImportService {
 
 		const incomingSettings = payload.data.siteSettings;
 		if (incomingSettings) {
+			const normalizedIncomingSettings =
+				normalizeSiteSettingsForImport(incomingSettings);
 			const currentSettings = this.getCurrentSiteSettings(siteId);
 			for (const column of siteSettingsWritableColumns) {
-				if (!(column in incomingSettings)) {
+				if (!(column in normalizedIncomingSettings)) {
 					continue;
 				}
 				const current = currentSettings?.[column];
-				const incoming = normalizeSqlValue(incomingSettings[column]);
+				const incoming = normalizeSqlValue(normalizedIncomingSettings[column]);
 				if (current !== incoming) {
 					changes.push({
 						path: `siteSettings.${column}`,
@@ -1077,10 +1096,14 @@ export class QingYanImportService {
 		siteId: number,
 		settings: QingYanExportSiteSettings,
 	) {
+		const normalizedSettings = normalizeSiteSettingsForImport(settings);
 		const updates = Object.fromEntries(
 			siteSettingsWritableColumns
-				.filter((column) => column in settings)
-				.map((column) => [column, normalizeSqlValue(settings[column])]),
+				.filter((column) => column in normalizedSettings)
+				.map((column) => [
+					column,
+					normalizeSqlValue(normalizedSettings[column]),
+				]),
 		);
 		const columns = Object.keys(updates);
 		if (columns.length === 0) {

@@ -480,7 +480,12 @@ describe("admin sites", () => {
 						commentVotesEnabled: true,
 					},
 					notifications: {
-						emailEnabled: false,
+						commenter: {
+							replyEmailEnabled: false,
+						},
+						backend: {
+							enabled: false,
+						},
 					},
 					pageCount: 1,
 					commentCount: 1,

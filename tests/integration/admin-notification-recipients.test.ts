@@ -90,25 +90,27 @@ async function createScopedUser(
 function recipientsPayload(userId: number) {
 	return {
 		notifications: {
-			recipients: [
-				{
-					userId,
-					routes: [
-						{
-							eventType: "admin_comment_pending",
-							channelConfigId: "email:default",
-							enabled: true,
-						},
-						{
-							eventType: "admin_comment_approved",
-							channelConfigId: "email:default",
-							enabled: true,
-						},
-					],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			backend: {
+				recipients: [
+					{
+						userId,
+						routes: [
+							{
+								eventType: "admin_comment_pending",
+								channelConfigId: "email:default",
+								enabled: true,
+							},
+							{
+								eventType: "admin_comment_approved",
+								channelConfigId: "email:default",
+								enabled: true,
+							},
+						],
+						includeCommentContent: "summary",
+						enabled: true,
+					},
+				],
+			},
 		},
 	};
 }
@@ -132,7 +134,7 @@ describe("admin site notification recipients", () => {
 		});
 
 		expect(updateResponse.statusCode).toBe(200);
-		expect(updateResponse.json().notifications).toMatchObject({
+		expect(updateResponse.json().notifications.backend).toMatchObject({
 			recipients: [
 				{
 					userId: recipient.id,
@@ -168,7 +170,9 @@ describe("admin site notification recipients", () => {
 			},
 		});
 		expect(readResponse.statusCode).toBe(200);
-		expect(readResponse.json().notifications.recipients).toHaveLength(1);
+		expect(readResponse.json().notifications.backend.recipients).toHaveLength(
+			1,
+		);
 	});
 
 	it("lets site admins add same-site users but rejects users without target-site access", async () => {

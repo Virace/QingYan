@@ -109,7 +109,12 @@ export function buildSiteSummary(site: DevSiteSeed) {
 			allowLike: settings.allowPageLike,
 		},
 		notifications: {
-			emailEnabled: settings.emailNotificationsEnabled,
+			commenter: {
+				replyEmailEnabled: settings.commenterReplyEmailEnabled,
+			},
+			backend: {
+				enabled: settings.backendNotificationsEnabled,
+			},
 		},
 		pageCount: 0,
 		commentCount: 0,

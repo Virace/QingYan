@@ -25,6 +25,7 @@ import {
 import type { CommentsWriteRepository } from "./write-repository";
 import { CommenterPreferencesRepository } from "../notifications/commenter-preferences-repository";
 import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
+import { isSystemMailUsable } from "./public-contract";
 
 function resolveIdentity(
 	siteKey: string,
@@ -52,6 +53,7 @@ export class CommentsWriteService {
 			SystemSettings["ipRegion"]
 		>,
 		private readonly moderationService?: ModerationService,
+		private readonly loadSystemSettings?: () => Promise<SystemSettings>,
 	) {}
 
 	public async createComment(input: {
@@ -324,12 +326,22 @@ export class CommentsWriteService {
 			},
 		});
 		if (!shouldUseVerifiedAuthor) {
+			const systemSettings = this.loadSystemSettings
+				? await this.loadSystemSettings()
+				: undefined;
+			const replyEmailNotificationUsable =
+				commentsEnabled &&
+				(settings?.maxDepth ?? 3) > 1 &&
+				(settings?.commenterReplyEmailEnabled ?? false) &&
+				Boolean(systemSettings && isSystemMailUsable(systemSettings.mail));
 			await new CommenterPreferencesRepository(
 				this.writeRepository.database,
 			).upsertFromCommentForm({
 				siteId: site.id,
 				email: resolvedAuthorEmail,
-				notifyOnReply: input.options?.notifyOnReply ?? false,
+				notifyOnReply:
+					replyEmailNotificationUsable &&
+					(input.options?.notifyOnReply ?? false),
 			});
 		}
 		if (input.parentCommentId && status === "approved") {

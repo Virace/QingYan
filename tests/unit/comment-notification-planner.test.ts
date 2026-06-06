@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { createDatabaseClients } from "../../src/db/client";
@@ -7,7 +7,9 @@ import {
 	comments,
 	notificationDeliveries,
 	pageThreads,
+	siteSettings,
 	sites,
+	systemSettings,
 	taskRuns,
 } from "../../src/db/schema";
 import { CommentNotificationPlanner } from "../../src/modules/notifications/comment-notification-planner";
@@ -49,6 +51,10 @@ async function seedThread(fixture: ReturnType<typeof createFixture>) {
 			allowedOriginsJson: JSON.stringify(["http://localhost:4321"]),
 		})
 		.returning();
+	await fixture.db.insert(siteSettings).values({
+		siteId: site.id,
+		commenterReplyEmailEnabled: true,
+	});
 	const [thread] = await fixture.db
 		.insert(pageThreads)
 		.values({
@@ -63,8 +69,25 @@ async function seedThread(fixture: ReturnType<typeof createFixture>) {
 	return { site, thread };
 }
 
+async function seedUsableSystemMail(fixture: ReturnType<typeof createFixture>) {
+	await fixture.db.insert(systemSettings).values([
+		{ category: "mail", key: "enabled", valueJson: JSON.stringify(true) },
+		{
+			category: "mail",
+			key: "smtp.host",
+			valueJson: JSON.stringify("smtp.example.test"),
+		},
+		{
+			category: "mail",
+			key: "smtp.from",
+			valueJson: JSON.stringify("notify@example.test"),
+		},
+	]);
+}
+
 async function seedApprovedReply(fixture: ReturnType<typeof createFixture>) {
 	const { site, thread } = await seedThread(fixture);
+	await seedUsableSystemMail(fixture);
 	await fixture.db.insert(comments).values([
 		{
 			id: "c_parent",
@@ -171,6 +194,61 @@ describe("comment notification planner", () => {
 					source: "public_api",
 				}),
 			).toMatchObject({ createdCount: 0 });
+			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+	it("does not create commenter tasks when commenter reply email is disabled", async () => {
+		const fixture = createFixture();
+		try {
+			const { site } = await seedApprovedReply(fixture);
+			await fixture.db
+				.update(siteSettings)
+				.set({ commenterReplyEmailEnabled: false })
+				.where(eq(siteSettings.siteId, site.id));
+			const planner = new CommentNotificationPlanner(fixture.db);
+
+			const result = await planner.planForCommentEvent({
+				siteId: site.id,
+				siteKey: "fangyuan",
+				pageKey: "post:reply-notify",
+				commentId: "c_reply",
+				source: "public_api",
+			});
+
+			expect(result).toMatchObject({ createdCount: 0, taskIds: [] });
+			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+	it("does not create commenter tasks when system mail is unusable", async () => {
+		const fixture = createFixture();
+		try {
+			const { site } = await seedApprovedReply(fixture);
+			await fixture.db
+				.update(systemSettings)
+				.set({ valueJson: JSON.stringify(false) })
+				.where(
+					and(
+						eq(systemSettings.category, "mail"),
+						eq(systemSettings.key, "enabled"),
+					),
+				);
+			const planner = new CommentNotificationPlanner(fixture.db);
+
+			const result = await planner.planForCommentEvent({
+				siteId: site.id,
+				siteKey: "fangyuan",
+				pageKey: "post:reply-notify",
+				commentId: "c_reply",
+				source: "public_api",
+			});
+
+			expect(result).toMatchObject({ createdCount: 0, taskIds: [] });
 			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
 		} finally {
 			fixture.cleanup();

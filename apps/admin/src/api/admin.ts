@@ -372,8 +372,13 @@ export interface AdminSite {
 	};
 	engagement: AdminEngagementSettings & AdminEngagementSummary;
 	notifications: {
-		emailEnabled: boolean;
-		recipients?: SiteNotificationRecipient[];
+		commenter: {
+			replyEmailEnabled: boolean;
+		};
+		backend: {
+			enabled: boolean;
+			recipients?: SiteNotificationRecipient[];
+		};
 		channelConfigs: NotificationChannelConfig[];
 	};
 	pageCount: number;
@@ -479,8 +484,13 @@ export interface AdminSettings {
 		emergencyLockdown: boolean;
 	};
 	notifications: {
-		emailEnabled: boolean;
-		recipients?: SiteNotificationRecipient[];
+		commenter: {
+			replyEmailEnabled: boolean;
+		};
+		backend: {
+			enabled: boolean;
+			recipients?: SiteNotificationRecipient[];
+		};
 		channelConfigs: NotificationChannelConfig[];
 	};
 }

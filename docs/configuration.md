@@ -8,7 +8,7 @@ QingYan 把配置来源分成四类：
 
 - `startup config`：YAML 文件，包含 server、database、admin session 和基础 security 字段。修改后通常需要重启。
 - `env override`：白名单环境变量覆盖 startup config 或 install 行为。环境变量优先级高于 YAML。
-- `db site settings`：数据库中的站点记录与 `site_settings`，包含评论开关、审核默认状态、验证码模式、评论身份字段、页面点赞、通知开关、评论元数据采集等。
+- `db site settings`：数据库中的站点记录与 `site_settings`，包含评论开关、审核默认状态、验证码模式、评论身份字段、页面点赞、评论者回复邮件通知、后台用户通知、评论元数据采集等。
 - `db system settings`：数据库中的 `system_settings`，包含日志等级、日志保留天数、mail SMTP、captcha provider/config、IP 库下载与更新等不影响进程启动的全局能力设置。
 - `generated bootstrap`：安装器生成并写入数据库的一次性后台入口、管理员用户名、密码 hash 等初始化状态。
 
@@ -169,7 +169,7 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
 - 页面来源注册设置：`pageRegistry.mode`、权威 sitemap URL 列表、未知页面响应、健康宽限时间和紧急锁定。
-- 邮件通知开关。
+- 评论者回复邮件通知开关和后台用户通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
 
@@ -233,8 +233,9 @@ Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion�
 
 评论通知配置分为站点级和系统级：
 
-- 站点级 `site_settings.notifications.emailEnabled` 控制当前站点是否允许发送评论通知。
-- 站点级 `site_notification_recipients` 引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
+- 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification` 计算，不影响后台用户通知。
+- 站点级 `site_settings.backend_notifications_enabled` 对应 Admin API `notifications.backend.enabled`，只控制是否为后台用户创建站点通知任务，不影响普通评论者回复邮件订阅。
+- 站点级 `site_notification_recipients` 对应 Admin API `notifications.backend.recipients`，引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
 - 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。
 - 系统级 `notification_channel_configs` 维护具体通知渠道配置实例。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点接收人 route 使用 `channelConfigId` 选择具体实例。
 - 通知模板由 `notification_templates` 保存自定义覆盖；没有覆盖时使用内置默认模板。

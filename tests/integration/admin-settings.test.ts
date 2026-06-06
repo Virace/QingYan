@@ -151,7 +151,12 @@ describe("admin settings", () => {
 					allowLike: false,
 				},
 				notifications: {
-					emailEnabled: true,
+					commenter: {
+						replyEmailEnabled: true,
+					},
+					backend: {
+						enabled: true,
+					},
 				},
 				engagement: {
 					visitors: {
@@ -219,7 +224,12 @@ describe("admin settings", () => {
 				allowLike: true,
 			},
 			notifications: {
-				emailEnabled: true,
+				commenter: {
+					replyEmailEnabled: true,
+				},
+				backend: {
+					enabled: true,
+				},
 			},
 			engagement: {
 				visitors: {

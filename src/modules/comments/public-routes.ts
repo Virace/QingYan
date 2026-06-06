@@ -111,6 +111,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		() => systemSettingsService.getPublicApiSettings(),
 		metadataResolver,
 		() => systemSettingsService.getIpRegionSettings(),
+		() => systemSettingsService.getSettings(),
 	);
 	const writeService = new CommentsWriteService(
 		fastify.config,
@@ -121,6 +122,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		metadataResolver,
 		() => systemSettingsService.getIpRegionSettings(),
 		moderationService,
+		() => systemSettingsService.getSettings(),
 	);
 
 	fastify.get("/comments/bootstrap", async (request, reply) => {

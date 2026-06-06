@@ -277,6 +277,31 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 		if (tableExists(sqlite, "site_settings")) {
 			addColumnIfMissing(sqlite, "site_settings", "engagement_json", "text");
 			addColumnIfMissing(sqlite, "site_settings", "page_registry_json", "text");
+			addColumnIfMissing(
+				sqlite,
+				"site_settings",
+				"commenter_reply_email_enabled",
+				"integer NOT NULL DEFAULT 0",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"site_settings",
+				"backend_notifications_enabled",
+				"integer NOT NULL DEFAULT 0",
+			);
+			if (
+				columnExists(sqlite, "site_settings", "email_notifications_enabled")
+			) {
+				sqlite.exec(`
+					UPDATE site_settings
+					SET commenter_reply_email_enabled = COALESCE(email_notifications_enabled, 0)
+					WHERE commenter_reply_email_enabled IS NULL OR commenter_reply_email_enabled = 0
+				`);
+			}
+		}
+
+		if (tableExists(sqlite, "comments")) {
+			addColumnIfMissing(sqlite, "comments", "author_user_id", "integer");
 		}
 
 		if (tableExists(sqlite, "site_page_registry_sources")) {

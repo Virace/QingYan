@@ -1549,7 +1549,8 @@ export class AdminRepository {
 				moderationJson: siteSettings.moderationJson,
 				allowPageLike: siteSettings.allowPageLike,
 				engagementJson: siteSettings.engagementJson,
-				emailNotificationsEnabled: siteSettings.emailNotificationsEnabled,
+				commenterReplyEmailEnabled: siteSettings.commenterReplyEmailEnabled,
+				backendNotificationsEnabled: siteSettings.backendNotificationsEnabled,
 			})
 			.from(sites)
 			.innerJoin(siteSettings, eq(siteSettings.siteId, sites.id))
@@ -1630,7 +1631,12 @@ export class AdminRepository {
 				parseEngagementSettings(row.engagementJson),
 			),
 			notifications: {
-				emailEnabled: row.emailNotificationsEnabled,
+				commenter: {
+					replyEmailEnabled: row.commenterReplyEmailEnabled,
+				},
+				backend: {
+					enabled: row.backendNotificationsEnabled,
+				},
 			},
 			pageCount: pageCountMap.get(row.siteId) ?? 0,
 			commentCount: commentCountMap.get(row.siteId) ?? 0,
@@ -2078,7 +2084,8 @@ export class AdminRepository {
 			moderationJson?: string;
 			pageRegistryJson?: string;
 			engagementJson?: string;
-			emailNotificationsEnabled?: boolean;
+			commenterReplyEmailEnabled?: boolean;
+			backendNotificationsEnabled?: boolean;
 		},
 	) {
 		await this.db
@@ -2106,7 +2113,8 @@ export class AdminRepository {
 				moderationJson: input.moderationJson,
 				pageRegistryJson: input.pageRegistryJson,
 				engagementJson: input.engagementJson,
-				emailNotificationsEnabled: input.emailNotificationsEnabled,
+				commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
+				backendNotificationsEnabled: input.backendNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})
 			.where(eq(siteSettings.siteId, siteId));

@@ -68,6 +68,18 @@ const commonPlaceholders: NotificationTemplatePlaceholder[] = [
 		jsonSupported: true,
 	},
 	{
+		path: "comment.authorLabel",
+		label: "评论作者展示名",
+		description: "包含可信作者 Badge 的评论作者展示名。",
+		jsonSupported: true,
+	},
+	{
+		path: "comment.badgeLabel",
+		label: "评论作者 Badge",
+		description: "可信作者 Badge 文案；普通评论作者为空字符串。",
+		jsonSupported: true,
+	},
+	{
 		path: "comment.content",
 		label: "评论内容",
 		description: "触发通知的评论正文。",
@@ -247,7 +259,7 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		format: "text",
 		subjectTemplate: "[{{site.name}}] 你的评论有新回复",
 		bodyTemplate:
-			"{{comment.authorName}} 回复了你在 {{page.title}} 的评论。\n{{links.unsubscribe}}",
+			"{{comment.authorLabel}} 在 {{page.title}} 回复了你：\n{{comment.content}}\n\n查看页面：{{page.url}}\n\n如需退订可点击：{{links.unsubscribe}}",
 	}),
 	withMetadata({
 		key: "commenter_reply_approved_email_html",
@@ -258,7 +270,7 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		format: "html",
 		subjectTemplate: "[{{site.name}}] 你的评论有新回复",
 		bodyTemplate:
-			'<p>{{comment.authorName}} 回复了你在 {{page.title}} 的评论。</p><p><a href="{{links.unsubscribe}}">退订</a></p>',
+			'<p>{{comment.authorLabel}} 在 {{page.title}} 回复了你：</p><blockquote>{{comment.content}}</blockquote><p><a href="{{page.url}}">查看页面</a></p><p>如需退订可点击：<a href="{{links.unsubscribe}}">退订评论回复提醒</a></p>',
 	}),
 	withMetadata({
 		key: "channel_test",

@@ -486,6 +486,8 @@ describe("initial migration", () => {
 					"engagement_json",
 					"page_registry_json",
 					"staff_display_json",
+					"commenter_reply_email_enabled",
+					"backend_notifications_enabled",
 				]),
 			);
 			expect(
@@ -1176,6 +1178,77 @@ describe("initial migration", () => {
 		expect(migrationFiles).toEqual(["0000_initial.sql"]);
 	});
 
+	it("backfills missing comment author user column when multi-user tables already exist", () => {
+		const directory = mkdtempSync(
+			path.join(tmpdir(), "qingyan-schema-author-user-"),
+		);
+		const databaseFile = path.join(directory, "schema.db");
+		const sqlite = new Database(databaseFile);
+
+		try {
+			sqlite.exec(`
+				CREATE TABLE sites (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_key text NOT NULL,
+					name text NOT NULL,
+					allowed_origins_json text NOT NULL
+				);
+				CREATE TABLE admin_sessions (
+					id text PRIMARY KEY NOT NULL,
+					token_hash text NOT NULL,
+					user_id integer,
+					expires_at text NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE admin_groups (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					key text NOT NULL,
+					name text NOT NULL
+				);
+				CREATE TABLE comments (
+					id text PRIMARY KEY NOT NULL,
+					site_id integer NOT NULL,
+					page_thread_id integer NOT NULL,
+					parent_id text,
+					visitor_id integer,
+					author_identity text DEFAULT 'visitor' NOT NULL,
+					status text DEFAULT 'pending' NOT NULL,
+					author_name text NOT NULL,
+					author_email text,
+					author_email_hash text,
+					author_website text,
+					content_raw text NOT NULL,
+					content_html text,
+					is_pinned integer DEFAULT false NOT NULL,
+					is_folded integer DEFAULT false NOT NULL,
+					reply_count integer DEFAULT 0 NOT NULL,
+					vote_up_count integer DEFAULT 0 NOT NULL,
+					vote_down_count integer DEFAULT 0 NOT NULL,
+					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+					deleted_at text
+				);
+				CREATE TABLE __qingyan_migrations (
+					name text PRIMARY KEY NOT NULL,
+					applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				INSERT INTO __qingyan_migrations (name) VALUES ('0000_initial.sql');
+			`);
+
+			applyDatabaseMigrations(sqlite);
+
+			const commentColumns = sqlite
+				.prepare("PRAGMA table_info(comments)")
+				.all() as Array<{ name: string }>;
+			expect(commentColumns.map((column) => column.name)).toContain(
+				"author_user_id",
+			);
+		} finally {
+			sqlite.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
 	it("backfills unreleased multi-user admin schema into an existing dev database", () => {
 		const directory = mkdtempSync(
 			path.join(tmpdir(), "qingyan-schema-legacy-"),
@@ -1326,6 +1399,12 @@ describe("initial migration", () => {
 			);
 			expect(siteSettingsColumns.map((column) => column.name)).toContain(
 				"page_registry_json",
+			);
+			expect(siteSettingsColumns.map((column) => column.name)).toContain(
+				"commenter_reply_email_enabled",
+			);
+			expect(siteSettingsColumns.map((column) => column.name)).toContain(
+				"backend_notifications_enabled",
 			);
 			expect(
 				visitorRequestMetadataColumns.map((column) => column.name),

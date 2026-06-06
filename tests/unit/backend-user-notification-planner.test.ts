@@ -8,6 +8,7 @@ import {
 	adminUsers,
 	notificationChannelConfigs,
 	siteNotificationRecipientRoutes,
+	siteSettings,
 	sites,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
@@ -462,5 +463,52 @@ describe("backend user notification planner", () => {
 		expect(serializedTasks).not.toContain("wxpusher-token");
 		expect(serializedTasks).not.toContain("webhook-secret");
 		expect(serializedTasks).not.toContain("query-secret");
+	});
+
+	it("creates backend-user notifications even when commenter reply email notifications are disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: "backend-independent-recipient",
+			siteKey: "fangyuan",
+			email: "backend-independent@example.test",
+		});
+		await fixture.app.db
+			.update(siteSettings)
+			.set({ commenterReplyEmailEnabled: false })
+			.where(eq(siteSettings.siteId, site.id));
+		const recipients = new BackendUserNotificationRecipientsRepository(
+			fixture.app.db,
+		);
+		await recipients.replaceSiteRecipients({
+			siteId: site.id,
+			recipients: [
+				{
+					userId: user.id,
+					channels: ["email"],
+					events: ["admin_comment_pending"],
+					includeCommentContent: "summary",
+					enabled: true,
+				},
+			],
+		});
+
+		const planner = new BackendUserNotificationPlanner(fixture.app.db);
+		const planned = await planner.planForCommentEvent(
+			commentEvent({
+				siteId: site.id,
+				commentId: "comment-backend-independent",
+				status: "pending",
+			}),
+		);
+
+		expect(planned.deliveries).toEqual([
+			expect.objectContaining({
+				recipientType: "backend_user",
+				recipientUserId: user.id,
+				recipientAddressSnapshot: "backend-independent@example.test",
+				eventFamily: "admin_comment_pending",
+			}),
+		]);
 	});
 });

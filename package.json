@@ -26,6 +26,7 @@
 		"check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run config:check",
 		"test:e2e": "playwright test",
 		"dev:smoke": "tsx scripts/dev-smoke.ts",
+		"commenter-email:smoke": "tsx scripts/commenter-reply-email-smoke.ts",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "vitest run --config vitest.config.ts",
 		"config:check": "tsx src/config/check-config.ts config/qingyan.example.yml",

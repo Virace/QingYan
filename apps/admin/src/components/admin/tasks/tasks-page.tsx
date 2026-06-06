@@ -964,7 +964,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 					settingsQuery.data?.notifications.channelConfigs ?? []
 				}
 				notificationRecipients={
-					settingsQuery.data?.notifications.recipients ?? []
+					settingsQuery.data?.notifications.backend.recipients ?? []
 				}
 				isSaving={createMutation.isPending || updateMutation.isPending}
 				saveError={createMutation.error ?? updateMutation.error}

@@ -670,8 +670,17 @@ export const adminSettingsBodySchema = z
 			.optional(),
 		notifications: z
 			.object({
-				emailEnabled: z.boolean().optional(),
-				recipients: z.array(siteNotificationRecipientSchema).optional(),
+				commenter: z
+					.object({
+						replyEmailEnabled: z.boolean().optional(),
+					})
+					.optional(),
+				backend: z
+					.object({
+						enabled: z.boolean().optional(),
+						recipients: z.array(siteNotificationRecipientSchema).optional(),
+					})
+					.optional(),
 			})
 			.optional(),
 	})

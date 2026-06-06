@@ -43,10 +43,16 @@ export const siteSettingsFieldBindings = [
 		label: "访客记录",
 	},
 	{
-		path: "notifications.emailEnabled",
+		path: "notifications.commenter.replyEmailEnabled",
 		groupId: "site-notifications",
-		controlId: "site-email-notifications",
-		label: "当前站点邮件通知",
+		controlId: "commenter-reply-email-notifications",
+		label: "评论者回复邮件通知",
+	},
+	{
+		path: "notifications.backend.enabled",
+		groupId: "site-notifications",
+		controlId: "backend-user-notifications",
+		label: "后台用户通知",
 	},
 ] satisfies SettingsFieldBinding[];
 

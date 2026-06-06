@@ -101,6 +101,7 @@ describe("openapi docs", () => {
 			"pageViews",
 			"pageLikes",
 			"visitors",
+			"replyEmailNotification",
 		]);
 		expect(spec.components.schemas.FeatureFlag.required).toEqual(["enabled"]);
 		expect(JSON.stringify(spec.components.schemas.PublicComment)).not.toContain(

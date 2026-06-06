@@ -65,6 +65,7 @@ export function deriveConcurrencyKey(task: ScheduledTaskRecord): string {
 export class TaskScheduler {
 	private timer: NodeJS.Timeout | null = null;
 	private stopped = false;
+	private readonly pendingTicks = new Set<Promise<unknown>>();
 	private readonly now: () => Date;
 	private readonly intervalMs: number;
 	private readonly claimLeaseMs: number;
@@ -83,19 +84,29 @@ export class TaskScheduler {
 		}
 		this.stopped = false;
 		this.timer = setInterval(() => {
-			void this.tick().catch(() => undefined);
-			void this.markStaleRuns().catch(() => undefined);
+			this.trackTick(this.tick());
+			this.trackTick(this.markStaleRuns());
 		}, this.intervalMs);
 		this.timer.unref?.();
-		void this.tick().catch(() => undefined);
+		this.trackTick(this.tick());
 	}
 
-	public stop(): void {
+	public async stop(): Promise<void> {
 		this.stopped = true;
 		if (this.timer) {
 			clearInterval(this.timer);
 			this.timer = null;
 		}
+		await Promise.allSettled([...this.pendingTicks]);
+	}
+
+	private trackTick<T>(promise: Promise<T>): void {
+		this.pendingTicks.add(promise);
+		void promise
+			.catch(() => undefined)
+			.finally(() => {
+				this.pendingTicks.delete(promise);
+			});
 	}
 
 	public async tick(input?: { now?: Date }): Promise<TaskSchedulerTickResult> {

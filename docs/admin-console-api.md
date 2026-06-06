@@ -691,8 +691,13 @@ Query：
     allowLike: boolean;
   };
   notifications: {
-    emailEnabled: boolean;
-    recipients?: SiteNotificationRecipient[];
+    commenter: {
+      replyEmailEnabled: boolean;
+    };
+    backend: {
+      enabled: boolean;
+      recipients?: SiteNotificationRecipient[];
+    };
     channelConfigs: NotificationChannelConfig[];
   };
   pageCount: number;
@@ -771,8 +776,9 @@ Admin Settings API 的 canonical 开关路径：
 - 访客记录：`engagement.visitors.enabled`
 - 页面来源模式：`pageRegistry.mode`
 - 权威 sitemap URL 列表：`pageRegistry.authoritativeSitemapUrls`
-- 当前站点邮件通知：`notifications.emailEnabled`
-- 当前站点后台用户通知接收人：`notifications.recipients`
+- 评论者回复邮件通知：`notifications.commenter.replyEmailEnabled`
+- 后台用户通知：`notifications.backend.enabled`
+- 当前站点后台用户通知接收人：`notifications.backend.recipients`
 
 `pageFeedback.allowLike` 是过渡同步字段；新 UI 和新调用代码应以 `engagement.pageLikes.enabled` 为页面点赞 canonical 开关。
 
@@ -888,28 +894,33 @@ AdminSettings
     emergencyLockdown: boolean;
   };
   notifications: {
-    emailEnabled: boolean;
-    recipients?: Array<{
-      userId: number;
-      username: string;
-      email: string;
-      displayName: string;
-      // compatibility projection, derived from routes
-      channels: Array<"email" | "webhook" | "wxpusher">;
-      // compatibility projection, derived from routes
-      events: Array<"admin_comment_pending" | "admin_comment_approved">;
-      routes: Array<{
-        id?: string;
-        eventType: "admin_comment_pending" | "admin_comment_approved";
-        channelConfigId: string;
-        channelType?: "email" | "webhook" | "wxpusher";
-        channelName?: string;
+    commenter: {
+      replyEmailEnabled: boolean;
+    };
+    backend: {
+      enabled: boolean;
+      recipients?: Array<{
+        userId: number;
+        username: string;
+        email: string;
+        displayName: string;
+        // compatibility projection, derived from routes
+        channels: Array<"email" | "webhook" | "wxpusher">;
+        // compatibility projection, derived from routes
+        events: Array<"admin_comment_pending" | "admin_comment_approved">;
+        routes: Array<{
+          id?: string;
+          eventType: "admin_comment_pending" | "admin_comment_approved";
+          channelConfigId: string;
+          channelType?: "email" | "webhook" | "wxpusher";
+          channelName?: string;
+          enabled: boolean;
+        }>;
+        includeCommentContent: "none" | "summary" | "full";
+        rateLimitProfile: string | null;
         enabled: boolean;
       }>;
-      includeCommentContent: "none" | "summary" | "full";
-      rateLimitProfile: string | null;
-      enabled: boolean;
-    }>;
+    };
     channelConfigs: NotificationChannelConfig[];
   };
 }
@@ -917,7 +928,7 @@ AdminSettings
 
 后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；站点管理员只能配置自己有访问权的站点，且候选接收人也必须对该站点有访问权；站点评论管理员不可管理接收人。
 
-接收人配置的 canonical 模型是 `notifications.recipients[].routes[]`。每条 route 绑定一个事件和一个具体渠道配置实例，例如 `email:default`、`wxpusher:ops` 或 `webhook:feishu`。`channels` 和 `events` 仍作为兼容投影返回，旧请求也可用它们生成默认 route；新 Admin UI 和新调用代码应提交 `routes`。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核只保留审核语义，不追加第二条后台用户通知。
+接收人配置的 canonical 模型是 `notifications.backend.recipients[].routes[]`。每条 route 绑定一个事件和一个具体渠道配置实例，例如 `email:default`、`wxpusher:ops` 或 `webhook:feishu`。`channels` 和 `events` 仍作为兼容投影返回，旧请求也可用它们生成默认 route；新 Admin UI 和新调用代码应提交 `routes`。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核只保留审核语义，不追加第二条后台用户通知。
 
 Engagement 语义：
 
@@ -968,7 +979,7 @@ AdminSystemSettings
 
 更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`notifications`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
 
-`mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。`notifications.emailEnabled` 是 site owner，只控制当前站点是否发送通知。
+`mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。站点级通知设置拆分为 `notifications.commenter.replyEmailEnabled` 和 `notifications.backend.enabled`：前者只控制普通评论者回复邮件订阅能力，后者只控制后台用户通知任务创建。
 
 `notifications.delivery.queueBackend` 默认是 `database`。选择 `bullmq` 时需要部署 Redis 并配置相应运行环境；BullMQ 只影响队列后端，不改变 planner、delivery projection、worker 状态模型或任务中心展示。
 

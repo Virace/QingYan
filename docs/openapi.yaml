@@ -290,7 +290,7 @@ paths:
       summary: 退订普通评论者回复邮件通知
       operationId: unsubscribeCommenterNotifications
       description: |
-        使用邮件中的一次性退订 token 关闭对应普通评论者邮箱在对应站点的回复通知。数据库只保存 token hash；明文 token 只出现在邮件链接中。无效、过期或已消费 token 返回 404。
+        使用邮件中的一次性退订 token 关闭对应普通评论者邮箱在对应站点的回复通知。数据库只保存 token hash；明文 token 只出现在邮件链接中。浏览器默认返回可读 HTML 退订结果页；自动化或 API 客户端传入 `Accept: application/json` 时返回 JSON 状态。无效、过期或已消费 token 返回 404。
       parameters:
         - name: token
           in: query
@@ -302,6 +302,9 @@ paths:
         '200':
           description: 退订成功
           content:
+            text/html:
+              schema:
+                type: string
             application/json:
               schema:
                 $ref: '#/components/schemas/UnsubscribeResponse'
@@ -873,6 +876,7 @@ components:
         - pageViews
         - pageLikes
         - visitors
+        - replyEmailNotification
       properties:
         comments:
           $ref: '#/components/schemas/FeatureFlag'
@@ -899,6 +903,9 @@ components:
           $ref: '#/components/schemas/FeatureFlag'
         visitors:
           $ref: '#/components/schemas/FeatureFlag'
+        replyEmailNotification:
+          type: boolean
+          description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is true only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
     BootstrapSite:
       type: object
       required: [siteKey]
@@ -1099,7 +1106,7 @@ components:
               type: string
         options:
           type: object
-          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference when the submitted author email passes notification email policy. It does not affect staff/admin comments.
+          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference only when bootstrap `features.replyEmailNotification` is true and the submitted author email passes notification email policy. It does not affect staff/admin comments or backend-user notifications.
           properties:
             notifyOnReply:
               type: boolean

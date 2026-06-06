@@ -12,11 +12,16 @@ import {
 	sites,
 	taskRuns,
 } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
+import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
+import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
+import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -64,6 +69,22 @@ async function seedActivePage(
 	return site;
 }
 
+async function enableReplyEmailCapability(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	siteId: number,
+) {
+	const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+	await systemSettings.upsert("mail", "enabled", true);
+	await systemSettings.upsert("mail", "smtp.host", "smtp.example.test");
+	await systemSettings.upsert("mail", "smtp.from", "notify@example.test");
+	await fixture.app.db
+		.update(siteSettings)
+		.set({
+			commenterReplyEmailEnabled: true,
+		})
+		.where(eq(siteSettings.siteId, siteId));
+}
+
 async function postComment(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 	input: {
@@ -105,7 +126,8 @@ describe("comment notifications", () => {
 	it("persists notifyOnReply preference for ordinary commenter writes", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await seedActivePage(fixture, "post:preference");
+		const site = await seedActivePage(fixture, "post:preference");
+		await enableReplyEmailCapability(fixture, site.id);
 
 		const enabled = await postComment(fixture, {
 			pageKey: "post:preference",
@@ -141,6 +163,30 @@ describe("comment notifications", () => {
 			.from(commenterNotificationPreferences);
 		expect(rows).toHaveLength(1);
 		expect(rows[0]).toMatchObject({
+			notifyOnReply: false,
+			unsubscribedAt: null,
+		});
+	});
+
+	it("does not enable commenter preference when reply email notification is unavailable", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:preference-unavailable");
+
+		const response = await postComment(fixture, {
+			pageKey: "post:preference-unavailable",
+			parentCommentId: null,
+			email: "unavailable@example.com",
+			content: "old client still submits notifyOnReply",
+			notifyOnReply: true,
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [preference] = await fixture.app.db
+			.select()
+			.from(commenterNotificationPreferences);
+		expect(preference).toMatchObject({
+			email: "unavailable@example.com",
 			notifyOnReply: false,
 			unsubscribedAt: null,
 		});
@@ -196,6 +242,7 @@ describe("comment notifications", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const site = await seedActivePage(fixture, "post:approve-reply");
+		await enableReplyEmailCapability(fixture, site.id);
 
 		const parent = await postComment(fixture, {
 			pageKey: "post:approve-reply",
@@ -268,6 +315,7 @@ describe("comment notifications", () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		const site = await seedActivePage(fixture, "post:admin-reply-notify");
+		await enableReplyEmailCapability(fixture, site.id);
 		await fixture.app.db
 			.update(siteSettings)
 			.set({
@@ -347,17 +395,34 @@ describe("comment notifications", () => {
 			email: "subscriber@example.com",
 			purpose: "commenter_reply",
 		});
+		const browserIssued = await tokens.issue({
+			siteId: site.id,
+			email: "subscriber@example.com",
+			purpose: "commenter_reply",
+		});
 
 		const response = await fixture.app.inject({
 			method: "GET",
 			url: `/qingyan/notifications/unsubscribe?token=${encodeURIComponent(
 				issued.token,
 			)}`,
+			headers: {
+				accept: "application/json",
+			},
 		});
 		const replay = await fixture.app.inject({
 			method: "GET",
 			url: `/qingyan/notifications/unsubscribe?token=${encodeURIComponent(
 				issued.token,
+			)}`,
+			headers: {
+				accept: "application/json",
+			},
+		});
+		const browserResponse = await fixture.app.inject({
+			method: "GET",
+			url: `/qingyan/notifications/unsubscribe?token=${encodeURIComponent(
+				browserIssued.token,
 			)}`,
 		});
 
@@ -366,6 +431,10 @@ describe("comment notifications", () => {
 			status: "unsubscribed",
 		});
 		expect(replay.statusCode).toBe(404);
+		expect(browserResponse.statusCode).toBe(200);
+		expect(browserResponse.headers["content-type"]).toContain("text/html");
+		expect(browserResponse.body).toContain("已退订评论回复提醒");
+		expect(browserResponse.body).not.toContain('{"status":"unsubscribed"}');
 		const [preference] = await fixture.app.db
 			.select()
 			.from(commenterNotificationPreferences);
@@ -377,5 +446,122 @@ describe("comment notifications", () => {
 
 		const [adminUser] = await fixture.app.db.select().from(adminUsers).limit(1);
 		expect(adminUser).toBeTruthy();
+	});
+
+	it("sends one commenter reply email with unsubscribe link and suppresses later replies after unsubscribe", async () => {
+		const sentMessages: Array<{ to: string; body: string }> = [];
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const site = await seedActivePage(fixture, "post:worker-unsubscribe");
+		await enableReplyEmailCapability(fixture, site.id);
+
+		const parent = await postComment(fixture, {
+			pageKey: "post:worker-unsubscribe",
+			parentCommentId: null,
+			email: "parent-worker@example.com",
+			content: "parent wants a real unsubscribe link",
+			notifyOnReply: true,
+		});
+		expect(parent.statusCode).toBe(200);
+		const parentId = parent.json().comment.id as string;
+		const reply = await postComment(fixture, {
+			pageKey: "post:worker-unsubscribe",
+			parentCommentId: parentId,
+			email: "reply-worker@example.com",
+			content: "first reply",
+			notifyOnReply: false,
+		});
+		expect(reply.statusCode).toBe(200);
+
+		const repository = new TaskRunRepository(fixture.app.db);
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			adapters: {
+				email: {
+					async send(input) {
+						sentMessages.push({ to: input.to, body: input.body });
+						return { providerMessageId: `test-${sentMessages.length}` };
+					},
+				},
+			},
+			templateContextBuilder: new NotificationTemplateContextBuilder(
+				fixture.app.db,
+				{
+					publicBaseUrl: "http://localhost:4401",
+					publicPath: "/qingyan",
+				},
+			),
+		});
+
+		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(1);
+		expect(sentMessages).toEqual([
+			expect.objectContaining({
+				to: "parent-worker@example.com",
+				body: expect.stringContaining("Visitor 在 Notifications 回复了你"),
+			}),
+		]);
+		expect(sentMessages[0]?.body).toContain("first reply");
+		expect(sentMessages[0]?.body).toContain(
+			"查看页面：http://localhost:4321/post:worker-unsubscribe",
+		);
+		expect(sentMessages[0]?.body).toContain("如需退订可点击：");
+		expect(sentMessages[0]?.body).toContain(
+			"/qingyan/notifications/unsubscribe?token=",
+		);
+		const token = sentMessages[0]?.body.match(
+			/\/qingyan\/notifications\/unsubscribe\?token=([^\s"'<>]+)/u,
+		)?.[1];
+		expect(token).toEqual(expect.any(String));
+		const [firstDelivery] = await fixture.app.db
+			.select()
+			.from(notificationDeliveries);
+		expect(firstDelivery).toMatchObject({
+			recipientType: "commenter",
+			recipientAddressSnapshot: "parent-worker@example.com",
+			status: "sent",
+			providerMessageId: "test-1",
+		});
+
+		const unsubscribe = await fixture.app.inject({
+			method: "GET",
+			url: `/qingyan/notifications/unsubscribe?token=${token}`,
+			headers: {
+				accept: "application/json",
+			},
+		});
+		expect(unsubscribe.statusCode).toBe(200);
+
+		const secondReply = await postComment(fixture, {
+			pageKey: "post:worker-unsubscribe",
+			parentCommentId: parentId,
+			email: "another-reply-worker@example.com",
+			content: "second reply after unsubscribe",
+			notifyOnReply: false,
+		});
+		expect(secondReply.statusCode).toBe(200);
+
+		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(0);
+		expect(sentMessages).toHaveLength(1);
+		const deliveries = await fixture.app.db
+			.select()
+			.from(notificationDeliveries);
+		expect(deliveries).toHaveLength(1);
+		const [preference] = await fixture.app.db
+			.select()
+			.from(commenterNotificationPreferences)
+			.where(
+				eq(commenterNotificationPreferences.email, "parent-worker@example.com"),
+			);
+		expect(preference).toMatchObject({
+			notifyOnReply: false,
+			source: "unsubscribe_link",
+		});
+		expect(preference?.unsubscribedAt).toEqual(expect.any(String));
+		const threadReplies = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.parentId, parentId));
+		expect(threadReplies).toHaveLength(2);
 	});
 });

@@ -5,7 +5,10 @@ import {
 	commenterNotificationPreferences,
 	comments,
 	pageThreads,
+	siteSettings,
 } from "../../db/schema";
+import { isSystemMailUsable } from "../comments/public-contract";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskActorType } from "../tasks/types";
 import { EmailReputationRepository } from "./email-reputation-repository";
@@ -52,6 +55,9 @@ export class CommentNotificationPlanner {
 		input: CommentNotificationPlanInput,
 	): Promise<CommentNotificationPlanResult> {
 		if (input.source === "import" || input.source === "migration") {
+			return { createdCount: 0, taskIds: [] };
+		}
+		if (!(await this.isCommenterReplyEmailAvailable(input.siteId))) {
 			return { createdCount: 0, taskIds: [] };
 		}
 
@@ -198,5 +204,22 @@ export class CommentNotificationPlanner {
 			)
 			.limit(1);
 		return row ?? null;
+	}
+
+	private async isCommenterReplyEmailAvailable(siteId: number) {
+		const [[settings], systemSettings] = await Promise.all([
+			this.db
+				.select({
+					commenterReplyEmailEnabled: siteSettings.commenterReplyEmailEnabled,
+				})
+				.from(siteSettings)
+				.where(eq(siteSettings.siteId, siteId))
+				.limit(1),
+			new RuntimeSystemSettingsService(this.db).getSettings(),
+		]);
+		return (
+			Boolean(settings?.commenterReplyEmailEnabled) &&
+			isSystemMailUsable(systemSettings.mail)
+		);
 	}
 }

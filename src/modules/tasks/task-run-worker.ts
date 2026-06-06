@@ -21,6 +21,7 @@ export class TaskRunWorker {
 	private timer: NodeJS.Timeout | null = null;
 	private stopped = false;
 	private running = false;
+	private runningTick: Promise<TaskRunWorkerTickResult> | null = null;
 	private readonly intervalMs: number;
 	private readonly claimLimit: number;
 	private readonly now: () => Date;
@@ -43,12 +44,13 @@ export class TaskRunWorker {
 		void this.tick().catch(() => undefined);
 	}
 
-	public stop(): void {
+	public async stop(): Promise<void> {
 		this.stopped = true;
 		if (this.timer) {
 			clearInterval(this.timer);
 			this.timer = null;
 		}
+		await this.runningTick?.catch(() => undefined);
 	}
 
 	public async tick(): Promise<TaskRunWorkerTickResult> {
@@ -56,18 +58,27 @@ export class TaskRunWorker {
 			return { claimedRunIds: [] };
 		}
 		this.running = true;
+		const tickPromise = this.runTick();
+		this.runningTick = tickPromise;
 		try {
-			const runs = await this.options.taskRuns.claimRunnable({
-				workerId: this.options.workerId,
-				nowIso: this.now().toISOString(),
-				limit: this.claimLimit,
-			});
-			for (const run of runs) {
-				await this.options.runner.runClaimed(run);
-			}
-			return { claimedRunIds: runs.map((run) => run.id) };
+			return await tickPromise;
 		} finally {
+			if (this.runningTick === tickPromise) {
+				this.runningTick = null;
+			}
 			this.running = false;
 		}
+	}
+
+	private async runTick(): Promise<TaskRunWorkerTickResult> {
+		const runs = await this.options.taskRuns.claimRunnable({
+			workerId: this.options.workerId,
+			nowIso: this.now().toISOString(),
+			limit: this.claimLimit,
+		});
+		for (const run of runs) {
+			await this.options.runner.runClaimed(run);
+		}
+		return { claimedRunIds: runs.map((run) => run.id) };
 	}
 }

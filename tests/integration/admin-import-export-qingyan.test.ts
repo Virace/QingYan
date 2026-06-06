@@ -47,7 +47,8 @@ function qingyanExportPayload() {
 				auto_blacklist_scope: "post",
 				auto_blacklist_ttl_sec: 1800,
 				comment_metadata_json: null,
-				email_notifications_enabled: 1,
+				commenter_reply_email_enabled: 1,
+				backend_notifications_enabled: 1,
 			},
 			systemSettings: [],
 			pageThreads: [
@@ -345,6 +346,8 @@ describe("admin import/export QingYan routes", () => {
 				siteSettings: {
 					comments_enabled: 1,
 					default_status: "pending",
+					commenter_reply_email_enabled: 0,
+					backend_notifications_enabled: 0,
 				},
 				systemSettings: [],
 				pageThreads: [
@@ -666,7 +669,8 @@ describe("admin import/export QingYan routes", () => {
 			defaultStatus: "approved",
 			maxDepth: 2,
 			allowPageLike: false,
-			emailNotificationsEnabled: true,
+			commenterReplyEmailEnabled: true,
+			backendNotificationsEnabled: true,
 		});
 	});
 

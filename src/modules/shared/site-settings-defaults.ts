@@ -231,6 +231,7 @@ export function buildDefaultSiteSettings(siteId: number) {
 			defaultSiteModerationSettings,
 		),
 		pageRegistryJson: null,
-		emailNotificationsEnabled: false,
+		commenterReplyEmailEnabled: false,
+		backendNotificationsEnabled: false,
 	};
 }

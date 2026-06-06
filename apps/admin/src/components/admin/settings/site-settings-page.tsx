@@ -171,7 +171,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		mutation.error,
 		"站点设置保存失败。",
 	);
-	const notificationRecipients = draft.notifications.recipients ?? [];
+	const notificationRecipients = draft.notifications.backend.recipients ?? [];
 	const notificationCandidateUsers = eligibleNotificationRecipientUsers(
 		usersQuery.data?.users ?? [],
 		draft.siteKey,
@@ -186,7 +186,10 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			...draft,
 			notifications: {
 				...draft.notifications,
-				recipients,
+				backend: {
+					...draft.notifications.backend,
+					recipients,
+				},
 			},
 		});
 	};
@@ -961,29 +964,58 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							</Tabs.Content>
 							<Tabs.Content value="notifications">
 								<div className="grid gap-4 md:grid-cols-2">
-									<BooleanField
-										label="当前站点邮件通知"
-										description="控制当前站点是否创建通知任务；实例级邮件、Webhook、WxPusher 和队列限速在系统设置维护。"
-										checked={draft.notifications.emailEnabled}
-										error={firstFieldError(
-											saveError,
-											"notifications.emailEnabled",
-										)}
-										onCheckedChange={(emailEnabled) =>
-											setDraft({
-												...draft,
-												notifications: {
-													...draft.notifications,
-													emailEnabled,
-												},
-											})
-										}
-									/>
 									<SettingsSection
-										title="后台接收人"
-										description="接收人必须是启用状态且有当前站点权限的后台用户；保存后会替换当前站点接收人列表。"
+										title="评论者回复邮件通知"
+										description="控制公开评论表单是否显示“有人回复时邮件通知我”。只影响普通评论者，不影响后台用户通知。"
+									>
+										<BooleanField
+											label="允许评论者订阅回复邮件"
+											description="系统邮件可用时，公开 bootstrap 会返回 replyEmailNotification=true，内容站点可显示订阅 checkbox。"
+											checked={draft.notifications.commenter.replyEmailEnabled}
+											error={firstFieldError(
+												saveError,
+												"notifications.commenter.replyEmailEnabled",
+											)}
+											onCheckedChange={(replyEmailEnabled) =>
+												setDraft({
+													...draft,
+													notifications: {
+														...draft.notifications,
+														commenter: {
+															...draft.notifications.commenter,
+															replyEmailEnabled,
+														},
+													},
+												})
+											}
+										/>
+									</SettingsSection>
+									<SettingsSection
+										title="后台用户通知"
+										description="控制 QingYan 后台用户是否接收站点通知。接收人引用后台用户，可使用邮件、Webhook 或 WxPusher。"
 									>
 										<div className="grid gap-3">
+											<BooleanField
+												label="启用后台用户通知"
+												description="关闭后不再为后台用户创建站点通知任务；不影响普通评论者回复邮件订阅。"
+												checked={draft.notifications.backend.enabled}
+												error={firstFieldError(
+													saveError,
+													"notifications.backend.enabled",
+												)}
+												onCheckedChange={(enabled) =>
+													setDraft({
+														...draft,
+														notifications: {
+															...draft.notifications,
+															backend: {
+																...draft.notifications.backend,
+																enabled,
+															},
+														},
+													})
+												}
+											/>
 											<div>
 												<Button
 													type="button"

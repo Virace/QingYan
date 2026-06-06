@@ -187,8 +187,8 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	taskRunWorker.start();
 
 	fastify.addHook("onClose", async () => {
-		taskRunWorker.stop();
-		taskScheduler.stop();
+		await taskRunWorker.stop();
+		await taskScheduler.stop();
 		ipRegionScheduler.stop();
 		sqlite.close();
 	});

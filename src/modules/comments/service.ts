@@ -15,7 +15,7 @@ import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import { resolveRequestMetadata } from "./metadata/request-metadata";
 import type { CommentMetadataResolver } from "./metadata/resolver";
-import { buildPublicFeatures } from "./public-contract";
+import { buildPublicFeatures, isSystemMailUsable } from "./public-contract";
 import type { CommentsRepository } from "./repository";
 import {
 	mergeStaffDisplaySettings,
@@ -119,6 +119,7 @@ export class CommentsService {
 		private readonly loadIpRegionSettings?: () => Promise<
 			SystemSettings["ipRegion"]
 		>,
+		private readonly loadSystemSettings?: () => Promise<SystemSettings>,
 	) {}
 
 	public getRepository(): CommentsRepository {
@@ -181,6 +182,9 @@ export class CommentsService {
 		const publicApiSettings = this.loadPublicApiSettings
 			? await this.loadPublicApiSettings()
 			: { advisoryFields: { enabled: false } };
+		const systemSettings = this.loadSystemSettings
+			? await this.loadSystemSettings()
+			: undefined;
 		const metadataConfig = this.repository.resolveCommentMetadata(
 			settings ?? undefined,
 		);
@@ -328,6 +332,11 @@ export class CommentsService {
 					| "always"
 					| "threshold",
 				engagement,
+				systemMailUsable: systemSettings
+					? isSystemMailUsable(systemSettings.mail)
+					: false,
+				commenterReplyEmailEnabled:
+					settings?.commenterReplyEmailEnabled ?? false,
 			}),
 			form: buildCommentForm({
 				allowWebsite: settings?.allowWebsite,

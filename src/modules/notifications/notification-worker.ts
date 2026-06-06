@@ -1,4 +1,4 @@
-import type { NotificationDeliveryRecord } from "../tasks/types";
+import type { NotificationDeliveryRecord, TaskRunRecord } from "../tasks/types";
 import type { TaskQueue } from "../tasks/types";
 import type { TaskRunRepository } from "../tasks/task-run-repository";
 import {
@@ -31,6 +31,12 @@ type NotificationWorkerInput = {
 	adapters: Record<string, NotificationChannelAdapter | undefined>;
 	reputation?: ReputationRecorder;
 	retryDelaySec?: number;
+	templateContextBuilder?: {
+		build(input: {
+			task: TaskRunRecord;
+			delivery: NotificationDeliveryRecord;
+		}): Promise<Record<string, unknown>>;
+	};
 };
 
 type TemplatePayload = {
@@ -47,9 +53,13 @@ function asTemplatePayload(payload: unknown): TemplatePayload {
 }
 
 function fallbackBody(delivery: NotificationDeliveryRecord): string {
-	return delivery.templateKey === "channel_test"
-		? "这是一条 QingYan 通知通道测试消息。"
-		: "{{comment.content}}";
+	if (delivery.templateKey === "channel_test") {
+		return "这是一条 QingYan 通知通道测试消息。";
+	}
+	if (delivery.templateKey === "commenter.reply_approved") {
+		return "{{comment.authorLabel}} 在 {{page.title}} 回复了你：\n{{comment.content}}\n\n查看页面：{{page.url}}\n\n如需退订可点击：{{links.unsubscribe}}";
+	}
+	return "{{comment.content}}";
 }
 
 export class NotificationWorker {
@@ -99,9 +109,13 @@ export class NotificationWorker {
 						subjectTemplate:
 							payload.subjectTemplate ?? "[QingYan] Notification",
 						bodyTemplate: payload.bodyTemplate ?? fallbackBody(delivery),
-						context: payload.templateContext ?? {
-							comment: { content: "QingYan notification" },
-						},
+						context: payload.templateContext ??
+							(await this.input.templateContextBuilder?.build({
+								task,
+								delivery,
+							})) ?? {
+								comment: { content: "QingYan notification" },
+							},
 					});
 					const result = await adapter.send({
 						to: delivery.recipientAddressSnapshot,
