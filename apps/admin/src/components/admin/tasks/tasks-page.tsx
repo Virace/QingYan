@@ -551,7 +551,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 										</select>
 									</label>
 									<label className="grid gap-1 text-sm">
-										<span className="text-muted-foreground">最近状态</span>
+										<span className="text-muted-foreground">调度状态</span>
 										<select
 											className={inputClass}
 											value={definitionStatusFilter}
@@ -809,7 +809,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 															类型
 														</th>
 														<th className="px-3 py-2 text-left font-medium">
-															最近状态
+															删除前状态
 														</th>
 														<th className="px-3 py-2 text-left font-medium">
 															删除人

@@ -1,4 +1,4 @@
-import type { TaskTypeDefinition } from "@/api/tasks";
+import type { ScheduledTaskProjection, TaskTypeDefinition } from "@/api/tasks";
 import { Input } from "@/components/ui/input";
 
 import { Field, inputClass, textareaClass } from "../shared/admin-ui";
@@ -119,15 +119,35 @@ function PayloadTextarea({
 	);
 }
 
+function ReadOnlyPayloadValue({
+	label,
+	value,
+	description,
+}: {
+	label: string;
+	value: string;
+	description?: string;
+}) {
+	return (
+		<Field label={label} description={description}>
+			<div className="min-h-10 whitespace-pre-wrap break-words rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+				{value || "-"}
+			</div>
+		</Field>
+	);
+}
+
 export function TaskTypePayloadForm({
 	definition,
 	payload,
 	siteKey,
+	protection,
 	onChange,
 }: {
 	definition: TaskTypeDefinition | null;
 	payload: TaskPayloadDraft;
 	siteKey: string;
+	protection?: ScheduledTaskProjection["protection"];
 	onChange: (payload: TaskPayloadDraft) => void;
 }) {
 	if (!definition) {
@@ -147,16 +167,25 @@ export function TaskTypePayloadForm({
 		const current = readRecord(payload[key]);
 		setValue(key, { ...current, [field]: value });
 	};
+	const lockedPayloadPaths = new Set(protection?.lockedPayloadPaths ?? []);
 
 	switch (definition.type) {
 		case "page_source_refresh":
 			return (
 				<div className="grid gap-3 md:grid-cols-2">
-					<PayloadInput
-						label="站点 Key"
-						value={readText(payload.siteKey) || siteKey}
-						onChange={(value) => setValue("siteKey", value.trim())}
-					/>
+					{lockedPayloadPaths.has("siteKey") ? (
+						<ReadOnlyPayloadValue
+							label="绑定站点"
+							value={readText(payload.siteKey) || siteKey}
+							description="系统托管任务按当前站点绑定，不能在任务编辑中修改。"
+						/>
+					) : (
+						<PayloadInput
+							label="站点 Key"
+							value={readText(payload.siteKey) || siteKey}
+							onChange={(value) => setValue("siteKey", value.trim())}
+						/>
+					)}
 					<Field label="刷新模式">
 						<select
 							className={inputClass}
@@ -167,15 +196,23 @@ export function TaskTypePayloadForm({
 							<option value="replace">按来源替换</option>
 						</select>
 					</Field>
-					<PayloadTextarea
-						label="sitemap 地址"
-						description="填写一个或多个 sitemap 或 sitemap index URL；可用逗号、空格或换行分隔。"
-						value={readStringList(payload.sitemapUrls)}
-						placeholder="https://example.com/sitemap-index.xml"
-						onChange={(value) =>
-							setValue("sitemapUrls", parseStringList(value))
-						}
-					/>
+					{lockedPayloadPaths.has("sitemapUrls") ? (
+						<ReadOnlyPayloadValue
+							label="sitemap 地址"
+							value={readStringList(payload.sitemapUrls)}
+							description="权威来源来自站点页面注册设置，在这里只读展示。"
+						/>
+					) : (
+						<PayloadTextarea
+							label="sitemap 地址"
+							description="填写一个或多个 sitemap 或 sitemap index URL；可用逗号、空格或换行分隔。"
+							value={readStringList(payload.sitemapUrls)}
+							placeholder="https://example.com/sitemap-index.xml"
+							onChange={(value) =>
+								setValue("sitemapUrls", parseStringList(value))
+							}
+						/>
+					)}
 					<PayloadInput
 						label="超时毫秒"
 						value={payload.timeoutMs ? String(payload.timeoutMs) : ""}

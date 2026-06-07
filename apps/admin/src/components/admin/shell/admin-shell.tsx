@@ -101,10 +101,10 @@ const OpsPage = lazyAdminPage<object, "OpsPage">(
 	() => import("../ops/ops-page"),
 	"OpsPage",
 );
-const UsersPage = lazyAdminPage<{ isInitialAdmin: boolean }, "UsersPage">(
-	() => import("../users/users-page"),
-	"UsersPage",
-);
+const UsersPage = lazyAdminPage<
+	{ isInitialAdmin: boolean; siteKey: string },
+	"UsersPage"
+>(() => import("../users/users-page"), "UsersPage");
 const ProfilePage = lazyAdminPage<object, "ProfilePage">(
 	() => import("../profile/profile-page"),
 	"ProfilePage",
@@ -329,6 +329,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return (
 					<UsersPage
 						isInitialAdmin={Boolean(meQuery.data?.user.isInitialAdmin)}
+						siteKey={activeSiteKey}
 					/>
 				);
 			case "profile":

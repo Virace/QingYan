@@ -73,6 +73,20 @@ describe("admin notification templates", () => {
 			]),
 		);
 
+		const defaultPreviewResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/notification-templates/commenter_reply_approved_email_text/preview",
+			...withAdminWriteAuth(auth),
+			payload: {},
+		});
+		expect(defaultPreviewResponse.statusCode).toBe(200);
+		expect(defaultPreviewResponse.json()).toMatchObject({
+			rendered: {
+				subject: "[FangYuan] 你的评论有新回复",
+				body: expect.stringContaining("Alice 在 示例文章 回复了你"),
+			},
+		});
+
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
 			url: "/qingyan/api/admin/notification-templates/commenter_reply_approved_email_text",

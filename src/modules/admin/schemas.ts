@@ -240,6 +240,7 @@ export const adminUserGroupKeySchema = z.enum([
 ]);
 
 export const adminUsersQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
 	search: z.string().min(1).optional(),
 	limit: z.coerce.number().int().positive().max(100).default(50),
 	offset: z.coerce.number().int().min(0).default(0),

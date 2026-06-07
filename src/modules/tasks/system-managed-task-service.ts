@@ -158,8 +158,8 @@ export class SystemManagedTaskService {
 			protection: authoritativePageSourceRefreshPolicy(),
 			type: "page_source_refresh",
 			siteKey: input.siteKey,
-			name: "页面来源权威刷新",
-			description: "页面来源权威模式保障任务，定时刷新权威 sitemap。",
+			name: "权威来源刷新",
+			description: "定时刷新权威 sitemap，保障页面注册表同步。",
 			payload: {
 				siteKey: input.siteKey,
 				sitemapUrls: input.sitemapUrls,

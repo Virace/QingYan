@@ -77,7 +77,7 @@ export function TaskDefinitionTable({
 						<th className="px-3 py-2 text-left font-medium">范围</th>
 						<th className="px-3 py-2 text-left font-medium">调度</th>
 						<th className="px-3 py-2 text-left font-medium">下次运行</th>
-						<th className="px-3 py-2 text-left font-medium">最近状态</th>
+						<th className="px-3 py-2 text-left font-medium">调度状态</th>
 						<th className="px-3 py-2 text-left font-medium">Owner</th>
 						<th className="px-3 py-2 text-right font-medium">操作</th>
 					</tr>

@@ -374,6 +374,8 @@ export interface AdminUser {
 	username: string;
 	email: string;
 	displayName: string;
+	website: string | null;
+	avatarUrl: string | null;
 	status: "active" | "disabled" | "deleted";
 	groupKey: AdminGroupKey;
 	groupName: string;
@@ -1174,7 +1176,12 @@ export function testNotificationTemplate(
 }
 
 export function listAdminUsers(
-	input: { search?: string; limit?: number; offset?: number } = {},
+	input: {
+		siteKey?: string;
+		search?: string;
+		limit?: number;
+		offset?: number;
+	} = {},
 ) {
 	return requestJson<{ users: AdminUser[] }>(
 		`/api/admin/users?${queryString(input)}`,

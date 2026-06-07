@@ -90,17 +90,34 @@ export class AdminUsersRepository {
 	}
 
 	public async listUsers(input: {
+		siteKey?: string;
 		search?: string;
 		limit: number;
 		offset: number;
 	}) {
-		const where = input.search
+		const searchFilter = input.search
 			? or(
 					like(adminUsers.username, `%${input.search}%`),
 					like(adminUsers.email, `%${input.search}%`),
 					like(adminUsers.displayName, `%${input.search}%`),
 				)
 			: undefined;
+		const siteFilter = input.siteKey
+			? or(
+					eq(adminGroups.key, "admin"),
+					sql`exists (
+						select 1
+						from ${adminUserSiteAccess}
+						inner join ${sites} on ${sites.id} = ${adminUserSiteAccess.siteId}
+						where ${adminUserSiteAccess.userId} = ${adminUsers.id}
+							and ${sites.siteKey} = ${input.siteKey}
+					)`,
+				)
+			: undefined;
+		const where =
+			searchFilter && siteFilter
+				? and(searchFilter, siteFilter)
+				: (searchFilter ?? siteFilter);
 		return this.db
 			.select({
 				id: adminUsers.id,

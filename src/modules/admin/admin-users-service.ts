@@ -63,6 +63,7 @@ export class AdminUsersService {
 	}
 
 	public async listUsers(input: {
+		siteKey?: string;
 		search?: string;
 		limit: number;
 		offset: number;

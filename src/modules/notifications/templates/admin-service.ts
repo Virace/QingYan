@@ -17,6 +17,8 @@ function previewContext() {
 		},
 		comment: {
 			authorName: "Alice",
+			authorLabel: "Alice",
+			badgeLabel: "",
 			content: "这是一条用于模板预览的评论。",
 		},
 		parent: {

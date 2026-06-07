@@ -70,7 +70,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	});
 	const usersQuery = useQuery({
 		queryKey: ["admin", "users", "notification-candidates", resolvedSiteKey],
-		queryFn: () => listAdminUsers({ limit: 100 }),
+		queryFn: () => listAdminUsers({ siteKey: resolvedSiteKey, limit: 100 }),
 		enabled: Boolean(resolvedSiteKey),
 	});
 	const [draft, setDraft] = useState<AdminSettings | null>(null);
@@ -178,6 +178,13 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	).filter(
 		(user) =>
 			!notificationRecipients.some((recipient) => recipient.userId === user.id),
+	);
+	const staffCandidateUsers = eligibleNotificationRecipientUsers(
+		usersQuery.data?.users ?? [],
+		draft.siteKey,
+	);
+	const selectedStaffCandidate = staffCandidateUsers.find(
+		(user) => user.email === draft.comments.verifiedAuthor.email,
 	);
 	const setNotificationRecipients = (
 		recipients: SiteNotificationRecipient[],
@@ -288,34 +295,14 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 										testId="settings-group-comments"
 									>
 										<div className="grid gap-4 md:grid-cols-2">
-											<Field label="默认状态">
-												<select
-													className={inputClass}
-													value={draft.comments.defaultStatus}
-													onChange={(event) =>
-														setDraft({
-															...draft,
-															comments: {
-																...draft.comments,
-																defaultStatus: event.target.value as
-																	| "pending"
-																	| "approved",
-															},
-														})
-													}
-												>
-													<option value="pending">待审</option>
-													<option value="approved">直接通过</option>
-												</select>
-											</Field>
 											<SettingsSection
 												title="评论审核"
-												description="审核模式属于当前站点；Akismet 会自动使用站点前端 Origin 作为 Blog URL。"
+												description="评论审核策略属于当前站点；Akismet 会自动使用站点前端 Origin 作为 Blog URL。"
 											>
 												<div className="grid gap-4 md:grid-cols-2">
 													<Field
-														label="审核模式"
-														description="纯手动只进入待审；Akismet 自动审核可直接通过正常评论并拦截垃圾评论。"
+														label="评论审核策略"
+														description="不审核会直接发布；人工审核会进入待审；Akismet 自动审核会发布正常评论并拦截垃圾评论；Akismet 辅助会标记垃圾评论，正常评论仍待审。"
 													>
 														<select
 															className={inputClass}
@@ -327,6 +314,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 																	...draft,
 																	comments: {
 																		...draft.comments,
+																		defaultStatus:
+																			mode === "manual" ||
+																			mode === "manual_with_akismet"
+																				? "pending"
+																				: "approved",
 																		moderation: {
 																			...draft.comments.moderation,
 																			mode,
@@ -340,7 +332,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 																});
 															}}
 														>
-															<option value="manual">纯手动审核</option>
+															<option value="manual">人工审核</option>
 															<option value="none">不审核，直接通过</option>
 															<option value="akismet_auto">
 																Akismet 自动审核
@@ -510,8 +502,8 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 												</div>
 											</SettingsSection>
 											<SettingsSection
-												title="可信评论作者"
-												description="管理员登录后可作为站点人员回复；公开展示会按这里的 badge 和显示名策略处理。"
+												title="站点人员评论身份"
+												description="从当前站点可用后台用户选择评论身份；公开展示会按这里的 badge 和显示名策略处理。"
 											>
 												<div className="grid gap-4 md:grid-cols-2">
 													<BooleanField
@@ -530,6 +522,48 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															})
 														}
 													/>
+													<Field
+														label="站点人员"
+														description="从当前站点可用后台用户中选择，选择后自动填充展示名、邮箱和主页。"
+													>
+														<select
+															className={inputClass}
+															value={selectedStaffCandidate?.email ?? ""}
+															onChange={(event) => {
+																const user = staffCandidateUsers.find(
+																	(item) => item.email === event.target.value,
+																);
+																if (!user) {
+																	return;
+																}
+																setDraft({
+																	...draft,
+																	comments: {
+																		...draft.comments,
+																		verifiedAuthor: {
+																			...draft.comments.verifiedAuthor,
+																			displayName: user.displayName,
+																			email: user.email,
+																			website: user.website ?? "",
+																		},
+																	},
+																});
+															}}
+														>
+															<option value="">选择站点人员</option>
+															{draft.comments.verifiedAuthor.email &&
+															!selectedStaffCandidate ? (
+																<option value="" disabled>
+																	当前邮箱不属于当前站点人员
+																</option>
+															) : null}
+															{staffCandidateUsers.map((user) => (
+																<option key={user.id} value={user.email}>
+																	{user.displayName} / {user.email}
+																</option>
+															))}
+														</select>
+													</Field>
 													<Field label="显示名称">
 														<Input
 															value={draft.comments.verifiedAuthor.displayName}
@@ -547,39 +581,23 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															}
 														/>
 													</Field>
-													<Field label="邮箱">
+													<Field
+														label="邮箱"
+														description="来自所选站点人员；如需修改，请先调整后台用户资料或站点授权。"
+													>
 														<Input
 															type="email"
 															value={draft.comments.verifiedAuthor.email}
-															onChange={(event) =>
-																setDraft({
-																	...draft,
-																	comments: {
-																		...draft.comments,
-																		verifiedAuthor: {
-																			...draft.comments.verifiedAuthor,
-																			email: event.target.value,
-																		},
-																	},
-																})
-															}
+															readOnly
 														/>
 													</Field>
-													<Field label="作者主页 URL">
+													<Field
+														label="作者主页 URL"
+														description="来自所选站点人员；为空时公开侧不会展示作者主页。"
+													>
 														<Input
 															value={draft.comments.verifiedAuthor.website}
-															onChange={(event) =>
-																setDraft({
-																	...draft,
-																	comments: {
-																		...draft.comments,
-																		verifiedAuthor: {
-																			...draft.comments.verifiedAuthor,
-																			website: event.target.value,
-																		},
-																	},
-																})
-															}
+															readOnly
 														/>
 													</Field>
 													<Field label="Badge 文案">

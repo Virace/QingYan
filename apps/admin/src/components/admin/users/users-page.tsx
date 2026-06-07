@@ -88,7 +88,13 @@ function SiteKeyPicker({
 	);
 }
 
-export function UsersPage({ isInitialAdmin }: { isInitialAdmin: boolean }) {
+export function UsersPage({
+	isInitialAdmin,
+	siteKey,
+}: {
+	isInitialAdmin: boolean;
+	siteKey: string;
+}) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
 	const [createOpen, setCreateOpen] = useState(false);
@@ -114,8 +120,9 @@ export function UsersPage({ isInitialAdmin }: { isInitialAdmin: boolean }) {
 		useState(true);
 	const [resetError, setResetError] = useState("");
 	const usersQuery = useQuery({
-		queryKey: ["admin", "users"],
-		queryFn: () => listAdminUsers(),
+		queryKey: ["admin", "users", siteKey],
+		queryFn: () => listAdminUsers({ siteKey }),
+		enabled: Boolean(siteKey),
 	});
 	const groupsQuery = useQuery({
 		queryKey: ["admin", "groups"],
@@ -212,6 +219,7 @@ export function UsersPage({ isInitialAdmin }: { isInitialAdmin: boolean }) {
 		(group) => group.key !== "admin" || isInitialAdmin,
 	);
 	const siteOptions = sitesQuery.data?.items ?? [];
+	const currentSite = siteOptions.find((site) => site.siteKey === siteKey);
 	const revokeUserSessions = async (user: AdminUser) => {
 		const confirmed = await confirm({
 			title: "强制登出用户",
@@ -256,7 +264,9 @@ export function UsersPage({ isInitialAdmin }: { isInitialAdmin: boolean }) {
 									<div>
 										<CardTitle className="text-lg">用户</CardTitle>
 										<CardDescription>
-											管理后台用户、状态和站点授权。
+											{currentSite
+												? `当前站点：${currentSite.name} / ${currentSite.siteKey}`
+												: "管理后台用户、状态和站点授权。"}
 										</CardDescription>
 									</div>
 									<Button type="button" onClick={() => setCreateOpen(true)}>
@@ -390,7 +400,7 @@ export function UsersPage({ isInitialAdmin }: { isInitialAdmin: boolean }) {
 									);
 								})}
 								{usersQuery.data?.users.length === 0 ? (
-									<EmptyState text="暂无用户" />
+									<EmptyState text="当前站点暂无用户" />
 								) : null}
 							</CardContent>
 						</Card>

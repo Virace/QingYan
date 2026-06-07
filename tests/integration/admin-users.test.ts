@@ -219,6 +219,46 @@ describe("admin users api", () => {
 		});
 	});
 
+	it("filters users by selected site key", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.insert(sites).values({
+			siteKey: "docs",
+			name: "Docs",
+			allowedOriginsJson: JSON.stringify(["https://docs.example.test"]),
+		});
+		await createUser(fixture, {
+			username: "global-admin",
+			groupKey: "admin",
+		});
+		await createUser(fixture, {
+			username: "fangyuan-admin",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		await createUser(fixture, {
+			username: "docs-moderator",
+			groupKey: "site_moderator",
+			siteKeys: ["docs"],
+		});
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+
+		const usersResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/users?siteKey=fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(usersResponse.statusCode).toBe(200);
+		expect(
+			usersResponse
+				.json()
+				.users.map((user: { username: string }) => user.username),
+		).toEqual(["admin", "global-admin", "fangyuan-admin"]);
+	});
+
 	it("lets an initial admin create an admin user and site-scoped users", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

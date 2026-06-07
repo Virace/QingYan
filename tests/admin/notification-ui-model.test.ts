@@ -33,6 +33,8 @@ function user(input: Partial<AdminUser> & Pick<AdminUser, "id" | "username">) {
 		username: input.username,
 		email: input.email ?? `${input.username}@example.com`,
 		displayName: input.displayName ?? input.username,
+		website: input.website ?? null,
+		avatarUrl: input.avatarUrl ?? null,
 		status: input.status ?? "active",
 		groupKey: input.groupKey ?? "site_moderator",
 		groupName: input.groupName ?? "站点审核员",

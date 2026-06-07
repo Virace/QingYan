@@ -158,7 +158,9 @@ test("site settings page renders editable controls", async ({ page }) => {
 	await selectSettingsTab(page, "访客与计数");
 	await expect(page.getByRole("switch", { name: "访客记录" })).toBeVisible();
 	await selectSettingsTab(page, "通知");
-	await expect(page.getByText("当前站点邮件通知")).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "后台用户通知" }),
+	).toBeVisible();
 	await expect(
 		page.getByRole("button", { name: "保存站点通知设置" }),
 	).toBeVisible();
@@ -188,7 +190,9 @@ test("settings tabs sync to query without changing the active settings view", as
 	await expect(page).toHaveURL(/siteTab=notifications/);
 	await page.reload();
 	await expect(page.getByRole("heading", { name: "站点设置" })).toBeVisible();
-	await expect(page.getByText("当前站点邮件通知")).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "后台用户通知" }),
+	).toBeVisible();
 
 	await page.getByRole("button", { name: "系统设置" }).click();
 	await expect(page).toHaveURL(/view=system/);
@@ -687,7 +691,9 @@ test("system mail disabled hides smtp details without removing site notification
 
 	await page.getByRole("button", { name: "站点设置" }).click();
 	await selectSettingsTab(page, "通知");
-	await expect(page.getByText("当前站点邮件通知")).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "后台用户通知" }),
+	).toBeVisible();
 });
 
 test("notification channel workflow uses dialogs and shows created test task", async ({
@@ -730,7 +736,7 @@ test("notification channel workflow uses dialogs and shows created test task", a
 test("site notification recipients use an add dialog", async ({ page }) => {
 	await openSiteSettings(page);
 	await selectSettingsTab(page, "通知");
-	await expect(page.getByText("后台接收人")).toBeVisible();
+	await expect(page.getByText("暂无后台通知接收人")).toBeVisible();
 
 	const addButton = page.getByRole("button", { name: "添加接收人" });
 	await expect(addButton).toBeVisible();
@@ -805,11 +811,13 @@ test("site settings comment group switch hides and restores comment details", as
 	await expect(page.getByText("评论已关闭。已保存的审核")).toBeVisible();
 	await expect(page.getByText("默认状态")).toHaveCount(0);
 	await expect(page.getByText("审核模式")).toHaveCount(0);
+	await expect(page.getByText("评论审核策略", { exact: true })).toHaveCount(0);
 	await expect(page.getByText("验证码模式")).toHaveCount(0);
 
 	await ensureSwitchState(page, "评论", true);
-	await expect(page.getByText("默认状态")).toBeVisible();
-	await expect(page.getByText("审核模式", { exact: true })).toBeVisible();
+	await expect(page.getByText("默认状态")).toHaveCount(0);
+	await expect(page.getByText("审核模式")).toHaveCount(0);
+	await expect(page.getByText("评论审核策略", { exact: true })).toBeVisible();
 	await expect(page.getByText("验证码模式")).toBeVisible();
 });
 
@@ -824,20 +832,20 @@ test("site settings comment details stay inside the comment config group", async
 	await expect(commentGroup).toBeVisible();
 
 	const groupBox = await commentGroup.boundingBox();
-	const defaultStatusBox = await page.getByText("默认状态").boundingBox();
 	const moderationBox = await page
-		.getByText("审核模式", { exact: true })
+		.getByText("评论审核策略", { exact: true })
 		.boundingBox();
+	const captchaBox = await page.getByText("验证码模式").boundingBox();
 
-	if (!groupBox || !defaultStatusBox || !moderationBox) {
+	if (!groupBox || !moderationBox || !captchaBox) {
 		throw new Error("Expected comment group and field labels to have bounds.");
 	}
-	expect(defaultStatusBox.x).toBeGreaterThanOrEqual(groupBox.x);
-	expect(defaultStatusBox.x + defaultStatusBox.width).toBeLessThanOrEqual(
-		groupBox.x + groupBox.width,
-	);
 	expect(moderationBox.x).toBeGreaterThanOrEqual(groupBox.x);
 	expect(moderationBox.x + moderationBox.width).toBeLessThanOrEqual(
+		groupBox.x + groupBox.width,
+	);
+	expect(captchaBox.x).toBeGreaterThanOrEqual(groupBox.x);
+	expect(captchaBox.x + captchaBox.width).toBeLessThanOrEqual(
 		groupBox.x + groupBox.width,
 	);
 });
@@ -880,7 +888,7 @@ test("site settings visual states render without overlay on desktop and mobile",
 	});
 
 	await ensureSwitchState(page, "评论", true);
-	await expect(page.getByText("审核模式", { exact: true })).toBeVisible();
+	await expect(page.getByText("评论审核策略", { exact: true })).toBeVisible();
 	await testInfo.attach("site-settings-comments-on-desktop", {
 		body: await page.screenshot({ fullPage: false }),
 		contentType: "image/png",

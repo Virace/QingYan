@@ -353,6 +353,7 @@ export function TaskEditorDialog({
 							definition={selectedDefinition}
 							payload={draft.payload}
 							siteKey={siteKey}
+							protection={task?.protection}
 							onChange={(payload) =>
 								updateDraft({
 									payload,
