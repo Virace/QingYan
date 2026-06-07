@@ -103,6 +103,10 @@ describe("openapi docs", () => {
 			"visitors",
 			"replyEmailNotification",
 		]);
+		expect(
+			spec.components.schemas.PublicFeatures.properties.replyEmailNotification
+				.allOf[0].$ref,
+		).toBe("#/components/schemas/FeatureFlag");
 		expect(spec.components.schemas.FeatureFlag.required).toEqual(["enabled"]);
 		expect(JSON.stringify(spec.components.schemas.PublicComment)).not.toContain(
 			"viewerVote",

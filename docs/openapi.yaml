@@ -904,8 +904,9 @@ components:
         visitors:
           $ref: '#/components/schemas/FeatureFlag'
         replyEmailNotification:
-          type: boolean
-          description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is true only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
+          allOf:
+            - $ref: '#/components/schemas/FeatureFlag'
+            - description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is enabled only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
     BootstrapSite:
       type: object
       required: [siteKey]
@@ -1106,7 +1107,7 @@ components:
               type: string
         options:
           type: object
-          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference only when bootstrap `features.replyEmailNotification` is true and the submitted author email passes notification email policy. It does not affect staff/admin comments or backend-user notifications.
+          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference only when bootstrap `features.replyEmailNotification.enabled` is true and the submitted author email passes notification email policy. It does not affect staff/admin comments or backend-user notifications.
           properties:
             notifyOnReply:
               type: boolean

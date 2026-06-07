@@ -988,7 +988,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									>
 										<BooleanField
 											label="允许评论者订阅回复邮件"
-											description="系统邮件可用时，公开 bootstrap 会返回 replyEmailNotification=true，内容站点可显示订阅 checkbox。"
+											description="系统邮件可用时，公开 bootstrap 会返回 replyEmailNotification.enabled=true，内容站点可显示订阅 checkbox。"
 											checked={draft.notifications.commenter.replyEmailEnabled}
 											error={firstFieldError(
 												saveError,

@@ -99,7 +99,7 @@ describe("public API contract", () => {
 				pageViews: { enabled: true },
 				pageLikes: { enabled: true },
 				visitors: { enabled: true },
-				replyEmailNotification: true,
+				replyEmailNotification: { enabled: true },
 			},
 			data: {
 				comments: {
@@ -149,7 +149,10 @@ describe("public API contract", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(response.json().features.replyEmailNotification).toBe(false);
+		expect(response.json().features.replyEmailNotification).toEqual({
+			enabled: false,
+			reason: "feature_disabled",
+		});
 	});
 
 	it("omits comments data when comments are disabled", async () => {
@@ -188,7 +191,10 @@ describe("public API contract", () => {
 			enabled: false,
 			reason: "comments_disabled",
 		});
-		expect(body.features.replyEmailNotification).toBe(false);
+		expect(body.features.replyEmailNotification).toEqual({
+			enabled: false,
+			reason: "comments_disabled",
+		});
 		expect(body.features.commentVotes).toEqual({
 			enabled: false,
 			reason: "comments_disabled",
@@ -263,7 +269,10 @@ describe("public API contract", () => {
 		expect(body.features.comments.reason).toBe("page_inactive");
 		expect(body.features.pageViews.reason).toBe("page_inactive");
 		expect(body.features.pageLikes.reason).toBe("page_inactive");
-		expect(body.features.replyEmailNotification).toBe(false);
+		expect(body.features.replyEmailNotification).toEqual({
+			enabled: false,
+			reason: "page_inactive",
+		});
 		expect(body.data).toEqual({});
 	});
 });

@@ -104,6 +104,21 @@ function assertAllowedSitemapUrl(url: string, allowedOrigins: string[]) {
 	}
 }
 
+function formatPageSourceRefreshCounters(
+	prefix: string,
+	counters: PageSourceRefreshCounters,
+) {
+	return `${[
+		`${prefix}：处理 ${counters.processed}`,
+		`新增 ${counters.created}`,
+		`更新 ${counters.updated}`,
+		`过期 ${counters.stale}`,
+		`跳过 ${counters.skipped}`,
+		`失败 ${counters.failed}`,
+		`放行待处理 ${counters.approvedPending}`,
+	].join("，")}。`;
+}
+
 export class PageSourceRefreshService {
 	private readonly pageRegistry: PageRegistryService;
 
@@ -124,7 +139,10 @@ export class PageSourceRefreshService {
 			...emptyCounters(),
 		});
 		const result = await this.refreshSourcesWithContext(input, context);
-		await context.log.info("页面来源刷新完成。", result);
+		await context.log.info(
+			formatPageSourceRefreshCounters("页面来源刷新完成", result),
+			result,
+		);
 		return result;
 	}
 
@@ -161,6 +179,23 @@ export class PageSourceRefreshService {
 			errors.push(...sourceResult.errors);
 			for (const pageId of sourceResult.seenPageRegistryIds) {
 				seenPageRegistryIds.add(pageId);
+			}
+			await context.log.info(
+				formatPageSourceRefreshCounters("页面来源结果", sourceResult),
+				{
+					sourceUrl: source.sourceUrl,
+					...sourceResult,
+					errors: sourceResult.errors.slice(0, 20),
+				},
+			);
+			if (sourceResult.errors.length > 0) {
+				await context.log.warn(
+					`页面来源存在失败条目：${source.sourceUrl}，失败 ${sourceResult.errors.length}。`,
+					{
+						sourceUrl: source.sourceUrl,
+						errors: sourceResult.errors.slice(0, 20),
+					},
+				);
 			}
 			await context.updateProgress({
 				phase: "refreshing",

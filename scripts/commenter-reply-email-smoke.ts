@@ -955,14 +955,18 @@ export async function runSmoke(config = resolveSmokeConfig()) {
 	});
 	const bootstrapBody = assertRecord(bootstrap.body, "bootstrap");
 	const features = assertRecord(bootstrapBody.features, "bootstrap.features");
-	if (features.replyEmailNotification !== true) {
+	const replyEmailNotification = assertRecord(
+		features.replyEmailNotification,
+		"bootstrap.features.replyEmailNotification",
+	);
+	if (replyEmailNotification.enabled !== true) {
 		throw new Error(
-			`Expected features.replyEmailNotification=true, got ${String(
+			`Expected features.replyEmailNotification.enabled=true, got ${String(
 				features.replyEmailNotification,
 			)}`,
 		);
 	}
-	console.log("bootstrap.features.replyEmailNotification=true");
+	console.log("bootstrap.features.replyEmailNotification.enabled=true");
 	await approveSmokePage(config, auth);
 
 	const stamp = new Date().toISOString();

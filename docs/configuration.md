@@ -233,7 +233,7 @@ Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion�
 
 评论通知配置分为站点级和系统级：
 
-- 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification` 计算，不影响后台用户通知。
+- 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification.enabled` 计算，不影响后台用户通知。
 - 站点级 `site_settings.backend_notifications_enabled` 对应 Admin API `notifications.backend.enabled`，只控制是否为后台用户创建站点通知任务，不影响普通评论者回复邮件订阅。
 - 站点级 `site_notification_recipients` 对应 Admin API `notifications.backend.recipients`，引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
 - 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。

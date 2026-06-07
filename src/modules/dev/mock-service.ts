@@ -703,7 +703,10 @@ export class DevMockService {
 					pageViews: { enabled: true },
 					pageLikes: { enabled: true },
 					visitors: { enabled: true },
-					replyEmailNotification: false,
+					replyEmailNotification: {
+						enabled: false,
+						reason: "feature_disabled",
+					},
 				},
 				data: {
 					comments: {

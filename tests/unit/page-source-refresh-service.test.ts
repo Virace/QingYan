@@ -37,17 +37,20 @@ function createFixture() {
 	return clients;
 }
 
-function createTaskContext(): Pick<
-	TaskRunnerContext,
-	"log" | "updateProgress" | "signal"
-> {
+function createTaskContext(
+	logs: string[] = [],
+): Pick<TaskRunnerContext, "log" | "updateProgress" | "signal"> {
 	return {
 		log: {
 			stdout: async () => undefined,
 			stderr: async () => undefined,
 			system: async () => undefined,
-			info: async () => undefined,
-			warn: async () => undefined,
+			info: async (message) => {
+				logs.push(message);
+			},
+			warn: async (message) => {
+				logs.push(message);
+			},
 			error: async () => undefined,
 			debug: async () => undefined,
 			write: async () => undefined,
@@ -381,6 +384,55 @@ describe("PageSourceRefreshService", () => {
 			skipped: 1,
 			failed: 1,
 		});
+	});
+
+	it("writes visible refresh counter details into task log messages", async () => {
+		const fixture = createFixture();
+		await seedSite(fixture);
+		await fixture.db.insert(sitePageRegistry).values({
+			siteId: 1,
+			pageKey: "/posts/existing/",
+			pageUrl: "/posts/existing/",
+			status: "active",
+		});
+		await fixture.db.insert(pendingPageCandidates).values({
+			siteKey: "fangyuan",
+			pageKey: "/posts/pending/",
+			pageUrl: "/posts/pending/",
+			hitCount: 1,
+			status: "pending",
+		});
+		const logs: string[] = [];
+		const { service } = createService(fixture, async () =>
+			[
+				"<urlset>",
+				"<url><loc>https://example.com/posts/existing/</loc></url>",
+				"<url><loc>https://example.com/posts/new/</loc></url>",
+				"<url><loc>https://example.com/posts/pending/</loc></url>",
+				"<url><loc>https://other.example.com/posts/bad/</loc></url>",
+				"</urlset>",
+			].join(""),
+		);
+
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+				mode: "replace",
+				trigger: "manual",
+			},
+			createTaskContext(logs),
+		);
+
+		expect(logs).toContain(
+			"页面来源结果：处理 4，新增 2，更新 1，过期 0，跳过 0，失败 1，放行待处理 1。",
+		);
+		expect(logs).toContain(
+			"页面来源刷新完成：处理 4，新增 2，更新 1，过期 0，跳过 0，失败 1，放行待处理 1。",
+		);
+		expect(logs).toContain(
+			"页面来源存在失败条目：https://example.com/sitemap.xml，失败 1。",
+		);
 	});
 
 	it("does not synthesize due refresh inputs without scheduled source records", async () => {
