@@ -207,7 +207,10 @@ describe("ConditionTriggerEvaluator", () => {
 			scope: { siteKey: "fangyuan" },
 			enabled: true,
 			scheduleKind: "condition",
-			payload: { siteKey: "fangyuan", sourceIds: [] },
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+			},
 			policy: {},
 			trigger: conditionTrigger({
 				op: "metric",
@@ -230,7 +233,10 @@ describe("ConditionTriggerEvaluator", () => {
 			scope: { siteKey: "fangyuan" },
 			enabled: true,
 			scheduleKind: "condition",
-			payload: { siteKey: "fangyuan", sourceIds: [] },
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+			},
 			policy: {},
 			trigger: conditionTrigger({
 				op: "script",
@@ -275,7 +281,10 @@ describe("ConditionTriggerEvaluator", () => {
 			scope: { siteKey: "fangyuan" },
 			enabled: true,
 			scheduleKind: "condition",
-			payload: { siteKey: "fangyuan", sourceIds: [] },
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+			},
 			policy: {},
 			trigger: conditionTrigger(
 				{
@@ -407,7 +416,10 @@ describe("ConditionTriggerEvaluator", () => {
 			scope: { siteKey: "fangyuan" },
 			enabled: true,
 			scheduleKind: "condition",
-			payload: { siteKey: "fangyuan", sourceIds: [] },
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+			},
 			policy: {},
 			trigger: conditionTrigger({
 				op: "metric",

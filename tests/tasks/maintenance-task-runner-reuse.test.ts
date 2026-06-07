@@ -44,7 +44,7 @@ describe("maintenance task runner reuse wrappers", () => {
 			.run(
 				{
 					siteKey: "fangyuan",
-					sourceIds: [1],
+					sitemapUrls: ["https://example.com/sitemap.xml"],
 					mode: "append",
 					trigger: "scheduled",
 				},
@@ -54,7 +54,7 @@ describe("maintenance task runner reuse wrappers", () => {
 		expect(service.executeRefresh).toHaveBeenCalledWith(
 			{
 				siteKey: "fangyuan",
-				sourceIds: [1],
+				sitemapUrls: ["https://example.com/sitemap.xml"],
 				mode: "append",
 				trigger: "scheduled",
 				timeoutMs: undefined,

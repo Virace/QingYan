@@ -72,7 +72,7 @@ describe("scheduled task run projection", () => {
 			scope: { siteKey: "fangyuan" },
 			enabled: true,
 			scheduleKind: "manual_only",
-			payload: { sourceIds: [1] },
+			payload: { sitemapUrls: ["https://example.com/sitemap.xml"] },
 			policy: { maxAttempts: 2, retryDelaySec: 120 },
 			trigger: { kind: "manual" },
 			retentionCount: 5,
@@ -85,13 +85,13 @@ describe("scheduled task run projection", () => {
 			scheduledTask: task,
 			trigger: "manual",
 			triggerSnapshot: { actor: "admin" },
-			input: { sourceIds: [1] },
+			input: { sitemapUrls: ["https://example.com/sitemap.xml"] },
 			createdByUserId: adminUserId,
 			runAfter: "2026-06-04T10:00:00.000Z",
 		});
 		await scheduledTasks.update(task.id, {
 			name: "Updated source refresh",
-			payload: { sourceIds: [2] },
+			payload: { sitemapUrls: ["https://example.com/other-sitemap.xml"] },
 			updatedByUserId: adminUserId,
 		});
 		await scheduledTasks.deleteWithSnapshot(task.id, {
@@ -110,9 +110,9 @@ describe("scheduled task run projection", () => {
 			scope: { siteKey: "fangyuan" },
 			trigger: "manual",
 			triggerSnapshot: { actor: "admin" },
-			input: { sourceIds: [1] },
+			input: { sitemapUrls: ["https://example.com/sitemap.xml"] },
 			actionConfigSnapshot: {
-				payload: { sourceIds: [1] },
+				payload: { sitemapUrls: ["https://example.com/sitemap.xml"] },
 				policy: { maxAttempts: 2, retryDelaySec: 120 },
 			},
 			ownerUserIdSnapshot: adminUserId,

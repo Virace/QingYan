@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabaseClients } from "../../src/db/client";
@@ -12,11 +12,9 @@ import {
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
-	sitePageRegistrySourcePages,
 	sites,
 } from "../../src/db/schema";
 import { PageSourceRefreshService } from "../../src/modules/page-registry/source-refresh-service";
-import { PageSourceRepository } from "../../src/modules/page-registry/source-repository";
 import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
 
 const cleanups: Array<() => void> = [];
@@ -93,26 +91,30 @@ function createService(
 	};
 }
 
-async function createSource(
-	fixture: ReturnType<typeof createFixture>,
+async function runRefresh(
+	service: PageSourceRefreshService,
 	input: {
-		sourceType?: "sitemap" | "rss" | "atom";
-		sourceUrl?: string;
+		sitemapUrls?: string[];
 		mode?: "append" | "replace";
+		timeoutMs?: number;
+		maxBytes?: number;
 	} = {},
 ) {
-	const repository = new PageSourceRepository(fixture.db);
-	return repository.createSource({
-		siteId: 1,
-		sourceType: input.sourceType ?? "sitemap",
-		sourceUrl: input.sourceUrl ?? "https://example.com/sitemap.xml",
-		enabled: true,
-		mode: input.mode ?? "append",
-	});
+	return service.executeRefresh(
+		{
+			siteKey: "fangyuan",
+			sitemapUrls: input.sitemapUrls ?? ["https://example.com/sitemap.xml"],
+			mode: input.mode ?? "replace",
+			trigger: "manual",
+			timeoutMs: input.timeoutMs,
+			maxBytes: input.maxBytes,
+		},
+		createTaskContext(),
+	);
 }
 
 describe("PageSourceRefreshService", () => {
-	it("creates active registry pages from sitemap URL payloads without source records", async () => {
+	it("creates active registry pages from sitemap URL payloads", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
 		const fetchCalls: string[] = [];
@@ -126,21 +128,9 @@ describe("PageSourceRefreshService", () => {
 			].join("");
 		});
 
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sitemapUrls: ["https://example.com/sitemap.xml"],
-				mode: "replace",
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		const result = await runRefresh(service);
 
 		const pages = await fixture.db.select().from(sitePageRegistry);
-		const sourcePages = await fixture.db
-			.select()
-			.from(sitePageRegistrySourcePages);
-
 		expect(fetchCalls).toEqual(["https://example.com/sitemap.xml"]);
 		expect(pages).toEqual(
 			expect.arrayContaining([
@@ -156,7 +146,6 @@ describe("PageSourceRefreshService", () => {
 				}),
 			]),
 		);
-		expect(sourcePages).toEqual([]);
 		expect(result).toMatchObject({
 			processed: 2,
 			created: 2,
@@ -167,7 +156,7 @@ describe("PageSourceRefreshService", () => {
 		});
 	});
 
-	it("rejects runtime sitemap URLs outside allowed origins before fetch", async () => {
+	it("rejects sitemap URLs outside allowed origins before fetch", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
 		const fetchCalls: string[] = [];
@@ -177,125 +166,16 @@ describe("PageSourceRefreshService", () => {
 		});
 
 		await expect(
-			service.executeRefresh(
-				{
-					siteKey: "fangyuan",
-					sitemapUrls: ["http://169.254.169.254/latest/meta-data"],
-					mode: "replace",
-					trigger: "manual",
-				},
-				createTaskContext(),
-			),
+			runRefresh(service, {
+				sitemapUrls: ["http://169.254.169.254/latest/meta-data"],
+			}),
 		).rejects.toThrow("Sitemap URL is outside allowed origins");
 		expect(fetchCalls).toEqual([]);
-	});
-
-	it("prefers canonical sitemap URL payloads over legacy sourceIds compatibility", async () => {
-		const fixture = createFixture();
-		await seedSite(fixture);
-		const legacySource = await createSource(fixture, {
-			sourceUrl: "https://example.com/legacy.xml",
-		});
-		const fetchCalls: string[] = [];
-		const { service } = createService(fixture, async (url) => {
-			fetchCalls.push(url);
-			return [
-				"<urlset>",
-				"<url><loc>https://example.com/posts/canonical/</loc></url>",
-				"</urlset>",
-			].join("");
-		});
-
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sitemapUrls: ["https://example.com/canonical.xml"],
-				sourceIds: [legacySource.id],
-				mode: "replace",
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
-
-		const pages = await fixture.db.select().from(sitePageRegistry);
-		const sourcePages = await fixture.db
-			.select()
-			.from(sitePageRegistrySourcePages);
-
-		expect(fetchCalls).toEqual(["https://example.com/canonical.xml"]);
-		expect(pages).toEqual([
-			expect.objectContaining({
-				pageKey: "/posts/canonical/",
-				pageUrl: "/posts/canonical/",
-				status: "active",
-			}),
-		]);
-		expect(sourcePages).toEqual([]);
-		expect(result).toMatchObject({
-			processed: 1,
-			created: 1,
-			updated: 0,
-		});
-	});
-
-	it("creates active registry pages from sitemap entries", async () => {
-		const fixture = createFixture();
-		await seedSite(fixture);
-		const source = await createSource(fixture);
-		const { service } = createService(fixture, async () =>
-			[
-				"<urlset>",
-				"<url><loc>https://example.com/posts/a/</loc></url>",
-				"<url><loc>https://example.com/posts/b/</loc></url>",
-				"</urlset>",
-			].join(""),
-		);
-
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
-
-		const pages = await fixture.db.select().from(sitePageRegistry);
-		const sourcePages = await fixture.db
-			.select()
-			.from(sitePageRegistrySourcePages);
-
-		expect(pages).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					pageKey: "/posts/a/",
-					pageUrl: "/posts/a/",
-					status: "active",
-				}),
-				expect.objectContaining({
-					pageKey: "/posts/b/",
-					pageUrl: "/posts/b/",
-					status: "active",
-				}),
-			]),
-		);
-		expect(sourcePages).toHaveLength(2);
-		expect(result).toMatchObject({
-			processed: 2,
-			created: 2,
-			updated: 0,
-			stale: 0,
-			skipped: 0,
-			failed: 0,
-		});
 	});
 
 	it("creates active registry pages from sitemap index child sitemaps", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture, {
-			sourceUrl: "https://example.com/sitemap-index.xml",
-		});
 		const fetchCalls: Array<{
 			url: string;
 			options: {
@@ -323,19 +203,13 @@ describe("PageSourceRefreshService", () => {
 			throw new Error(`Unexpected fetch URL: ${url}`);
 		});
 
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-				timeoutMs: 12_000,
-				maxBytes: 1_048_576,
-			},
-			createTaskContext(),
-		);
+		const result = await runRefresh(service, {
+			sitemapUrls: ["https://example.com/sitemap-index.xml"],
+			timeoutMs: 12_000,
+			maxBytes: 1_048_576,
+		});
 
 		const pages = await fixture.db.select().from(sitePageRegistry);
-
 		expect(pages).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -389,9 +263,6 @@ describe("PageSourceRefreshService", () => {
 	it("rejects sitemap index child URLs outside allowed origins", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture, {
-			sourceUrl: "https://example.com/sitemap-index.xml",
-		});
 		const fetchCalls: string[] = [];
 		const { service } = createService(fixture, async (url) => {
 			fetchCalls.push(url);
@@ -406,56 +277,16 @@ describe("PageSourceRefreshService", () => {
 		});
 
 		await expect(
-			service.executeRefresh(
-				{
-					siteKey: "fangyuan",
-					sourceIds: [source.id],
-					trigger: "manual",
-				},
-				createTaskContext(),
-			),
+			runRefresh(service, {
+				sitemapUrls: ["https://example.com/sitemap-index.xml"],
+			}),
 		).rejects.toThrow("Sitemap URL is outside allowed origins");
 		expect(fetchCalls).toEqual(["https://example.com/sitemap-index.xml"]);
 	});
 
-	it("stores RSS item titles as registry title hints", async () => {
+	it("marks missing site pages as stale in replace mode", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture, {
-			sourceType: "rss",
-			sourceUrl: "https://example.com/feed.xml",
-		});
-		const { service } = createService(
-			fixture,
-			async () =>
-				"<rss><channel><item><title>Hello</title><link>https://example.com/hello/</link></item></channel></rss>",
-		);
-
-		await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
-
-		const [page] = await fixture.db
-			.select()
-			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "/hello/"));
-
-		expect(page).toMatchObject({
-			pageUrl: "/hello/",
-			title: "Hello",
-			status: "active",
-		});
-	});
-
-	it("marks missing source-owned pages as stale in replace mode", async () => {
-		const fixture = createFixture();
-		await seedSite(fixture);
-		const source = await createSource(fixture, { mode: "replace" });
 		let response = [
 			"<urlset>",
 			"<url><loc>https://example.com/posts/keep/</loc></url>",
@@ -464,31 +295,16 @@ describe("PageSourceRefreshService", () => {
 		].join("");
 		const { service } = createService(fixture, async () => response);
 
-		await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		await runRefresh(service);
 		response =
 			"<urlset><url><loc>https://example.com/posts/keep/</loc></url></urlset>";
 
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		const result = await runRefresh(service);
 
 		const [missing] = await fixture.db
 			.select()
 			.from(sitePageRegistry)
 			.where(eq(sitePageRegistry.pageKey, "/posts/missing/"));
-
 		expect(missing?.status).toBe("stale");
 		expect(result).toMatchObject({ processed: 1, stale: 1 });
 	});
@@ -496,7 +312,6 @@ describe("PageSourceRefreshService", () => {
 	it("does not restore protected page statuses during refresh", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture);
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
 			pageKey: "/posts/trash/",
@@ -510,20 +325,12 @@ describe("PageSourceRefreshService", () => {
 				"<urlset><url><loc>https://example.com/posts/trash/</loc></url></urlset>",
 		);
 
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		const result = await runRefresh(service);
 
 		const [page] = await fixture.db
 			.select()
 			.from(sitePageRegistry)
 			.where(eq(sitePageRegistry.pageKey, "/posts/trash/"));
-
 		expect(page).toMatchObject({
 			pageUrl: "/posts/trash/",
 			status: "trash",
@@ -534,25 +341,26 @@ describe("PageSourceRefreshService", () => {
 	it("reports processed, updated, skipped, failed, and stale counters", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture, { mode: "replace" });
-		const repository = new PageSourceRepository(fixture.db);
-		const staleSeed = await repository.upsertRegistryPage({
-			siteId: 1,
-			pageKey: "/posts/stale-seed/",
-			pageUrl: "/posts/stale-seed/",
-			nowIso: "2026-05-29T00:00:00.000Z",
-		});
-		await repository.attachSourcePage({
-			sourceId: source.id,
-			pageRegistryId: staleSeed.page.id,
-			nowIso: "2026-05-29T00:00:00.000Z",
-		});
-		await fixture.db.insert(sitePageRegistry).values({
-			siteId: 1,
-			pageKey: "/posts/ignored/",
-			pageUrl: "/posts/ignored/",
-			status: "ignored",
-		});
+		await fixture.db.insert(sitePageRegistry).values([
+			{
+				siteId: 1,
+				pageKey: "/posts/stale-seed/",
+				pageUrl: "/posts/stale-seed/",
+				status: "active",
+			},
+			{
+				siteId: 1,
+				pageKey: "/posts/ignored/",
+				pageUrl: "/posts/ignored/",
+				status: "ignored",
+			},
+			{
+				siteId: 1,
+				pageKey: "/posts/missing/",
+				pageUrl: "/posts/missing/",
+				status: "active",
+			},
+		]);
 		const { service } = createService(fixture, async () =>
 			[
 				"<urlset>",
@@ -563,73 +371,33 @@ describe("PageSourceRefreshService", () => {
 			].join(""),
 		);
 
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		const result = await runRefresh(service);
 
-		const [owned] = await fixture.db
-			.select()
-			.from(sitePageRegistrySourcePages)
-			.where(
-				and(
-					eq(sitePageRegistrySourcePages.sourceId, source.id),
-					eq(sitePageRegistrySourcePages.pageRegistryId, staleSeed.page.id),
-				),
-			);
-
-		expect(owned).toBeDefined();
 		expect(result).toMatchObject({
 			processed: 3,
 			created: 0,
 			updated: 1,
-			stale: 0,
+			stale: 1,
 			skipped: 1,
 			failed: 1,
 		});
 	});
 
-	it("returns due refresh inputs only for due enabled sources", async () => {
+	it("does not synthesize due refresh inputs without scheduled source records", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const repository = new PageSourceRepository(fixture.db);
-		const dueSource = await createSource(fixture, {
-			sourceUrl: "https://example.com/due-sitemap.xml",
-		});
-		const futureSource = await createSource(fixture, {
-			sourceUrl: "https://example.com/future-sitemap.xml",
-		});
-		await repository.updateSource({
-			sourceId: dueSource.id,
-			patch: { nextRefreshAt: "2026-05-29T00:00:00.000Z" },
-		});
-		await repository.updateSource({
-			sourceId: futureSource.id,
-			patch: { nextRefreshAt: "2026-05-29T02:00:00.000Z" },
-		});
 		const { service } = createService(fixture, async () => "<urlset />");
 
 		const inputs = await service.listDueRefreshInputs(
 			new Date("2026-05-29T01:00:00.000Z"),
 		);
 
-		expect(inputs).toEqual([
-			{
-				siteKey: "fangyuan",
-				sourceIds: [dueSource.id],
-				trigger: "scheduled",
-			},
-		]);
+		expect(inputs).toEqual([]);
 	});
 
-	it("auto-approves pending unknown pages when a source confirms them", async () => {
+	it("auto-approves pending unknown pages when sitemap confirms them", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture);
 		await fixture.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
 			pageKey: "/posts/source-confirmed/",
@@ -649,14 +417,7 @@ describe("PageSourceRefreshService", () => {
 				"<urlset><url><loc>https://example.com/posts/source-confirmed/</loc></url></urlset>",
 		);
 
-		const result = await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		const result = await runRefresh(service);
 
 		const [candidate] = await fixture.db
 			.select()
@@ -666,7 +427,6 @@ describe("PageSourceRefreshService", () => {
 			.select()
 			.from(pageThreads)
 			.where(eq(pageThreads.pageKey, "/posts/source-confirmed/"));
-
 		expect(candidate).toMatchObject({ status: "approved" });
 		expect(thread).toMatchObject({
 			pageKey: "/posts/source-confirmed/",
@@ -676,24 +436,16 @@ describe("PageSourceRefreshService", () => {
 		expect(result).toMatchObject({ approvedPending: 1 });
 	});
 
-	it("queues a lazy title refresh run for URL-only source entries", async () => {
+	it("queues a lazy title refresh run for entries without title hints", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture);
 		const { service, titleRefreshRuns } = createService(
 			fixture,
 			async () =>
 				"<urlset><url><loc>https://example.com/posts/title-later/</loc></url></urlset>",
 		);
 
-		await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-			},
-			createTaskContext(),
-		);
+		await runRefresh(service);
 
 		expect(titleRefreshRuns).toEqual([
 			{
@@ -703,10 +455,9 @@ describe("PageSourceRefreshService", () => {
 		]);
 	});
 
-	it("passes task timeout and max bytes to source fetch", async () => {
+	it("passes task timeout and max bytes to sitemap fetch", async () => {
 		const fixture = createFixture();
 		await seedSite(fixture);
-		const source = await createSource(fixture);
 		const fetchCalls: Array<{
 			url: string;
 			options: {
@@ -720,16 +471,10 @@ describe("PageSourceRefreshService", () => {
 			return "<urlset><url><loc>https://example.com/posts/options/</loc></url></urlset>";
 		});
 
-		await service.executeRefresh(
-			{
-				siteKey: "fangyuan",
-				sourceIds: [source.id],
-				trigger: "manual",
-				timeoutMs: 12_000,
-				maxBytes: 1_048_576,
-			},
-			createTaskContext(),
-		);
+		await runRefresh(service, {
+			timeoutMs: 12_000,
+			maxBytes: 1_048_576,
+		});
 
 		expect(fetchCalls).toEqual([
 			{

@@ -56,30 +56,16 @@ const sitemapUrlSchema = z
 		return parsed.protocol === "http:" || parsed.protocol === "https:";
 	}, "Sitemap URL must use http or https.");
 
-const pageSourceRefreshPayloadSchema = z
-	.object({
-		siteKey: z.string().min(1),
-		sitemapUrls: z.array(sitemapUrlSchema).optional(),
-		sourceIds: z.array(z.number().int().positive()).optional(),
-		mode: z.enum(["append", "replace"]).optional(),
-		trigger: z.enum(["manual", "scheduled", "webhook"]).default("scheduled"),
-		timeoutMs: z.number().int().positive().optional(),
-		maxBytes: z.number().int().positive().optional(),
-		maxAttempts: z.number().int().positive().optional(),
-		retryDelaySec: z.number().int().nonnegative().optional(),
-	})
-	.superRefine((value, context) => {
-		if (
-			(!value.sitemapUrls || value.sitemapUrls.length === 0) &&
-			(!value.sourceIds || value.sourceIds.length === 0)
-		) {
-			context.addIssue({
-				code: "custom",
-				path: ["sitemapUrls"],
-				message: "Either sitemapUrls or sourceIds is required.",
-			});
-		}
-	});
+const pageSourceRefreshPayloadSchema = z.object({
+	siteKey: z.string().min(1),
+	sitemapUrls: z.array(sitemapUrlSchema).min(1),
+	mode: z.enum(["append", "replace"]).optional(),
+	trigger: z.enum(["manual", "scheduled", "webhook"]).default("scheduled"),
+	timeoutMs: z.number().int().positive().optional(),
+	maxBytes: z.number().int().positive().optional(),
+	maxAttempts: z.number().int().positive().optional(),
+	retryDelaySec: z.number().int().nonnegative().optional(),
+});
 
 const pageMetadataRefreshPayloadSchema = z.object({
 	siteKey: z.string().min(1),
@@ -205,7 +191,7 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 				delete: "page_registry.update",
 			},
 			payloadSchema: pageSourceRefreshPayloadSchema,
-			defaultPayload: { siteKey: "", trigger: "scheduled" },
+			defaultPayload: { siteKey: "", sitemapUrls: [], trigger: "scheduled" },
 			defaultPolicy,
 			schedule,
 			dangerous: false,
@@ -238,7 +224,6 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 							{
 								siteKey: validated.siteKey,
 								sitemapUrls: validated.sitemapUrls,
-								sourceIds: validated.sourceIds,
 								mode: validated.mode,
 								trigger: validated.trigger,
 								timeoutMs: validated.timeoutMs,

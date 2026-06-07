@@ -51,10 +51,10 @@ describe("built-in task type registry", () => {
 		});
 	});
 
-	it("validates legacy sourceIds compatibility through the page source schema", () => {
+	it("rejects legacy sourceIds payloads through the page source schema", () => {
 		const registry = createBuiltInTaskTypeRegistry();
 
-		expect(
+		expect(() =>
 			registry.validatePayload("page_source_refresh", {
 				siteKey: "fangyuan",
 				sourceIds: [1, 2],
@@ -62,14 +62,7 @@ describe("built-in task type registry", () => {
 				timeoutMs: 10_000,
 				maxBytes: 512_000,
 			}),
-		).toEqual({
-			siteKey: "fangyuan",
-			sourceIds: [1, 2],
-			mode: "replace",
-			trigger: "scheduled",
-			timeoutMs: 10_000,
-			maxBytes: 512_000,
-		});
+		).toThrow(/Invalid task payload/);
 		expect(() =>
 			registry.validatePayload("page_source_refresh", {
 				siteKey: "fangyuan",

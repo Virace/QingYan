@@ -195,83 +195,6 @@ function indexExists(sqlite: SqliteClient, indexName: string): boolean {
 	);
 }
 
-function parseJsonRecord(value: string | null): Record<string, unknown> | null {
-	if (!value) {
-		return null;
-	}
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: null;
-	} catch {
-		return null;
-	}
-}
-
-function migrateAuthoritativeSourceIdsToSitemapUrls(
-	sqlite: SqliteClient,
-): void {
-	if (
-		!tableExists(sqlite, "site_settings") ||
-		!columnExists(sqlite, "site_settings", "page_registry_json") ||
-		!tableExists(sqlite, "site_page_registry_sources")
-	) {
-		return;
-	}
-
-	const settingsRows = sqlite
-		.prepare(
-			"SELECT site_id, page_registry_json FROM site_settings WHERE page_registry_json IS NOT NULL",
-		)
-		.all() as Array<{ site_id: number; page_registry_json: string | null }>;
-	const sourcesBySite = new Map<number, Map<number, string>>();
-	const sourceRows = sqlite
-		.prepare("SELECT id, site_id, source_url FROM site_page_registry_sources")
-		.all() as Array<{ id: number; site_id: number; source_url: string }>;
-	for (const source of sourceRows) {
-		const siteSources = sourcesBySite.get(source.site_id) ?? new Map();
-		siteSources.set(source.id, source.source_url);
-		sourcesBySite.set(source.site_id, siteSources);
-	}
-
-	const updateSettings = sqlite.prepare(
-		"UPDATE site_settings SET page_registry_json = ? WHERE site_id = ?",
-	);
-	for (const row of settingsRows) {
-		const pageRegistry = parseJsonRecord(row.page_registry_json);
-		if (!pageRegistry) {
-			continue;
-		}
-		const legacyIds = Array.isArray(pageRegistry.authoritativeSourceIds)
-			? pageRegistry.authoritativeSourceIds.filter(
-					(value): value is number =>
-						Number.isInteger(value) && (value as number) > 0,
-				)
-			: [];
-		if (
-			legacyIds.length === 0 ||
-			Array.isArray(pageRegistry.authoritativeSitemapUrls)
-		) {
-			delete pageRegistry.authoritativeSourceIds;
-			updateSettings.run(JSON.stringify(pageRegistry), row.site_id);
-			continue;
-		}
-
-		const siteSources = sourcesBySite.get(row.site_id);
-		const sitemapUrls = Array.from(
-			new Set(
-				legacyIds
-					.map((sourceId) => siteSources?.get(sourceId))
-					.filter((value): value is string => Boolean(value)),
-			),
-		);
-		pageRegistry.authoritativeSitemapUrls = sitemapUrls;
-		delete pageRegistry.authoritativeSourceIds;
-		updateSettings.run(JSON.stringify(pageRegistry), row.site_id);
-	}
-}
-
 function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 	const applyBackfill = sqlite.transaction(() => {
 		if (tableExists(sqlite, "site_settings")) {
@@ -303,26 +226,6 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 		if (tableExists(sqlite, "comments")) {
 			addColumnIfMissing(sqlite, "comments", "author_user_id", "integer");
 		}
-
-		if (tableExists(sqlite, "site_page_registry_sources")) {
-			sqlite.exec(`
-				CREATE TABLE IF NOT EXISTS site_page_registry_source_pages (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					source_id integer NOT NULL,
-					page_registry_id integer NOT NULL,
-					first_seen_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					last_seen_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					FOREIGN KEY (source_id) REFERENCES site_page_registry_sources(id) ON UPDATE no action ON DELETE no action,
-					FOREIGN KEY (page_registry_id) REFERENCES site_page_registry(id) ON UPDATE no action ON DELETE no action
-				);
-				CREATE UNIQUE INDEX IF NOT EXISTS site_page_registry_source_pages_source_page_idx ON site_page_registry_source_pages (source_id, page_registry_id);
-				CREATE INDEX IF NOT EXISTS site_page_registry_source_pages_page_idx ON site_page_registry_source_pages (page_registry_id);
-			`);
-		}
-
-		migrateAuthoritativeSourceIdsToSitemapUrls(sqlite);
 
 		sqlite.exec(`
 			CREATE TABLE IF NOT EXISTS task_runs (

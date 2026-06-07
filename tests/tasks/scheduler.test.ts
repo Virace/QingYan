@@ -121,7 +121,10 @@ describe("TaskScheduler", () => {
 			scope: { siteKey: "fangyuan" },
 			enabled: true,
 			scheduleKind: "interval",
-			payload: { siteKey: "fangyuan", sourceIds: [1] },
+			payload: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+			},
 			policy: {},
 			trigger: { everyMinutes: 30 },
 			nextRunAt: "2026-06-04T10:00:00.000Z",
@@ -155,7 +158,10 @@ describe("TaskScheduler", () => {
 			status: "queued",
 			trigger: "schedule",
 			triggerSnapshot: { dueAt: "2026-06-04T10:00:00.000Z" },
-			input: { siteKey: "fangyuan", sourceIds: [1] },
+			input: {
+				siteKey: "fangyuan",
+				sitemapUrls: ["https://example.com/sitemap.xml"],
+			},
 			concurrencyKey: 'task:page_source_refresh:site:{"siteKey":"fangyuan"}',
 		});
 		expect(updatedTask).toMatchObject({

@@ -1,5 +1,4 @@
 import { requestJson } from "./client";
-import type { TaskExecutionOptions } from "./ops";
 import type { TaskRunProjection } from "./tasks";
 
 export interface Page<T> {
@@ -21,8 +20,6 @@ export type PageRegistryStatus =
 	| "deleted"
 	| "ignored";
 export type PendingPageStatus = "pending" | "approved" | "rejected" | "ignored";
-export type PageSourceType = "sitemap" | "rss" | "atom";
-export type PageSourceMode = "append" | "replace";
 export type AdminPageSortBy =
 	| "updatedAt"
 	| "createdAt"
@@ -165,23 +162,6 @@ export interface PendingPageCandidate {
 	hitCount: number;
 	status: PendingPageStatus;
 	lastRejectReason: string | null;
-	createdAt: string;
-	updatedAt: string;
-}
-
-export interface PageRegistrySource {
-	id: number;
-	siteKey: string;
-	sourceType: PageSourceType;
-	sourceUrl: string;
-	enabled: boolean;
-	mode: PageSourceMode;
-	refreshIntervalSec: number | null;
-	lastAttemptAt: string | null;
-	lastSuccessAt: string | null;
-	lastSuccessHash: string | null;
-	lastError: string | null;
-	nextRefreshAt: string | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -900,66 +880,6 @@ export function ignorePendingPage(input: {
 		method: "POST",
 		body: JSON.stringify(input),
 	});
-}
-
-export function listPageRegistrySources(input: { siteKey: string }) {
-	return requestJson<{ items: PageRegistrySource[] }>(
-		`/api/admin/page-registry/sources?${queryString(input)}`,
-	);
-}
-
-export function createPageRegistrySource(input: {
-	siteKey: string;
-	sourceType: PageSourceType;
-	sourceUrl: string;
-	enabled: boolean;
-	mode: PageSourceMode;
-	refreshIntervalSec?: number | null;
-}) {
-	return requestJson<{ source: PageRegistrySource }>(
-		"/api/admin/page-registry/sources",
-		{
-			method: "POST",
-			body: JSON.stringify(input),
-		},
-	);
-}
-
-export function deletePageRegistrySource(input: { sourceId: number }) {
-	return requestJson<{ ok: true }>(
-		`/api/admin/page-registry/sources/${input.sourceId}`,
-		{
-			method: "DELETE",
-		},
-	);
-}
-
-export function refreshPageRegistrySource(input: {
-	sourceId: number;
-	options?: TaskExecutionOptions;
-}) {
-	return requestJson<{ run: TaskRunProjection }>(
-		`/api/admin/page-registry/sources/${input.sourceId}/refresh`,
-		{
-			method: "POST",
-			body: JSON.stringify(input.options ?? {}),
-		},
-	);
-}
-
-export function refreshPageRegistrySources(
-	input: {
-		siteKey: string;
-		mode?: PageSourceMode;
-	} & TaskExecutionOptions,
-) {
-	return requestJson<{ run: TaskRunProjection }>(
-		"/api/admin/page-registry/refresh",
-		{
-			method: "POST",
-			body: JSON.stringify(input),
-		},
-	);
 }
 
 export function listCommenters(input: {

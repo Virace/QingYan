@@ -516,7 +516,7 @@ describe("admin api ACL", () => {
 		});
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/admin/page-registry/sources?siteKey=qingyan",
+			url: "/qingyan/api/admin/page-registry/pending?siteKey=qingyan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie.value,
 			},

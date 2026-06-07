@@ -1,3 +1,5 @@
+/// <reference lib="dom" />
+
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 

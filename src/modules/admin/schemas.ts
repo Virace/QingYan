@@ -450,66 +450,6 @@ export const adminPageTitleRefreshBodySchema = z.object({
 		.optional(),
 });
 
-export const pageSourceTypeSchema = z.enum(["sitemap", "rss", "atom"]);
-export const pageSourceModeSchema = z.enum(["append", "replace"]);
-
-export const adminPageRegistrySourcesQuerySchema = z.object({
-	siteKey: z.string().min(1),
-});
-
-export const adminPageRegistrySourceCreateBodySchema = z.object({
-	siteKey: z.string().min(1),
-	sourceType: pageSourceTypeSchema,
-	sourceUrl: z.string().url(),
-	enabled: z.boolean().default(true),
-	mode: pageSourceModeSchema.default("append"),
-	refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
-});
-
-export const adminPageRegistrySourcePatchBodySchema = z
-	.object({
-		sourceType: pageSourceTypeSchema.optional(),
-		sourceUrl: z.string().url().optional(),
-		enabled: z.boolean().optional(),
-		mode: pageSourceModeSchema.optional(),
-		refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
-		nextRefreshAt: z.string().datetime().nullable().optional(),
-	})
-	.refine((value) => Object.keys(value).length > 0, {
-		message: "至少需要一个更新字段",
-	});
-
-export const adminPageRegistrySourceDeleteBodySchema = z.object({}).optional();
-
-export const adminPageRegistrySourceParamsSchema = z.object({
-	sourceId: z.coerce.number().int().positive(),
-});
-
-export const adminTaskExecutionOptionsSchema = z.object({
-	executionMode: z.literal("async").optional(),
-	timeoutMs: z.number().int().min(1000).max(60_000).optional(),
-	maxBytes: z
-		.number()
-		.int()
-		.min(65_536)
-		.max(10 * 1024 * 1024)
-		.optional(),
-	runAfter: z.string().datetime().nullable().optional(),
-	maxAttempts: z.number().int().min(1).max(10).optional(),
-	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
-});
-
-export const adminPageRegistrySourceRefreshBodySchema =
-	adminTaskExecutionOptionsSchema.optional();
-
-export const adminPageRegistryRefreshBodySchema =
-	adminTaskExecutionOptionsSchema
-		.extend({
-			siteKey: z.string().min(1),
-			mode: pageSourceModeSchema.optional(),
-		})
-		.optional();
-
 export const adminMaintenanceTasksQuerySchema = z.object({
 	siteKey: z.string().min(1).optional(),
 	type: z.string().min(1).optional(),

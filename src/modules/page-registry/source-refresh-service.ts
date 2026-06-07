@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
-
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
-import { sites } from "../../db/schema";
+import { sitePageRegistry, sites } from "../../db/schema";
 import type { TaskRunnerContext } from "../tasks/task-runner-context";
 import { PageRegistryService } from "./service";
 import {
@@ -15,13 +13,9 @@ import {
 	type PageSourceEntry,
 	type ParsedPageSource,
 } from "./source-parser";
-import {
-	PageSourceRepository,
-	type PageRegistrySourceRecord,
-	type PageSourceMode,
-} from "./source-repository";
 
 export type PageSourceRefreshTrigger = "manual" | "scheduled" | "webhook";
+export type PageSourceMode = "append" | "replace";
 
 export interface PageSourceRefreshCounters {
 	processed: number;
@@ -51,29 +45,20 @@ export interface PageSourceRefreshOptions {
 
 interface PageSourceRefreshJobScope {
 	siteKey: string;
-	sitemapUrls?: string[];
-	sourceIds?: number[];
+	sitemapUrls: string[];
 	mode?: PageSourceMode;
 	trigger: PageSourceRefreshTrigger;
 	timeoutMs?: number;
 	maxBytes?: number;
-	runAfter?: string | null;
-	maxAttempts?: number;
-	retryDelaySec?: number;
 }
 
-type RefreshablePageSource =
-	| PageRegistrySourceRecord
-	| {
-			id: null;
-			siteId: number;
-			siteKey: string;
-			sourceType: "sitemap";
-			sourceUrl: string;
-			enabled: true;
-			mode: PageSourceMode;
-			refreshIntervalSec: null;
-	  };
+type RefreshablePageSource = {
+	siteId: number;
+	siteKey: string;
+	sourceType: "sitemap";
+	sourceUrl: string;
+	mode: PageSourceMode;
+};
 
 function emptyCounters(): PageSourceRefreshCounters {
 	return {
@@ -85,14 +70,6 @@ function emptyCounters(): PageSourceRefreshCounters {
 		failed: 0,
 		approvedPending: 0,
 	};
-}
-
-function hashText(text: string): string {
-	return createHash("sha256").update(text).digest("hex");
-}
-
-function addSeconds(date: Date, seconds: number): string {
-	return new Date(date.getTime() + seconds * 1000).toISOString();
 }
 
 const MAX_SITEMAP_INDEX_DEPTH = 3;
@@ -128,14 +105,12 @@ function assertAllowedSitemapUrl(url: string, allowedOrigins: string[]) {
 }
 
 export class PageSourceRefreshService {
-	private readonly repository: PageSourceRepository;
 	private readonly pageRegistry: PageRegistryService;
 
 	public constructor(
 		private readonly db: AppDatabase,
 		private readonly options: PageSourceRefreshOptions,
 	) {
-		this.repository = new PageSourceRepository(db);
 		this.pageRegistry = new PageRegistryService(db);
 	}
 
@@ -153,20 +128,8 @@ export class PageSourceRefreshService {
 		return result;
 	}
 
-	public async listDueRefreshInputs(now = new Date()) {
-		const dueSources = await this.repository.listDueSources(now.toISOString());
-		const bySiteKey = new Map<string, number[]>();
-		for (const source of dueSources) {
-			const sourceIds = bySiteKey.get(source.siteKey) ?? [];
-			sourceIds.push(source.id);
-			bySiteKey.set(source.siteKey, sourceIds);
-		}
-
-		return Array.from(bySiteKey, ([siteKey, sourceIds]) => ({
-			siteKey,
-			sourceIds,
-			trigger: "scheduled" as const,
-		}));
+	public async listDueRefreshInputs(_now = new Date()) {
+		return [];
 	}
 
 	private async refreshSourcesWithContext(
@@ -176,10 +139,11 @@ export class PageSourceRefreshService {
 		const selectedSources = await this.listSelectedSources(scope);
 		const counters = emptyCounters();
 		const errors: Array<{
-			sourceId: number | null;
 			url: string;
 			reason: string;
 		}> = [];
+		const seenPageRegistryIds = new Set<number>();
+		const siteId = selectedSources[0]?.siteId;
 
 		for (const source of selectedSources) {
 			if (context.signal?.aborted) {
@@ -195,9 +159,19 @@ export class PageSourceRefreshService {
 			counters.failed += sourceResult.failed;
 			counters.approvedPending += sourceResult.approvedPending;
 			errors.push(...sourceResult.errors);
+			for (const pageId of sourceResult.seenPageRegistryIds) {
+				seenPageRegistryIds.add(pageId);
+			}
 			await context.updateProgress({
 				phase: "refreshing",
 				...counters,
+			});
+		}
+		if ((scope.mode ?? "replace") === "replace" && siteId !== undefined) {
+			counters.stale += await this.markMissingSitePagesStale({
+				siteId,
+				seenPageRegistryIds: Array.from(seenPageRegistryIds),
+				nowIso: new Date().toISOString(),
 			});
 		}
 
@@ -210,22 +184,6 @@ export class PageSourceRefreshService {
 	private async listSelectedSources(
 		scope: PageSourceRefreshJobScope,
 	): Promise<RefreshablePageSource[]> {
-		const runtimeSources = await this.listRuntimeSitemapSources(scope);
-		if (runtimeSources.length > 0) {
-			return runtimeSources;
-		}
-		const legacySources = await this.repository.listEnabledSources({
-			sourceIds: scope.sourceIds,
-		});
-		return legacySources.filter((source) => source.siteKey === scope.siteKey);
-	}
-
-	private async listRuntimeSitemapSources(
-		scope: PageSourceRefreshJobScope,
-	): Promise<RefreshablePageSource[]> {
-		if (!scope.sitemapUrls || scope.sitemapUrls.length === 0) {
-			return [];
-		}
 		const [site] = await this.db
 			.select()
 			.from(sites)
@@ -243,14 +201,11 @@ export class PageSourceRefreshService {
 			assertAllowedSitemapUrl(sourceUrl, allowedOrigins);
 		}
 		return scope.sitemapUrls.map((sourceUrl) => ({
-			id: null,
 			siteId: site.id,
 			siteKey: site.siteKey,
 			sourceType: "sitemap",
 			sourceUrl,
-			enabled: true,
 			mode: scope.mode ?? "replace",
-			refreshIntervalSec: null,
 		}));
 	}
 
@@ -262,7 +217,6 @@ export class PageSourceRefreshService {
 		const nowIso = now.toISOString();
 		const counters = emptyCounters();
 		const errors: Array<{
-			sourceId: number | null;
 			url: string;
 			reason: string;
 		}> = [];
@@ -270,9 +224,6 @@ export class PageSourceRefreshService {
 		const missingTitlePageKeys: string[] = [];
 		let approvedPending = 0;
 
-		if (source.id !== null) {
-			await this.repository.markSourceAttempt(source.id, nowIso);
-		}
 		const allowedOrigins = await this.options.loadAllowedOriginsForSite(
 			source.siteKey,
 		);
@@ -297,7 +248,6 @@ export class PageSourceRefreshService {
 			if (rejectionReason) {
 				counters.failed += 1;
 				errors.push({
-					sourceId: source.id,
 					url: entry.url,
 					reason: rejectionReason,
 				});
@@ -307,13 +257,12 @@ export class PageSourceRefreshService {
 			if (!normalized) {
 				counters.failed += 1;
 				errors.push({
-					sourceId: source.id,
 					url: entry.url,
 					reason: "normalize_failed",
 				});
 				continue;
 			}
-			const upsert = await this.repository.upsertRegistryPage({
+			const upsert = await this.upsertRegistryPage({
 				siteId: source.siteId,
 				pageKey: normalized.pageKey,
 				pageUrl: normalized.pageUrl,
@@ -324,13 +273,6 @@ export class PageSourceRefreshService {
 				missingTitlePageKeys.push(normalized.pageKey);
 			}
 			seenPageRegistryIds.push(upsert.page.id);
-			if (source.id !== null) {
-				await this.repository.attachSourcePage({
-					sourceId: source.id,
-					pageRegistryId: upsert.page.id,
-					nowIso,
-				});
-			}
 			const approved = await this.pageRegistry.approvePendingCandidateIfPending(
 				{
 					siteId: source.siteId,
@@ -351,25 +293,6 @@ export class PageSourceRefreshService {
 			}
 		}
 
-		const mode = scope.mode ?? source.mode;
-		if (mode === "replace" && source.id !== null) {
-			counters.stale += await this.repository.markMissingSourcePagesStale({
-				sourceId: source.id,
-				seenPageRegistryIds,
-				nowIso,
-			});
-		}
-
-		if (source.id !== null) {
-			await this.repository.markSourceSuccess({
-				sourceId: source.id,
-				nowIso,
-				hash: hashText(parsed.hashText),
-				nextRefreshAt: source.refreshIntervalSec
-					? addSeconds(now, source.refreshIntervalSec)
-					: null,
-			});
-		}
 		if (missingTitlePageKeys.length > 0) {
 			await this.options.createTitleRefreshRun?.({
 				siteKey: source.siteKey,
@@ -381,6 +304,7 @@ export class PageSourceRefreshService {
 			...counters,
 			approvedPending,
 			errors,
+			seenPageRegistryIds,
 		};
 	}
 
@@ -449,5 +373,105 @@ export class PageSourceRefreshService {
 				});
 			}
 		}
+	}
+
+	private async upsertRegistryPage(input: {
+		siteId: number;
+		pageKey: string;
+		pageUrl: string;
+		title?: string | null;
+		nowIso: string;
+	}) {
+		const [existing] = await this.db
+			.select()
+			.from(sitePageRegistry)
+			.where(
+				and(
+					eq(sitePageRegistry.siteId, input.siteId),
+					eq(sitePageRegistry.pageKey, input.pageKey),
+				),
+			)
+			.limit(1);
+
+		if (!existing) {
+			await this.db.insert(sitePageRegistry).values({
+				siteId: input.siteId,
+				pageKey: input.pageKey,
+				pageUrl: input.pageUrl,
+				title: input.title ?? null,
+				status: "active",
+				firstSeenAt: input.nowIso,
+				lastSeenAt: input.nowIso,
+				createdAt: input.nowIso,
+				updatedAt: input.nowIso,
+			});
+			const [page] = await this.db
+				.select()
+				.from(sitePageRegistry)
+				.where(
+					and(
+						eq(sitePageRegistry.siteId, input.siteId),
+						eq(sitePageRegistry.pageKey, input.pageKey),
+					),
+				)
+				.limit(1);
+			return { page, action: "created" as const };
+		}
+
+		const protectedStatus = ["trash", "deleted", "ignored"].includes(
+			existing.status,
+		);
+		await this.db
+			.update(sitePageRegistry)
+			.set({
+				pageUrl: input.pageUrl,
+				title: input.title ?? existing.title,
+				lastSeenAt: input.nowIso,
+				updatedAt: input.nowIso,
+			})
+			.where(eq(sitePageRegistry.id, existing.id));
+		const [page] = await this.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.id, existing.id))
+			.limit(1);
+
+		if (protectedStatus) {
+			return { page, action: "skipped_protected" as const };
+		}
+		return {
+			page,
+			action:
+				existing.pageUrl === input.pageUrl &&
+				existing.title === (input.title ?? null)
+					? ("unchanged" as const)
+					: ("updated" as const),
+		};
+	}
+
+	private async markMissingSitePagesStale(input: {
+		siteId: number;
+		seenPageRegistryIds: number[];
+		nowIso: string;
+	}) {
+		const rows = await this.db
+			.select({
+				id: sitePageRegistry.id,
+				status: sitePageRegistry.status,
+			})
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.siteId, input.siteId));
+		const missingIds = rows
+			.filter((row) => !input.seenPageRegistryIds.includes(row.id))
+			.filter((row) => !["trash", "deleted", "ignored"].includes(row.status))
+			.map((row) => row.id);
+		if (missingIds.length === 0) {
+			return 0;
+		}
+		await this.db
+			.update(sitePageRegistry)
+			.set({ status: "stale", updatedAt: input.nowIso })
+			.where(inArray(sitePageRegistry.id, missingIds));
+		return missingIds.length;
 	}
 }

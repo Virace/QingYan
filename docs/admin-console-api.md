@@ -368,9 +368,13 @@ Query：
 
 ## Page Registry
 
-### `GET /api/admin/page-registry/sources`
+页面来源刷新不再提供 source CRUD API。权威模式的 sitemap 地址由站点设置
+`pageRegistry.authoritativeSitemapUrls` 管理，并同步到系统托管的
+`page_source_refresh` 任务 payload `sitemapUrls`。
 
-列出当前站点页面来源。
+### `GET /api/admin/page-registry/pending`
+
+列出当前站点待审核未知页面。
 
 Query：
 
@@ -384,65 +388,79 @@ Query：
 
 ```ts
 {
-  items: PageRegistrySource[];
+  items: Array<{
+    siteKey: string;
+    pageKey: string;
+    pageUrl: string;
+    hitCount: number;
+    status: "pending" | "rejected" | "ignored";
+    firstSeenAt: string;
+    lastSeenAt: string;
+  }>;
+  pagination: {
+    limit: number;
+    offset: number;
+    totalCount: number;
+  };
 }
 ```
 
-### `POST /api/admin/page-registry/sources`
+### `POST /api/admin/page-registry/pending/approve`
 
-创建 sitemap、RSS 或 Atom 页面来源。
+批准待审核未知页面，并将待处理访问量合并到正式页面线程。
 
 请求：
 
 ```ts
 {
   siteKey: string;
-  sourceType: "sitemap" | "rss" | "atom";
-  sourceUrl: string;
-  enabled: boolean;
-  mode: "append" | "replace";
-  refreshIntervalSec?: number | null;
+  pageKey: string;
 }
 ```
-
-### `DELETE /api/admin/page-registry/sources/{sourceId}`
-
-删除页面来源配置和来源-页面关联，不删除页面登记、评论、点赞或访问数据。
 
 响应：
 
 ```ts
 {
-  ok: true;
+  page: SitePageRegistryProjection;
 }
 ```
 
-### `POST /api/admin/page-registry/sources/{sourceId}/refresh`
+### `POST /api/admin/page-registry/pending/reject`
 
-为单个来源创建 `page_source_refresh` 任务。
-
-响应：
-
-```ts
-{
-  run: TaskRunProjection;
-}
-```
-
-### `POST /api/admin/page-registry/refresh`
-
-为当前站点全部来源创建 `page_source_refresh` 任务。
+拒绝待审核未知页面。
 
 请求：
 
 ```ts
 {
   siteKey: string;
-  mode?: "append" | "replace";
+  pageKey: string;
+  reason?: string;
 }
 ```
 
-来源刷新如果命中待处理未知页面，会自动放行 pending candidate 并合并待处理访问量。
+### `POST /api/admin/page-registry/pending/ignore`
+
+忽略待审核未知页面。
+
+请求：
+
+```ts
+{
+  siteKey: string;
+  pageKey: string;
+  reason?: string;
+}
+```
+
+响应：
+
+```ts
+{
+  candidate: PendingPageCandidateProjection;
+}
+```
 
 ### `GET /api/admin/commenters`
 

@@ -19,7 +19,6 @@ type PageMetadataRefreshTrigger = "manual" | "source_refresh" | "scheduled";
 export interface PageMetadataRefreshScope {
 	siteKey: string;
 	pageKeys?: string[];
-	sourceIds?: number[];
 	onlyMissingTitle?: boolean;
 	forceTitle?: boolean;
 	trigger: PageMetadataRefreshTrigger;

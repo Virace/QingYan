@@ -42,67 +42,6 @@ export const sitePageRegistry = sqliteTable(
 	],
 );
 
-export const sitePageRegistrySources = sqliteTable(
-	"site_page_registry_sources",
-	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		siteId: integer("site_id")
-			.notNull()
-			.references(() => sites.id),
-		sourceType: text("source_type").notNull(),
-		sourceUrl: text("source_url").notNull(),
-		enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-		mode: text("mode").notNull().default("append"),
-		refreshIntervalSec: integer("refresh_interval_sec"),
-		lastAttemptAt: text("last_attempt_at"),
-		lastSuccessAt: text("last_success_at"),
-		lastSuccessHash: text("last_success_hash"),
-		lastError: text("last_error"),
-		nextRefreshAt: text("next_refresh_at"),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-	},
-	(table) => [
-		uniqueIndex("site_page_registry_sources_site_url_idx").on(
-			table.siteId,
-			table.sourceUrl,
-		),
-		index("site_page_registry_sources_site_enabled_idx").on(
-			table.siteId,
-			table.enabled,
-		),
-		index("site_page_registry_sources_next_refresh_idx").on(
-			table.nextRefreshAt,
-		),
-	],
-);
-
-export const sitePageRegistrySourcePages = sqliteTable(
-	"site_page_registry_source_pages",
-	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		sourceId: integer("source_id")
-			.notNull()
-			.references(() => sitePageRegistrySources.id),
-		pageRegistryId: integer("page_registry_id")
-			.notNull()
-			.references(() => sitePageRegistry.id),
-		firstSeenAt: text("first_seen_at")
-			.notNull()
-			.default(sql`CURRENT_TIMESTAMP`),
-		lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-	},
-	(table) => [
-		uniqueIndex("site_page_registry_source_pages_source_page_idx").on(
-			table.sourceId,
-			table.pageRegistryId,
-		),
-		index("site_page_registry_source_pages_page_idx").on(table.pageRegistryId),
-	],
-);
-
 export const pendingPageCandidates = sqliteTable(
 	"pending_page_candidates",
 	{

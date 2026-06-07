@@ -49,8 +49,7 @@ export interface TaskRunnerServices {
 		executeRefresh(
 			input: {
 				siteKey: string;
-				sitemapUrls?: string[];
-				sourceIds?: number[];
+				sitemapUrls: string[];
 				mode?: "append" | "replace";
 				trigger: PageSourceRefreshTrigger;
 				timeoutMs?: number;

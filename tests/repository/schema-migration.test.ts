@@ -136,68 +136,23 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("backfills legacy authoritative source IDs to sitemap URLs", () => {
+	it("does not create legacy page source tables in the current schema", () => {
 		const fixture = createMigratedDatabase();
 
 		try {
-			const site = fixture.sqlite
+			const legacySourceTable = fixture.sqlite
 				.prepare(
-					"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
+					"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
 				)
-				.run("fangyuan", "FangYuan", '["http://localhost:4321"]');
-			const siteId = Number(site.lastInsertRowid);
-			const source = fixture.sqlite
+				.get("site_page_registry_sources");
+			const legacySourcePageTable = fixture.sqlite
 				.prepare(
-					`
-						INSERT INTO site_page_registry_sources (
-							site_id,
-							source_type,
-							source_url,
-							enabled,
-							mode
-						) VALUES (?, ?, ?, ?, ?)
-					`,
+					"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
 				)
-				.run(
-					siteId,
-					"sitemap",
-					"http://localhost:4321/sitemap.xml",
-					1,
-					"replace",
-				);
-			const sourceId = Number(source.lastInsertRowid);
-			fixture.sqlite
-				.prepare(
-					"INSERT INTO site_settings (site_id, page_registry_json) VALUES (?, ?)",
-				)
-				.run(
-					siteId,
-					JSON.stringify({
-						mode: "authoritative",
-						authoritativeSourceIds: [sourceId],
-						unknownPageResponse: "inactive_payload",
-						requireHealthySource: true,
-						sourceFreshnessGraceSec: 7200,
-						emergencyLockdown: false,
-					}),
-				);
+				.get("site_page_registry_source_pages");
 
-			applyDatabaseMigrations(fixture.sqlite);
-
-			const row = fixture.sqlite
-				.prepare(
-					"SELECT page_registry_json FROM site_settings WHERE site_id = ?",
-				)
-				.get(siteId) as { page_registry_json: string };
-			const pageRegistry = JSON.parse(row.page_registry_json) as Record<
-				string,
-				unknown
-			>;
-			expect(pageRegistry).toMatchObject({
-				mode: "authoritative",
-				authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
-			});
-			expect(pageRegistry).not.toHaveProperty("authoritativeSourceIds");
+			expect(legacySourceTable).toBeUndefined();
+			expect(legacySourcePageTable).toBeUndefined();
 		} finally {
 			fixture.cleanup();
 		}
@@ -247,12 +202,6 @@ describe("initial migration", () => {
 			}>;
 			const pageRegistryColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(site_page_registry)")
-				.all() as Array<{ name: string; dflt_value: string | null }>;
-			const pageRegistrySourceColumns = fixture.sqlite
-				.prepare("PRAGMA table_info(site_page_registry_sources)")
-				.all() as Array<{ name: string; dflt_value: string | null }>;
-			const pageRegistrySourcePageColumns = fixture.sqlite
-				.prepare("PRAGMA table_info(site_page_registry_source_pages)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
 			const pendingCandidateColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(pending_page_candidates)")
@@ -565,37 +514,6 @@ describe("initial migration", () => {
 					"last_seen_at",
 					"trashed_at",
 					"deleted_at",
-					"created_at",
-					"updated_at",
-				]),
-			);
-			expect(pageRegistrySourceColumns.map((column) => column.name)).toEqual(
-				expect.arrayContaining([
-					"id",
-					"site_id",
-					"source_type",
-					"source_url",
-					"enabled",
-					"mode",
-					"refresh_interval_sec",
-					"last_attempt_at",
-					"last_success_at",
-					"last_success_hash",
-					"last_error",
-					"next_refresh_at",
-					"created_at",
-					"updated_at",
-				]),
-			);
-			expect(
-				pageRegistrySourcePageColumns.map((column) => column.name),
-			).toEqual(
-				expect.arrayContaining([
-					"id",
-					"source_id",
-					"page_registry_id",
-					"first_seen_at",
-					"last_seen_at",
 					"created_at",
 					"updated_at",
 				]),
@@ -1303,16 +1221,6 @@ describe("initial migration", () => {
 					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
 				);
-				CREATE TABLE site_page_registry_sources (
-					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-					site_id integer NOT NULL,
-					source_type text NOT NULL,
-					source_url text NOT NULL,
-					enabled integer DEFAULT true NOT NULL,
-					mode text DEFAULT 'append' NOT NULL,
-					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-				);
 				CREATE TABLE task_runs (
 					id text PRIMARY KEY NOT NULL,
 					type text NOT NULL,
@@ -1372,7 +1280,6 @@ describe("initial migration", () => {
 					"visitor_request_metadata",
 					"ip_region_database_state",
 					"ip_region_update_runs",
-					"site_page_registry_source_pages",
 					"pending_page_candidates",
 					"pending_page_view_sessions",
 					"admin_profile_verification_tokens",
