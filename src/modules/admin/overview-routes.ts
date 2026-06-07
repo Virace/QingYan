@@ -4,6 +4,7 @@ import { joinPublicPath } from "../../config/public-path";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
+import { requirePermission } from "./authorization";
 
 export const adminOverviewRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new AdminRepository(fastify.db);
@@ -21,7 +22,8 @@ export const adminOverviewRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 
 	fastify.get("/", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "sites.read");
 		const logging = fastify.loggerManager.getRuntimeSettings();
 
 		return service.getOverview({

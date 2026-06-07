@@ -161,6 +161,32 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			security: fastify.config.security,
 		}),
 	);
+	const recordSecurityMetric = async (
+		metricKey: "security.blacklist.hit" | "security.rate_limited",
+		input: {
+			siteKey?: string;
+			scope?: string;
+			targetType?: string;
+			rule?: string;
+		},
+	) => {
+		await fastify.taskMetricRollups
+			.increment({
+				siteId: input.siteKey
+					? (fastify.siteRegistry.getRegisteredSite(input.siteKey)?.id ?? null)
+					: null,
+				siteKey: input.siteKey ?? null,
+				metricKey,
+				dimensions: {
+					scope: input.scope ?? "unknown",
+					targetType: input.targetType ?? "unknown",
+					rule: input.rule ?? "unknown",
+				},
+			})
+			.catch((error: unknown) => {
+				fastify.log.warn({ err: error }, "Failed to write security metric");
+			});
+	};
 
 	const security: SecurityToolkit = {
 		async assertGlobalFloodAllowed({ ip }) {
@@ -181,6 +207,10 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 					error.message === "RATE_LIMIT_EXCEEDED" &&
 					"resetAt" in error
 				) {
+					await recordSecurityMetric("security.rate_limited", {
+						scope: "global",
+						rule: "globalFloodGuard",
+					});
 					throw new AppError(
 						429,
 						"GLOBAL_RATE_LIMITED",
@@ -247,6 +277,12 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			});
 
 			if (matchedRule) {
+				await recordSecurityMetric("security.blacklist.hit", {
+					siteKey: input.siteKey,
+					scope: matchedRule.scope,
+					targetType: matchedRule.targetType,
+					rule: matchedRule.source,
+				});
 				await fastify.loggerManager.logApp({
 					level: "warn",
 					channel: "app",
@@ -291,6 +327,12 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 				const siteId = fastify.siteRegistry.getRegisteredSite(
 					input.siteKey,
 				)?.id;
+				await recordSecurityMetric("security.rate_limited", {
+					siteKey: input.siteKey,
+					scope: input.scope,
+					targetType: "ip",
+					rule: "abuse_guard",
+				});
 				if (!siteId) {
 					return false;
 				}
@@ -367,6 +409,10 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 					error.message === "RATE_LIMIT_EXCEEDED" &&
 					"resetAt" in error
 				) {
+					await recordSecurityMetric("security.rate_limited", {
+						scope: "rate_limit",
+						rule: errorCode,
+					});
 					throw new AppError(429, errorCode, errorMessage, {
 						resetAt: (error as Error & { resetAt: number }).resetAt,
 					});
@@ -508,8 +554,16 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 		const allowedAdminOrigins =
 			runtimeSecurity.adminOriginGuard.allowedOrigins.length > 0
-				? runtimeSecurity.adminOriginGuard.allowedOrigins
+				? [...runtimeSecurity.adminOriginGuard.allowedOrigins]
 				: [new URL(fastify.config.server.publicBaseUrl).origin];
+		const devAdminOrigin = fastify.runtimeOptions.devMode.adminOrigin;
+		if (
+			fastify.runtimeOptions.devMode.enabled &&
+			devAdminOrigin &&
+			!allowedAdminOrigins.includes(devAdminOrigin)
+		) {
+			allowedAdminOrigins.push(devAdminOrigin);
+		}
 		if (origin && !allowedAdminOrigins.includes(origin)) {
 			throw new AppError(403, "ADMIN_ORIGIN_FORBIDDEN", "后台请求来源不合法。");
 		}

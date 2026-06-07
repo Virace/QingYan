@@ -4,9 +4,10 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
-import { pageThreads } from "../../db/schema";
+import { adminUsers, pageThreads } from "../../db/schema";
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
+import { requirePermission } from "../admin/authorization";
 import { DatabaseBackupService } from "../database-backup/database-backup-service";
 import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { ImportJobRepository } from "./job-repository";
@@ -80,7 +81,7 @@ const dryRunBodySchema = z.object({
 const wordpressPlanBodySchema = z
 	.object({
 		authorDecisions: z
-			.record(z.string(), z.enum(["verified", "visitor"]))
+			.record(z.string(), z.enum(["staff", "verified", "visitor"]))
 			.optional(),
 	})
 	.optional();
@@ -262,6 +263,18 @@ async function listExistingPageCandidates(input: {
 		.where(eq(pageThreads.siteId, input.siteId));
 }
 
+async function listAdminUserAuthorCandidates(input: { db: AppDatabase }) {
+	return input.db
+		.select({
+			id: adminUsers.id,
+			email: adminUsers.email,
+			displayName: adminUsers.displayName,
+			username: adminUsers.username,
+			status: adminUsers.status,
+		})
+		.from(adminUsers);
+}
+
 export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	fastify.addContentTypeParser(
 		["application/xml", "text/xml"],
@@ -308,7 +321,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	);
 
 	fastify.get("/jobs", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
 		const parsed = importJobsQuerySchema.safeParse(request.query);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -334,7 +348,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.get("/jobs/:jobId", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
 		const parsed = importJobParamsSchema.safeParse(request.params);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -353,7 +368,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/export", async (request, reply) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.export");
 		const parsed = qingyanExportBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -378,7 +394,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/qingyan/dry-run", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
 		const parsed = qingyanDryRunBodySchema.safeParse(request.body);
 		if (!parsed.success) {
 			throw new InvalidRequestError({
@@ -390,7 +407,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/wordpress/analyze", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "wordpress_migration.analyze");
 
 		if (typeof request.body === "string") {
 			const parsed = wordpressAnalyzeQuerySchema.safeParse(request.query);
@@ -413,10 +431,14 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 				db: fastify.db,
 				siteId: site.id,
 			});
+			const adminUserCandidates = await listAdminUserAuthorCandidates({
+				db: fastify.db,
+			});
 			const result = wordpressService.analyze({
 				...data,
 				targetDistRoot: await resolveStaticSiteSource(data.targetDistRoot),
 				existingPages,
+				adminUsers: adminUserCandidates,
 			});
 			await jobService.createWordPressAnalyzeJob({
 				siteId: site.id,
@@ -442,10 +464,14 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 			db: fastify.db,
 			siteId: site.id,
 		});
+		const adminUserCandidates = await listAdminUserAuthorCandidates({
+			db: fastify.db,
+		});
 		const result = wordpressService.analyze({
 			...parsed.data,
 			targetDistRoot: await resolveStaticSiteSource(parsed.data.targetDistRoot),
 			existingPages,
+			adminUsers: adminUserCandidates,
 		});
 		await jobService.createWordPressAnalyzeJob({
 			siteId: site.id,
@@ -460,7 +486,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/wordpress/jobs/:jobId/plan", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "wordpress_migration.plan");
 		const parsed = importJobParamsSchema.safeParse(request.params);
 		const parsedBody = wordpressPlanBodySchema.safeParse(request.body);
 		if (!parsed.success || !parsedBody.success) {
@@ -479,7 +506,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/jobs/:jobId/dry-run", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
 		const parsedParams = importJobParamsSchema.safeParse(request.params);
 		const parsedBody = dryRunBodySchema.safeParse(request.body);
 		if (!parsedParams.success || !parsedBody.success) {
@@ -495,7 +523,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/jobs/:jobId/apply", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "wordpress_migration.apply");
 		const parsedParams = importJobParamsSchema.safeParse(request.params);
 		const parsedBody = applyBodySchema.safeParse(request.body);
 		if (!parsedParams.success || !parsedBody.success) {
@@ -511,7 +540,8 @@ export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 
 	fastify.post("/qingyan/jobs/:jobId/apply", async (request) => {
-		await sessionService.requireSession(request);
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import_apply");
 		const parsedParams = importJobParamsSchema.safeParse(request.params);
 		const parsedBody = qingyanApplyBodySchema.safeParse(request.body);
 		if (!parsedParams.success || !parsedBody.success) {

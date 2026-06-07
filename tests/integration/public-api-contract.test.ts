@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { sitePageRegistry, siteSettings, sites } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -32,12 +34,20 @@ async function seedPage(
 	pageKey: string,
 	status: "active" | "trash" = "active",
 ) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status,
 	});
+}
+
+async function enableUsableSystemMail(fixture: TestFixture) {
+	const repository = new AdminSystemSettingsRepository(fixture.app.db);
+	await repository.upsert("mail", "enabled", true);
+	await repository.upsert("mail", "smtp.host", "smtp.example.test");
+	await repository.upsert("mail", "smtp.from", "notify@example.test");
 }
 
 describe("public API contract", () => {
@@ -46,9 +56,11 @@ describe("public API contract", () => {
 		cleanups.push(fixture.cleanup);
 		const site = await getFangyuanSite(fixture);
 		await seedPage(fixture, site.id, "posts/public-contract/");
+		await enableUsableSystemMail(fixture);
 		await fixture.app.db
 			.update(siteSettings)
 			.set({
+				commenterReplyEmailEnabled: true,
 				engagementJson: serializeEngagementSettings({
 					visitors: { enabled: true },
 					pageViews: { enabled: true },
@@ -73,7 +85,7 @@ describe("public API contract", () => {
 			schemaVersion: "2026-05-31",
 			site: { siteKey: "fangyuan" },
 			page: {
-				pageKey: "posts/public-contract/",
+				pageKey: "/posts/public-contract/",
 				status: "active",
 			},
 			features: {
@@ -87,6 +99,7 @@ describe("public API contract", () => {
 				pageViews: { enabled: true },
 				pageLikes: { enabled: true },
 				visitors: { enabled: true },
+				replyEmailNotification: true,
 			},
 			data: {
 				comments: {
@@ -107,9 +120,36 @@ describe("public API contract", () => {
 		expect(body).not.toHaveProperty("pageMetrics");
 		expect(body).not.toHaveProperty("pageFeedback");
 		expect(body).not.toHaveProperty("captcha");
+		expect(body).not.toHaveProperty("adminNotifications");
+		expect(body.features).not.toHaveProperty("adminNotifications");
+		expect(body.features).not.toHaveProperty("smtp");
 		expect(JSON.stringify(body)).not.toContain("trustMode");
 		expect(JSON.stringify(body.features)).not.toContain('"reason":null');
 		expect(JSON.stringify(body)).not.toContain('"viewer":{}');
+	});
+
+	it("returns reply email notification as false when public capability is unavailable", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const site = await getFangyuanSite(fixture);
+		await seedPage(fixture, site.id, "posts/reply-email-disabled/");
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commenterReplyEmailEnabled: true,
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Reply%20Email%20Disabled",
+			headers: {
+				referer: "http://localhost:4321/posts/reply-email-disabled/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().features.replyEmailNotification).toBe(false);
 	});
 
 	it("omits comments data when comments are disabled", async () => {
@@ -148,6 +188,7 @@ describe("public API contract", () => {
 			enabled: false,
 			reason: "comments_disabled",
 		});
+		expect(body.features.replyEmailNotification).toBe(false);
 		expect(body.features.commentVotes).toEqual({
 			enabled: false,
 			reason: "comments_disabled",
@@ -222,6 +263,7 @@ describe("public API contract", () => {
 		expect(body.features.comments.reason).toBe("page_inactive");
 		expect(body.features.pageViews.reason).toBe("page_inactive");
 		expect(body.features.pageLikes.reason).toBe("page_inactive");
+		expect(body.features.replyEmailNotification).toBe(false);
 		expect(body.data).toEqual({});
 	});
 });

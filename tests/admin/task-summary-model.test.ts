@@ -1,29 +1,55 @@
 import { describe, expect, it } from "vitest";
 
-import type { TaskCenterItem } from "../../apps/admin/src/api/ops";
-import { summarizeTask } from "../../apps/admin/src/components/admin/task-summary-model";
+import type { TaskRunCenterItem } from "../../apps/admin/src/api/ops";
+import { summarizeTask } from "../../apps/admin/src/components/admin/tasks/task-summary-model";
 
 function task(
-	input: Partial<TaskCenterItem> & { type: TaskCenterItem["type"] },
+	input: Partial<TaskRunCenterItem> & { type: TaskRunCenterItem["type"] },
 ) {
 	const { type, ...rest } = input;
-	return {
-		source: "maintenance",
-		id: "job_1",
+	const item: TaskRunCenterItem = {
+		source: "task_run",
+		id: "run_1",
+		scheduledTaskId: null,
+		scheduledTaskNameSnapshot: null,
 		type,
+		category: "maintenance",
 		status: input.status ?? "succeeded",
+		siteId: 1,
 		siteKey: input.siteKey ?? "default",
+		scopeKind: "site",
+		trigger: "manual",
+		ownerUserIdSnapshot: 1,
+		createdByUserId: 1,
+		skipReason: null,
+		blockReason: null,
+		visibility: "run_detail",
+		canViewLogs: true,
+		queueBackend: "database",
+		queueMessageId: null,
+		actorType: "admin_user",
+		actorId: "1",
+		subjectType: null,
+		subjectId: null,
+		payloadSummary: null,
+		payload: null,
 		scope: input.scope ?? null,
+		triggerSnapshot: null,
+		input: null,
+		actionConfigSnapshot: null,
 		progress: input.progress ?? null,
 		result: input.result ?? null,
 		error: input.error ?? null,
+		idempotencyKey: null,
 		runAfter: null,
 		attempts: input.attempts ?? 1,
 		maxAttempts: input.maxAttempts ?? 3,
 		retryDelaySec: 60,
 		priority: 0,
 		concurrencyKey: null,
-		lastHeartbeatAt: null,
+		workerId: null,
+		lockConflictWithRunId: null,
+		lockConflictWithTaskName: null,
 		createdAt: "2026-05-30T00:00:00.000Z",
 		startedAt: null,
 		finishedAt: null,
@@ -34,7 +60,72 @@ function task(
 			readyAt: null,
 		},
 		...rest,
-	} satisfies TaskCenterItem;
+	};
+	return item;
+}
+
+function notificationTask(input: Partial<TaskRunCenterItem> = {}) {
+	const item: TaskRunCenterItem = {
+		source: "task_run",
+		id: "task_1",
+		scheduledTaskId: null,
+		scheduledTaskNameSnapshot: null,
+		queueBackend: "database",
+		queueMessageId: "msg_1",
+		type: "comment_notification",
+		category: "notification",
+		status: "retrying",
+		siteId: 1,
+		siteKey: "default",
+		scopeKind: "site",
+		trigger: "scheduled",
+		ownerUserIdSnapshot: 1,
+		createdByUserId: null,
+		skipReason: null,
+		blockReason: null,
+		visibility: "run_detail",
+		canViewLogs: true,
+		actorType: "system",
+		actorId: null,
+		subjectType: "comment",
+		subjectId: "comment_1",
+		payloadSummary: {
+			eventFamily: "admin_comment_pending",
+			channel: "email",
+			channelConfigName: "默认邮件",
+			recipientType: "backend_user",
+			recipientAddressSnapshot: "admin@example.com",
+		},
+		payload: null,
+		scope: null,
+		triggerSnapshot: null,
+		input: null,
+		actionConfigSnapshot: null,
+		progress: null,
+		result: { providerMessageId: "provider_msg_1" },
+		error: { providerMessage: "smtp temp fail" },
+		idempotencyKey: "notification:1",
+		runAfter: "2026-06-02T00:05:00.000Z",
+		attempts: 2,
+		maxAttempts: 3,
+		retryDelaySec: 60,
+		priority: 0,
+		concurrencyKey: null,
+		workerId: null,
+		lockConflictWithRunId: null,
+		lockConflictWithTaskName: null,
+		createdAt: "2026-06-02T00:00:00.000Z",
+		startedAt: null,
+		finishedAt: null,
+		updatedAt: "2026-06-02T00:01:00.000Z",
+		queueState: {
+			waitingReason: "retry_wait",
+			waitingDescription: "等待重试。",
+			readyAt: "2026-06-02T00:05:00.000Z",
+		},
+		...input,
+	};
+	return item;
 }
 
 describe("task summary model", () => {
@@ -118,14 +209,14 @@ describe("task summary model", () => {
 	it("returns a generic summary for unknown task types", () => {
 		const summary = summarizeTask(
 			task({
-				type: "custom_cleanup" as TaskCenterItem["type"],
+				type: "custom_cleanup",
 				status: "failed",
 				error: { message: "boom" },
 			}),
 		);
 
 		expect(summary.title).toBe("custom_cleanup");
-		expect(summary.description).toContain("job_1");
+		expect(summary.description).toContain("run_1");
 		expect(summary.metrics).toEqual(
 			expect.arrayContaining([
 				{ label: "状态", value: "failed" },
@@ -147,5 +238,31 @@ describe("task summary model", () => {
 		);
 
 		expect(summary.description).not.toContain("undefined");
+	});
+
+	it("summarizes notification task rows with delivery trace fields", () => {
+		const summary = summarizeTask(notificationTask());
+
+		expect(summary.title).toBe("通知任务 / comment_notification");
+		expect(summary.description).toContain("事件 admin_comment_pending");
+		expect(summary.description).toContain("收件人 admin@example.com");
+		expect(summary.metrics).toEqual(
+			expect.arrayContaining([
+				{ label: "状态", value: "retrying" },
+				{ label: "尝试", value: "2 / 3" },
+				{ label: "事件", value: "admin_comment_pending" },
+				{ label: "通道", value: "email" },
+				{ label: "渠道配置", value: "默认邮件" },
+				{ label: "收件人类型", value: "backend_user" },
+				{ label: "收件地址", value: "admin@example.com" },
+				{ label: "队列", value: "database" },
+				{ label: "下次重试", value: "2026-06-02T00:05:00.000Z" },
+				{ label: "Provider Message ID", value: "provider_msg_1" },
+			]),
+		);
+		expect(summary.errors).toContainEqual({
+			label: "Provider",
+			message: "smtp temp fail",
+		});
 	});
 });

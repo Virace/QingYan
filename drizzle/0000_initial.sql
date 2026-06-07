@@ -21,6 +21,7 @@ CREATE TABLE `comments` (
 	`page_thread_id` integer NOT NULL,
 	`parent_id` text,
 	`visitor_id` integer,
+	`author_user_id` integer,
 	`author_identity` text DEFAULT 'visitor' NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`author_name` text NOT NULL,
@@ -40,7 +41,8 @@ CREATE TABLE `comments` (
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`page_thread_id`) REFERENCES `page_threads`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`parent_id`) REFERENCES `comments`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`visitor_id`) REFERENCES `visitors`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`visitor_id`) REFERENCES `visitors`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`author_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE INDEX `comments_thread_idx` ON `comments` (`page_thread_id`);--> statement-breakpoint
 CREATE INDEX `comments_parent_idx` ON `comments` (`parent_id`);--> statement-breakpoint
@@ -161,39 +163,6 @@ CREATE TABLE `site_page_registry` (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_page_registry_site_page_key_idx` ON `site_page_registry` (`site_id`,`page_key`);--> statement-breakpoint
 CREATE INDEX `site_page_registry_site_status_idx` ON `site_page_registry` (`site_id`,`status`);--> statement-breakpoint
-CREATE TABLE `site_page_registry_sources` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`site_id` integer NOT NULL,
-	`source_type` text NOT NULL,
-	`source_url` text NOT NULL,
-	`enabled` integer DEFAULT true NOT NULL,
-	`mode` text DEFAULT 'append' NOT NULL,
-	`refresh_interval_sec` integer,
-	`last_attempt_at` text,
-	`last_success_at` text,
-	`last_success_hash` text,
-	`last_error` text,
-	`next_refresh_at` text,
-	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
-);--> statement-breakpoint
-CREATE UNIQUE INDEX `site_page_registry_sources_site_url_idx` ON `site_page_registry_sources` (`site_id`,`source_url`);--> statement-breakpoint
-CREATE INDEX `site_page_registry_sources_site_enabled_idx` ON `site_page_registry_sources` (`site_id`,`enabled`);--> statement-breakpoint
-CREATE INDEX `site_page_registry_sources_next_refresh_idx` ON `site_page_registry_sources` (`next_refresh_at`);--> statement-breakpoint
-CREATE TABLE `site_page_registry_source_pages` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`source_id` integer NOT NULL,
-	`page_registry_id` integer NOT NULL,
-	`first_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	FOREIGN KEY (`source_id`) REFERENCES `site_page_registry_sources`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`page_registry_id`) REFERENCES `site_page_registry`(`id`) ON UPDATE no action ON DELETE no action
-);--> statement-breakpoint
-CREATE UNIQUE INDEX `site_page_registry_source_pages_source_page_idx` ON `site_page_registry_source_pages` (`source_id`,`page_registry_id`);--> statement-breakpoint
-CREATE INDEX `site_page_registry_source_pages_page_idx` ON `site_page_registry_source_pages` (`page_registry_id`);--> statement-breakpoint
 CREATE TABLE `pending_page_candidates` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`site_key` text NOT NULL,
@@ -222,16 +191,234 @@ CREATE TABLE `pending_page_view_sessions` (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `pending_page_view_sessions_page_fingerprint_idx` ON `pending_page_view_sessions` (`site_key`,`page_key`,`fingerprint`);--> statement-breakpoint
 CREATE INDEX `pending_page_view_sessions_site_page_idx` ON `pending_page_view_sessions` (`site_key`,`page_key`);--> statement-breakpoint
+CREATE TABLE `admin_users` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`username` text NOT NULL,
+	`email` text NOT NULL,
+	`password_hash` text NOT NULL,
+	`display_name` text NOT NULL,
+	`website` text,
+	`avatar_url` text,
+	`status` text DEFAULT 'active' NOT NULL,
+	`is_initial_admin` integer DEFAULT false NOT NULL,
+	`password_change_required` integer DEFAULT false NOT NULL,
+	`login_blocked_until` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`password_rotated_at` text,
+	`last_login_at` text,
+	`deleted_at` text
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_users_username_idx` ON `admin_users` (`username`);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_users_email_idx` ON `admin_users` (`email`);--> statement-breakpoint
+CREATE INDEX `admin_users_status_idx` ON `admin_users` (`status`);--> statement-breakpoint
+CREATE TABLE `admin_groups` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`key` text NOT NULL,
+	`name` text NOT NULL,
+	`description` text,
+	`kind` text DEFAULT 'system' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_groups_key_idx` ON `admin_groups` (`key`);--> statement-breakpoint
+CREATE TABLE `admin_user_groups` (
+	`user_id` integer NOT NULL,
+	`group_id` integer NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_by_user_id` integer,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`group_id`) REFERENCES `admin_groups`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_user_groups_user_idx` ON `admin_user_groups` (`user_id`);--> statement-breakpoint
+CREATE INDEX `admin_user_groups_group_idx` ON `admin_user_groups` (`group_id`);--> statement-breakpoint
+CREATE TABLE `admin_group_permissions` (
+	`group_id` integer NOT NULL,
+	`permission_key` text NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_by_user_id` integer,
+	FOREIGN KEY (`group_id`) REFERENCES `admin_groups`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_group_permissions_group_permission_idx` ON `admin_group_permissions` (`group_id`,`permission_key`);--> statement-breakpoint
+CREATE TABLE `admin_user_site_access` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_id` integer NOT NULL,
+	`site_id` integer NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`created_by_user_id` integer,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_user_site_access_user_site_idx` ON `admin_user_site_access` (`user_id`,`site_id`);--> statement-breakpoint
+CREATE INDEX `admin_user_site_access_site_idx` ON `admin_user_site_access` (`site_id`);--> statement-breakpoint
+CREATE TABLE `admin_profile_verification_tokens` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`purpose` text NOT NULL,
+	`user_id` integer NOT NULL,
+	`token_hash` text NOT NULL,
+	`new_email` text,
+	`pending_password_hash` text,
+	`expires_at` text NOT NULL,
+	`consumed_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `admin_profile_verification_tokens_user_id_idx` ON `admin_profile_verification_tokens` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_profile_verification_tokens_token_hash_idx` ON `admin_profile_verification_tokens` (`token_hash`);--> statement-breakpoint
+CREATE TABLE `delayed_deletions` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`resource_type` text NOT NULL,
+	`resource_id` text NOT NULL,
+	`site_id` integer,
+	`requested_by_user_id` integer,
+	`requested_at` text NOT NULL,
+	`hard_delete_after` text NOT NULL,
+	`restored_by_user_id` integer,
+	`restored_at` text,
+	`hard_deleted_at` text,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`metadata_json` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`requested_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`restored_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `delayed_deletions_status_due_idx` ON `delayed_deletions` (`status`,`hard_delete_after`);--> statement-breakpoint
+CREATE INDEX `delayed_deletions_site_id_idx` ON `delayed_deletions` (`site_id`);--> statement-breakpoint
+CREATE INDEX `delayed_deletions_resource_idx` ON `delayed_deletions` (`resource_type`,`resource_id`);--> statement-breakpoint
+CREATE TABLE `site_notification_recipients` (
+	`id` text PRIMARY KEY NOT NULL,
+	`site_id` integer NOT NULL,
+	`user_id` integer NOT NULL,
+	`channels_json` text DEFAULT '[]' NOT NULL,
+	`events_json` text DEFAULT '[]' NOT NULL,
+	`include_comment_content` text NOT NULL,
+	`rate_limit_profile` text,
+	`enabled` integer DEFAULT true NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `site_notification_recipients_site_user_idx` ON `site_notification_recipients` (`site_id`,`user_id`);--> statement-breakpoint
+CREATE INDEX `site_notification_recipients_site_idx` ON `site_notification_recipients` (`site_id`);--> statement-breakpoint
+CREATE INDEX `site_notification_recipients_user_idx` ON `site_notification_recipients` (`user_id`);--> statement-breakpoint
+CREATE TABLE `notification_channel_configs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`type` text NOT NULL,
+	`name` text NOT NULL,
+	`description` text,
+	`enabled` integer DEFAULT true NOT NULL,
+	`config_json` text NOT NULL,
+	`secret_config_json` text DEFAULT '{}' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);--> statement-breakpoint
+CREATE INDEX `notification_channel_configs_type_idx` ON `notification_channel_configs` (`type`);--> statement-breakpoint
+CREATE INDEX `notification_channel_configs_enabled_idx` ON `notification_channel_configs` (`enabled`);--> statement-breakpoint
+CREATE TABLE `site_notification_recipient_routes` (
+	`id` text PRIMARY KEY NOT NULL,
+	`recipient_id` text NOT NULL,
+	`event_type` text NOT NULL,
+	`channel_config_id` text NOT NULL,
+	`enabled` integer DEFAULT true NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`recipient_id`) REFERENCES `site_notification_recipients`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`channel_config_id`) REFERENCES `notification_channel_configs`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `site_notification_recipient_routes_recipient_idx` ON `site_notification_recipient_routes` (`recipient_id`);--> statement-breakpoint
+CREATE INDEX `site_notification_recipient_routes_config_idx` ON `site_notification_recipient_routes` (`channel_config_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `site_notification_recipient_routes_unique_idx` ON `site_notification_recipient_routes` (`recipient_id`,`event_type`,`channel_config_id`);--> statement-breakpoint
+INSERT INTO `notification_channel_configs` (`id`, `type`, `name`, `description`, `enabled`, `config_json`, `secret_config_json`) VALUES ('email:default', 'email', '默认邮件', '使用系统 SMTP 设置发送邮件通知。', true, '{}', '{}');--> statement-breakpoint
+CREATE TABLE `admin_user_notification_preferences` (
+	`user_id` integer NOT NULL,
+	`channel` text NOT NULL,
+	`enabled` integer DEFAULT true NOT NULL,
+	`digest_mode` text DEFAULT 'off' NOT NULL,
+	`digest_interval_minutes` integer,
+	`digest_times_json` text,
+	`paused_until` text,
+	`channel_config_ref` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `admin_user_notification_preferences_user_config_idx` ON `admin_user_notification_preferences` (`user_id`,`channel_config_ref`);--> statement-breakpoint
+CREATE TABLE `commenter_notification_preferences` (
+	`id` text PRIMARY KEY NOT NULL,
+	`site_id` integer NOT NULL,
+	`email` text NOT NULL,
+	`email_hash` text NOT NULL,
+	`notify_on_reply` integer DEFAULT false NOT NULL,
+	`unsubscribed_at` text,
+	`source` text NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `commenter_notification_preferences_site_email_idx` ON `commenter_notification_preferences` (`site_id`,`email_hash`);--> statement-breakpoint
+CREATE INDEX `commenter_notification_preferences_site_idx` ON `commenter_notification_preferences` (`site_id`);--> statement-breakpoint
+CREATE TABLE `email_delivery_reputation` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_id` integer NOT NULL,
+	`email` text NOT NULL,
+	`email_hash` text NOT NULL,
+	`failure_score` integer DEFAULT 0 NOT NULL,
+	`last_failure_at` text,
+	`last_success_at` text,
+	`suppressed_until` text,
+	`suppressed_reason` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `email_delivery_reputation_site_email_idx` ON `email_delivery_reputation` (`site_id`,`email_hash`);--> statement-breakpoint
+CREATE INDEX `email_delivery_reputation_site_idx` ON `email_delivery_reputation` (`site_id`);--> statement-breakpoint
+CREATE TABLE `unsubscribe_tokens` (
+	`id` text PRIMARY KEY NOT NULL,
+	`site_id` integer NOT NULL,
+	`email_hash` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`purpose` text NOT NULL,
+	`expires_at` text,
+	`consumed_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE UNIQUE INDEX `unsubscribe_tokens_token_hash_idx` ON `unsubscribe_tokens` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `unsubscribe_tokens_site_email_idx` ON `unsubscribe_tokens` (`site_id`,`email_hash`);--> statement-breakpoint
+CREATE TABLE `notification_templates` (
+	`key` text PRIMARY KEY NOT NULL,
+	`channel` text NOT NULL,
+	`event_type` text NOT NULL,
+	`format` text NOT NULL,
+	`subject_template` text,
+	`body_template` text NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_by_user_id` integer,
+	FOREIGN KEY (`updated_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `notification_templates_channel_event_idx` ON `notification_templates` (`channel`,`event_type`);--> statement-breakpoint
 CREATE TABLE `admin_sessions` (
 	`id` text PRIMARY KEY NOT NULL,
+	`user_id` integer,
 	`token_hash` text NOT NULL,
 	`csrf_token_hash` text,
 	`csrf_issued_at` text,
 	`ip` text,
 	`user_agent` text,
 	`expires_at` text NOT NULL,
+	`revoked_at` text,
+	`revoked_by_user_id` integer,
+	`revocation_reason` text,
 	`last_seen_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`revoked_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE INDEX `admin_sessions_expires_at_idx` ON `admin_sessions` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `audit_logs` (
@@ -280,9 +467,10 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_enabled` integer DEFAULT true NOT NULL,
 	`auto_blacklist_scope` text DEFAULT 'post' NOT NULL,
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
-	`email_notifications_enabled` integer DEFAULT false NOT NULL,
+	`commenter_reply_email_enabled` integer DEFAULT false NOT NULL,
+	`backend_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `engagement_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL, `comment_metadata_json` text, `engagement_json` text, `verified_author_json` text, `staff_display_json` text, `moderation_json` text, `page_registry_json` text,
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE UNIQUE INDEX `site_settings_site_id_idx` ON `site_settings` (`site_id`);--> statement-breakpoint
@@ -392,27 +580,179 @@ CREATE TABLE `ip_region_update_runs` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );--> statement-breakpoint
-CREATE TABLE `maintenance_jobs` (
+CREATE TABLE `scheduled_tasks` (
 	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`description` text,
 	`type` text NOT NULL,
-	`status` text NOT NULL,
-	`site_key` text,
+	`site_id` integer,
+	`scope_kind` text NOT NULL,
 	`scope_json` text NOT NULL,
+	`enabled` integer DEFAULT false NOT NULL,
+	`disabled_reason` text,
+	`schedule_kind` text NOT NULL,
+	`schedule_preset` text,
+	`cron_expression` text,
+	`timezone` text,
+	`payload_json` text NOT NULL,
+	`payload_schema_version` integer DEFAULT 1 NOT NULL,
+	`system_key` text,
+	`protection_json` text,
+	`policy_json` text NOT NULL,
+	`trigger_json` text NOT NULL,
+	`trigger_schema_version` integer DEFAULT 1 NOT NULL,
+	`next_run_at` text,
+	`claim_worker_id` text,
+	`claim_expires_at` text,
+	`last_run_at` text,
+	`last_run_id` text,
+	`last_status` text,
+	`retention_count` integer DEFAULT 5 NOT NULL,
+	`owner_user_id` integer NOT NULL,
+	`created_by_user_id` integer,
+	`updated_by_user_id` integer,
+	`transferred_by_user_id` integer,
+	`transferred_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`deleted_at` text,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`owner_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`updated_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`transferred_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_enabled_next_run_idx` ON `scheduled_tasks` (`enabled`,`next_run_at`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_claim_expires_idx` ON `scheduled_tasks` (`claim_expires_at`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_system_key_idx` ON `scheduled_tasks` (`system_key`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_site_type_idx` ON `scheduled_tasks` (`site_id`,`type`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_owner_idx` ON `scheduled_tasks` (`owner_user_id`);--> statement-breakpoint
+CREATE INDEX `scheduled_tasks_deleted_idx` ON `scheduled_tasks` (`deleted_at`);--> statement-breakpoint
+CREATE TABLE `scheduled_task_deleted_snapshots` (
+	`id` text PRIMARY KEY NOT NULL,
+	`scheduled_task_id` text NOT NULL,
+	`snapshot_json` text NOT NULL,
+	`deleted_by_user_id` integer,
+	`deleted_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`delete_reason` text,
+	`last_run_id` text,
+	`last_status` text,
+	FOREIGN KEY (`deleted_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `scheduled_task_deleted_snapshots_task_idx` ON `scheduled_task_deleted_snapshots` (`scheduled_task_id`);--> statement-breakpoint
+CREATE INDEX `scheduled_task_deleted_snapshots_deleted_idx` ON `scheduled_task_deleted_snapshots` (`deleted_at`);--> statement-breakpoint
+CREATE TABLE `task_metric_rollups` (
+	`id` text PRIMARY KEY NOT NULL,
+	`site_id` integer,
+	`site_key` text DEFAULT '__global__' NOT NULL,
+	`metric_key` text NOT NULL,
+	`bucket_start_at` text NOT NULL,
+	`bucket_size_sec` integer NOT NULL,
+	`dimension_json` text NOT NULL,
+	`value` real DEFAULT 0 NOT NULL,
+	`sample_count` integer DEFAULT 0 NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `task_metric_rollups_site_metric_bucket_idx` ON `task_metric_rollups` (`site_id`,`metric_key`,`bucket_start_at`);--> statement-breakpoint
+CREATE INDEX `task_metric_rollups_metric_bucket_idx` ON `task_metric_rollups` (`metric_key`,`bucket_start_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `task_metric_rollups_unique_bucket_idx` ON `task_metric_rollups` (`site_key`,`metric_key`,`bucket_start_at`,`bucket_size_sec`,`dimension_json`);--> statement-breakpoint
+CREATE TABLE `task_runs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`queue_backend` text NOT NULL,
+	`queue_message_id` text,
+	`scheduled_task_id` text,
+	`scheduled_task_name_snapshot` text,
+	`type` text NOT NULL,
+	`category` text NOT NULL,
+	`status` text NOT NULL,
+	`site_id` integer,
+	`site_key` text,
+	`scope_kind` text,
+	`trigger` text,
+	`trigger_snapshot_json` text,
+	`scope_json` text,
+	`input_json` text,
+	`action_config_snapshot_json` text,
+	`actor_type` text,
+	`actor_id` text,
+	`subject_type` text,
+	`subject_id` text,
+	`payload_summary_json` text NOT NULL,
+	`payload_json` text NOT NULL,
 	`progress_json` text,
 	`result_json` text,
 	`error_json` text,
+	`skip_reason` text,
+	`block_reason` text,
+	`idempotency_key` text,
 	`run_after` text,
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`max_attempts` integer DEFAULT 1 NOT NULL,
 	`retry_delay_sec` integer DEFAULT 0 NOT NULL,
 	`priority` integer DEFAULT 0 NOT NULL,
 	`concurrency_key` text,
-	`last_heartbeat_at` text,
+	`worker_id` text,
+	`lock_conflict_with_run_id` text,
+	`lock_conflict_with_task_name` text,
+	`owner_user_id_snapshot` integer,
+	`created_by_user_id` integer,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`started_at` text,
 	`finished_at` text,
-	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`owner_user_id_snapshot`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
+CREATE INDEX `task_runs_scheduled_task_created_idx` ON `task_runs` (`scheduled_task_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `task_runs_status_run_after_idx` ON `task_runs` (`status`,`run_after`);--> statement-breakpoint
+CREATE INDEX `task_runs_type_status_run_after_idx` ON `task_runs` (`type`,`status`,`run_after`);--> statement-breakpoint
+CREATE INDEX `task_runs_category_created_idx` ON `task_runs` (`category`,`created_at`);--> statement-breakpoint
+CREATE INDEX `task_runs_site_idx` ON `task_runs` (`site_id`);--> statement-breakpoint
+CREATE INDEX `task_runs_site_created_idx` ON `task_runs` (`site_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `task_runs_concurrency_status_idx` ON `task_runs` (`concurrency_key`,`status`);--> statement-breakpoint
+CREATE UNIQUE INDEX `task_runs_idempotency_idx` ON `task_runs` (`idempotency_key`);--> statement-breakpoint
+CREATE TABLE `task_event_logs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`task_run_id` text NOT NULL,
+	`sequence` integer DEFAULT 0 NOT NULL,
+	`stream` text DEFAULT 'system' NOT NULL,
+	`event_type` text NOT NULL,
+	`level` text NOT NULL,
+	`message` text NOT NULL,
+	`data_json` text,
+	`visible_to_site_admin` integer DEFAULT false NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`task_run_id`) REFERENCES `task_runs`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `task_event_logs_run_sequence_idx` ON `task_event_logs` (`task_run_id`,`sequence`);--> statement-breakpoint
+CREATE INDEX `task_event_logs_run_created_idx` ON `task_event_logs` (`task_run_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `task_event_logs_level_created_idx` ON `task_event_logs` (`level`,`created_at`);--> statement-breakpoint
+CREATE TABLE `notification_deliveries` (
+	`id` text PRIMARY KEY NOT NULL,
+	`task_run_id` text NOT NULL,
+	`channel` text NOT NULL,
+	`channel_config_ref` text,
+	`channel_config_name_snapshot` text,
+	`recipient_type` text NOT NULL,
+	`recipient_user_id` integer,
+	`recipient_address_snapshot` text NOT NULL,
+	`recipient_identity_key` text NOT NULL,
+	`event_family` text NOT NULL,
+	`template_key` text NOT NULL,
+	`status` text NOT NULL,
+	`provider_message_id` text,
+	`last_error_json` text,
+	`sent_at` text,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`task_run_id`) REFERENCES `task_runs`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`recipient_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `notification_deliveries_task_run_idx` ON `notification_deliveries` (`task_run_id`);--> statement-breakpoint
+CREATE INDEX `notification_deliveries_recipient_idx` ON `notification_deliveries` (`recipient_type`,`recipient_identity_key`);--> statement-breakpoint
+CREATE INDEX `notification_deliveries_status_idx` ON `notification_deliveries` (`status`);--> statement-breakpoint
 CREATE TABLE `admin_bootstrap_state` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`console_path` text NOT NULL,

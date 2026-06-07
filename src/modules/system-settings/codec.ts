@@ -93,7 +93,9 @@ export function preserveConfiguredSecrets(
 	for (const descriptor of secretFieldDescriptors) {
 		const value = getPathValue(next, descriptor.valuePath);
 		const storedValue =
-			value === undefined ? getPathValue(current, descriptor.valuePath) : value;
+			value === undefined || value === ""
+				? getPathValue(current, descriptor.valuePath)
+				: value;
 		setPathValue(next, descriptor.valuePath, storedValue);
 		setPathValue(next, descriptor.configuredPath, Boolean(storedValue));
 	}

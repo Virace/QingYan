@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
+import { taskRuns } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -14,8 +16,6 @@ describe("admin ops IP region maintenance", () => {
 			cookies: { qingyan_admin: adminCookie.value },
 		});
 
-		await fixture.cleanup();
-
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			commentMetadata: expect.objectContaining({
@@ -23,6 +23,8 @@ describe("admin ops IP region maintenance", () => {
 			}),
 			recentJobs: expect.any(Array),
 		});
+
+		await fixture.cleanup();
 	});
 
 	it("creates a comment IP refresh job with CSRF", async () => {
@@ -41,15 +43,30 @@ describe("admin ops IP region maintenance", () => {
 			},
 		});
 
-		await fixture.cleanup();
-
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			job: {
+			run: {
 				type: "comment_ip_refresh",
 				status: "queued",
+				siteKey: "fangyuan",
+				input: {
+					scope: "missing",
+					ipVersions: ["v4"],
+					siteKey: "fangyuan",
+					batchSize: 100,
+				},
 			},
 		});
+		const [run] = await fixture.app.db
+			.select()
+			.from(taskRuns)
+			.where(eq(taskRuns.type, "comment_ip_refresh"));
+		expect(run).toMatchObject({
+			status: "queued",
+			siteKey: "fangyuan",
+		});
+
+		await fixture.cleanup();
 	});
 
 	it("rejects comment IP refresh without CSRF", async () => {

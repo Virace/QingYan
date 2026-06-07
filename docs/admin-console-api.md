@@ -325,7 +325,7 @@ Query：
 
 ### `POST /api/admin/pages/{pageKey}/title/refresh`
 
-为单个页面创建服务端异步 title 刷新任务。该接口只创建任务，页面 HTML 抓取在服务端 maintenance job 中执行。
+为单个页面创建服务端异步 title 刷新任务。该接口只创建 `task_runs` 运行记录，页面 HTML 抓取由统一任务运行器执行。
 
 请求：
 
@@ -342,7 +342,7 @@ Query：
 
 ```ts
 {
-  job: MaintenanceJob;
+  run: TaskRunProjection;
 }
 ```
 
@@ -368,9 +368,13 @@ Query：
 
 ## Page Registry
 
-### `GET /api/admin/page-registry/sources`
+页面来源刷新不再提供 source CRUD API。权威模式的 sitemap 地址由站点设置
+`pageRegistry.authoritativeSitemapUrls` 管理，并同步到系统托管的
+`page_source_refresh` 任务 payload `sitemapUrls`。
 
-列出当前站点页面来源。
+### `GET /api/admin/page-registry/pending`
+
+列出当前站点待审核未知页面。
 
 Query：
 
@@ -384,75 +388,77 @@ Query：
 
 ```ts
 {
-  items: PageRegistrySource[];
+  items: Array<{
+    siteKey: string;
+    pageKey: string;
+    pageUrl: string;
+    hitCount: number;
+    status: "pending" | "rejected" | "ignored";
+    firstSeenAt: string;
+    lastSeenAt: string;
+  }>;
+  pagination: {
+    limit: number;
+    offset: number;
+    totalCount: number;
+  };
 }
 ```
 
-### `POST /api/admin/page-registry/sources`
+### `POST /api/admin/page-registry/pending/approve`
 
-创建 sitemap、RSS 或 Atom 页面来源。
+批准待审核未知页面，并将待处理访问量合并到正式页面线程。
 
 请求：
 
 ```ts
 {
   siteKey: string;
-  sourceType: "sitemap" | "rss" | "atom";
-  sourceUrl: string;
-  enabled: boolean;
-  mode: "append" | "replace";
-  refreshIntervalSec?: number | null;
+  pageKey: string;
 }
 ```
-
-### `DELETE /api/admin/page-registry/sources/{sourceId}`
-
-删除页面来源配置和来源-页面关联，不删除页面登记、评论、点赞或访问数据。
 
 响应：
 
 ```ts
 {
-  ok: true;
+  page: SitePageRegistryProjection;
 }
 ```
 
-### `POST /api/admin/page-registry/sources/{sourceId}/refresh`
+### `POST /api/admin/page-registry/pending/reject`
 
-为单个来源创建 `page_source_refresh` 任务。
-
-响应：
-
-```ts
-{
-  job: MaintenanceJob;
-}
-```
-
-### `POST /api/admin/page-registry/refresh`
-
-为当前站点全部来源创建 `page_source_refresh` 任务。
+拒绝待审核未知页面。
 
 请求：
 
 ```ts
 {
   siteKey: string;
-  mode?: "append" | "replace";
+  pageKey: string;
+  reason?: string;
 }
 ```
 
-来源刷新如果命中待处理未知页面，会自动放行 pending candidate 并合并待处理访问量。
+### `POST /api/admin/page-registry/pending/ignore`
 
-### `GET /api/admin/page-registry/maintenance-jobs/{jobId}`
+忽略待审核未知页面。
 
-获取页面来源维护任务。
+请求：
+
+```ts
+{
+  siteKey: string;
+  pageKey: string;
+  reason?: string;
+}
+```
 
 响应：
 
 ```ts
 {
-  job: MaintenanceJob | null;
+  candidate: PendingPageCandidateProjection;
 }
 ```
 
@@ -477,10 +483,20 @@ Query：
     email: boolean;
   };
   isBlacklisted: boolean;
+  notifications?: {
+    notifyOnReply?: boolean | null;
+    unsubscribedAt?: string | null;
+    suppressedUntil?: string | null;
+    reputationScore?: number | null;
+    lastSuccessAt?: string | null;
+    lastFailureAt?: string | null;
+  };
 }
 ```
 
 `email` 是 trim + lower-case 后的聚合键；`emailVariants` 保留该聚合组中出现过的原始邮箱写法。搜索邮箱时同样按归一化值匹配，因此 `Virace@aliyun.com` 和 `virace@aliyun.com` 会归到同一个评论者视图。`/api/admin/users` 命名空间保留给未来真正的后台用户或账号系统。
+
+`notifications` 汇总当前站点内该邮箱的普通评论者回复通知状态。`notifyOnReply=true` 表示该邮箱已选择接收已审核回复邮件；`unsubscribedAt` 来自全局退订链接；`suppressedUntil`、`reputationScore`、`lastSuccessAt` 和 `lastFailureAt` 来自投递 reputation，不等同于退订。明显占位或无效邮箱不会创建偏好，评论创建仍可继续。
 
 ### `GET /api/admin/visitors`
 
@@ -693,7 +709,14 @@ Query：
     allowLike: boolean;
   };
   notifications: {
-    emailEnabled: boolean;
+    commenter: {
+      replyEmailEnabled: boolean;
+    };
+    backend: {
+      enabled: boolean;
+      recipients?: SiteNotificationRecipient[];
+    };
+    channelConfigs: NotificationChannelConfig[];
   };
   pageCount: number;
   commentCount: number;
@@ -759,7 +782,7 @@ AdminSettings
 
 ### `PUT /api/admin/sites/{siteKey}/settings`
 
-更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
+更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`pageRegistry`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
 
 Admin Settings API 的 canonical 开关路径：
 
@@ -769,9 +792,24 @@ Admin Settings API 的 canonical 开关路径：
 - 页面浏览量：`engagement.pageViews.enabled`
 - 页面点赞：`engagement.pageLikes.enabled`
 - 访客记录：`engagement.visitors.enabled`
-- 当前站点邮件通知：`notifications.emailEnabled`
+- 页面来源模式：`pageRegistry.mode`
+- 权威 sitemap URL 列表：`pageRegistry.authoritativeSitemapUrls`
+- 评论者回复邮件通知：`notifications.commenter.replyEmailEnabled`
+- 后台用户通知：`notifications.backend.enabled`
+- 当前站点后台用户通知接收人：`notifications.backend.recipients`
 
 `pageFeedback.allowLike` 是过渡同步字段；新 UI 和新调用代码应以 `engagement.pageLikes.enabled` 为页面点赞 canonical 开关。
+
+页面来源权威模式说明：
+
+- 公开运行时页面身份只来自允许 `Referer` 的 URL pathname。Canonical Page Key 保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash；请求体或 query 中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段。
+- `pageRegistry.mode="discovery"` 时，未登记页面保持发现模式：bootstrap 可写入 pending candidate / pending PV，等待后台审核。
+- `pageRegistry.mode="authoritative"` 时，`authoritativeSitemapUrls` 必须至少包含一个当前站点允许 origin 下的 HTTP/HTTPS sitemap URL。
+- 权威模式下未知页面默认按 `unknownPageResponse="inactive_payload"` 返回 200 inactive payload，`features.*.enabled=false` 且 `data={}`，不会创建 visitor、visitor metadata、pending candidate、pending PV、page thread、PV、captcha challenge、评论、投票或页面反馈记录。
+- `unknownPageResponse="forbidden"` 或 `emergencyLockdown=true` 时，未知页面返回 403 `PAGE_NOT_REGISTERED`，同样不做业务写入。
+- 非 active registry page 返回非交互行为或 403 `PAGE_NOT_INTERACTIVE`，公开写入口不会继续创建 visitor、captcha、thread 或业务记录。
+- 保存 authoritative 设置会幂等 ensure 一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 固定为 `page_registry:authoritative_source_refresh:<siteKey>`，payload `sitemapUrls` 与 `pageRegistry.authoritativeSitemapUrls` 保持一致。
+- 页面来源 source CRUD 属于 legacy compatibility / 调试入口，不是 authoritative mode 的推荐配置路径。权威模式应通过站点设置中的 `authoritativeSitemapUrls` 管理 sitemap URL。
 
 请求：
 
@@ -865,11 +903,50 @@ AdminSettings
       enabled: boolean;
     };
   };
+  pageRegistry: {
+    mode: "discovery" | "authoritative";
+    authoritativeSitemapUrls: string[];
+    unknownPageResponse: "inactive_payload" | "forbidden";
+    requireHealthySource: boolean;
+    sourceFreshnessGraceSec: number;
+    emergencyLockdown: boolean;
+  };
   notifications: {
-    emailEnabled: boolean;
+    commenter: {
+      replyEmailEnabled: boolean;
+    };
+    backend: {
+      enabled: boolean;
+      recipients?: Array<{
+        userId: number;
+        username: string;
+        email: string;
+        displayName: string;
+        // compatibility projection, derived from routes
+        channels: Array<"email" | "webhook" | "wxpusher">;
+        // compatibility projection, derived from routes
+        events: Array<"admin_comment_pending" | "admin_comment_approved">;
+        routes: Array<{
+          id?: string;
+          eventType: "admin_comment_pending" | "admin_comment_approved";
+          channelConfigId: string;
+          channelType?: "email" | "webhook" | "wxpusher";
+          channelName?: string;
+          enabled: boolean;
+        }>;
+        includeCommentContent: "none" | "summary" | "full";
+        rateLimitProfile: string | null;
+        enabled: boolean;
+      }>;
+    };
+    channelConfigs: NotificationChannelConfig[];
   };
 }
 ```
+
+后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；站点管理员只能配置自己有访问权的站点，且候选接收人也必须对该站点有访问权；站点评论管理员不可管理接收人。
+
+接收人配置的 canonical 模型是 `notifications.backend.recipients[].routes[]`。每条 route 绑定一个事件和一个具体渠道配置实例，例如 `email:default`、`wxpusher:ops` 或 `webhook:feishu`。`channels` 和 `events` 仍作为兼容投影返回，旧请求也可用它们生成默认 route；新 Admin UI 和新调用代码应提交 `routes`。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核只保留审核语义，不追加第二条后台用户通知。
 
 Engagement 语义：
 
@@ -918,9 +995,13 @@ AdminSystemSettings
 
 ### `PUT /api/admin/system-settings`
 
-更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
+更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`notifications`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
 
-`mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。`notifications.emailEnabled` 是 site owner，只控制当前站点是否发送通知。
+`mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。站点级通知设置拆分为 `notifications.commenter.replyEmailEnabled` 和 `notifications.backend.enabled`：前者只控制普通评论者回复邮件订阅能力，后者只控制后台用户通知任务创建。
+
+`notifications.delivery.queueBackend` 默认是 `database`。选择 `bullmq` 时需要部署 Redis 并配置相应运行环境；BullMQ 只影响队列后端，不改变 planner、delivery projection、worker 状态模型或任务中心展示。
+
+Webhook 和 WxPusher 的 canonical 配置模型是 `notifications.channelConfigs[]`。每个元素是一条具体渠道配置实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`；站点接收人再通过 route 的 `channelConfigId` 选择具体实例。`email:default` 是只读默认邮件实例，GET 会返回，PUT 可原样带回但不会作为可编辑实例落库。Webhook/WxPusher 的 `secretConfig.secret`、`secretConfig.appToken` 是 secret 字段，GET 响应只返回 `secretConfigured` 状态；PUT 省略或提交空 `secretConfig` 会保留已有密钥。
 
 `avatar.external.enabled` 控制外部头像 URL 生成。`avatar.display.*` 和 `publicApi.advisoryFields.enabled` 控制可选公开展示建议字段，不能简单视为 `avatar.external.enabled` 的子设置。
 
@@ -975,6 +1056,42 @@ AdminSystemSettings
       password?: string;
       passwordConfigured: boolean;
       from: string;
+    };
+  };
+  notifications: {
+    delivery: {
+      globalMaxPerMinute: number;
+      perChannelMaxPerMinute: number;
+      perSiteMaxPerHour: number;
+      perRecipientMinIntervalSec: number;
+      dailyChannelBudget: number;
+      lowPriorityDelaySec: number;
+      queueBackend: "database" | "bullmq";
+    };
+    channelConfigs: Array<{
+      id: string;
+      type: "email" | "webhook" | "wxpusher";
+      name: string;
+      description: string | null;
+      enabled: boolean;
+      config: Record<string, unknown>;
+      secretConfig?: Record<string, unknown>;
+      secretConfigured?: boolean;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+    }>;
+    // compatibility settings, not the canonical Webhook/WxPusher model
+    webhook: {
+      enabled: boolean;
+      url: string;
+      secret?: string;
+      secretConfigured: boolean;
+    };
+    wxpusher: {
+      enabled: boolean;
+      appToken?: string;
+      appTokenConfigured: boolean;
+      apiUrl: string;
     };
   };
   captcha: {
@@ -1053,6 +1170,149 @@ AdminSystemSettings
       apiKey?: string;
       apiKeyConfigured: boolean;
     };
+  };
+}
+```
+
+### `POST /api/admin/system-settings/notifications/channel-test`
+
+创建通知通道测试任务。该接口需要 `system_settings.update` 权限，会创建 `channel_test` 类型的 `task_runs` 和对应 `notification_deliveries`，再由通知 worker 或测试流程投递。
+
+请求：
+
+```ts
+{
+  channelConfigId: string;
+  // compatibility fallback; new clients should use channelConfigId
+  channel?: "email" | "webhook" | "wxpusher";
+  recipient?: string;
+  siteKey?: string;
+}
+```
+
+响应：
+
+```ts
+{
+  taskId: string;
+  deliveryId: string;
+  queueBackend: "database" | "bullmq";
+  channelConfigId: string;
+  channelType: "email" | "webhook" | "wxpusher";
+  channelName: string;
+  channel: "email" | "webhook" | "wxpusher";
+  recipient: string;
+}
+```
+
+## Notification Templates
+
+通知模板接口主要服务 Admin Console 的模板管理页。模板支持 `html`、`text` 和 `json` 输出格式；变量渲染会按目标格式进行 escaping，JSON 模板渲染后必须是合法 JSON。
+
+### `GET /api/admin/notification-templates`
+
+列出默认模板和数据库中的自定义覆盖。需要 `system_settings.read` 权限。
+
+响应：
+
+```ts
+{
+  templates: Array<{
+    key: string;
+    name: string;
+    description: string;
+    channel: "email" | "webhook" | "wxpusher";
+    channelLabel: string;
+    channelDescription: string;
+    eventType: string;
+    eventLabel: string;
+    eventDescription: string;
+    format: "html" | "text" | "json";
+    formatLabel: string;
+    subjectTemplate: string | null;
+    bodyTemplate: string;
+    isCustomized: boolean;
+    updatedAt: string | null;
+    updatedByUserId: number | null;
+  }>;
+}
+```
+
+`name`、`description`、`channelLabel`、`channelDescription`、`eventLabel`、`eventDescription` 和 `formatLabel` 均为中文展示文案，来自内置默认模板元数据；数据库自定义覆盖只覆盖格式和模板内容，不覆盖这些展示字段。
+
+### `PUT /api/admin/notification-templates/{templateKey}`
+
+保存模板覆盖。需要 `system_settings.update` 权限。
+
+请求：
+
+```ts
+{
+  format: "html" | "text" | "json";
+  subjectTemplate?: string | null;
+  bodyTemplate: string;
+}
+```
+
+响应：
+
+```ts
+{
+  template: NotificationTemplate;
+}
+```
+
+### `POST /api/admin/notification-templates/{templateKey}/preview`
+
+使用预置示例变量预览模板渲染结果。需要 `system_settings.read` 权限；请求体可为空，也可临时覆盖格式和模板内容。
+
+响应：
+
+```ts
+{
+  rendered: {
+    subject?: string;
+    body: string;
+  };
+}
+```
+
+### `POST /api/admin/notification-templates/{templateKey}/restore-default`
+
+删除该模板的数据库覆盖，恢复默认模板。需要 `system_settings.update` 权限。
+
+响应：
+
+```ts
+{
+  template: NotificationTemplate;
+}
+```
+
+### `POST /api/admin/notification-templates/{templateKey}/test-send`
+
+创建模板测试发送任务。需要 `system_settings.update` 权限；`recipient` 省略时使用当前后台用户邮箱。
+
+请求：
+
+```ts
+{
+  recipient?: string;
+}
+```
+
+响应：
+
+```ts
+{
+  taskId: string;
+  deliveryId: string;
+  queueBackend: "database" | "bullmq";
+  channel: "email" | "webhook" | "wxpusher";
+  recipient: string;
+  preview: {
+    subject?: string;
+    body: string;
   };
 }
 ```
@@ -1271,6 +1531,347 @@ Query：
 }
 ```
 
+## Task Scheduler
+
+任务调度中心接口服务内置 Admin Console，不进入公开 OpenAPI。所有写操作需要已登录后台会话和 CSRF token；后端按当前用户的全局管理员、初始管理员、站点管理员、站点评论管理员和站点授权执行 ACL，不以前端隐藏作为权限边界。
+
+任务调度中心只允许后端注册的内置 task type，不支持任意 Shell、Python、JavaScript、SQL、系统命令、容器命令或脚本库任务。
+
+### `GET /api/admin/tasks/definitions`
+
+列出后端权威 task type registry。
+
+响应：
+```ts
+{
+  items: Array<{
+    type: string;
+    label: string;
+    description: string;
+    category: "notification" | "import" | "maintenance" | "backup" | "upgrade" | "page" | "system";
+    scope: "global" | "site" | "multi_site" | "page";
+    defaultPayload: Record<string, unknown>;
+    defaultPolicy: {
+      maxAttempts?: number;
+      retryDelaySec?: number;
+      timeoutMs?: number;
+      maxBytes?: number;
+      concurrencyKey?: string;
+    };
+    schedule: {
+      manual: boolean;
+      presets: string[];
+      cron: boolean;
+      condition: boolean;
+    };
+    dangerous: boolean;
+    reuse: {
+      service: string;
+      method: string;
+      file: string;
+    };
+  }>;
+}
+```
+
+当前内置 task type 包括：
+
+- `page_source_refresh`
+- `page_metadata_refresh`
+- `comment_ip_refresh`
+- `ip_region_update`
+- `backup`
+- `site_settings_action`
+- `blacklist_automation`
+- `daily_site_digest`
+
+### `GET /api/admin/tasks/scheduled`
+
+列出当前用户可见的计划任务定义。非 owner 的站点管理员和站点评论管理员只能看到摘要投影，不能看到 raw payload、policy、trigger 或日志。
+
+响应：
+```ts
+{
+  items: ScheduledTaskProjection[];
+  totalCount: number;
+}
+```
+
+### `POST /api/admin/tasks/scheduled`
+
+创建计划任务定义。危险 task type 必须先以 `enabled=false` 创建；如果请求里传入 `enabled=true`，后端返回 `VALIDATION_FAILED`，字段路径为 `enabled`。
+
+请求：
+```ts
+{
+  name: string;
+  description?: string | null;
+  type: string;
+  siteKey?: string | null;
+  scopeKind: "global" | "site" | "multi_site" | "page";
+  scope: Record<string, unknown>;
+  enabled: boolean;
+  scheduleKind: "manual_only" | "once" | "interval" | "daily" | "weekly" | "monthly" | "cron";
+  schedulePreset?: string | null;
+  cronExpression?: string | null;
+  timezone?: string | null;
+  payload: Record<string, unknown>;
+  policy: {
+    maxAttempts?: number;
+    retryDelaySec?: number;
+    timeoutMs?: number;
+    maxBytes?: number;
+    concurrencyKey?: string;
+    failureNotification?: {
+      enabled: boolean;
+      channelConfigIds: string[];
+      recipientIds: string[];
+    };
+  };
+  trigger: {
+    runAt?: string;
+    everyMinutes?: number;
+    time?: string;
+    dayOfWeek?: number;
+    dayOfMonth?: number;
+  };
+  retentionCount: number;
+}
+```
+
+响应为 `ScheduledTaskProjection`。
+
+### `GET /api/admin/tasks/scheduled/{taskId}`
+
+读取单个计划任务定义。无可见权限时返回 `SCHEDULED_TASK_NOT_FOUND`；摘要可见但无管理权限时，响应不包含 raw payload/policy/trigger。
+
+### `PATCH /api/admin/tasks/scheduled/{taskId}`
+
+更新计划任务定义。只有 owner、初始管理员或具备全局管理权限的管理员可以更新。
+
+### `DELETE /api/admin/tasks/scheduled/{taskId}`
+
+删除计划任务定义并写入删除快照。历史 run 不会被删除；普通任务管理 UI 不提供恢复入口。
+
+请求：
+```ts
+{
+  reason?: string | null;
+}
+```
+
+响应为 `ScheduledTaskDeletedSnapshot`。
+
+### `POST /api/admin/tasks/scheduled/{taskId}/run`
+
+立即创建一次手动运行记录。该接口只创建 `task_runs` 记录并写审计；执行由后端任务 runner/worker 后续处理。
+
+响应为 `TaskRunProjection`，owner 和管理员可见 raw input；摘要用户只能看到脱敏投影。
+
+### `POST /api/admin/tasks/scheduled/{taskId}/enable`
+
+启用计划任务定义。任务 owner 权限变化导致自动停用后，需要具备管理权限的用户手动重新启用。
+
+### `POST /api/admin/tasks/scheduled/{taskId}/disable`
+
+禁用计划任务定义。
+
+请求：
+```ts
+{
+  reason: string;
+}
+```
+
+### `POST /api/admin/tasks/scheduled/{taskId}/transfer-owner`
+
+转移任务 owner。目标用户必须处于 active 状态，并具备目标任务作用范围所需权限；初始管理员可接管所有任务。
+
+请求：
+```ts
+{
+  ownerUserId: number;
+}
+```
+
+### `POST /api/admin/tasks/owners/reconcile`
+
+管理员或初始管理员用于处理 owner 被停用、删除、降权或失去站点权限后的任务。匹配的任务会自动 disabled，并转移给初始管理员。
+
+请求：
+```ts
+{
+  ownerUserId: number;
+  reason: "owner_permission_changed" | "owner_disabled" | "owner_deleted" | string;
+}
+```
+
+响应：
+```ts
+{
+  updatedTaskIds: string[];
+}
+```
+
+### `GET /api/admin/tasks/runs`
+
+列出任务运行记录。
+
+响应：
+```ts
+{
+  items: TaskRunProjection[];
+  totalCount: number;
+}
+```
+
+### `GET /api/admin/tasks/runs/{runId}`
+
+读取单个任务运行记录。非 owner 摘要用户不能看到 raw input/output/error。
+
+### `GET /api/admin/tasks/runs/{runId}/events`
+
+分页读取任务事件日志。只有具备日志权限的用户可以访问；站点摘要用户默认不能访问事件日志。显式标记 `visibleToSiteAdmin=true` 的事件仍需经过后端权限投影和脱敏。
+
+响应：
+```ts
+{
+  items: Array<{
+    id: string;
+    taskRunId: string;
+    eventType: string;
+    level: "debug" | "info" | "warn" | "error";
+    message: string;
+    data: unknown;
+    visibleToSiteAdmin: boolean;
+    createdAt: string;
+  }>;
+  totalCount: number;
+}
+```
+
+### `GET /api/admin/tasks/runs/{runId}/logs`
+
+按 sequence 增量读取任务 console 日志。任务详情 console 使用该接口轮询 stdout/stderr/system 日志流；只有具备日志权限的用户可以访问。
+
+Query：
+
+```ts
+{
+  afterSequence?: number;
+  limit?: number; // default 100, max 500
+}
+```
+
+响应：
+
+```ts
+{
+  items: TaskRunLogLine[];
+  nextSequence: number;
+  hasMore: boolean;
+}
+```
+
+### `POST /api/admin/tasks/runs/{runId}/cancel`
+
+取消任务运行记录。当前实现写入 `cancelled` 状态和 `TASK_RUN_CANCELLED` 错误快照。
+
+### `POST /api/admin/tasks/runs/{runId}/retry`
+
+把任务运行记录标记为 `retrying`，并写入 `TASK_RUN_RETRY_REQUESTED` 错误快照。
+
+### `GET /api/admin/tasks/audit`
+
+列出任务相关审计记录。初始管理员和管理员可见全局任务审计；站点用户只能看到其授权站点范围内的任务审计摘要。
+
+### `GET /api/admin/tasks/deleted-snapshots`
+
+列出计划任务删除快照。仅初始管理员可访问。
+
+### `GET /api/admin/tasks/deleted-snapshots/{snapshotId}`
+
+读取单个计划任务删除快照。仅初始管理员可访问。
+
+`ScheduledTaskProjection`：
+```ts
+{
+  id: string;
+  name: string;
+  description: string | null;
+  type: string;
+  siteId: number | null;
+  scopeKind: string;
+  enabled: boolean;
+  disabledReason: string | null;
+  scheduleKind: string;
+  schedulePreset: string | null;
+  cronExpression: string | null;
+  timezone: string | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastRunId: string | null;
+  lastStatus: string | null;
+  ownerUserId: number;
+  createdByUserId: number | null;
+  updatedByUserId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  canManage: boolean;
+  canRun: boolean;
+  canViewLogs: boolean;
+  visibility: "summary" | "definition";
+  scope?: unknown;
+  payload?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  trigger?: Record<string, unknown>;
+  retentionCount?: number;
+}
+```
+
+`TaskRunProjection`：
+```ts
+{
+  id: string;
+  scheduledTaskId: string | null;
+  scheduledTaskNameSnapshot: string | null;
+  type: string;
+  category: "notification" | "import" | "maintenance" | "backup" | "upgrade" | "page" | "system";
+  status: "queued" | "delayed" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "blocked" | "suppressed" | "cancelled";
+  siteId: number | null;
+  siteKey: string | null;
+  scopeKind: string | null;
+  trigger: string | null;
+  ownerUserIdSnapshot: number | null;
+  createdByUserId: number | null;
+  skipReason: string | null;
+  blockReason: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+  canViewLogs: boolean;
+  visibility: "run_summary" | "run_detail";
+  scope?: unknown;
+  triggerSnapshot?: unknown;
+  input?: unknown;
+  actionConfigSnapshot?: unknown;
+  payloadSummary?: unknown;
+  payload?: unknown;
+  progress?: unknown;
+  result?: unknown;
+  error?: unknown;
+  attempts?: number;
+  maxAttempts?: number;
+  retryDelaySec?: number;
+  priority?: number;
+  concurrencyKey?: string | null;
+  workerId?: string | null;
+  lockConflictWithRunId?: string | null;
+  lockConflictWithTaskName?: string | null;
+}
+```
+
 ## Ops
 
 ### `GET /api/admin/ops/status`
@@ -1420,7 +2021,7 @@ Query：
 
 ### `GET /api/admin/ops/tasks`
 
-任务中心维护任务列表。该接口聚合 maintenance job；导入任务仍由 import-export job API 管理。
+任务中心列表。该接口只读取 `task_runs` 投影；导入任务仍由 import-export job API 管理。
 
 Query：
 
@@ -1437,20 +2038,30 @@ Query：
 
 ```ts
 {
-  items: Array<MaintenanceJob & { source: "maintenance" }>;
+  items: AdminTaskCenterItem[];
+  totalCount: number;
+  limit: number;
+  offset: number;
 }
 ```
 
-`MaintenanceJob`：
+`TaskRunCenterItem`：
 
 ```ts
 {
+  source: "task_run";
   id: string;
-  type:
-    | "ip_region_update"
-    | "comment_ip_refresh"
-    | "page_source_refresh"
-    | "page_metadata_refresh";
+  queueBackend: "database" | "bullmq";
+  queueMessageId: string | null;
+  type: string;
+  category:
+    | "notification"
+    | "import"
+    | "maintenance"
+    | "backup"
+    | "upgrade"
+    | "page"
+    | "system";
   status:
     | "queued"
     | "delayed"
@@ -1458,21 +2069,29 @@ Query：
     | "retrying"
     | "succeeded"
     | "failed"
+    | "suppressed"
     | "cancelled";
+  siteId: number | null;
   siteKey: string | null;
+  actorType: "admin_user" | "system" | "visitor" | null;
+  actorId: string | null;
+  subjectType: string | null;
+  subjectId: string | null;
+  payloadSummary: unknown;
+  payload: unknown;
   scope: unknown;
   progress: unknown;
   result: unknown;
   error: unknown;
+  idempotencyKey: string | null;
   runAfter: string | null;
   attempts: number;
   maxAttempts: number;
-  retryDelaySec: number;
-  concurrencyKey: string | null;
-  lastHeartbeatAt: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
   updatedAt: string;
 }
 ```
+
+通知任务会在 `payloadSummary` / `payload` / `result` 中提供排障用 event、channel、channel config id/name、recipient type、recipient address snapshot、attempt、next retry、error 和 provider message id。`notification_deliveries.channelConfigRef` 与 `notification_deliveries.channelConfigNameSnapshot` 保存任务创建时的渠道配置快照，用于区分多个 Webhook 或 WxPusher 配置实例。拥有 `tasks.read` 的后台用户可以在任务中心查看这些内部排障字段；公开 API 不暴露这些字段。secret 和明文退订 token 不会写入 task payload、日志、导出或 Admin API 响应。

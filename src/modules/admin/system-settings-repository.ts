@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
-import { systemSettings } from "../../db/schema";
+import { auditLogs, systemSettings } from "../../db/schema";
 
 export class AdminSystemSettingsRepository {
 	public constructor(private readonly db: AppDatabase) {}
@@ -36,5 +36,23 @@ export class AdminSystemSettingsRepository {
 					updatedAt,
 				},
 			});
+	}
+
+	public async writeAudit(input: {
+		actorType: string;
+		actorId?: string;
+		action: string;
+		targetType: string;
+		targetId: string;
+		payload?: Record<string, unknown>;
+	}) {
+		await this.db.insert(auditLogs).values({
+			actorType: input.actorType,
+			actorId: input.actorId,
+			action: input.action,
+			targetType: input.targetType,
+			targetId: input.targetId,
+			payloadJson: input.payload ? JSON.stringify(input.payload) : undefined,
+		});
 	}
 }

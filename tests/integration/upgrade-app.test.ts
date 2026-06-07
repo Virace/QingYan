@@ -121,8 +121,11 @@ describe("upgrade app", () => {
 				url: "/qingyan/upgrade",
 			});
 			expect(page.statusCode).toBe(200);
-			expect(page.headers["set-cookie"]).toContain("qingyan_upgrade=");
+			expect(page.headers["set-cookie"]).toBeUndefined();
 			expect(page.body).toContain("QingYan Upgrade");
+			expect(page.body).toContain('id="token"');
+			expect(page.body).toContain('autocomplete="one-time-code"');
+			expect(page.body).toContain("token: tokenInput.value");
 
 			const state = await fixture.app.inject({
 				method: "GET",
@@ -156,11 +159,19 @@ describe("upgrade app", () => {
 			expect(missingToken.statusCode).toBe(403);
 			expect(missingToken.json().error.code).toBe("UPGRADE_TOKEN_INVALID");
 
-			const badConfirm = await fixture.app.inject({
+			const cookieOnly = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/upgrade/apply",
 				headers: { cookie: "qingyan_upgrade=upgrade-token" },
-				payload: { confirm: "upgrade" },
+				payload: { confirm: "UPGRADE QINGYAN" },
+			});
+			expect(cookieOnly.statusCode).toBe(403);
+			expect(cookieOnly.json().error.code).toBe("UPGRADE_TOKEN_INVALID");
+
+			const badConfirm = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/upgrade/apply",
+				payload: { token: "upgrade-token", confirm: "upgrade" },
 			});
 			expect(badConfirm.statusCode).toBe(400);
 			expect(badConfirm.json().error.code).toBe("INVALID_REQUEST");
@@ -175,8 +186,7 @@ describe("upgrade app", () => {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/upgrade/apply",
-				headers: { cookie: "qingyan_upgrade=upgrade-token" },
-				payload: { confirm: "UPGRADE QINGYAN" },
+				payload: { token: "upgrade-token", confirm: "UPGRADE QINGYAN" },
 			});
 
 			expect(response.statusCode).toBe(200);
@@ -195,8 +205,7 @@ describe("upgrade app", () => {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/upgrade/apply",
-				headers: { cookie: "qingyan_upgrade=upgrade-token" },
-				payload: { confirm: "UPGRADE QINGYAN" },
+				payload: { token: "upgrade-token", confirm: "UPGRADE QINGYAN" },
 			});
 
 			expect(response.statusCode).toBe(409);

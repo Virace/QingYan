@@ -3,15 +3,11 @@ import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import type { AppConfig } from "../../config/types";
-import { joinPublicPath, qingyanCookiePath } from "../../config/public-path";
+import { joinPublicPath } from "../../config/public-path";
 import type { SqliteClient } from "../../db/client";
 import { buildErrorResponse } from "../shared/error-response";
 import { AppError } from "../shared/errors";
-import {
-	upgradeRoutes,
-	UPGRADE_COOKIE_NAME,
-	UPGRADE_PATH,
-} from "./upgrade-routes";
+import { upgradeRoutes, UPGRADE_PATH } from "./upgrade-routes";
 import {
 	UpgradeService,
 	type RegisteredApplicationUpgrade,
@@ -30,10 +26,6 @@ export interface CreateUpgradeAppInput {
 	migrationDirectory?: string;
 	token?: string;
 	now?: () => Date;
-}
-
-function createUpgradeCookie(token: string, publicPath: string): string {
-	return `${UPGRADE_COOKIE_NAME}=${encodeURIComponent(token)}; Path=${qingyanCookiePath(publicPath)}; HttpOnly; SameSite=Lax`;
 }
 
 function renderValue(value: unknown): string {
@@ -77,6 +69,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </div>
 <div class="content">
 <pre id="state">${renderValue(state)}</pre>
+<label>升级令牌<input id="token" autocomplete="one-time-code" required></label>
 <label>确认文本<input id="confirm" autocomplete="off" placeholder="UPGRADE QINGYAN"></label>
 <button id="apply" type="button">执行升级</button>
 <div id="message" class="message"></div>
@@ -85,6 +78,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </main>
 <script>
 const applyButton = document.getElementById("apply");
+const tokenInput = document.getElementById("token");
 const confirmInput = document.getElementById("confirm");
 const message = document.getElementById("message");
 applyButton.addEventListener("click", async () => {
@@ -94,7 +88,7 @@ applyButton.addEventListener("click", async () => {
 		const response = await fetch("${applyPath}", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ confirm: confirmInput.value }),
+			body: JSON.stringify({ token: tokenInput.value, confirm: confirmInput.value }),
 		});
 		const result = await response.json();
 		if (!response.ok) {
@@ -139,7 +133,6 @@ export function createUpgradeApp(
 
 	app.get(upgradePath, async (_request, reply) =>
 		reply
-			.header("Set-Cookie", createUpgradeCookie(token, publicPath))
 			.type("text/html; charset=utf-8")
 			.send(
 				renderUpgradeHtml(service.publicState(), `${upgradeApiPath}/apply`),

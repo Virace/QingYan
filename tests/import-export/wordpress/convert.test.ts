@@ -101,6 +101,20 @@ function authorMatchReportFixture(
 	return report;
 }
 
+function existingUserMatchReportFixture() {
+	const report = authorMatchReportFixture("staff_existing_user");
+	const match = report.items[0].comments[0].authorMatch;
+	if (match) {
+		match.adminUser = {
+			id: 42,
+			displayName: "后台作者",
+			username: "owner",
+			status: "active",
+		};
+	}
+	return report;
+}
+
 describe("convertReportToImportPlan", () => {
 	it("rejects unresolved reports", () => {
 		expect(() =>
@@ -134,12 +148,25 @@ describe("convertReportToImportPlan", () => {
 		expect(plan.items[0].comments[0].authorIdentity).toBe("verified");
 	});
 
-	it("requires explicit decisions for WordPress author email candidates", () => {
-		expect(() =>
-			convertReportToImportPlan({
-				report: authorMatchReportFixture("staff_email_candidate"),
-			}),
-		).toThrow(/Unresolved WordPress author candidates/);
+	it("maps existing backend user matches to staff comments with author user id", () => {
+		const plan = convertReportToImportPlan({
+			report: existingUserMatchReportFixture(),
+		});
+
+		expect(plan.items[0].comments[0]).toMatchObject({
+			authorIdentity: "staff",
+			authorUserId: 42,
+		});
+	});
+
+	it("defaults unresolved WordPress author email candidates to visitor", () => {
+		const plan = convertReportToImportPlan({
+			report: authorMatchReportFixture("staff_email_candidate"),
+		});
+
+		expect(plan.items[0].comments[0]).toMatchObject({
+			authorIdentity: "visitor",
+		});
 	});
 
 	it("applies explicit WordPress author email candidate decisions", () => {

@@ -1,4 +1,5 @@
 import { requestJson } from "./client";
+import type { TaskRunProjection } from "./tasks";
 
 export interface OpsStatus {
 	version: {
@@ -120,40 +121,6 @@ export function restartService(input: { confirm: string }) {
 }
 
 export type IpVersion = "v4" | "v6";
-export type MaintenanceJobStatus =
-	| "queued"
-	| "delayed"
-	| "running"
-	| "retrying"
-	| "succeeded"
-	| "failed"
-	| "cancelled";
-
-export interface MaintenanceJob {
-	id: string;
-	type:
-		| "ip_region_update"
-		| "comment_ip_refresh"
-		| "page_source_refresh"
-		| "page_metadata_refresh";
-	status: MaintenanceJobStatus;
-	siteKey: string | null;
-	scope: unknown;
-	progress: unknown;
-	result: unknown;
-	error: unknown;
-	runAfter: string | null;
-	attempts: number;
-	maxAttempts: number;
-	retryDelaySec: number;
-	priority: number;
-	concurrencyKey: string | null;
-	lastHeartbeatAt: string | null;
-	createdAt: string;
-	startedAt: string | null;
-	finishedAt: string | null;
-	updatedAt: string;
-}
 
 export interface TaskQueueState {
 	waitingReason:
@@ -201,7 +168,7 @@ export interface IpRegionMaintenanceStatus {
 		missingLocation: number;
 		failedLocation: number;
 	};
-	recentJobs: MaintenanceJob[];
+	recentJobs: TaskRunProjection[];
 }
 
 export function fetchIpRegionMaintenanceStatus() {
@@ -211,7 +178,7 @@ export function fetchIpRegionMaintenanceStatus() {
 export function createIpRegionUpdateJob(
 	input: { ipVersions: IpVersion[] } & TaskExecutionOptions,
 ) {
-	return requestJson<{ job: MaintenanceJob }>(
+	return requestJson<{ run: TaskRunProjection }>(
 		"/api/admin/ops/ip-region/update",
 		{
 			method: "POST",
@@ -227,7 +194,7 @@ export function createCommentIpRefreshJob(
 		siteKey?: string;
 	} & TaskExecutionOptions,
 ) {
-	return requestJson<{ job: MaintenanceJob }>(
+	return requestJson<{ run: TaskRunProjection }>(
 		"/api/admin/ops/comment-ip/refresh",
 		{
 			method: "POST",
@@ -236,16 +203,19 @@ export function createCommentIpRefreshJob(
 	);
 }
 
-export function fetchMaintenanceJob(jobId: string) {
-	return requestJson<{ job: MaintenanceJob | null }>(
-		`/api/admin/ops/maintenance-jobs/${encodeURIComponent(jobId)}`,
-	);
-}
-
-export interface TaskCenterItem extends MaintenanceJob {
-	source: "maintenance";
+export interface TaskRunCenterItem extends TaskRunProjection {
+	source: "task_run";
+	queueBackend: "database" | "bullmq";
+	queueMessageId: string | null;
+	actorType: "admin_user" | "system" | "visitor" | null;
+	actorId: string | null;
+	subjectType: string | null;
+	subjectId: string | null;
+	idempotencyKey: string | null;
 	queueState: TaskQueueState;
 }
+
+export type AdminTaskCenterItem = TaskRunCenterItem;
 
 export function listTasks(input: {
 	siteKey?: string;
@@ -262,25 +232,11 @@ export function listTasks(input: {
 	}
 	const query = params.toString();
 	return requestJson<{
-		items: TaskCenterItem[];
+		items: AdminTaskCenterItem[];
 		totalCount: number;
 		limit: number;
 		offset: number;
 	}>(`/api/admin/ops/tasks${query ? `?${query}` : ""}`);
-}
-
-export function runTaskNow(jobId: string) {
-	return requestJson<{ job: MaintenanceJob }>(
-		`/api/admin/ops/tasks/${encodeURIComponent(jobId)}/run-now`,
-		{ method: "POST" },
-	);
-}
-
-export function prioritizeTask(jobId: string) {
-	return requestJson<{ job: MaintenanceJob }>(
-		`/api/admin/ops/tasks/${encodeURIComponent(jobId)}/prioritize`,
-		{ method: "POST" },
-	);
 }
 
 export function createPageTitleRefreshTask(
@@ -291,7 +247,7 @@ export function createPageTitleRefreshTask(
 		forceTitle?: boolean;
 	} & TaskExecutionOptions,
 ) {
-	return requestJson<{ job: MaintenanceJob }>(
+	return requestJson<{ run: TaskRunProjection }>(
 		"/api/admin/ops/tasks/page-title-refresh",
 		{
 			method: "POST",

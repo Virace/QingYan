@@ -31,6 +31,10 @@ export class RuntimeSystemSettingsService {
 		return (await this.getSettings()).admin.session;
 	}
 
+	public async getAdminSettings() {
+		return (await this.getSettings()).admin;
+	}
+
 	public async getIpRegionSettings() {
 		return (await this.getSettings()).ipRegion;
 	}

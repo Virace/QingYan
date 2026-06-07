@@ -67,6 +67,7 @@ describe("resolveRuntimeOptions", () => {
 			enabled: true,
 			adminUsername: "admin",
 			adminPassword: "admin",
+			adminOrigin: "http://localhost:5173",
 			adminToken: "dev-token",
 			tokenSource: "env",
 			seed: {
@@ -77,7 +78,10 @@ describe("resolveRuntimeOptions", () => {
 				},
 			},
 		});
-		expect(resolved.config).toBe(config);
+		expect(resolved.config).not.toBe(config);
+		expect(resolved.config.security.adminOriginGuard.allowedOrigins).toContain(
+			"http://localhost:5173",
+		);
 		expect("sites" in resolved.config).toBe(false);
 	});
 
@@ -110,6 +114,22 @@ describe("resolveRuntimeOptions", () => {
 			adminUsername: "dev-admin",
 			adminPassword: "dev-password",
 		});
+	});
+
+	it("allows overriding the admin dev origin", () => {
+		const config = createTestConfig("./data/test.db");
+
+		const resolved = resolveRuntimeOptions(config, {
+			QINGYAN_DEV_MODE: "true",
+			QINGYAN_DEV_ADMIN_ORIGIN: "http://localhost:5174",
+		});
+
+		expect(resolved.runtimeOptions.devMode.adminOrigin).toBe(
+			"http://localhost:5174",
+		);
+		expect(resolved.config.security.adminOriginGuard.allowedOrigins).toContain(
+			"http://localhost:5174",
+		);
 	});
 
 	it("keeps the original sites untouched when dev mode is disabled", () => {
@@ -149,6 +169,7 @@ describe("resolveRuntimeOptions", () => {
 			const output = `${result.stdout}\n${result.stderr}`;
 			expect(output).toContain("QingYan Dev Admin: admin / admin");
 			expect(output).toContain("QingYan Dev Captcha: 1357");
+			expect(output).toContain("QingYan Admin API base: /qingyan/api");
 		} finally {
 			rmSync(workspace.directory, { recursive: true, force: true });
 		}
@@ -183,6 +204,7 @@ describe("resolveRuntimeOptions", () => {
 			expect(output).toContain(
 				"QingYan Admin dev alias: http://localhost:5173/qingyan/admin",
 			);
+			expect(output).toContain("QingYan Admin API base: /qingyan/api");
 			expect(output).not.toContain("QINGYAN_ADMIN_DEV_PATHS");
 		} finally {
 			rmSync(workspace.directory, { recursive: true, force: true });

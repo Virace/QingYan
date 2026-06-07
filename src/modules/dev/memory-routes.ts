@@ -76,6 +76,17 @@ export function createDevMemoryRoutes(input: {
 			return {
 				authenticated: true,
 				session: { expiresAt: session.expiresAt },
+				user: {
+					id: 0,
+					username: input.runtimeOptions.devMode.adminUsername ?? "admin",
+					email: "admin@localhost.invalid",
+					displayName: input.runtimeOptions.devMode.adminUsername ?? "admin",
+					groupKey: "admin",
+					groupName: "管理员",
+					isInitialAdmin: true,
+					passwordChangeRequired: false,
+				},
+				permissions: ["*"],
 				sites: [
 					{
 						siteKey: seedSite.siteKey,

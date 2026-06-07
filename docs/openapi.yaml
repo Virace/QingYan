@@ -7,6 +7,8 @@ info:
 
     当前规格以仓库内已经实现并通过自动化验证的接口为准，覆盖公开评论接口、页面点赞接口、验证码接口和 Web Upgrade Mode 最小接口。
 
+    普通公开请求的页面身份由已允许 `Referer` 的 URL pathname 派生：保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash。请求体或 query 中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段，不作为生产公开运行时身份来源。启用页面来源权威模式后，未登记页面默认返回 inactive payload；配置为 forbidden 或开启 emergency lockdown 时返回 `PAGE_NOT_REGISTERED`，且不会创建 visitor、pending page candidate、PV、captcha 或页面反馈写入。
+
     `/api/admin/*` 属于 QingYan 自带 Admin Console 的管理接口，不进入公开 OpenAPI；这些接口可以随内置后台一起演进。开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`，但第三方站点前端不建议把它当作公开稳定合同依赖。
 servers:
   - url: http://localhost:4401
@@ -14,6 +16,7 @@ servers:
 tags:
   - name: System
   - name: Comments
+  - name: Notifications
   - name: Captcha
   - name: Page Feedback
   - name: Upgrade
@@ -52,6 +55,8 @@ paths:
                 $ref: '#/components/schemas/BootstrapResponse'
         '400':
           $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
         '404':
           $ref: '#/components/responses/Error404'
   /api/comments/thread:
@@ -74,6 +79,8 @@ paths:
                 $ref: '#/components/schemas/ThreadResponse'
         '400':
           $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
         '404':
           $ref: '#/components/responses/Error404'
   /api/comments:
@@ -151,6 +158,8 @@ paths:
                 $ref: '#/components/schemas/CaptchaStateResponse'
         '400':
           $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
         '404':
           $ref: '#/components/responses/Error404'
   /api/comments/captcha/refresh:
@@ -275,6 +284,34 @@ paths:
           $ref: '#/components/responses/Error409'
         '429':
           $ref: '#/components/responses/Error429'
+  /notifications/unsubscribe:
+    get:
+      tags: [Notifications]
+      summary: 退订普通评论者回复邮件通知
+      operationId: unsubscribeCommenterNotifications
+      description: |
+        使用邮件中的一次性退订 token 关闭对应普通评论者邮箱在对应站点的回复通知。数据库只保存 token hash；明文 token 只出现在邮件链接中。浏览器默认返回可读 HTML 退订结果页；自动化或 API 客户端传入 `Accept: application/json` 时返回 JSON 状态。无效、过期或已消费 token 返回 404。
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: 退订成功
+          content:
+            text/html:
+              schema:
+                type: string
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnsubscribeResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
   /api/upgrade/state:
     get:
       tags: [Upgrade]
@@ -331,6 +368,7 @@ components:
       name: pageKey
       in: query
       required: true
+      description: Dev/mock compatibility field. Normal public requests derive the canonical page key from the allowed Referer pathname.
       schema:
         type: string
         minLength: 1
@@ -397,7 +435,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     Error403:
-      description: 当前请求被拒绝
+      description: 当前请求被拒绝。常见公开错误码包括 PAGE_NOT_REGISTERED、PAGE_NOT_INTERACTIVE、COMMENTS_DISABLED、COMMENT_VOTE_DISABLED、PAGE_FEEDBACK_DISABLED。
       content:
         application/json:
           schema:
@@ -453,6 +491,13 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorObject'
+    UnsubscribeResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [unsubscribed]
     UpgradePlan:
       type: object
       required:
@@ -831,6 +876,7 @@ components:
         - pageViews
         - pageLikes
         - visitors
+        - replyEmailNotification
       properties:
         comments:
           $ref: '#/components/schemas/FeatureFlag'
@@ -857,6 +903,9 @@ components:
           $ref: '#/components/schemas/FeatureFlag'
         visitors:
           $ref: '#/components/schemas/FeatureFlag'
+        replyEmailNotification:
+          type: boolean
+          description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is true only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
     BootstrapSite:
       type: object
       required: [siteKey]
@@ -869,10 +918,12 @@ components:
       properties:
         pageKey:
           type: string
+          description: Canonical page key derived from the allowed Referer pathname.
         status:
           type: string
     BootstrapData:
       type: object
+      description: Omitted feature payloads are represented by absent properties. Authoritative unknown pages with inactive_payload return an empty object.
       properties:
         comments:
           $ref: '#/components/schemas/BootstrapCommentsData'
@@ -1055,7 +1106,7 @@ components:
               type: string
         options:
           type: object
-          description: Optional reserved create options. `notifyOnReply` is accepted for forward compatibility but has no public behavior yet.
+          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference only when bootstrap `features.replyEmailNotification` is true and the submitted author email passes notification email policy. It does not affect staff/admin comments or backend-user notifications.
           properties:
             notifyOnReply:
               type: boolean
@@ -1085,6 +1136,7 @@ components:
           type: string
         pageKey:
           type: string
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         choice:
           type: string
           enum: [up, down]
@@ -1108,6 +1160,7 @@ components:
           type: string
         pageKey:
           type: string
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         challengeId:
           type: string
         mode:
@@ -1131,6 +1184,7 @@ components:
           type: string
         pageKey:
           type: string
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
         pageUrl:
@@ -1148,6 +1202,7 @@ components:
           type: string
         pageKey:
           type: string
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         challengeId:
           type: string
         token:
@@ -1168,6 +1223,7 @@ components:
           type: string
         pageKey:
           type: string
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
         pageUrl:

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	captchaSessions,
 	commentRequestMetadata,
 	comments,
 	pageFeedbackRecords,
@@ -79,7 +80,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await seedActivePage(
 			fixture,
 			site.id,
-			"posts/lightweight-bootstrap/",
+			"/posts/lightweight-bootstrap/",
 			"/posts/lightweight-bootstrap/",
 		);
 
@@ -145,7 +146,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const threads = await fixture.app.db.select().from(pageThreads);
 		expect(threads).toHaveLength(1);
 		expect(threads[0]).toMatchObject({
-			pageKey: "posts/lightweight-bootstrap/",
+			pageKey: "/posts/lightweight-bootstrap/",
 			pageViewCount: 2,
 		});
 	});
@@ -245,7 +246,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				}),
 			})
 			.where(eq(siteSettings.siteId, site.id));
-		await seedActivePage(fixture, site.id, "post:welcome", "/posts/welcome/");
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/welcome/",
+			"/posts/welcome/",
+		);
 
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
@@ -261,7 +267,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:welcome",
+			pageKey: "/posts/welcome/",
 			pageTitle: "Welcome",
 			pageUrl: "/posts/welcome/",
 			commentCount: 2,
@@ -272,7 +278,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:welcome"));
+			.where(eq(pageThreads.pageKey, "/posts/welcome/"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -328,7 +334,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				qingyan_visitor: "viewer_seed",
 			},
 			headers: {
-				referer: "http://localhost:4321/post:welcome",
+				referer: "http://localhost:4321/posts/welcome/",
 				"user-agent": "bootstrap-test",
 			},
 		});
@@ -416,7 +422,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await seedActivePage(
 			fixture,
 			site.id,
-			"lol_voice_collation.html",
+			"/lol_voice_collation.html",
 			"/lol_voice_collation.html",
 		);
 
@@ -434,7 +440,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "lol_voice_collation.html",
+			pageKey: "/lol_voice_collation.html",
 			pageTitle: "英雄联盟音频文件整理计划——15.15",
 			pageUrl: "/lol_voice_collation.html",
 			commentCount: 1,
@@ -443,7 +449,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "lol_voice_collation.html"));
+			.where(eq(pageThreads.pageKey, "/lol_voice_collation.html"));
 		if (!pageThread) {
 			throw new Error("Expected imported page thread to exist");
 		}
@@ -492,7 +498,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		const allThreads = await fixture.app.db.select().from(pageThreads);
 		expect(allThreads.map((thread) => thread.pageKey).sort()).toEqual([
-			"lol_voice_collation.html",
+			"/lol_voice_collation.html",
 		]);
 	});
 
@@ -515,6 +521,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 					},
 					pageViews: {
 						enabled: true,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
 					},
 				}),
 			})
@@ -553,7 +565,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(candidates).toHaveLength(1);
 		expect(candidates[0]).toMatchObject({
 			siteKey: "fangyuan",
-			pageKey: "posts/unknown-bootstrap/",
+			pageKey: "/posts/unknown-bootstrap/",
 			pageUrl: "/posts/unknown-bootstrap/",
 			hitCount: 1,
 			status: "pending",
@@ -564,9 +576,237 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(pendingSessions).toHaveLength(1);
 		expect(pendingSessions[0]).toMatchObject({
 			siteKey: "fangyuan",
-			pageKey: "posts/unknown-bootstrap/",
+			pageKey: "/posts/unknown-bootstrap/",
 			hitCount: 1,
 		});
+	});
+
+	it("returns inactive payload without writes for authoritative unknown bootstrap pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				pageRegistryJson: JSON.stringify({
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+					unknownPageResponse: "inactive_payload",
+					requireHealthySource: true,
+					sourceFreshnessGraceSec: 7200,
+					emergencyLockdown: false,
+				}),
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+				captchaMode: "always",
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Unknown%20Authoritative",
+			headers: {
+				referer: "http://localhost:4321/posts/authoritative-unknown/",
+				"user-agent": "authoritative-unknown-bootstrap",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			page: {
+				pageKey: "/posts/authoritative-unknown/",
+				status: "active",
+			},
+			features: {
+				comments: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				pageViews: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				pageLikes: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				visitors: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+			},
+			data: {},
+		});
+		expect(response.json()).not.toHaveProperty("visitorKey");
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(commentRequestMetadata)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
+		expect(await fixture.app.db.select().from(captchaSessions)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
+	});
+
+	it("rejects authoritative unknown bootstrap pages when forbidden is configured", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				pageRegistryJson: JSON.stringify({
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+					unknownPageResponse: "forbidden",
+					requireHealthySource: true,
+					sourceFreshnessGraceSec: 7200,
+					emergencyLockdown: false,
+				}),
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+				captchaMode: "always",
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Forbidden%20Unknown",
+			headers: {
+				referer: "http://localhost:4321/posts/authoritative-forbidden/",
+				"user-agent": "authoritative-forbidden-bootstrap",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(commentRequestMetadata)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(captchaSessions)).toEqual([]);
+	});
+
+	it("rejects unknown bootstrap pages during emergency lockdown", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				pageRegistryJson: JSON.stringify({
+					mode: "discovery",
+					authoritativeSitemapUrls: [],
+					unknownPageResponse: "inactive_payload",
+					requireHealthySource: true,
+					sourceFreshnessGraceSec: 7200,
+					emergencyLockdown: true,
+				}),
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Locked",
+			headers: {
+				referer: "http://localhost:4321/posts/lockdown-unknown/",
+				"user-agent": "lockdown-unknown-bootstrap",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(commentRequestMetadata)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
 
 	it("records official PV for active registry pages without creating pending candidates", async () => {
@@ -590,12 +830,18 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 					pageViews: {
 						enabled: true,
 					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
 				}),
 			})
 			.where(eq(siteSettings.siteId, site.id));
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/registered-bootstrap/",
+			pageKey: "/posts/registered-bootstrap/",
 			pageUrl: "/posts/registered-bootstrap/",
 			status: "active",
 		});
@@ -637,7 +883,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(threads).toHaveLength(1);
 		expect(threads[0]).toMatchObject({
 			siteId: site.id,
-			pageKey: "posts/registered-bootstrap/",
+			pageKey: "/posts/registered-bootstrap/",
 			pageUrl: "/posts/registered-bootstrap/",
 			pageViewCount: 1,
 			pageLikeCount: 0,
@@ -670,7 +916,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			.where(eq(siteSettings.siteId, site.id));
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/registered-dedupe/",
+			pageKey: "/posts/registered-dedupe/",
 			pageUrl: "/posts/registered-dedupe/",
 			status: "active",
 		});
@@ -727,7 +973,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		}
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/trashed-bootstrap/",
+			pageKey: "/posts/trashed-bootstrap/",
 			pageUrl: "/posts/trashed-bootstrap/",
 			status: "trash",
 			trashedAt: "2026-05-29T00:00:00.000Z",
@@ -815,7 +1061,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await seedActivePage(
 			fixture,
 			site.id,
-			"post:metadata-display",
+			"/posts/metadata-display/",
 			"/posts/metadata-display/",
 		);
 		await fixture.app.db
@@ -849,7 +1095,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:metadata-display",
+			pageKey: "/posts/metadata-display/",
 			pageTitle: "Metadata Display",
 			pageUrl: "/posts/metadata-display/",
 			commentCount: 1,
@@ -858,7 +1104,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:metadata-display"));
+			.where(eq(pageThreads.pageKey, "/posts/metadata-display/"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -902,7 +1148,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				qingyan_visitor: "viewer_metadata",
 			},
 			headers: {
-				referer: "http://localhost:4321/post:metadata-display",
+				referer: "http://localhost:4321/posts/metadata-display/",
 			},
 		});
 
@@ -944,7 +1190,12 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
-		await seedActivePage(fixture, site.id, "post:gravatar", "/posts/gravatar/");
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/gravatar/",
+			"/posts/gravatar/",
+		);
 
 		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
 		await systemSettings.upsert("avatar", "external.enabled", true);
@@ -976,7 +1227,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:gravatar",
+			pageKey: "/posts/gravatar/",
 			pageTitle: "Gravatar",
 			pageUrl: "/posts/gravatar/",
 			commentCount: 1,
@@ -985,7 +1236,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:gravatar"));
+			.where(eq(pageThreads.pageKey, "/posts/gravatar/"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -1015,7 +1266,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				qingyan_visitor: "viewer_gravatar",
 			},
 			headers: {
-				referer: "http://localhost:4321/post:gravatar",
+				referer: "http://localhost:4321/posts/gravatar/",
 			},
 		});
 
@@ -1092,7 +1343,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await seedActivePage(
 			fixture,
 			site.id,
-			"post:verified-badge",
+			"/posts/verified-badge/",
 			"/posts/verified-badge/",
 		);
 
@@ -1123,7 +1374,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:verified-badge",
+			pageKey: "/posts/verified-badge/",
 			pageTitle: "Verified Badge",
 			pageUrl: "/posts/verified-badge/",
 			commentCount: 1,
@@ -1132,7 +1383,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:verified-badge"));
+			.where(eq(pageThreads.pageKey, "/posts/verified-badge/"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -1159,7 +1410,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				qingyan_visitor: "viewer_verified_badge",
 			},
 			headers: {
-				referer: "http://localhost:4321/post:verified-badge",
+				referer: "http://localhost:4321/posts/verified-badge/",
 			},
 		});
 
@@ -1188,7 +1439,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 				qingyan_visitor: "viewer_verified_badge",
 			},
 			headers: {
-				referer: "http://localhost:4321/post:verified-badge",
+				referer: "http://localhost:4321/posts/verified-badge/",
 			},
 		});
 
@@ -1267,10 +1518,10 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
-		await seedActivePage(fixture, site.id, "post:always", "/post:always");
+		await seedActivePage(fixture, site.id, "/post:always", "/post:always");
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:always",
+			pageKey: "/post:always",
 			pageTitle: "Always",
 			pageUrl: "/post:always",
 		});

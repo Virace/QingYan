@@ -23,6 +23,9 @@ import {
 	resolveEngagementTrustMode,
 } from "../shared/site-settings-defaults";
 import type { CommentsWriteRepository } from "./write-repository";
+import { CommenterPreferencesRepository } from "../notifications/commenter-preferences-repository";
+import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
+import { isSystemMailUsable } from "./public-contract";
 
 function resolveIdentity(
 	siteKey: string,
@@ -50,6 +53,7 @@ export class CommentsWriteService {
 			SystemSettings["ipRegion"]
 		>,
 		private readonly moderationService?: ModerationService,
+		private readonly loadSystemSettings?: () => Promise<SystemSettings>,
 	) {}
 
 	public async createComment(input: {
@@ -72,7 +76,16 @@ export class CommentsWriteService {
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
-		verifiedAuthorSession?: { type: "admin" };
+		verifiedAuthorSession?: {
+			type: "admin";
+			userId?: number;
+			displayName?: string;
+			email?: string;
+			website?: string | null;
+		};
+		options?: {
+			notifyOnReply?: boolean;
+		};
 	}) {
 		const site = this.readRepository.getRegisteredSite(input.siteKey);
 		if (!site) {
@@ -256,20 +269,25 @@ export class CommentsWriteService {
 			? "approved"
 			: (moderation?.status ?? legacyStatus);
 		const resolvedAuthorName = shouldUseVerifiedAuthor
-			? verifiedAuthor.displayName
+			? (input.verifiedAuthorSession?.displayName ?? verifiedAuthor.displayName)
 			: authorName;
 		const resolvedAuthorEmail = shouldUseVerifiedAuthor
-			? verifiedAuthor.email || undefined
+			? input.verifiedAuthorSession?.email || verifiedAuthor.email || undefined
 			: authorEmail;
 		const resolvedAuthorWebsite = shouldUseVerifiedAuthor
-			? verifiedAuthor.website || undefined
+			? input.verifiedAuthorSession
+				? (input.verifiedAuthorSession.website ?? undefined)
+				: verifiedAuthor.website || undefined
 			: authorWebsite;
 		const created = await this.writeRepository.createComment({
 			siteId: site.id,
 			pageThreadId: thread.id,
 			parentCommentId: input.parentCommentId,
 			visitorId: visitor?.id ?? null,
-			authorIdentity: shouldUseVerifiedAuthor ? "verified" : "visitor",
+			authorUserId: shouldUseVerifiedAuthor
+				? input.verifiedAuthorSession?.userId
+				: null,
+			authorIdentity: shouldUseVerifiedAuthor ? "staff" : "visitor",
 			authorName: resolvedAuthorName,
 			authorEmail: resolvedAuthorEmail,
 			authorWebsite:
@@ -294,9 +312,9 @@ export class CommentsWriteService {
 			requestId: input.requestId,
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
-			actorType: shouldUseVerifiedAuthor ? "admin" : "visitor",
+			actorType: shouldUseVerifiedAuthor ? "admin_user" : "visitor",
 			actorId: shouldUseVerifiedAuthor
-				? "admin_session"
+				? String(input.verifiedAuthorSession?.userId ?? "admin_session")
 				: (visitor?.visitorKey ?? input.ip ?? "anonymous"),
 			event: "comments.created",
 			message: status === "pending" ? "评论已提交待审核" : "评论已发布",
@@ -307,6 +325,39 @@ export class CommentsWriteService {
 				pageKey: input.pageKey,
 			},
 		});
+		if (!shouldUseVerifiedAuthor) {
+			const systemSettings = this.loadSystemSettings
+				? await this.loadSystemSettings()
+				: undefined;
+			const replyEmailNotificationUsable =
+				commentsEnabled &&
+				(settings?.maxDepth ?? 3) > 1 &&
+				(settings?.commenterReplyEmailEnabled ?? false) &&
+				Boolean(systemSettings && isSystemMailUsable(systemSettings.mail));
+			await new CommenterPreferencesRepository(
+				this.writeRepository.database,
+			).upsertFromCommentForm({
+				siteId: site.id,
+				email: resolvedAuthorEmail,
+				notifyOnReply:
+					replyEmailNotificationUsable &&
+					(input.options?.notifyOnReply ?? false),
+			});
+		}
+		if (input.parentCommentId && status === "approved") {
+			await this.planReplyNotification({
+				siteId: site.id,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				commentId: created.commentId,
+				source: shouldUseVerifiedAuthor ? "admin_reply" : "public_api",
+				actorType: shouldUseVerifiedAuthor ? "admin_user" : "visitor",
+				actorId: shouldUseVerifiedAuthor
+					? String(input.verifiedAuthorSession?.userId ?? "admin_session")
+					: (visitor?.visitorKey ?? input.ip ?? "anonymous"),
+				requestId: input.requestId,
+			});
+		}
 		const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
 		const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
 		if (abuseGuardEnabled && autoBlacklistEnabled) {
@@ -342,6 +393,41 @@ export class CommentsWriteService {
 				rootCommentCount: created.thread.rootCommentCount,
 			},
 		};
+	}
+
+	private async planReplyNotification(input: {
+		siteId: number;
+		siteKey: string;
+		pageKey: string;
+		commentId: string;
+		source: "public_api" | "admin_reply";
+		actorType: "admin_user" | "visitor";
+		actorId: string;
+		requestId?: string;
+	}) {
+		try {
+			await new CommentNotificationPlanner(
+				this.writeRepository.database,
+			).planForCommentEvent(input);
+		} catch (error) {
+			await this.security
+				.writeAudit({
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					actorType: "system",
+					actorId: "notification_planner",
+					event: "notification.email.failed",
+					message: "评论通知规划失败",
+					targetType: "comment",
+					targetId: input.commentId,
+					payload: {
+						source: input.source,
+						error: error instanceof Error ? error.message : String(error),
+					},
+				})
+				.catch(() => undefined);
+		}
 	}
 
 	public async castVote(input: {

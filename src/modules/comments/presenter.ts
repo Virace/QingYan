@@ -14,6 +14,10 @@ interface PresenterCommentInput {
 	authorEmail: string | null;
 	authorEmailHash: string | null;
 	authorWebsite: string | null;
+	staffUserDisplayName?: string | null;
+	staffUserEmail?: string | null;
+	staffUserWebsite?: string | null;
+	staffUserAvatarUrl?: string | null;
 	authorIp?: string | null;
 	authorUserAgent?: string | null;
 	authorIpCountry?: string | null;
@@ -157,27 +161,41 @@ export function presentComments(
 
 	for (const comment of comments) {
 		const verifiedAuthor = options?.verifiedAuthor;
-		const avatarUrl = buildExternalAvatarUrl({
-			enabled: options?.avatar?.external.enabled ?? false,
-			email: comment.authorEmail,
-			baseUrl:
-				options?.avatar?.external.baseUrl ?? "https://gravatar.com/avatar",
-			hashAlgorithm: options?.avatar?.external.hashAlgorithm ?? "sha256",
-			query: options?.avatar?.external.query ?? "s=80&d=404&r=g",
-		});
 		const isVerifiedAuthor =
-			comment.authorIdentity === "verified" && verifiedAuthor?.enabled === true;
+			(comment.authorIdentity === "verified" ||
+				comment.authorIdentity === "staff") &&
+			verifiedAuthor?.enabled === true;
 		const shouldUseCurrentStaffProfile =
 			isVerifiedAuthor &&
+			comment.authorIdentity === "staff" &&
 			(options?.staffDisplay?.nameMode ?? "current_profile") ===
 				"current_profile" &&
-			Boolean(verifiedAuthor?.displayName);
+			Boolean(comment.staffUserDisplayName);
+		const displayEmail = shouldUseCurrentStaffProfile
+			? (comment.staffUserEmail ?? comment.authorEmail)
+			: comment.authorEmail;
 		const author: Record<string, unknown> = {
 			name: shouldUseCurrentStaffProfile
-				? verifiedAuthor?.displayName
+				? comment.staffUserDisplayName
 				: comment.authorName,
-			website: sanitizeOptionalSafeHttpUrl(comment.authorWebsite),
-			avatarUrl,
+			website: sanitizeOptionalSafeHttpUrl(
+				shouldUseCurrentStaffProfile
+					? (comment.staffUserWebsite ?? comment.authorWebsite)
+					: comment.authorWebsite,
+			),
+			avatarUrl:
+				shouldUseCurrentStaffProfile && comment.staffUserAvatarUrl
+					? comment.staffUserAvatarUrl
+					: buildExternalAvatarUrl({
+							enabled: options?.avatar?.external.enabled ?? false,
+							email: displayEmail,
+							baseUrl:
+								options?.avatar?.external.baseUrl ??
+								"https://gravatar.com/avatar",
+							hashAlgorithm:
+								options?.avatar?.external.hashAlgorithm ?? "sha256",
+							query: options?.avatar?.external.query ?? "s=80&d=404&r=g",
+						}),
 		};
 		if (isVerifiedAuthor && verifiedAuthor?.badgeLabel) {
 			author.badge = {

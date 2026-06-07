@@ -14,7 +14,7 @@ import {
 	setAllAuthorCandidateDecisions,
 	setAuthorCandidateDecision,
 	skipItem,
-} from "../../apps/admin/src/components/admin/wp-migration-model";
+} from "../../apps/admin/src/components/admin/data/wp-migration-model";
 
 function reportItem(input: {
 	wpPostId: string;
@@ -229,7 +229,7 @@ describe("wp migration model", () => {
 				wpAuthorEmail: "virace@aliyun.com",
 			},
 		]);
-		expect(hasBlockingAuthorCandidates([item], {})).toBe(true);
+		expect(hasBlockingAuthorCandidates([item], {})).toBe(false);
 		expect(
 			hasBlockingAuthorCandidates(
 				[item],

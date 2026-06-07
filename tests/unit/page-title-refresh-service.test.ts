@@ -7,9 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabaseClients } from "../../src/db/client";
 import { applyDatabaseMigrations } from "../../src/db/migrations";
-import { maintenanceJobs, sitePageRegistry, sites } from "../../src/db/schema";
-import { MaintenanceJobRepository } from "../../src/modules/ops/maintenance-job-repository";
+import { sitePageRegistry, sites } from "../../src/db/schema";
 import { PageMetadataRefreshService } from "../../src/modules/page-registry/title-refresh-service";
+import { AppError } from "../../src/modules/shared/errors";
+import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
 
 const cleanups: Array<() => void> = [];
 
@@ -29,6 +30,25 @@ function createFixture() {
 		rmSync(directory, { recursive: true, force: true });
 	});
 	return clients;
+}
+
+function createTaskContext(): Pick<
+	TaskRunnerContext,
+	"log" | "updateProgress" | "signal"
+> {
+	return {
+		log: {
+			stdout: async () => undefined,
+			stderr: async () => undefined,
+			system: async () => undefined,
+			info: async () => undefined,
+			warn: async () => undefined,
+			error: async () => undefined,
+			debug: async () => undefined,
+			write: async () => undefined,
+		},
+		updateProgress: async () => undefined,
+	};
 }
 
 async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
@@ -76,29 +96,25 @@ function createService(
 	fixture: ReturnType<typeof createFixture>,
 	fetchHtml: (
 		url: string,
-		options: { timeoutMs: number; maxBytes: number },
+		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>,
 ) {
-	const jobs = new MaintenanceJobRepository(fixture.db);
-	return {
-		jobs,
-		service: new PageMetadataRefreshService(fixture.db, jobs, {
-			fetchHtml,
-			now: () => new Date("2026-05-29T00:00:00.000Z"),
-			settings: {
-				batchSize: 50,
-				timeoutMs: 8000,
-				maxBytes: 512 * 1024,
-			},
-		}),
-	};
+	return new PageMetadataRefreshService(fixture.db, {
+		fetchHtml,
+		now: () => new Date("2026-05-29T00:00:00.000Z"),
+		settings: {
+			batchSize: 50,
+			timeoutMs: 8000,
+			maxBytes: 512 * 1024,
+		},
+	});
 }
 
 describe("PageMetadataRefreshService", () => {
 	it("refreshes a page title from same-origin HTML", async () => {
 		const fixture = createFixture();
 		await seedSiteAndPages(fixture);
-		const { service, jobs } = createService(fixture, async (url) => {
+		const service = createService(fixture, async (url) => {
 			expect(url).toBe("https://example.com/posts/ok/");
 			return {
 				status: 200,
@@ -106,13 +122,15 @@ describe("PageMetadataRefreshService", () => {
 			};
 		});
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			pageKeys: ["posts/ok/"],
-			forceTitle: true,
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/ok/"],
+				forceTitle: true,
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [page] = await fixture.db
 			.select()
@@ -125,27 +143,26 @@ describe("PageMetadataRefreshService", () => {
 			titleRefreshError: null,
 			titleRefreshedAt: "2026-05-29T00:00:00.000Z",
 		});
-		expect(await jobs.getRequired(job.id)).toMatchObject({
-			status: "succeeded",
-			result: { processed: 1, updated: 1, failed: 0 },
-		});
+		expect(result).toMatchObject({ processed: 1, updated: 1, failed: 0 });
 	});
 
 	it("marks 404 pages as not_found", async () => {
 		const fixture = createFixture();
 		await seedSiteAndPages(fixture);
-		const { service, jobs } = createService(fixture, async () => ({
+		const service = createService(fixture, async () => ({
 			status: 404,
 			text: "",
 		}));
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			pageKeys: ["posts/missing/"],
-			forceTitle: true,
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/missing/"],
+				forceTitle: true,
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [page] = await fixture.db
 			.select()
@@ -156,32 +173,31 @@ describe("PageMetadataRefreshService", () => {
 			titleRefreshStatusCode: 404,
 			titleRefreshError: "http_404",
 		});
-		expect(await jobs.getRequired(job.id)).toMatchObject({
-			status: "succeeded",
-			result: {
-				processed: 1,
-				updated: 0,
-				failed: 1,
-				errors: [{ pageKey: "posts/missing/", message: "http_404" }],
-			},
+		expect(result).toMatchObject({
+			processed: 1,
+			updated: 0,
+			failed: 1,
+			errors: [{ pageKey: "posts/missing/", message: "http_404" }],
 		});
 	});
 
 	it("marks non-200 pages as unreachable", async () => {
 		const fixture = createFixture();
 		await seedSiteAndPages(fixture);
-		const { service, jobs } = createService(fixture, async () => ({
+		const service = createService(fixture, async () => ({
 			status: 500,
 			text: "",
 		}));
 
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			pageKeys: ["posts/server-error/"],
-			forceTitle: true,
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/server-error/"],
+				forceTitle: true,
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [page] = await fixture.db
 			.select()
@@ -192,31 +208,30 @@ describe("PageMetadataRefreshService", () => {
 			titleRefreshStatusCode: 500,
 			titleRefreshError: "http_500",
 		});
-		expect(await jobs.getRequired(job.id)).toMatchObject({
-			status: "succeeded",
-			result: {
-				processed: 1,
-				updated: 0,
-				failed: 1,
-				errors: [{ pageKey: "posts/server-error/", message: "http_500" }],
-			},
+		expect(result).toMatchObject({
+			processed: 1,
+			updated: 0,
+			failed: 1,
+			errors: [{ pageKey: "posts/server-error/", message: "http_500" }],
 		});
 	});
 
 	it("records errors without restoring protected statuses", async () => {
 		const fixture = createFixture();
 		await seedSiteAndPages(fixture);
-		const { service } = createService(fixture, async () => {
+		const service = createService(fixture, async () => {
 			throw new Error("timeout");
 		});
 
-		await service.createRefreshJob({
-			siteKey: "fangyuan",
-			pageKeys: ["posts/trash/"],
-			forceTitle: true,
-			trigger: "manual",
-		});
-		await service.runNextQueuedJob();
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/trash/"],
+				forceTitle: true,
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
 
 		const [page] = await fixture.db
 			.select()
@@ -230,50 +245,15 @@ describe("PageMetadataRefreshService", () => {
 		});
 	});
 
-	it("creates durable page metadata refresh jobs", async () => {
-		const fixture = createFixture();
-		await seedSiteAndPages(fixture);
-		const { service } = createService(fixture, async () => ({
-			status: 200,
-			text: "<title>Ignored</title>",
-		}));
-		const runAfter = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-
-		const job = await service.createRefreshJob({
-			siteKey: "fangyuan",
-			onlyMissingTitle: true,
-			trigger: "manual",
-			runAfter,
-			maxAttempts: 3,
-			retryDelaySec: 90,
-			timeoutMs: 4500,
-			maxBytes: 131072,
-		});
-
-		const [row] = await fixture.db
-			.select()
-			.from(maintenanceJobs)
-			.where(eq(maintenanceJobs.id, job.id));
-		expect(row).toMatchObject({
-			type: "page_metadata_refresh",
-			status: "delayed",
-			siteKey: "fangyuan",
-			runAfter,
-			maxAttempts: 3,
-			retryDelaySec: 90,
-			concurrencyKey: "page-title:fangyuan",
-		});
-		expect(JSON.parse(row.scopeJson)).toMatchObject({
-			timeoutMs: 4500,
-			maxBytes: 131072,
-		});
-	});
-
 	it("passes task timeout and max bytes to HTML fetch", async () => {
 		const fixture = createFixture();
 		await seedSiteAndPages(fixture);
-		const seenOptions: Array<{ timeoutMs: number; maxBytes: number }> = [];
-		const { service } = createService(fixture, async (_url, options) => {
+		const seenOptions: Array<{
+			allowedOrigins: string[];
+			timeoutMs: number;
+			maxBytes: number;
+		}> = [];
+		const service = createService(fixture, async (_url, options) => {
 			seenOptions.push(options);
 			return {
 				status: 200,
@@ -281,16 +261,62 @@ describe("PageMetadataRefreshService", () => {
 			};
 		});
 
-		await service.createRefreshJob({
-			siteKey: "fangyuan",
-			pageKeys: ["posts/ok/"],
-			forceTitle: true,
-			trigger: "manual",
-			timeoutMs: 4500,
-			maxBytes: 131072,
-		});
-		await service.runNextQueuedJob();
+		await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/ok/"],
+				forceTitle: true,
+				trigger: "manual",
+				timeoutMs: 4500,
+				maxBytes: 131072,
+			},
+			createTaskContext(),
+		);
 
-		expect(seenOptions).toEqual([{ timeoutMs: 4500, maxBytes: 131072 }]);
+		expect(seenOptions).toEqual([
+			{
+				allowedOrigins: ["https://example.com"],
+				timeoutMs: 4500,
+				maxBytes: 131072,
+			},
+		]);
+	});
+
+	it("records safe fetch rejections as title refresh failures", async () => {
+		const fixture = createFixture();
+		await seedSiteAndPages(fixture);
+		const service = createService(fixture, async () => {
+			throw new AppError(
+				403,
+				"SERVER_FETCH_DESTINATION_DENIED",
+				"服务器拉取目标地址不允许访问。",
+			);
+		});
+
+		const result = await service.executeRefresh(
+			{
+				siteKey: "fangyuan",
+				pageKeys: ["posts/ok/"],
+				forceTitle: true,
+				trigger: "manual",
+			},
+			createTaskContext(),
+		);
+
+		const [page] = await fixture.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.pageKey, "posts/ok/"));
+		expect(page).toMatchObject({
+			title: null,
+			status: "unreachable",
+			titleRefreshStatusCode: null,
+			titleRefreshError: "服务器拉取目标地址不允许访问。",
+		});
+		expect(result).toMatchObject({
+			processed: 1,
+			updated: 0,
+			failed: 1,
+		});
 	});
 });

@@ -4,10 +4,13 @@ import { eq } from "drizzle-orm";
 import {
 	blacklistRules,
 	commentRequestMetadata,
+	commenterNotificationPreferences,
 	comments,
+	emailDeliveryReputation,
 	pageThreads,
 	sites,
 } from "../../src/db/schema";
+import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -157,6 +160,24 @@ describe("admin commenters", () => {
 			matchMode: "exact",
 			source: "manual",
 		});
+		await fixture.app.db.insert(commenterNotificationPreferences).values({
+			id: "pref_admin_commenters_alice",
+			siteId: site.id,
+			email: "alice@example.com",
+			emailHash: hashNotificationEmail("alice@example.com") ?? "",
+			notifyOnReply: true,
+			source: "comment_form",
+		});
+		await fixture.app.db.insert(emailDeliveryReputation).values({
+			siteId: site.id,
+			email: "alice@example.com",
+			emailHash: hashNotificationEmail("alice@example.com") ?? "",
+			failureScore: 2,
+			lastFailureAt: "2026-06-02T09:00:00.000Z",
+			lastSuccessAt: "2026-06-02T08:00:00.000Z",
+			suppressedUntil: "2026-06-09T09:00:00.000Z",
+			suppressedReason: "bounce",
+		});
 
 		const response = await fixture.app.inject({
 			method: "GET",
@@ -213,6 +234,14 @@ describe("admin commenters", () => {
 						email: true,
 					},
 					isBlacklisted: true,
+					notifications: {
+						notifyOnReply: true,
+						unsubscribedAt: null,
+						reputationScore: 2,
+						lastSuccessAt: "2026-06-02T08:00:00.000Z",
+						lastFailureAt: "2026-06-02T09:00:00.000Z",
+						suppressedUntil: "2026-06-09T09:00:00.000Z",
+					},
 				},
 			],
 			pagination: {
@@ -243,20 +272,26 @@ describe("admin commenters", () => {
 		});
 	});
 
-	it("does not expose users as the canonical anonymous commenter endpoint", async () => {
+	it("keeps anonymous commenters separate from backend users", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/admin/users?siteKey=fangyuan&limit=20&offset=0",
+			url: "/qingyan/api/admin/commenters?siteKey=fangyuan&limit=20&offset=0",
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
 		});
 
-		expect(response.statusCode).toBe(404);
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			items: [],
+			pagination: {
+				totalCount: 0,
+			},
+		});
 	});
 
 	it("does not aggregate missing or unparsed user agents as unknown devices", async () => {

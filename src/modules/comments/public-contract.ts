@@ -1,4 +1,5 @@
 import type { EngagementSettings } from "../shared/site-settings-defaults";
+import type { SystemSettings } from "../system-settings/definitions";
 
 export type FeatureDisabledReason =
 	| "site_disabled"
@@ -24,6 +25,7 @@ export type PublicFeatures = {
 	pageViews: FeatureFlag;
 	pageLikes: FeatureFlag;
 	visitors: FeatureFlag;
+	replyEmailNotification: boolean;
 };
 
 export function enabledFeature(): FeatureFlag {
@@ -40,12 +42,22 @@ export function omitEmptyObject<T extends Record<string, unknown>>(
 	return Object.keys(value).length > 0 ? value : undefined;
 }
 
+export function isSystemMailUsable(mail: SystemSettings["mail"]): boolean {
+	return (
+		mail.enabled &&
+		mail.smtp.host.trim().length > 0 &&
+		mail.smtp.from.trim().length > 0
+	);
+}
+
 export function buildPublicFeatures(input: {
 	pageInteractive: boolean;
 	commentsEnabled: boolean;
 	maxDepth: number;
 	captchaMode: "never" | "always" | "threshold";
 	engagement: EngagementSettings;
+	systemMailUsable: boolean;
+	commenterReplyEmailEnabled: boolean;
 }): PublicFeatures {
 	if (!input.pageInteractive) {
 		return {
@@ -55,9 +67,8 @@ export function buildPublicFeatures(input: {
 			commentCaptcha: disabledFeature("page_inactive"),
 			pageViews: disabledFeature("page_inactive"),
 			pageLikes: disabledFeature("page_inactive"),
-			visitors: input.engagement.visitors.enabled
-				? enabledFeature()
-				: disabledFeature("feature_disabled"),
+			visitors: disabledFeature("page_inactive"),
+			replyEmailNotification: false,
 		};
 	}
 
@@ -97,5 +108,11 @@ export function buildPublicFeatures(input: {
 		visitors: input.engagement.visitors.enabled
 			? enabledFeature()
 			: disabledFeature("feature_disabled"),
+		replyEmailNotification:
+			input.pageInteractive &&
+			input.commentsEnabled &&
+			input.maxDepth > 1 &&
+			input.systemMailUsable &&
+			input.commenterReplyEmailEnabled,
 	};
 }

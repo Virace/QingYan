@@ -9,7 +9,7 @@ describe("normalizePageSourceEntry", () => {
 	it("accepts allowed-origin content URLs and stores root-relative page URLs", () => {
 		const resolved = normalizePageSourceEntry({
 			entry: {
-				url: "https://example.com/posts/a/?utm=1#x",
+				url: "https://example.com/posts/a?utm=1#x",
 				sourceKind: "sitemap",
 				warnings: [],
 			},
@@ -17,9 +17,38 @@ describe("normalizePageSourceEntry", () => {
 		});
 
 		expect(resolved).toEqual({
-			pageKey: "posts/a/",
-			pageUrl: "/posts/a/",
+			pageKey: "/posts/a",
+			pageUrl: "/posts/a",
 			warnings: [],
+		});
+	});
+
+	it("preserves pathname shape without alias or directory fallback", () => {
+		expect(
+			normalizePageSourceEntry({
+				entry: {
+					url: "https://example.com/about/",
+					sourceKind: "sitemap",
+					warnings: [],
+				},
+				allowedOrigins: ["https://example.com"],
+			}),
+		).toMatchObject({
+			pageKey: "/about/",
+			pageUrl: "/about/",
+		});
+		expect(
+			normalizePageSourceEntry({
+				entry: {
+					url: "https://example.com/A//B/?q=1",
+					sourceKind: "sitemap",
+					warnings: [],
+				},
+				allowedOrigins: ["https://example.com"],
+			}),
+		).toMatchObject({
+			pageKey: "/A//B/",
+			pageUrl: "/A//B/",
 		});
 	});
 
@@ -64,7 +93,7 @@ describe("normalizePageSourceEntry", () => {
 		});
 
 		expect(resolved).toEqual({
-			pageKey: "posts/titled/",
+			pageKey: "/posts/titled/",
 			pageUrl: "/posts/titled/",
 			title: "Titled",
 			warnings: ["rss-guid-missing"],

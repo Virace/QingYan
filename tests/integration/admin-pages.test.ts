@@ -2,13 +2,16 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	adminUsers,
 	comments,
-	maintenanceJobs,
+	delayedDeletions,
 	pageThreads,
 	pageViewSessions,
 	sitePageRegistry,
 	siteSettings,
 	sites,
+	systemSettings,
+	taskRuns,
 	visitors,
 } from "../../src/db/schema";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
@@ -33,8 +36,12 @@ describe("admin pages", () => {
 			.select()
 			.from(sites)
 			.where(eq(sites.siteKey, "fangyuan"));
-		if (!site) {
-			throw new Error("Expected site to exist");
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!site || !adminUser) {
+			throw new Error("Expected site and admin user to exist");
 		}
 
 		await fixture.app.db.insert(visitors).values({
@@ -156,8 +163,12 @@ describe("admin pages", () => {
 			.select()
 			.from(sites)
 			.where(eq(sites.siteKey, "fangyuan"));
-		if (!site) {
-			throw new Error("Expected site to exist");
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!site || !adminUser) {
+			throw new Error("Expected site and admin user to exist");
 		}
 		await fixture.app.db.update(siteSettings).set({
 			engagementJson: serializeEngagementSettings({
@@ -362,6 +373,123 @@ describe("admin pages", () => {
 		});
 	});
 
+	it("creates a pending delayed deletion record when deleting a page with retained deletion policy", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!site || !adminUser) {
+			throw new Error("Expected site and admin user to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "post:delayed-delete",
+			pageUrl: "/posts/delayed-delete/",
+			title: "Delayed Delete",
+			status: "active",
+		});
+
+		const deleteResponse = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/post%3Adelayed-delete/delete",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+			},
+		});
+
+		expect(deleteResponse.statusCode).toBe(200);
+		expect(deleteResponse.json()).toMatchObject({
+			page: {
+				pageKey: "post:delayed-delete",
+				status: "deleted",
+				deletion: {
+					mode: "delayed",
+					hardDeleteAfter: expect.any(String),
+				},
+			},
+		});
+		const [record] = await fixture.app.db
+			.select()
+			.from(delayedDeletions)
+			.where(eq(delayedDeletions.resourceId, "post:delayed-delete"));
+		expect(record).toMatchObject({
+			resourceType: "page",
+			resourceId: "post:delayed-delete",
+			siteId: site.id,
+			status: "pending",
+			requestedByUserId: adminUser.id,
+		});
+		expect(JSON.parse(record?.metadataJson ?? "{}")).toMatchObject({
+			pageKey: "post:delayed-delete",
+			siteKey: "fangyuan",
+		});
+	});
+
+	it("hard deletes page trash immediately when deletion retention is zero", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(systemSettings).values({
+			category: "admin",
+			key: "deletion.retentionDays",
+			valueJson: "0",
+		});
+		await fixture.app.db.insert(sitePageRegistry).values([
+			{
+				siteId: site.id,
+				pageKey: "post:trash-immediate-a",
+				pageUrl: "/posts/trash-immediate-a/",
+				status: "trash",
+				trashedAt: "2026-06-01T00:00:00.000Z",
+			},
+			{
+				siteId: site.id,
+				pageKey: "post:trash-immediate-b",
+				pageUrl: "/posts/trash-immediate-b/",
+				status: "trash",
+				trashedAt: "2026-06-01T00:00:00.000Z",
+			},
+		]);
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/trash/clear",
+			...withAdminWriteAuth(admin),
+			payload: {
+				siteKey: "fangyuan",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			deletedCount: 2,
+			deletion: {
+				mode: "immediate",
+				resourceCount: 2,
+			},
+		});
+		const remaining = await fixture.app.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.siteId, site.id));
+		expect(remaining).toEqual([]);
+	});
+
 	it("creates a page title refresh job for one page", async () => {
 		const fixture = await createTestApp({
 			pageTitleFetchHtml: async () => ({
@@ -395,33 +523,26 @@ describe("admin pages", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			job: {
+			run: {
 				type: "page_metadata_refresh",
 				status: "queued",
 				siteKey: "fangyuan",
-				scope: {
+				input: {
 					siteKey: "fangyuan",
 					pageKeys: ["post:title-refresh"],
-					forceTitle: true,
+					scope: "force",
 					trigger: "manual",
 				},
 			},
 		});
-		const [job] = await fixture.app.db.select().from(maintenanceJobs);
-		expect(job).toMatchObject({
-			type: "page_metadata_refresh",
-			status: "succeeded",
-			siteKey: "fangyuan",
-			concurrencyKey: "page-title:fangyuan:post:title-refresh",
-		});
-		const [page] = await fixture.app.db
+		const [run] = await fixture.app.db
 			.select()
-			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "post:title-refresh"));
-		expect(page).toMatchObject({
-			title: "Fresh Title",
-			status: "active",
-			titleRefreshStatusCode: 200,
+			.from(taskRuns)
+			.where(eq(taskRuns.type, "page_metadata_refresh"));
+		expect(run).toMatchObject({
+			type: "page_metadata_refresh",
+			status: "queued",
+			siteKey: "fangyuan",
 		});
 	});
 });

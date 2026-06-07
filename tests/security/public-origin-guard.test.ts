@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import type { AppConfig } from "../../src/config/types";
 import { sitePageRegistry, siteSettings, sites } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -53,6 +54,7 @@ function refererFor(pageKey: string, origin = "http://localhost:4321") {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -62,8 +64,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -328,6 +330,38 @@ describe("public origin guard", () => {
 			},
 		});
 		expect(runtimeOrigin.statusCode).toBe(200);
+	});
+
+	it("allows the admin dev origin even when database settings override startup defaults", async () => {
+		const fixture = await createTestApp({
+			devMode: true,
+			devAdminToken: "dev-token",
+		});
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app, {
+			password: "admin",
+		});
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+
+		await systemSettings.upsert("security", "adminOriginGuard.enabled", true);
+		await systemSettings.upsert("security", "adminOriginGuard.allowedOrigins", [
+			"https://admin.example.test",
+		]);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/sites/default",
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+				origin: "http://localhost:5173",
+			}),
+			payload: {
+				name: "Default Dev",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
 	});
 
 	it("allows dev memory mode writes without Origin for local integration", async () => {

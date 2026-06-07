@@ -374,4 +374,55 @@ describe("analyzeWordPressComments", () => {
 			),
 		).toEqual(["staff_strong", "staff_email_candidate", "visitor"]);
 	});
+
+	it("reports existing backend user author suggestions by matching email", () => {
+		const report = analyzeWordPressComments({
+			xml: wxrWithItems(
+				wxrItem({
+					id: "1",
+					title: "Existing Admin User",
+					link: "https://x-item.com/admin-user.html",
+					author: "Owner",
+					authorEmail: "Owner@Example.com",
+				}),
+			),
+			fileName: "fixture.xml",
+			siteKey: "fangyuan",
+			mapping: {
+				items: [
+					{
+						wpPostId: "1",
+						decision: "map",
+						target: {
+							pageKey: "admin-user.html",
+							pageUrl: "/admin-user.html",
+						},
+					},
+				],
+			},
+			adminUsers: [
+				{
+					id: 42,
+					email: "owner@example.com",
+					displayName: "后台作者",
+					username: "owner",
+					status: "active",
+				},
+			],
+		});
+
+		expect(report.authorSummary).toMatchObject({
+			staffExistingUser: 1,
+		});
+		expect(report.items[0]?.comments[0]?.authorMatch).toEqual({
+			kind: "staff_existing_user",
+			email: "owner@example.com",
+			adminUser: {
+				id: 42,
+				displayName: "后台作者",
+				username: "owner",
+				status: "active",
+			},
+		});
+	});
 });

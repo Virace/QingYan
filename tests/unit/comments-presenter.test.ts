@@ -22,7 +22,33 @@ const baseComment = {
 };
 
 describe("comment presenter", () => {
-	it("uses the current staff profile name for verified comments by default", () => {
+	it("uses the current staff user profile name for staff comments by default", () => {
+		const [comment] = presentComments(
+			[
+				{
+					...baseComment,
+					authorIdentity: "staff",
+					authorName: "管理员",
+					staffUserDisplayName: "Virace",
+				},
+			],
+			new Map(),
+			{
+				verifiedAuthor: {
+					enabled: true,
+					displayName: "Virace",
+					badgeLabel: "楼主",
+				},
+			},
+		);
+
+		expect(comment?.author).toMatchObject({
+			name: "Virace",
+			badge: { label: "楼主" },
+		});
+	});
+
+	it("keeps legacy verified comment names from site settings in current profile mode", () => {
 		const [comment] = presentComments(
 			[
 				{
@@ -42,18 +68,19 @@ describe("comment presenter", () => {
 		);
 
 		expect(comment?.author).toMatchObject({
-			name: "Virace",
+			name: "管理员",
 			badge: { label: "楼主" },
 		});
 	});
 
-	it("can keep the stored snapshot name for verified comments", () => {
+	it("can keep the stored snapshot name for staff comments", () => {
 		const [comment] = presentComments(
 			[
 				{
 					...baseComment,
-					authorIdentity: "verified",
+					authorIdentity: "staff",
 					authorName: "管理员",
+					staffUserDisplayName: "Virace",
 				},
 			],
 			new Map(),

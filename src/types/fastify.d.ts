@@ -10,6 +10,9 @@ import type { VisitorIdentity } from "../modules/shared/visitor";
 import type { SecurityToolkit } from "../plugins/security";
 import type { ServiceControlController } from "../modules/service-control/systemd-service";
 import type { SiteRegistry } from "../modules/shared/site-registry";
+import type { EmailSender } from "../modules/notifications/channels/email-channel";
+import type { AdminProfileEmailSender } from "../modules/admin/profile-service";
+import type { TaskMetricRollupRepository } from "../modules/tasks/task-metric-rollup-repository";
 
 export interface RequestContext {
 	requestId: string;
@@ -40,17 +43,28 @@ declare module "fastify" {
 		sqlite: SqliteClient;
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
+		taskMetricRollups: TaskMetricRollupRepository;
 		akismetClient?: Pick<AkismetClient, "commentCheck">;
 		commentMetadataResolver?: CommentMetadataResolver;
 		pageSourceFetchText?: (
 			url: string,
-			options: { timeoutMs?: number; maxBytes?: number },
+			options: {
+				allowedOrigins: string[];
+				timeoutMs?: number;
+				maxBytes?: number;
+			},
 		) => Promise<string>;
 		pageTitleFetchHtml?: (
 			url: string,
-			options: { timeoutMs: number; maxBytes: number },
+			options: {
+				allowedOrigins: string[];
+				timeoutMs: number;
+				maxBytes: number;
+			},
 		) => Promise<{ status: number; text: string }>;
 		serviceControl?: ServiceControlController;
+		emailSender?: EmailSender;
+		adminProfileEmailSender?: AdminProfileEmailSender;
 		devMockService?: DevMockService;
 	}
 

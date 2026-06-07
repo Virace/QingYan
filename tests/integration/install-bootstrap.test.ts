@@ -273,6 +273,7 @@ function installRestorePayload(databaseFile: string) {
 function installFormPayload(databaseFile: string) {
 	const payload = installPayload(databaseFile);
 	return {
+		token: payload.token,
 		server: payload.server,
 		database: payload.database,
 		admin: payload.admin,
@@ -523,6 +524,11 @@ describe("install bootstrap", () => {
 		expect(response.body).not.toContain("从导出包恢复");
 		expect(response.body).not.toContain("Use <code>POST");
 		expect(response.body).not.toContain("install-token");
+		expect(response.body).toContain('data-path="token"');
+		expect(response.body).toContain('autocomplete="one-time-code"');
+		expect(response.body).toContain("appendPlanLine");
+		expect(response.body).not.toContain("review.innerHTML");
+		expect(response.headers["set-cookie"]).toBeUndefined();
 	});
 
 	it("renders env-managed install fields as locked wizard metadata", async () => {
@@ -592,13 +598,13 @@ describe("install bootstrap", () => {
 		] as const;
 
 		for (const [method, url] of allowed) {
+			const { token: _token, ...payloadWithoutToken } = installFormPayload(
+				workspace.databaseFile,
+			);
 			const response = await app.inject({
 				method,
 				url,
-				payload:
-					method === "POST"
-						? installFormPayload(workspace.databaseFile)
-						: undefined,
+				payload: method === "POST" ? payloadWithoutToken : undefined,
 			});
 			expect([200, 302, 403]).toContain(response.statusCode);
 		}
@@ -924,7 +930,10 @@ describe("install bootstrap", () => {
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
-			payload: planResponse.json().applyPayload,
+			payload: {
+				...planResponse.json().applyPayload,
+				token: payload.token,
+			},
 		});
 
 		expect(apply.statusCode).toBe(201);
@@ -1258,7 +1267,10 @@ describe("install bootstrap", () => {
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
-			payload: plan.applyPayload,
+			payload: {
+				...plan.applyPayload,
+				token: "install-token",
+			},
 		});
 
 		expect(apply.statusCode).toBe(201);
@@ -1305,10 +1317,14 @@ describe("install bootstrap", () => {
 		});
 		cleanups.push(() => app.close());
 
+		const { token: _token, ...payloadWithoutToken } = installFormPayload(
+			workspace.databaseFile,
+		);
+
 		const state = await app.inject({
 			method: "POST",
 			url: "/qingyan/admin/install",
-			payload: installFormPayload(workspace.databaseFile),
+			payload: payloadWithoutToken,
 		});
 		expect(state.statusCode).toBe(403);
 		expect(state.json()).toMatchObject({
@@ -1328,6 +1344,28 @@ describe("install bootstrap", () => {
 				code: "INSTALL_TOKEN_INVALID",
 			},
 		});
+
+		const cookieOnlyPlan = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install/plan",
+			cookies: {
+				qingyan_install: "install-token",
+			},
+			payload: payloadWithoutToken,
+		});
+		expect(cookieOnlyPlan.statusCode).toBe(403);
+		expect(cookieOnlyPlan.json().error.code).toBe("INSTALL_TOKEN_INVALID");
+
+		const cookieOnlyApply = await app.inject({
+			method: "POST",
+			url: "/qingyan/admin/install",
+			cookies: {
+				qingyan_install: "install-token",
+			},
+			payload: payloadWithoutToken,
+		});
+		expect(cookieOnlyApply.statusCode).toBe(403);
+		expect(cookieOnlyApply.json().error.code).toBe("INSTALL_TOKEN_INVALID");
 	});
 
 	it("writes startup config and seeds the SQLite database", async () => {
@@ -1337,7 +1375,7 @@ describe("install bootstrap", () => {
 		cleanups.push(() => app.close());
 
 		const installCookie = await getInstallCookie(app);
-		expect(installCookie?.httpOnly).toBe(true);
+		expect(installCookie).toBeUndefined();
 
 		const response = await app.inject({
 			method: "POST",
@@ -1594,7 +1632,10 @@ describe("install bootstrap", () => {
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
-			payload: plan.json().applyPayload,
+			payload: {
+				...plan.json().applyPayload,
+				token: "install-token",
+			},
 		});
 
 		expect(response.statusCode).toBe(201);
@@ -1723,7 +1764,10 @@ describe("install bootstrap", () => {
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
-			payload: plan.json().applyPayload,
+			payload: {
+				...plan.json().applyPayload,
+				token: "install-token",
+			},
 		});
 
 		expect(apply.statusCode).toBe(201);
@@ -1834,7 +1878,10 @@ describe("install bootstrap", () => {
 			cookies: {
 				qingyan_install: installCookie?.value ?? "",
 			},
-			payload: applyPayload,
+			payload: {
+				...applyPayload,
+				token: "install-token",
+			},
 		});
 
 		expect(apply.statusCode).toBe(201);

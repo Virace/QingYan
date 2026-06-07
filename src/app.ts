@@ -6,15 +6,20 @@ import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
 import { adminOpsRoutes } from "./modules/admin/ops-routes";
 import { adminOverviewRoutes } from "./modules/admin/overview-routes";
+import { adminNotificationTemplateRoutes } from "./modules/admin/notification-template-routes";
 import { adminPageRegistryRoutes } from "./modules/admin/page-registry-routes";
 import { adminPagesRoutes } from "./modules/admin/pages-routes";
+import { adminProfileRoutes } from "./modules/admin/profile-routes";
 import { createPasswordHash } from "./modules/admin/password-hash";
 import { adminSessionRoutes } from "./modules/admin/session-routes";
+import { adminSettingsRoutes } from "./modules/admin/settings-routes";
 import { adminSitesRoutes } from "./modules/admin/sites-routes";
 import { adminSystemSettingsRoutes } from "./modules/admin/system-settings-routes";
+import { adminTasksRoutes } from "./modules/admin/tasks-routes";
 import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminCommentersRoutes } from "./modules/admin/commenters-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
+import { adminUsersRoutes } from "./modules/admin/admin-users-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import type { AkismetClient } from "./modules/comments/akismet-client";
 import { captchaWidgetRoutes } from "./modules/comments/captcha-widget-routes";
@@ -26,6 +31,9 @@ import { registerDatabaseDevRoutes } from "./modules/dev/routes";
 import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
+import type { EmailSender } from "./modules/notifications/channels/email-channel";
+import type { AdminProfileEmailSender } from "./modules/admin/profile-service";
+import { notificationsPublicRoutes } from "./modules/notifications/public-routes";
 import type { ServiceControlController } from "./modules/service-control/systemd-service";
 import { buildErrorResponse } from "./modules/shared/error-response";
 import { AppError } from "./modules/shared/errors";
@@ -46,9 +54,11 @@ interface BuildAppOptions {
 	pageSourceFetchText?: typeof fetchPageSourceText;
 	pageTitleFetchHtml?: (
 		url: string,
-		options: { timeoutMs: number; maxBytes: number },
+		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
 	) => Promise<{ status: number; text: string }>;
 	serviceControl?: ServiceControlController;
+	emailSender?: EmailSender;
+	adminProfileEmailSender?: AdminProfileEmailSender;
 }
 
 function registerBaseRoutes(
@@ -136,6 +146,12 @@ export async function buildApp(
 	if (options.serviceControl) {
 		app.decorate("serviceControl", options.serviceControl);
 	}
+	if (options.emailSender) {
+		app.decorate("emailSender", options.emailSender);
+	}
+	if (options.adminProfileEmailSender) {
+		app.decorate("adminProfileEmailSender", options.adminProfileEmailSender);
+	}
 
 	app.setErrorHandler(async (error, request, reply) => {
 		const requestId = request.context?.requestId ?? request.id;
@@ -207,14 +223,15 @@ export async function buildApp(
 		const devMockService = new DevMockService(devSeedSite);
 		app.decorate("devMockService", devMockService);
 		app.decorate("loggerManager", createMemoryLoggerManager(config));
-		app.decorate("adminBootstrap", {
+		const adminBootstrap = {
 			consolePath: config.admin.console.path ?? "/admin",
 			username: runtimeOptions.devMode.adminUsername ?? "admin",
 			passwordHash: createPasswordHash(
 				runtimeOptions.devMode.adminPassword ?? "admin",
 			),
 			generatedPassword: runtimeOptions.devMode.adminPassword ?? "admin",
-		});
+		};
+		app.decorate("adminBootstrap", adminBootstrap);
 		await app.register(requestContextPlugin);
 		registerBaseRoutes(app, openApi, publicPath);
 		await app.register(adminUiRoutes, {
@@ -263,11 +280,17 @@ export async function buildApp(
 	await app.register(adminOpsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/ops"),
 	});
+	await app.register(adminTasksRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/tasks"),
+	});
 	await app.register(commentsPublicRoutes, {
 		prefix: joinPublicPath(publicPath, "/api"),
 	});
 	await app.register(pageFeedbackPublicRoutes, {
 		prefix: joinPublicPath(publicPath, "/api"),
+	});
+	await app.register(notificationsPublicRoutes, {
+		prefix: joinPublicPath(publicPath, "/notifications"),
 	});
 	await app.register(commentsAdminRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/comments"),
@@ -290,8 +313,20 @@ export async function buildApp(
 	await app.register(adminSitesRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/sites"),
 	});
+	await app.register(adminSettingsRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/settings"),
+	});
 	await app.register(adminSystemSettingsRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/system-settings"),
+	});
+	await app.register(adminNotificationTemplateRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/notification-templates"),
+	});
+	await app.register(adminUsersRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin"),
+	});
+	await app.register(adminProfileRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/profile"),
 	});
 	await app.register(adminImportExportRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/import-export"),

@@ -6,6 +6,7 @@ import type { AppDatabase } from "../../db/client";
 import {
 	commentRequestMetadata,
 	comments,
+	adminUsers,
 	pageFeedbackRecords,
 	pageThreads,
 	pageViewSessions,
@@ -65,9 +66,17 @@ function createVisitorKey(): string {
 function mapCommentRequestMetadata(
 	comment: typeof comments.$inferSelect,
 	metadata: typeof commentRequestMetadata.$inferSelect | null,
+	staffUser?: Pick<
+		typeof adminUsers.$inferSelect,
+		"displayName" | "email" | "website" | "avatarUrl"
+	> | null,
 ) {
 	return {
 		...comment,
+		staffUserDisplayName: staffUser?.displayName ?? null,
+		staffUserEmail: staffUser?.email ?? null,
+		staffUserWebsite: staffUser?.website ?? null,
+		staffUserAvatarUrl: staffUser?.avatarUrl ?? null,
 		authorIp: metadata?.authorIp ?? null,
 		authorUserAgent: metadata?.authorUserAgent ?? null,
 		authorIpCountry: metadata?.ipCountry ?? null,
@@ -426,11 +435,7 @@ export class CommentsRepository {
 		if (!page) {
 			throw new AppError(403, "PAGE_NOT_REGISTERED", "页面尚未登记。");
 		}
-		if (
-			page?.status === "trash" ||
-			page?.status === "deleted" ||
-			page?.status === "ignored"
-		) {
+		if (page.status !== "active") {
 			throw new AppError(403, "PAGE_NOT_INTERACTIVE", "页面当前不可交互。");
 		}
 	}
@@ -617,12 +622,19 @@ export class CommentsRepository {
 			.select({
 				comment: comments,
 				metadata: commentRequestMetadata,
+				staffUser: {
+					displayName: adminUsers.displayName,
+					email: adminUsers.email,
+					website: adminUsers.website,
+					avatarUrl: adminUsers.avatarUrl,
+				},
 			})
 			.from(comments)
 			.leftJoin(
 				commentRequestMetadata,
 				eq(commentRequestMetadata.commentId, comments.id),
 			)
+			.leftJoin(adminUsers, eq(adminUsers.id, comments.authorUserId))
 			.where(
 				and(
 					eq(comments.pageThreadId, input.pageThreadId),
@@ -632,7 +644,7 @@ export class CommentsRepository {
 			)
 			.orderBy(orderBy);
 		const allApprovedComments = rows.map((row) =>
-			mapCommentRequestMetadata(row.comment, row.metadata),
+			mapCommentRequestMetadata(row.comment, row.metadata, row.staffUser),
 		);
 
 		const rootComments = allApprovedComments.filter(

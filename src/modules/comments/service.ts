@@ -1,5 +1,10 @@
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import { normalizePagination } from "../shared/pagination";
+import { mergePageRegistrySettings } from "../shared/page-registry-settings";
+import {
+	assertPublicPageAdmission,
+	resolvePublicPageAdmission,
+} from "../shared/public-page-admission";
 import {
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
@@ -10,7 +15,7 @@ import type { CaptchaService } from "./captcha-service";
 import { buildCommentForm } from "./comment-form";
 import { resolveRequestMetadata } from "./metadata/request-metadata";
 import type { CommentMetadataResolver } from "./metadata/resolver";
-import { buildPublicFeatures } from "./public-contract";
+import { buildPublicFeatures, isSystemMailUsable } from "./public-contract";
 import type { CommentsRepository } from "./repository";
 import {
 	mergeStaffDisplaySettings,
@@ -114,6 +119,7 @@ export class CommentsService {
 		private readonly loadIpRegionSettings?: () => Promise<
 			SystemSettings["ipRegion"]
 		>,
+		private readonly loadSystemSettings?: () => Promise<SystemSettings>,
 	) {}
 
 	public getRepository(): CommentsRepository {
@@ -135,12 +141,22 @@ export class CommentsService {
 			siteId: site.id,
 			pageKey: input.pageKey,
 		});
-		const pageInteractive =
-			registryPage?.status !== "trash" &&
-			registryPage?.status !== "deleted" &&
-			registryPage?.status !== "ignored";
-		const pageRegistered = Boolean(registryPage);
 		const settings = await this.repository.getSiteSettings(site.id);
+		const pageRegistrySettings = mergePageRegistrySettings(
+			settings?.pageRegistryJson,
+		);
+		const admission = resolvePublicPageAdmission({
+			registryPage,
+			settings: pageRegistrySettings,
+		});
+		if (
+			admission.kind === "unknown" &&
+			!admission.allowDiscoveryWrites &&
+			admission.response === "forbidden"
+		) {
+			assertPublicPageAdmission(admission);
+		}
+		const pageInteractive = admission.pageInteractive;
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			settings?.verifiedAuthorJson,
@@ -166,6 +182,9 @@ export class CommentsService {
 		const publicApiSettings = this.loadPublicApiSettings
 			? await this.loadPublicApiSettings()
 			: { advisoryFields: { enabled: false } };
+		const systemSettings = this.loadSystemSettings
+			? await this.loadSystemSettings()
+			: undefined;
 		const metadataConfig = this.repository.resolveCommentMetadata(
 			settings ?? undefined,
 		);
@@ -195,7 +214,7 @@ export class CommentsService {
 		if (
 			!thread &&
 			pageInteractive &&
-			pageRegistered &&
+			admission.kind === "registered" &&
 			engagement.pageViews.enabled
 		) {
 			thread = await this.repository.ensurePageThreadForRegisteredPage({
@@ -222,7 +241,8 @@ export class CommentsService {
 		if (
 			!thread &&
 			pageInteractive &&
-			!pageRegistered &&
+			admission.kind === "unknown" &&
+			admission.allowDiscoveryWrites &&
 			engagement.pageViews.enabled
 		) {
 			if (engagement.visitors.enabled) {
@@ -312,6 +332,11 @@ export class CommentsService {
 					| "always"
 					| "threshold",
 				engagement,
+				systemMailUsable: systemSettings
+					? isSystemMailUsable(systemSettings.mail)
+					: false,
+				commenterReplyEmailEnabled:
+					settings?.commenterReplyEmailEnabled ?? false,
 			}),
 			form: buildCommentForm({
 				allowWebsite: settings?.allowWebsite,

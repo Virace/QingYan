@@ -60,7 +60,13 @@ export const siteSettings = sqliteTable(
 		verifiedAuthorJson: text("verified_author_json"),
 		staffDisplayJson: text("staff_display_json"),
 		moderationJson: text("moderation_json"),
-		emailNotificationsEnabled: integer("email_notifications_enabled", {
+		pageRegistryJson: text("page_registry_json"),
+		commenterReplyEmailEnabled: integer("commenter_reply_email_enabled", {
+			mode: "boolean",
+		})
+			.notNull()
+			.default(false),
+		backendNotificationsEnabled: integer("backend_notifications_enabled", {
 			mode: "boolean",
 		})
 			.notNull()

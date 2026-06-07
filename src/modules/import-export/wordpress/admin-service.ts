@@ -7,6 +7,7 @@ import {
 	type AnalyzeWordPressCommentsInput,
 	type ExistingPageCandidate,
 } from "./analyzer";
+import type { WordPressAdminUserAuthorCandidate } from "./author-mapping";
 import type { ExplicitMapping, PageKeyStrategy } from "./page-key";
 
 export interface AnalyzeWordPressAdminInput {
@@ -20,6 +21,7 @@ export interface AnalyzeWordPressAdminInput {
 	pagePathTemplate?: string;
 	mapping?: ExplicitMapping;
 	existingPages?: ExistingPageCandidate[];
+	adminUsers?: WordPressAdminUserAuthorCandidate[];
 }
 
 export interface WordPressAnalyzeResult {
@@ -49,6 +51,7 @@ function toAnalyzeInput(
 		pagePathTemplate: input.pagePathTemplate,
 		mapping: input.mapping,
 		existingPages: input.existingPages,
+		adminUsers: input.adminUsers,
 	};
 }
 

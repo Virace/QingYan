@@ -16,7 +16,11 @@ import {
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
 
 type AdminSystemSettingsInput = {
-	admin?: SystemSettings["admin"];
+	admin?: {
+		session?: SystemSettings["admin"]["session"];
+		emailVerification?: SystemSettings["admin"]["emailVerification"];
+		deletion?: SystemSettings["admin"]["deletion"];
+	};
 	security?: SystemSettings["security"];
 	logging: SystemSettings["logging"];
 	mail?: {
@@ -28,6 +32,19 @@ type AdminSystemSettingsInput = {
 			username: string;
 			password?: string;
 			from: string;
+		};
+	};
+	notifications?: {
+		delivery?: Partial<SystemSettings["notifications"]["delivery"]>;
+		webhook?: {
+			enabled?: boolean;
+			url?: string;
+			secret?: string;
+		};
+		wxpusher?: {
+			enabled?: boolean;
+			appToken?: string;
+			apiUrl?: string;
 		};
 	};
 	captcha?: {
@@ -57,7 +74,34 @@ type AdminSystemSettingsInput = {
 		akismet: Omit<SystemSettings["antiSpam"]["akismet"], "apiKeyConfigured">;
 	};
 	requestId?: string;
+	actorUserId?: number;
 };
+
+export type AdminSystemSettingsSection =
+	| "security"
+	| "rate-limit"
+	| "mail"
+	| "notifications"
+	| "captcha"
+	| "avatar"
+	| "ip-region"
+	| "anti-spam";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeRecordPatch<T>(current: T, patch: unknown): T {
+	if (!isRecord(current) || !isRecord(patch)) {
+		return patch as T;
+	}
+
+	const next: Record<string, unknown> = { ...current };
+	for (const [key, value] of Object.entries(patch)) {
+		next[key] = mergeRecordPatch(next[key], value);
+	}
+	return next as T;
+}
 
 export class AdminSystemSettingsService {
 	public constructor(
@@ -66,9 +110,13 @@ export class AdminSystemSettingsService {
 		private readonly defaults?: SystemSettings,
 	) {}
 
-	public async getSettings() {
+	private async readCurrentSettings() {
 		const rows = (await this.repository.listAll()) as SystemSettingRow[];
-		const settings = readSystemSettingsRows(rows, this.defaults);
+		return readSystemSettingsRows(rows, this.defaults);
+	}
+
+	public async getSettings() {
+		const settings = await this.readCurrentSettings();
 
 		return {
 			...maskSystemSettings(settings),
@@ -79,12 +127,69 @@ export class AdminSystemSettingsService {
 		};
 	}
 
+	public async buildSectionPatchInput(
+		section: AdminSystemSettingsSection,
+		patch: Record<string, unknown>,
+	): Promise<AdminSystemSettingsInput> {
+		const current = await this.readCurrentSettings();
+		const next = structuredClone(current);
+
+		switch (section) {
+			case "security":
+				next.admin = patch.admin
+					? mergeRecordPatch(next.admin, patch.admin)
+					: next.admin;
+				next.security = patch.security
+					? mergeRecordPatch(next.security, patch.security)
+					: mergeRecordPatch(next.security, patch);
+				next.logging = patch.logging
+					? mergeRecordPatch(next.logging, patch.logging)
+					: next.logging;
+				break;
+			case "rate-limit":
+				next.security = {
+					...next.security,
+					rateLimit: mergeRecordPatch(next.security.rateLimit, patch),
+				};
+				break;
+			case "mail":
+				next.mail = mergeRecordPatch(next.mail, patch);
+				break;
+			case "notifications":
+				next.notifications = mergeRecordPatch(next.notifications, patch);
+				break;
+			case "captcha":
+				next.captcha = mergeRecordPatch(next.captcha, patch);
+				break;
+			case "avatar":
+				next.avatar = patch.avatar
+					? mergeRecordPatch(next.avatar, patch.avatar)
+					: mergeRecordPatch(next.avatar, patch);
+				next.publicApi = patch.publicApi
+					? mergeRecordPatch(next.publicApi, patch.publicApi)
+					: next.publicApi;
+				break;
+			case "ip-region":
+				next.ipRegion = mergeRecordPatch(next.ipRegion, patch);
+				break;
+			case "anti-spam":
+				next.antiSpam = mergeRecordPatch(next.antiSpam, patch);
+				break;
+		}
+
+		return next;
+	}
+
 	public async updateSettings(input: AdminSystemSettingsInput) {
-		const rows = (await this.repository.listAll()) as SystemSettingRow[];
-		const current = readSystemSettingsRows(rows, this.defaults);
+		const current = await this.readCurrentSettings();
 		const patch: SystemSettings = {
 			...current,
-			admin: input.admin ?? current.admin,
+			admin: input.admin
+				? {
+						...current.admin,
+						...input.admin,
+					}
+				: current.admin,
 			security: input.security ?? current.security,
 			logging: input.logging,
 			mail: input.mail
@@ -96,6 +201,22 @@ export class AdminSystemSettingsService {
 						},
 					}
 				: current.mail,
+			notifications: input.notifications
+				? {
+						delivery: {
+							...current.notifications.delivery,
+							...input.notifications.delivery,
+						},
+						webhook: {
+							...current.notifications.webhook,
+							...input.notifications.webhook,
+						},
+						wxpusher: {
+							...current.notifications.wxpusher,
+							...input.notifications.wxpusher,
+						},
+					}
+				: current.notifications,
 			captcha: input.captcha
 				? {
 						...current.captcha,
@@ -158,7 +279,28 @@ export class AdminSystemSettingsService {
 			event: "system.logging.updated",
 			requestId: input.requestId,
 			message: "系统设置已更新",
+			actorType: input.actorUserId ? "admin_user" : "system",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
 			data: input.logging,
+		});
+		await this.repository.writeAudit({
+			actorType: input.actorUserId ? "admin_user" : "system",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+			action: "system.settings.updated",
+			targetType: "system_settings",
+			targetId: "global",
+			payload: {
+				admin: input.admin,
+				security: input.security,
+				logging: input.logging,
+				mail: input.mail ? maskSystemSettings(next).mail : undefined,
+				notifications: maskSystemSettings(next).notifications,
+				captcha: input.captcha,
+				ipRegion: input.ipRegion,
+				avatar: input.avatar,
+				publicApi: input.publicApi,
+				antiSpam: input.antiSpam,
+			},
 		});
 
 		return this.getSettings();

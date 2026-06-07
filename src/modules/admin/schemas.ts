@@ -79,11 +79,260 @@ const engagementSettingsSchema = z.object({
 		.optional(),
 });
 
+const adminNotificationDeliverySettingsSchema = z.object({
+	globalMaxPerMinute: z.number().int().positive().optional(),
+	perChannelMaxPerMinute: z.number().int().positive().optional(),
+	perSiteMaxPerHour: z.number().int().positive().optional(),
+	perRecipientMinIntervalSec: z.number().int().min(0).optional(),
+	dailyChannelBudget: z.number().int().positive().optional(),
+	lowPriorityDelaySec: z.number().int().min(0).optional(),
+	queueBackend: z.enum(["database", "bullmq"]).optional(),
+});
+
+const adminSystemNotificationsSchema = z.object({
+	delivery: adminNotificationDeliverySettingsSchema.optional(),
+	channelConfigs: z
+		.array(
+			z
+				.object({
+					id: z.string().trim().min(1).optional(),
+					type: z.enum(["email", "webhook", "wxpusher"]),
+					name: z.string().trim().min(1),
+					description: z.string().trim().nullable().optional(),
+					enabled: z.boolean().default(true),
+					config: z.record(z.string(), z.unknown()).default({}),
+					secretConfig: z.record(z.string(), z.unknown()).optional(),
+				})
+				.superRefine((value, context) => {
+					if (value.type === "webhook") {
+						const url =
+							typeof value.config.url === "string"
+								? value.config.url.trim()
+								: "";
+						if (!url || !isSafeHttpUrl(url)) {
+							context.addIssue({
+								code: "custom",
+								path: ["config", "url"],
+								message: "Webhook URL 必须是合法的 http/https URL。",
+							});
+						}
+					}
+					if (value.type === "wxpusher") {
+						const apiUrl =
+							typeof value.config.apiUrl === "string"
+								? value.config.apiUrl.trim()
+								: "";
+						if (apiUrl && !isSafeHttpUrl(apiUrl)) {
+							context.addIssue({
+								code: "custom",
+								path: ["config", "apiUrl"],
+								message: "WxPusher API URL 必须是合法的 http/https URL。",
+							});
+						}
+					}
+				}),
+		)
+		.optional(),
+	webhook: z
+		.object({
+			enabled: z.boolean().optional(),
+			url: z.string().url().or(z.literal("")).optional(),
+			secret: z.string().optional(),
+		})
+		.optional(),
+	wxpusher: z
+		.object({
+			enabled: z.boolean().optional(),
+			appToken: z.string().optional(),
+			apiUrl: z.string().url().optional(),
+		})
+		.optional(),
+});
+
+const notificationTemplateFormatSchema = z.enum(["html", "text", "json"]);
+
+export const adminNotificationTemplateBodySchema = z.object({
+	format: notificationTemplateFormatSchema,
+	subjectTemplate: z.string().optional().nullable(),
+	bodyTemplate: z.string().min(1),
+});
+
+export const adminNotificationTemplatePreviewBodySchema = z
+	.object({
+		format: notificationTemplateFormatSchema.optional(),
+		subjectTemplate: z.string().optional().nullable(),
+		bodyTemplate: z.string().optional(),
+	})
+	.optional()
+	.default({});
+
+export const adminNotificationTemplateTestBodySchema = z.object({
+	recipient: z.string().min(1).optional(),
+});
+
+const siteNotificationRecipientChannelSchema = z.enum([
+	"email",
+	"webhook",
+	"wxpusher",
+]);
+const siteNotificationRecipientEventSchema = z.enum([
+	"admin_comment_pending",
+	"admin_comment_approved",
+]);
+const siteNotificationRecipientRouteSchema = z.object({
+	eventType: siteNotificationRecipientEventSchema,
+	channelConfigId: z.string().trim().min(1),
+	enabled: z.boolean().default(true),
+});
+const siteNotificationRecipientSchema = z
+	.object({
+		userId: z.number().int().positive(),
+		channels: z.array(siteNotificationRecipientChannelSchema).min(1).optional(),
+		events: z.array(siteNotificationRecipientEventSchema).min(1).optional(),
+		routes: z.array(siteNotificationRecipientRouteSchema).min(1).optional(),
+		includeCommentContent: z
+			.enum(["none", "summary", "full"])
+			.default("summary"),
+		rateLimitProfile: z.string().trim().min(1).nullable().optional(),
+		enabled: z.boolean().default(true),
+	})
+	.refine((value) => value.routes || (value.channels && value.events), {
+		message: "通知接收人必须配置至少一个事件和接收渠道。",
+	});
+
+const sectionPatchBodySchema = z
+	.record(z.string(), z.unknown())
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminSystemSettingsSectionParamsSchema = z.object({
+	section: z.enum([
+		"security",
+		"rate-limit",
+		"mail",
+		"notifications",
+		"captcha",
+		"avatar",
+		"ip-region",
+		"anti-spam",
+	]),
+});
+
+export const adminSiteSettingsSectionParamsSchema = z.object({
+	siteKey: z.string().min(1),
+	section: z.enum(["comments", "engagement", "notifications", "pageRegistry"]),
+});
+
+export const adminSectionPatchBodySchema = sectionPatchBodySchema;
+
 export const adminLoginBodySchema = z.object({
 	username: z.string().min(1),
 	password: z.string().min(1),
 	challengeId: z.string().min(1).optional(),
 	captchaValue: z.string().min(1).optional(),
+});
+
+export const adminUserGroupKeySchema = z.enum([
+	"admin",
+	"site_admin",
+	"site_moderator",
+]);
+
+export const adminUsersQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	search: z.string().min(1).optional(),
+	limit: z.coerce.number().int().positive().max(100).default(50),
+	offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const adminUserParamsSchema = z.object({
+	userId: z.coerce.number().int().positive(),
+});
+
+export const adminUserCreateBodySchema = z.object({
+	username: z.string().trim().min(1),
+	email: z.string().trim().email(),
+	displayName: z.string().trim().min(1),
+	password: z.string().min(8),
+	groupKey: adminUserGroupKeySchema,
+	siteKeys: z.array(z.string().min(1)).default([]),
+	passwordChangeRequired: z.boolean().default(false),
+});
+
+export const adminUserPatchBodySchema = z
+	.object({
+		email: z.string().trim().email().optional(),
+		displayName: z.string().trim().min(1).optional(),
+		groupKey: adminUserGroupKeySchema.optional(),
+		siteKeys: z.array(z.string().min(1)).optional(),
+		status: z.enum(["active", "disabled", "deleted"]).optional(),
+		passwordChangeRequired: z.boolean().optional(),
+	})
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminUserResetPasswordBodySchema = z.object({
+	password: z.string().min(8),
+	passwordChangeRequired: z.boolean().default(true),
+});
+
+export const adminUserRevokeSessionsBodySchema = z
+	.object({
+		loginBlockPreset: z
+			.enum(["none", "1h", "1d", "7d", "custom"])
+			.default("none"),
+		loginBlockedUntil: z.string().datetime().optional(),
+		reason: z.string().trim().max(500).optional(),
+	})
+	.superRefine((value, context) => {
+		if (value.loginBlockPreset === "custom" && !value.loginBlockedUntil) {
+			context.addIssue({
+				code: "custom",
+				path: ["loginBlockedUntil"],
+				message: "自定义禁止登录时间不能为空。",
+			});
+		}
+	});
+
+export const adminProfilePatchBodySchema = z
+	.object({
+		displayName: z.string().trim().min(1).optional(),
+		website: z.string().trim().url().or(z.literal("")).optional(),
+		avatarUrl: z.string().trim().url().or(z.literal("")).optional(),
+	})
+	.passthrough()
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	});
+
+export const adminProfilePasswordBodySchema = z
+	.object({
+		currentPassword: z.string().min(1),
+		nextPassword: z.string().min(8),
+		confirmPassword: z.string().min(8),
+	})
+	.refine((value) => value.nextPassword === value.confirmPassword, {
+		path: ["confirmPassword"],
+		message: "两次输入的新密码不一致。",
+	});
+
+export const adminProfileEmailChangeBodySchema = z.object({
+	newEmail: z
+		.string()
+		.trim()
+		.email()
+		.transform((value) => value.toLowerCase()),
+	currentPassword: z.string().min(1),
+});
+
+export const adminProfileEmailChangeConfirmBodySchema = z.object({
+	token: z.string().min(1),
+});
+
+export const adminProfilePasswordConfirmBodySchema = z.object({
+	token: z.string().min(1),
 });
 
 export const adminCommentsQuerySchema = z.object({
@@ -118,7 +367,14 @@ const singleSiteOriginListSchema = z
 
 export const adminPagesQuerySchema = adminCollectionQuerySchema;
 export const adminCommentersQuerySchema = adminCollectionQuerySchema;
-export const adminVisitorsQuerySchema = adminCollectionQuerySchema;
+export const adminVisitorsQuerySchema = adminCollectionQuerySchema.extend({
+	ip: z.string().trim().min(1).optional(),
+	userAgent: z.string().trim().min(1).optional(),
+	pageUrl: z.string().trim().min(1).optional(),
+	device: z.string().trim().min(1).optional(),
+	location: z.string().trim().min(1).optional(),
+	blacklist: z.enum(["any", "ip", "visitor", "none"]).optional(),
+});
 
 export const pageRegistryStatusSchema = z.enum([
 	"active",
@@ -193,68 +449,6 @@ export const adminPageTitleRefreshBodySchema = z.object({
 		.min(65_536)
 		.max(10 * 1024 * 1024)
 		.optional(),
-});
-
-export const pageSourceTypeSchema = z.enum(["sitemap", "rss", "atom"]);
-export const pageSourceModeSchema = z.enum(["append", "replace"]);
-
-export const adminPageRegistrySourcesQuerySchema = z.object({
-	siteKey: z.string().min(1),
-});
-
-export const adminPageRegistrySourceCreateBodySchema = z.object({
-	siteKey: z.string().min(1),
-	sourceType: pageSourceTypeSchema,
-	sourceUrl: z.string().url(),
-	enabled: z.boolean().default(true),
-	mode: pageSourceModeSchema.default("append"),
-	refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
-});
-
-export const adminPageRegistrySourcePatchBodySchema = z
-	.object({
-		sourceType: pageSourceTypeSchema.optional(),
-		sourceUrl: z.string().url().optional(),
-		enabled: z.boolean().optional(),
-		mode: pageSourceModeSchema.optional(),
-		refreshIntervalSec: z.number().int().min(3600).nullable().optional(),
-		nextRefreshAt: z.string().datetime().nullable().optional(),
-	})
-	.refine((value) => Object.keys(value).length > 0, {
-		message: "至少需要一个更新字段",
-	});
-
-export const adminPageRegistrySourceParamsSchema = z.object({
-	sourceId: z.coerce.number().int().positive(),
-});
-
-export const adminTaskExecutionOptionsSchema = z.object({
-	executionMode: z.literal("async").optional(),
-	timeoutMs: z.number().int().min(1000).max(60_000).optional(),
-	maxBytes: z
-		.number()
-		.int()
-		.min(65_536)
-		.max(10 * 1024 * 1024)
-		.optional(),
-	runAfter: z.string().datetime().nullable().optional(),
-	maxAttempts: z.number().int().min(1).max(10).optional(),
-	retryDelaySec: z.number().int().min(0).max(86_400).optional(),
-});
-
-export const adminPageRegistrySourceRefreshBodySchema =
-	adminTaskExecutionOptionsSchema.optional();
-
-export const adminPageRegistryRefreshBodySchema =
-	adminTaskExecutionOptionsSchema
-		.extend({
-			siteKey: z.string().min(1),
-			mode: pageSourceModeSchema.optional(),
-		})
-		.optional();
-
-export const adminPageRegistryMaintenanceJobParamsSchema = z.object({
-	jobId: z.string().min(1),
 });
 
 export const adminMaintenanceTasksQuerySchema = z.object({
@@ -403,9 +597,31 @@ export const adminSettingsBodySchema = z
 			})
 			.optional(),
 		engagement: engagementSettingsSchema.optional(),
+		pageRegistry: z
+			.object({
+				mode: z.enum(["discovery", "authoritative"]).optional(),
+				authoritativeSitemapUrls: z.array(z.string().trim().url()).optional(),
+				unknownPageResponse: z
+					.enum(["inactive_payload", "forbidden"])
+					.optional(),
+				requireHealthySource: z.boolean().optional(),
+				sourceFreshnessGraceSec: z.number().int().min(0).optional(),
+				emergencyLockdown: z.boolean().optional(),
+			})
+			.optional(),
 		notifications: z
 			.object({
-				emailEnabled: z.boolean().optional(),
+				commenter: z
+					.object({
+						replyEmailEnabled: z.boolean().optional(),
+					})
+					.optional(),
+				backend: z
+					.object({
+						enabled: z.boolean().optional(),
+						recipients: z.array(siteNotificationRecipientSchema).optional(),
+					})
+					.optional(),
 			})
 			.optional(),
 	})
@@ -416,9 +632,21 @@ export const adminSettingsBodySchema = z
 export const adminSystemSettingsBodySchema = z.object({
 	admin: z
 		.object({
-			session: z.object({
-				ttlMinutes: z.number().int().positive(),
-			}),
+			session: z
+				.object({
+					ttlMinutes: z.number().int().positive(),
+				})
+				.optional(),
+			emailVerification: z
+				.object({
+					selfServiceRequired: z.boolean(),
+				})
+				.optional(),
+			deletion: z
+				.object({
+					retentionDays: z.number().int().min(0).max(3650),
+				})
+				.optional(),
 		})
 		.optional(),
 	security: securitySettingsSchema.optional(),
@@ -434,11 +662,12 @@ export const adminSystemSettingsBodySchema = z.object({
 				port: z.number().int().positive(),
 				secure: z.boolean(),
 				username: z.string(),
-				password: z.string().min(1).optional(),
+				password: z.string().optional(),
 				from: z.string(),
 			}),
 		})
 		.optional(),
+	notifications: adminSystemNotificationsSchema.optional(),
 	captcha: z
 		.object({
 			provider: z.enum([
@@ -456,7 +685,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			turnstile: z
 				.object({
 					siteKey: z.string(),
-					secretKey: z.string().min(1).optional(),
+					secretKey: z.string().optional(),
 					expectedAction: z.string(),
 					expectedHostname: z.string().optional(),
 				})
@@ -464,7 +693,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			hcaptcha: z
 				.object({
 					siteKey: z.string(),
-					secretKey: z.string().min(1).optional(),
+					secretKey: z.string().optional(),
 					expectedHostname: z.string().optional(),
 				})
 				.optional(),
@@ -473,7 +702,7 @@ export const adminSystemSettingsBodySchema = z.object({
 					variant: z.enum(["score_based", "policy_based_challenge"]),
 					projectId: z.string(),
 					siteKey: z.string(),
-					apiKey: z.string().min(1).optional(),
+					apiKey: z.string().optional(),
 					expectedAction: z.string(),
 					expectedHostname: z.string().optional(),
 					minScore: z.number().min(0).max(1),
@@ -482,7 +711,7 @@ export const adminSystemSettingsBodySchema = z.object({
 			geetest: z
 				.object({
 					captchaId: z.string(),
-					captchaKey: z.string().min(1).optional(),
+					captchaKey: z.string().optional(),
 					apiServer: z.string().url(),
 				})
 				.optional(),
@@ -518,8 +747,26 @@ export const adminSystemSettingsBodySchema = z.object({
 	antiSpam: z
 		.object({
 			akismet: z.object({
-				apiKey: z.string().min(1).optional(),
+				apiKey: z.string().optional(),
 			}),
 		})
 		.optional(),
 });
+
+export const adminNotificationChannelTestBodySchema = z
+	.object({
+		channel: z.enum(["email", "webhook", "wxpusher"]).optional(),
+		channelConfigId: z.string().trim().min(1).optional(),
+		recipient: z.string().trim().min(1).optional(),
+		siteKey: z.string().trim().min(1).optional(),
+	})
+	.refine((value) => value.channelConfigId || value.channel, {
+		message: "必须选择一个通知渠道配置。",
+	});
+
+export const adminMailTestBodySchema = z
+	.object({
+		recipient: z.string().trim().min(1).optional(),
+	})
+	.optional()
+	.default({});

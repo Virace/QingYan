@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
 import {
+	adminUsers,
+	auditLogs,
 	comments,
 	pageThreads,
 	siteSettings,
@@ -88,6 +90,13 @@ describe("admin sites", () => {
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!adminUser) {
+			throw new Error("Expected admin user to exist");
+		}
 		const createResponse = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/admin/sites",
@@ -162,6 +171,18 @@ describe("admin sites", () => {
 				},
 			},
 		});
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "sites.created",
+					targetType: "site",
+					targetId: "docs",
+				}),
+			]),
+		);
 	});
 
 	it("updates verified author settings per site", async () => {
@@ -169,6 +190,13 @@ describe("admin sites", () => {
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!adminUser) {
+			throw new Error("Expected admin user to exist");
+		}
 		const response = await fixture.app.inject({
 			method: "PUT",
 			url: "/qingyan/api/admin/sites/fangyuan/settings",
@@ -197,6 +225,17 @@ describe("admin sites", () => {
 			website: "https://fangyuan.example.com/about",
 			badgeLabel: "楼主",
 		});
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "settings.updated",
+					targetType: "site_settings",
+				}),
+			]),
+		);
 	});
 
 	it("updates staff display settings per site", async () => {
@@ -264,6 +303,13 @@ describe("admin sites", () => {
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [adminUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.username, "admin"));
+		if (!adminUser) {
+			throw new Error("Expected admin user to exist");
+		}
 		const response = await fixture.app.inject({
 			method: "PATCH",
 			url: "/qingyan/api/admin/sites/fangyuan",
@@ -293,6 +339,18 @@ describe("admin sites", () => {
 			name: "FangYuan Updated",
 			allowedOrigins: ["https://new.example.com"],
 		});
+		const audits = await fixture.app.db.select().from(auditLogs);
+		expect(audits).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					actorType: "admin_user",
+					actorId: String(adminUser.id),
+					action: "sites.updated",
+					targetType: "site",
+					targetId: "fangyuan",
+				}),
+			]),
+		);
 	});
 
 	it("loads sites from DB without overwriting them from startup config", async () => {
@@ -412,17 +470,22 @@ describe("admin sites", () => {
 						},
 					},
 					pageFeedback: {
-						allowLike: false,
+						allowLike: true,
 					},
 					engagement: {
 						trustMode: "trusted",
 						visitorsEnabled: true,
-						pageViewsEnabled: false,
-						pageLikesEnabled: false,
-						commentVotesEnabled: false,
+						pageViewsEnabled: true,
+						pageLikesEnabled: true,
+						commentVotesEnabled: true,
 					},
 					notifications: {
-						emailEnabled: false,
+						commenter: {
+							replyEmailEnabled: false,
+						},
+						backend: {
+							enabled: false,
+						},
 					},
 					pageCount: 1,
 					commentCount: 1,

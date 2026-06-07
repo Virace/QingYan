@@ -8,6 +8,7 @@ import {
 	sites,
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -31,6 +32,7 @@ function jsonResponse(body: unknown, status = 200) {
 type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
 
 async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
 	const [site] = await fixture.app.db
 		.select()
 		.from(sites)
@@ -40,8 +42,8 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	}
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
-		pageKey,
-		pageUrl: `/${pageKey}`,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
@@ -138,7 +140,7 @@ describe("comment captcha providers", () => {
 			headers: refererFor("post:turnstile"),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "post:turnstile",
+				pageKey: "/post:turnstile",
 				challengeId: challenge.challengeId,
 				token: "turnstile-token",
 			},
@@ -226,7 +228,7 @@ describe("comment captcha providers", () => {
 			headers: refererFor("post:hcaptcha"),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "post:hcaptcha",
+				pageKey: "/post:hcaptcha",
 				challengeId: challenge.challengeId,
 				token: "hcaptcha-token",
 			},
@@ -309,7 +311,7 @@ describe("comment captcha providers", () => {
 			headers: refererFor("post:recaptcha"),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "post:recaptcha",
+				pageKey: "/post:recaptcha",
 				challengeId: challenge.challengeId,
 				token: "recaptcha-token",
 			},
@@ -360,7 +362,7 @@ describe("comment captcha providers", () => {
 			headers: refererFor("post:recaptcha-low-score"),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "post:recaptcha-low-score",
+				pageKey: "/post:recaptcha-low-score",
 				challengeId: refreshedChallenge.challengeId,
 				token: "recaptcha-low-score",
 			},
@@ -427,7 +429,7 @@ describe("comment captcha providers", () => {
 			headers: refererFor("post:geetest"),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "post:geetest",
+				pageKey: "/post:geetest",
 				challengeId: challenge.challengeId,
 				lotNumber: "lot-number",
 				captchaOutput: "captcha-output",

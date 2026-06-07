@@ -111,6 +111,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		() => systemSettingsService.getPublicApiSettings(),
 		metadataResolver,
 		() => systemSettingsService.getIpRegionSettings(),
+		() => systemSettingsService.getSettings(),
 	);
 	const writeService = new CommentsWriteService(
 		fastify.config,
@@ -121,6 +122,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		metadataResolver,
 		() => systemSettingsService.getIpRegionSettings(),
 		moderationService,
+		() => systemSettingsService.getSettings(),
 	);
 
 	fastify.get("/comments/bootstrap", async (request, reply) => {
@@ -317,7 +319,16 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			visitorKey: request.context?.visitor?.key,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
-			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
+			verifiedAuthorSession: adminSession
+				? {
+						type: "admin",
+						userId: adminSession.user.id,
+						displayName: adminSession.user.displayName,
+						email: adminSession.user.email,
+						website: adminSession.user.website,
+					}
+				: undefined,
+			options: parsed.data.options,
 		});
 		setPublicVisitorCookie({
 			reply,
@@ -330,6 +341,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			[
 				{
 					...result.createdComment,
+					parentId: null,
 					status: result.comment.status,
 				},
 			],
@@ -345,6 +357,9 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 		);
 		if (!presentedComment) {
 			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+		if (result.createdComment.parentId) {
+			presentedComment.parentId = result.createdComment.parentId;
 		}
 
 		return {

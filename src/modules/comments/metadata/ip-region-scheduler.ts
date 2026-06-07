@@ -3,6 +3,7 @@ import type { SystemSettings } from "../../system-settings/definitions";
 import { IpRegionUpdater } from "./ip-region-updater";
 
 const MONTHLY_UPDATE_HOUR = 4;
+export const MAX_IP_REGION_UPDATE_DELAY_MS = 2_147_483_647;
 
 export function nextMonthlyIpRegionUpdate(now = new Date()): Date {
 	const candidate = new Date(now);
@@ -13,6 +14,13 @@ export function nextMonthlyIpRegionUpdate(now = new Date()): Date {
 	}
 
 	return candidate;
+}
+
+export function nextMonthlyIpRegionUpdateDelay(now = new Date()): number {
+	return Math.min(
+		Math.max(nextMonthlyIpRegionUpdate(now).getTime() - now.getTime(), 1_000),
+		MAX_IP_REGION_UPDATE_DELAY_MS,
+	);
 }
 
 export class IpRegionAutoUpdateScheduler {
@@ -51,10 +59,7 @@ export class IpRegionAutoUpdateScheduler {
 
 	private schedule(): void {
 		this.stop();
-		const delay = Math.max(
-			nextMonthlyIpRegionUpdate().getTime() - Date.now(),
-			1_000,
-		);
+		const delay = nextMonthlyIpRegionUpdateDelay();
 		this.timer = setTimeout(() => {
 			void this.runAndReschedule();
 		}, delay);

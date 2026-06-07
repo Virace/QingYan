@@ -8,7 +8,7 @@ QingYan 把配置来源分成四类：
 
 - `startup config`：YAML 文件，包含 server、database、admin session 和基础 security 字段。修改后通常需要重启。
 - `env override`：白名单环境变量覆盖 startup config 或 install 行为。环境变量优先级高于 YAML。
-- `db site settings`：数据库中的站点记录与 `site_settings`，包含评论开关、审核默认状态、验证码模式、评论身份字段、页面点赞、通知开关、评论元数据采集等。
+- `db site settings`：数据库中的站点记录与 `site_settings`，包含评论开关、审核默认状态、验证码模式、评论身份字段、页面点赞、评论者回复邮件通知、后台用户通知、评论元数据采集等。
 - `db system settings`：数据库中的 `system_settings`，包含日志等级、日志保留天数、mail SMTP、captcha provider/config、IP 库下载与更新等不影响进程启动的全局能力设置。
 - `generated bootstrap`：安装器生成并写入数据库的一次性后台入口、管理员用户名、密码 hash 等初始化状态。
 
@@ -168,9 +168,14 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 - 滥用保护和自动黑名单策略。
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
-- 邮件通知开关。
+- 页面来源注册设置：`pageRegistry.mode`、权威 sitemap URL 列表、未知页面响应、健康宽限时间和紧急锁定。
+- 评论者回复邮件通知开关和后台用户通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
+
+页面来源注册设置是站点级 DB setting，不属于 startup YAML。公开运行时页面身份由允许 `Referer` 的 URL pathname 派生：保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash；请求参数中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段。`discovery` 模式下未知页面会继续写入 pending candidate / pending PV 供后台审核；`authoritative` 模式下未知页面默认返回 inactive payload，不创建 visitor、pending、PV、captcha、thread、评论、投票或页面反馈记录。若 `unknownPageResponse=forbidden` 或 `emergencyLockdown=true`，未知页面返回 `PAGE_NOT_REGISTERED`。
+
+开启 `authoritative` 必须配置至少一个 HTTP/HTTPS 权威 sitemap URL，且 URL origin 必须属于当前站点允许 origin。保存后系统会在任务中心幂等维护一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 为 `page_registry:authoritative_source_refresh:<siteKey>`，payload 中的 `sitemapUrls` 与 `pageRegistry.authoritativeSitemapUrls` 保持一致。当前版本不再保留 legacy source/sourceIds 刷新路径或迁移回填逻辑。
 
 可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台评论者聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
 
@@ -192,6 +197,8 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 - `mail.smtp.username`
 - `mail.smtp.password`
 - `mail.smtp.from`
+- `notifications.delivery.*`
+- `notifications.channelConfigs[]`
 - `captcha.provider`
 - `captcha.image.*`
 - `captcha.turnstile.*`
@@ -216,11 +223,42 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 
 首装会写入完整默认系统设置，其中后台会话有效期默认 `4320` 分钟（3 天）。若安装表单或 `QINGYAN_ADMIN_SESSION_TTL_MINUTES` 提供了会话有效期，会写入 `system_settings.admin.session.ttlMinutes`，正常运行后可继续在 Admin Console 修改。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
-Admin Console API 会返回 logging、mail、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretConfigured`、`appTokenConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
 
 `${server.publicPath}/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
 
 日志目录仍属于部署环境，不在后台修改。后台 cookie 名称、SameSite 和 Secure 仍属于启动配置；新登录会话 TTL、logging level/retention、公开评论 captcha provider 配置、IP region scheduler/updater 配置均从 `system_settings` 读取，不再把 startup YAML 作为长期 owner。
+
+### 通知与任务队列
+
+评论通知配置分为站点级和系统级：
+
+- 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification` 计算，不影响后台用户通知。
+- 站点级 `site_settings.backend_notifications_enabled` 对应 Admin API `notifications.backend.enabled`，只控制是否为后台用户创建站点通知任务，不影响普通评论者回复邮件订阅。
+- 站点级 `site_notification_recipients` 对应 Admin API `notifications.backend.recipients`，引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
+- 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。
+- 系统级 `notification_channel_configs` 维护具体通知渠道配置实例。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点接收人 route 使用 `channelConfigId` 选择具体实例。
+- 通知模板由 `notification_templates` 保存自定义覆盖；没有覆盖时使用内置默认模板。
+
+队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
+
+通知任务状态固定为 `queued`、`delayed`、`running`、`retrying`、`succeeded`、`failed`、`suppressed`、`cancelled`。通知接收人类型固定为 `backend_user`、`commenter`、`test`。普通评论者只支持 email；后台用户可使用 email、webhook、wxpusher，具体发送还要同时满足系统渠道配置实例、站点接收人 route 和个人偏好。任务和投递会记录 `channelConfigId` / `channelConfigName` 快照，用于区分多个同类型通道实例。
+
+评论者回复通知的公开写入语义：
+
+- `POST /api/comments` 的 `options.notifyOnReply` 只更新普通评论者在当前站点、当前邮箱的回复邮件偏好。
+- 只有普通评论者邮箱通过通知邮箱策略时才创建偏好；明显占位或无效邮箱不会创建偏好，但评论创建继续成功。
+- 只有最终 `approved` 的回复会触发普通评论者 email 任务；pending 回复在通过审核前不会发送。
+- import、migration 和系统来源不会创建评论者通知任务，也不会创建历史评论者偏好。
+- 全局退订链接使用一次性 token；数据库只保存 token hash，明文 token 只用于邮件链接生成，不写入任务 payload、日志、导出或 Admin API 响应。
+
+后台用户通知语义：
+
+- 接收人引用后台用户，不从 `comments.verifiedAuthor.email` 或评论作者邮箱派生长期接收人。
+- 待审核评论创建 `admin_comment_pending`；直接通过审核的评论创建 `admin_comment_approved`；pending 评论后续通过审核不再追加第二条后台用户通知。
+- 通知 planner、队列、worker、SMTP、Webhook 或 WxPusher 失败都不应阻断评论创建、审核、后台回复、导入、迁移或任务中心读取。
+
+Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属于敏感信息。它们不会在 Admin API GET 响应、普通 export、任务 payload 或日志中以明文返回；更新时省略 secret 字段或提交空 `secretConfig` 表示保留已有值。Webhook URL 的 query string 也不会写入收件地址快照，避免把 query token 带入任务中心和日志。
 
 ### 外部头像 URL
 
@@ -323,7 +361,7 @@ WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内�
 
 当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
 
-启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，会通过 HttpOnly `qingyan_upgrade` cookie 完成一次性升级令牌校验。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
+启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，操作员需要输入启动日志或本机操作命令显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
 Web Upgrade Mode 暴露最小接口：
 

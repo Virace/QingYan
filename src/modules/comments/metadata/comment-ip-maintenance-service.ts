@@ -11,9 +11,8 @@ import {
 	ipRegionUpdateRuns,
 	sites,
 } from "../../../db/schema";
-import { AppError } from "../../shared/errors";
 import type { SystemSettings } from "../../system-settings/definitions";
-import type { MaintenanceJobRepository } from "../../ops/maintenance-job-repository";
+import type { TaskRunnerContext } from "../../tasks/task-runner-context";
 import { IpRegionUpdater, type IpVersion } from "./ip-region-updater";
 import { parseIpRegionText, type IpRegionSnapshot } from "./ip-region";
 
@@ -74,7 +73,6 @@ function hasAuthorIp(row: {
 export class CommentIpMaintenanceService {
 	public constructor(
 		private readonly db: AppDatabase,
-		private readonly jobs: MaintenanceJobRepository,
 		private readonly options: CommentIpMaintenanceOptions = {},
 	) {}
 
@@ -116,127 +114,66 @@ export class CommentIpMaintenanceService {
 				missingLocation: missingLocation?.count ?? 0,
 				failedLocation: failedLocation?.count ?? 0,
 			},
-			recentJobs: await this.jobs.listRecent(10),
 		};
 	}
 
-	public async createCommentIpRefreshJob(input: CommentIpRefreshInput) {
-		await this.assertNoActiveJob();
-		return this.jobs.create({
-			type: "comment_ip_refresh",
-			scope: {
-				scope: input.scope,
-				ipVersions: input.ipVersions,
-				siteKey: input.siteKey,
-				batchSize: input.batchSize ?? 500,
-			},
-			runAfter: input.runAfter ?? null,
-			maxAttempts: input.maxAttempts,
-			retryDelaySec: input.retryDelaySec,
-		});
-	}
-
-	public async createIpRegionUpdateJob(input: {
-		ipVersions: IpVersion[];
-		timeoutMs?: number;
-		runAfter?: string | null;
-		maxAttempts?: number;
-		retryDelaySec?: number;
-	}) {
-		await this.assertNoActiveJob();
-		return this.jobs.create({
-			type: "ip_region_update",
-			scope: {
-				ipVersions: input.ipVersions,
-				timeoutMs: input.timeoutMs,
-			},
-			runAfter: input.runAfter ?? null,
-			maxAttempts: input.maxAttempts,
-			retryDelaySec: input.retryDelaySec,
-		});
-	}
-
-	public async runNextQueuedJob() {
-		const active = (await this.jobs.listRunnable({ limit: 20 })).find(
-			(job) =>
-				job.type === "comment_ip_refresh" || job.type === "ip_region_update",
-		);
-		if (!active) {
-			return null;
-		}
-		if (active.type === "comment_ip_refresh") {
-			return this.runCommentIpRefresh(
-				active.id,
-				active.scope as CommentIpRefreshInput,
-			);
-		}
-		return this.runIpRegionUpdate(
-			active.id,
-			active.scope as { ipVersions: IpVersion[]; timeoutMs?: number },
-		);
-	}
-
-	private async assertNoActiveJob() {
-		if (await this.jobs.hasActiveJob()) {
-			throw new AppError(
-				409,
-				"MAINTENANCE_JOB_ALREADY_RUNNING",
-				"已有维护任务正在运行。",
-			);
-		}
-	}
-
-	private async runIpRegionUpdate(
-		jobId: string,
-		scope: { ipVersions: IpVersion[]; timeoutMs?: number },
-	) {
-		await this.jobs.markRunning(jobId, {
-			phase: "updating",
-			processed: 0,
-		});
-		try {
-			const settings = await this.loadSettings();
-			const updater = this.options.updater ?? new IpRegionUpdater(this.db);
-			const results = [];
-			for (const ipVersion of scope.ipVersions) {
-				results.push({
-					ipVersion,
-					result: await updater.update({
-						ipVersion,
-						config: settings,
-						timeoutMs: scope.timeoutMs,
-					}),
-				});
-			}
-			return this.jobs.markSucceeded(jobId, { results });
-		} catch (error) {
-			return this.jobs.markFailed(jobId, {
-				message: error instanceof Error ? error.message : String(error),
-			});
-		}
-	}
-
-	private async runCommentIpRefresh(
-		jobId: string,
+	public async executeCommentIpRefresh(
 		input: CommentIpRefreshInput,
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
 	) {
-		await this.jobs.markRunning(jobId, {
+		await context.log.info("开始刷新评论 IP 地域信息。", input);
+		await context.updateProgress({
 			phase: "refreshing",
 			processed: 0,
 			refreshed: 0,
 			failed: 0,
 		});
-		try {
-			const result = await this.refreshCommentIps(jobId, input);
-			return this.jobs.markSucceeded(jobId, result);
-		} catch (error) {
-			return this.jobs.markFailed(jobId, {
-				message: error instanceof Error ? error.message : String(error),
-			});
-		}
+		const result = await this.refreshCommentIpsWithContext(input, context);
+		await context.log.info("评论 IP 地域刷新完成。", result);
+		return result;
 	}
 
-	private async refreshCommentIps(jobId: string, input: CommentIpRefreshInput) {
+	public async executeIpRegionUpdate(
+		input: { ipVersions: IpVersion[]; timeoutMs?: number },
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
+	) {
+		await context.log.info("开始更新 IP 地域库。", input);
+		await context.updateProgress({
+			phase: "updating",
+			processed: 0,
+		});
+		const settings = await this.loadSettings();
+		const updater = this.options.updater ?? new IpRegionUpdater(this.db);
+		const results = [];
+		let processed = 0;
+		for (const ipVersion of input.ipVersions) {
+			if (context.signal?.aborted) {
+				throw new Error("Task run aborted.");
+			}
+			await context.log.info(`更新 ${ipVersion} IP 地域库。`);
+			results.push({
+				ipVersion,
+				result: await updater.update({
+					ipVersion,
+					config: settings,
+					timeoutMs: input.timeoutMs,
+				}),
+			});
+			processed += 1;
+			await context.updateProgress({
+				phase: "updating",
+				processed,
+			});
+		}
+		const result = { results };
+		await context.log.info("IP 地域库更新完成。", result);
+		return result;
+	}
+
+	private async refreshCommentIpsWithContext(
+		input: CommentIpRefreshInput,
+		context: Pick<TaskRunnerContext, "log" | "updateProgress" | "signal">,
+	) {
 		const states = await this.db.select().from(ipRegionDatabaseState);
 		const hashByVersion = new Map(
 			states.map((state) => [state.ipVersion as IpVersion, state.fileHash]),
@@ -257,6 +194,9 @@ export class CommentIpMaintenanceService {
 				break;
 			}
 			for (const row of rows) {
+				if (context.signal?.aborted) {
+					throw new Error("Task run aborted.");
+				}
 				processed += 1;
 				afterCommentId = row.commentId;
 				try {
@@ -283,7 +223,7 @@ export class CommentIpMaintenanceService {
 					await this.updateCommentLocation(row.commentId, null, null, message);
 				}
 				if (processed % 50 === 0) {
-					await this.jobs.updateProgress(jobId, {
+					await context.updateProgress({
 						phase: "refreshing",
 						processed,
 						refreshed,

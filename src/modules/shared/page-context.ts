@@ -1,6 +1,7 @@
 import type { FastifyRequest } from "fastify";
 
 import { AppError, ResourceNotFoundError } from "./errors";
+import { deriveCanonicalPageKeyFromPathname } from "./canonical-page-key";
 import { normalizePagePath } from "./page-url";
 import type { RegisteredSiteRecord, SiteRegistry } from "./site-registry";
 
@@ -15,14 +16,6 @@ export interface PublicPageContext {
 function readReferer(request: FastifyRequest): string | undefined {
 	const header = request.headers.referer ?? request.headers.referrer;
 	return typeof header === "string" && header.length > 0 ? header : undefined;
-}
-
-function derivePageKey(pageUrl: string): string {
-	if (pageUrl === "/") {
-		return "/";
-	}
-
-	return pageUrl.replace(/^\/+/, "");
 }
 
 function parseReferer(value: string): URL {
@@ -74,7 +67,7 @@ export function resolvePublicPageContext(input: {
 	return {
 		site,
 		siteKey: site.siteKey,
-		pageKey: derivePageKey(pageUrl),
+		pageKey: deriveCanonicalPageKeyFromPathname(pageUrl),
 		pageUrl,
 		pageTitle: input.pageTitle,
 	};

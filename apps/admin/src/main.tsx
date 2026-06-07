@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Theme } from "@radix-ui/themes";
 import "@radix-ui/themes/styles.css";
 
 import App from "./App";
+import { AdminThemeProvider } from "./theme/admin-theme";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -14,8 +14,8 @@ if (!root) {
 
 createRoot(root).render(
 	<StrictMode>
-		<Theme accentColor="gray" grayColor="gray" radius="medium">
+		<AdminThemeProvider>
 			<App />
-		</Theme>
+		</AdminThemeProvider>
 	</StrictMode>,
 );

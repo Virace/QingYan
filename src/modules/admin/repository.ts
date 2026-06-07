@@ -17,7 +17,9 @@ import {
 	adminSessions,
 	blacklistRules,
 	commentRequestMetadata,
+	commenterNotificationPreferences,
 	comments,
+	emailDeliveryReputation,
 	pageThreads,
 	pageViewSessions,
 	sitePageRegistry,
@@ -28,6 +30,11 @@ import {
 } from "../../db/schema";
 import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { CommentStatus } from "../comments/moderation-types";
+import {
+	BackendUserNotificationRecipientsRepository,
+	type SiteNotificationRecipientInput,
+} from "../notifications/backend-user-recipients-repository";
+import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { resolvePublicPageUrl } from "../shared/page-url";
@@ -575,6 +582,7 @@ export class AdminRepository {
 
 	public async createAdminSession(input: {
 		id: string;
+		userId?: number;
 		tokenHash: string;
 		csrfTokenHash?: string;
 		csrfIssuedAt?: string;
@@ -696,6 +704,7 @@ export class AdminRepository {
 				voteDownCount: comments.voteDownCount,
 				createdAt: comments.createdAt,
 				updatedAt: comments.updatedAt,
+				siteKey: sites.siteKey,
 				pageKey: pageThreads.pageKey,
 				pageTitle: pageThreads.pageTitle,
 				pageUrl: pageThreads.pageUrl,
@@ -809,6 +818,7 @@ export class AdminRepository {
 					voteDownCount: row.voteDownCount,
 					createdAt: row.createdAt,
 					updatedAt: row.updatedAt,
+					siteKey: row.siteKey,
 					pageKey: row.pageKey,
 					pageTitle: row.pageTitle,
 					pageUrl: resolvePublicPageUrl(
@@ -1085,6 +1095,58 @@ export class AdminRepository {
 		const pagedItems = items.slice(input.offset, input.offset + input.limit);
 		const pageEmails = pagedItems.map((item) => item.email);
 		const metadataByEmail = new Map<string, RequestMetaSource[]>();
+		const notificationsByEmail = new Map<
+			string,
+			{
+				notifyOnReply: boolean | null;
+				unsubscribedAt: string | null;
+				suppressedUntil: string | null;
+				reputationScore: number | null;
+				lastSuccessAt: string | null;
+				lastFailureAt: string | null;
+			}
+		>();
+		if (input.siteId && pageEmails.length > 0) {
+			const preferenceRows = await this.db
+				.select()
+				.from(commenterNotificationPreferences)
+				.where(
+					and(
+						eq(commenterNotificationPreferences.siteId, input.siteId),
+						inArray(commenterNotificationPreferences.email, pageEmails),
+					),
+				);
+			const reputationRows = await this.db
+				.select()
+				.from(emailDeliveryReputation)
+				.where(
+					and(
+						eq(emailDeliveryReputation.siteId, input.siteId),
+						inArray(emailDeliveryReputation.email, pageEmails),
+					),
+				);
+			for (const row of preferenceRows) {
+				notificationsByEmail.set(row.email, {
+					notifyOnReply: row.notifyOnReply,
+					unsubscribedAt: row.unsubscribedAt,
+					suppressedUntil: null,
+					reputationScore: null,
+					lastSuccessAt: null,
+					lastFailureAt: null,
+				});
+			}
+			for (const row of reputationRows) {
+				const current = notificationsByEmail.get(row.email);
+				notificationsByEmail.set(row.email, {
+					notifyOnReply: current?.notifyOnReply ?? null,
+					unsubscribedAt: current?.unsubscribedAt ?? null,
+					suppressedUntil: row.suppressedUntil,
+					reputationScore: row.failureScore,
+					lastSuccessAt: row.lastSuccessAt,
+					lastFailureAt: row.lastFailureAt,
+				});
+			}
+		}
 		if (pageEmails.length > 0) {
 			const metadataRows = await this.db
 				.select({
@@ -1155,6 +1217,7 @@ export class AdminRepository {
 				const metadataRows = metadataByEmail.get(item.email) ?? [];
 				return {
 					...item,
+					notifications: notificationsByEmail.get(item.email),
 					ipLocations: aggregateIpLocations(metadataRows),
 					devices: aggregateDevices(metadataRows),
 				};
@@ -1166,10 +1229,21 @@ export class AdminRepository {
 	public async listVisitors(input: {
 		siteId?: number;
 		search?: string;
+		ip?: string;
+		userAgent?: string;
+		pageUrl?: string;
+		device?: string;
+		location?: string;
+		blacklist?: "any" | "ip" | "visitor" | "none";
 		limit: number;
 		offset: number;
 	}) {
 		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const ipValue = input.ip ? `%${input.ip}%` : undefined;
+		const userAgentValue = input.userAgent ? `%${input.userAgent}%` : undefined;
+		const pageUrlValue = input.pageUrl ? `%${input.pageUrl}%` : undefined;
+		const deviceValue = input.device ? `%${input.device}%` : undefined;
+		const locationValue = input.location ? `%${input.location}%` : undefined;
 		const rows = await this.db
 			.select({
 				id: visitors.id,
@@ -1189,7 +1263,67 @@ export class AdminRepository {
 			.where(
 				and(
 					input.siteId ? eq(visitors.siteId, input.siteId) : undefined,
-					searchValue ? like(visitors.visitorKey, searchValue) : undefined,
+					searchValue
+						? or(
+								like(visitors.visitorKey, searchValue),
+								like(visitors.lastIp, searchValue),
+								like(visitors.lastUserAgent, searchValue),
+								like(visitors.lastSeenPageUrl, searchValue),
+							)
+						: undefined,
+					ipValue
+						? or(
+								like(visitors.lastIp, ipValue),
+								sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.ip LIKE ${ipValue}
+								)`,
+							)
+						: undefined,
+					userAgentValue
+						? or(
+								like(visitors.lastUserAgent, userAgentValue),
+								sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.user_agent LIKE ${userAgentValue}
+								)`,
+							)
+						: undefined,
+					pageUrlValue
+						? or(
+								like(visitors.lastSeenPageUrl, pageUrlValue),
+								sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.last_seen_page_url LIKE ${pageUrlValue}
+								)`,
+							)
+						: undefined,
+					deviceValue
+						? sql`EXISTS (
+								SELECT 1 FROM visitor_request_metadata
+								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+								AND (
+									visitor_request_metadata.device_browser LIKE ${deviceValue}
+									OR visitor_request_metadata.device_os LIKE ${deviceValue}
+									OR visitor_request_metadata.device_type LIKE ${deviceValue}
+								)
+							)`
+						: undefined,
+					locationValue
+						? sql`EXISTS (
+								SELECT 1 FROM visitor_request_metadata
+								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+								AND (
+									visitor_request_metadata.ip_country LIKE ${locationValue}
+									OR visitor_request_metadata.ip_region LIKE ${locationValue}
+									OR visitor_request_metadata.ip_city LIKE ${locationValue}
+									OR visitor_request_metadata.ip_isp LIKE ${locationValue}
+								)
+							)`
+						: undefined,
 				),
 			)
 			.orderBy(desc(visitors.lastSeenAt));
@@ -1201,8 +1335,6 @@ export class AdminRepository {
 				totalCount: 0,
 			};
 		}
-		const pagedRows = rows.slice(input.offset, input.offset + input.limit);
-		const pagedVisitorIds = pagedRows.map((row) => row.id);
 
 		const commentStatsRows = await this.db
 			.select({
@@ -1265,7 +1397,7 @@ export class AdminRepository {
 			});
 		}
 		const metadataByVisitorId = new Map<number, RequestMetaAggregateSource[]>();
-		if (pagedVisitorIds.length > 0) {
+		if (visitorIds.length > 0) {
 			const metadataRows = await this.db
 				.select({
 					visitorId: visitorRequestMetadata.visitorId,
@@ -1291,7 +1423,7 @@ export class AdminRepository {
 					seenCount: visitorRequestMetadata.seenCount,
 				})
 				.from(visitorRequestMetadata)
-				.where(inArray(visitorRequestMetadata.visitorId, pagedVisitorIds))
+				.where(inArray(visitorRequestMetadata.visitorId, visitorIds))
 				.orderBy(desc(visitorRequestMetadata.lastSeenAt));
 			for (const row of metadataRows) {
 				const records = metadataByVisitorId.get(row.visitorId) ?? [];
@@ -1325,64 +1457,80 @@ export class AdminRepository {
 			input.siteId,
 		);
 		const ipRules = await this.listActiveBlacklistRules("ip", input.siteId);
-		return {
-			items: pagedRows.map((row) => {
-				const commentStats = commentStatsMap.get(row.id);
-				const ips = commentStats?.ips ?? [];
-				const metadataRows = metadataByVisitorId.get(row.id) ?? [];
-				const lastRequestMeta = buildRequestMeta(
-					metadataRows[0] ?? {
-						ip: row.lastIp,
-						userAgent: row.lastUserAgent,
-					},
-				);
-				const lastIp = row.lastIp ?? metadataRows[0]?.ip ?? null;
-				return {
-					siteKey: row.siteKey,
-					visitorKey: row.visitorKey,
-					lastIp,
-					lastUserAgent: row.lastUserAgent,
-					lastSeenPageKey: row.lastSeenPageKey,
-					lastSeenPageUrl: resolvePublicPageUrl(
-						row.lastSeenPageUrl,
-						parseStringArray(row.allowedOriginsJson),
+		const items = rows.map((row) => {
+			const commentStats = commentStatsMap.get(row.id);
+			const ips = commentStats?.ips ?? [];
+			const metadataRows = metadataByVisitorId.get(row.id) ?? [];
+			const lastRequestMeta = buildRequestMeta(
+				metadataRows[0] ?? {
+					ip: row.lastIp,
+					userAgent: row.lastUserAgent,
+				},
+			);
+			const lastIp = row.lastIp ?? metadataRows[0]?.ip ?? null;
+			const blacklist = {
+				ip: ipRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ ip: lastIp ?? undefined },
 					),
-					lastSeenAt: row.lastSeenAt,
-					createdAt: row.createdAt,
-					commentCount: commentStats?.commentCount ?? 0,
-					pageCount: pageCountMap.get(row.id) ?? 0,
-					emailCount: commentStats?.emailCount ?? 0,
-					emails: commentStats?.emails ?? [],
-					ips,
-					userAgents: commentStats?.userAgents ?? [],
-					lastRequestMeta,
-					ipLocations: aggregateIpLocations(metadataRows),
-					devices: aggregateDevices(metadataRows),
-					blacklist: {
-						ip: ipRules.some((rule) =>
-							matchBlacklistRule(
-								{
-									targetType: rule.targetType,
-									targetValue: rule.targetValue,
-									matchMode: rule.matchMode,
-								},
-								{ ip: lastIp ?? undefined },
-							),
-						),
-						visitor: visitorRules.some((rule) =>
-							matchBlacklistRule(
-								{
-									targetType: rule.targetType,
-									targetValue: rule.targetValue,
-									matchMode: rule.matchMode,
-								},
-								{ visitorKey: row.visitorKey },
-							),
-						),
-					},
-				};
-			}),
-			totalCount: rows.length,
+				),
+				visitor: visitorRules.some((rule) =>
+					matchBlacklistRule(
+						{
+							targetType: rule.targetType,
+							targetValue: rule.targetValue,
+							matchMode: rule.matchMode,
+						},
+						{ visitorKey: row.visitorKey },
+					),
+				),
+			};
+
+			return {
+				siteKey: row.siteKey,
+				visitorKey: row.visitorKey,
+				lastIp,
+				lastUserAgent: row.lastUserAgent,
+				lastSeenPageKey: row.lastSeenPageKey,
+				lastSeenPageUrl: resolvePublicPageUrl(
+					row.lastSeenPageUrl,
+					parseStringArray(row.allowedOriginsJson),
+				),
+				lastSeenAt: row.lastSeenAt,
+				createdAt: row.createdAt,
+				commentCount: commentStats?.commentCount ?? 0,
+				pageCount: pageCountMap.get(row.id) ?? 0,
+				emailCount: commentStats?.emailCount ?? 0,
+				emails: commentStats?.emails ?? [],
+				ips,
+				userAgents: commentStats?.userAgents ?? [],
+				lastRequestMeta,
+				ipLocations: aggregateIpLocations(metadataRows),
+				devices: aggregateDevices(metadataRows),
+				blacklist,
+			};
+		});
+		const filteredItems =
+			input.blacklist === "any"
+				? items.filter((item) => item.blacklist.ip || item.blacklist.visitor)
+				: input.blacklist === "ip"
+					? items.filter((item) => item.blacklist.ip)
+					: input.blacklist === "visitor"
+						? items.filter((item) => item.blacklist.visitor)
+						: input.blacklist === "none"
+							? items.filter(
+									(item) => !item.blacklist.ip && !item.blacklist.visitor,
+								)
+							: items;
+
+		return {
+			items: filteredItems.slice(input.offset, input.offset + input.limit),
+			totalCount: filteredItems.length,
 		};
 	}
 
@@ -1401,7 +1549,8 @@ export class AdminRepository {
 				moderationJson: siteSettings.moderationJson,
 				allowPageLike: siteSettings.allowPageLike,
 				engagementJson: siteSettings.engagementJson,
-				emailNotificationsEnabled: siteSettings.emailNotificationsEnabled,
+				commenterReplyEmailEnabled: siteSettings.commenterReplyEmailEnabled,
+				backendNotificationsEnabled: siteSettings.backendNotificationsEnabled,
 			})
 			.from(sites)
 			.innerJoin(siteSettings, eq(siteSettings.siteId, sites.id))
@@ -1482,7 +1631,12 @@ export class AdminRepository {
 				parseEngagementSettings(row.engagementJson),
 			),
 			notifications: {
-				emailEnabled: row.emailNotificationsEnabled,
+				commenter: {
+					replyEmailEnabled: row.commenterReplyEmailEnabled,
+				},
+				backend: {
+					enabled: row.backendNotificationsEnabled,
+				},
 			},
 			pageCount: pageCountMap.get(row.siteId) ?? 0,
 			commentCount: commentCountMap.get(row.siteId) ?? 0,
@@ -1499,6 +1653,16 @@ export class AdminRepository {
 			.limit(1);
 
 		return comment;
+	}
+
+	public async listCommentsByIds(commentIds: string[]) {
+		if (commentIds.length === 0) {
+			return [];
+		}
+		return this.db
+			.select()
+			.from(comments)
+			.where(inArray(comments.id, commentIds));
 	}
 
 	public async getCommentRequestMetadata(commentId: string) {
@@ -1811,6 +1975,15 @@ export class AdminRepository {
 		return rule;
 	}
 
+	public async getBlacklistRule(ruleId: number) {
+		const [rule] = await this.db
+			.select()
+			.from(blacklistRules)
+			.where(eq(blacklistRules.id, ruleId))
+			.limit(1);
+		return rule;
+	}
+
 	public async deleteBlacklistRulesByTarget(input: {
 		siteId?: number;
 		targetType: "ip" | "email" | "visitor";
@@ -1828,10 +2001,7 @@ export class AdminRepository {
 				and(
 					input.siteId === undefined
 						? isNull(blacklistRules.siteId)
-						: or(
-								isNull(blacklistRules.siteId),
-								eq(blacklistRules.siteId, input.siteId),
-							),
+						: eq(blacklistRules.siteId, input.siteId),
 					eq(blacklistRules.targetType, input.targetType),
 					eq(blacklistRules.targetValue, targetValue),
 					eq(blacklistRules.matchMode, input.matchMode),
@@ -1861,6 +2031,34 @@ export class AdminRepository {
 		return settings;
 	}
 
+	public async listSiteNotificationRecipients(siteId: number) {
+		return new BackendUserNotificationRecipientsRepository(
+			this.db,
+		).listSiteRecipients(siteId);
+	}
+
+	public async listNotificationChannelConfigs() {
+		return new NotificationChannelConfigsRepository(this.db).list();
+	}
+
+	public async replaceSiteNotificationRecipients(input: {
+		siteId: number;
+		recipients: SiteNotificationRecipientInput[];
+	}) {
+		return new BackendUserNotificationRecipientsRepository(
+			this.db,
+		).replaceSiteRecipients(input);
+	}
+
+	public async getNotificationRecipientCandidate(input: {
+		siteId: number;
+		userId: number;
+	}) {
+		return new BackendUserNotificationRecipientsRepository(
+			this.db,
+		).getUserForRecipientValidation(input);
+	}
+
 	public async updateSiteSettings(
 		siteId: number,
 		input: {
@@ -1884,8 +2082,10 @@ export class AdminRepository {
 			verifiedAuthorJson?: string;
 			staffDisplayJson?: string;
 			moderationJson?: string;
+			pageRegistryJson?: string;
 			engagementJson?: string;
-			emailNotificationsEnabled?: boolean;
+			commenterReplyEmailEnabled?: boolean;
+			backendNotificationsEnabled?: boolean;
 		},
 	) {
 		await this.db
@@ -1911,8 +2111,10 @@ export class AdminRepository {
 				verifiedAuthorJson: input.verifiedAuthorJson,
 				staffDisplayJson: input.staffDisplayJson,
 				moderationJson: input.moderationJson,
+				pageRegistryJson: input.pageRegistryJson,
 				engagementJson: input.engagementJson,
-				emailNotificationsEnabled: input.emailNotificationsEnabled,
+				commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
+				backendNotificationsEnabled: input.backendNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})
 			.where(eq(siteSettings.siteId, siteId));

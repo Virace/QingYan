@@ -428,6 +428,114 @@ export class PageRegistryService {
 		return this.setPageLifecycle(input, "deleted");
 	}
 
+	public async clearTrash(input: { siteId?: number; siteKey?: string }) {
+		const nowIso = new Date().toISOString();
+		const whereClause = and(
+			input.siteId ? eq(sitePageRegistry.siteId, input.siteId) : undefined,
+			eq(sitePageRegistry.status, "trash"),
+		);
+		const rows = await this.db
+			.select({
+				pageKey: sitePageRegistry.pageKey,
+				pageUrl: sitePageRegistry.pageUrl,
+			})
+			.from(sitePageRegistry)
+			.where(whereClause);
+		if (rows.length > 0) {
+			await this.db
+				.update(sitePageRegistry)
+				.set({
+					status: "deleted",
+					deletedAt: nowIso,
+					updatedAt: nowIso,
+				})
+				.where(whereClause);
+		}
+
+		return {
+			deletedCount: rows.length,
+			pages: rows,
+		};
+	}
+
+	public async restoreDeletedPage(input: {
+		pageKey: string;
+		siteId?: number | null;
+		siteKey?: string;
+	}) {
+		const page = await this.setPageLifecycle(
+			{
+				...input,
+				siteId: input.siteId ?? undefined,
+			},
+			"active",
+		);
+		return {
+			...page,
+			restoredCount: 1,
+		};
+	}
+
+	public async restoreDeletedPages(input: {
+		pageKeys: string[];
+		siteId?: number | null;
+	}) {
+		if (input.pageKeys.length === 0) {
+			return 0;
+		}
+		let restoredCount = 0;
+		for (const pageKey of input.pageKeys) {
+			try {
+				await this.restoreDeletedPage({
+					pageKey,
+					siteId: input.siteId,
+				});
+				restoredCount += 1;
+			} catch (error) {
+				if (error instanceof ResourceNotFoundError) {
+					continue;
+				}
+				throw error;
+			}
+		}
+		return restoredCount;
+	}
+
+	public async hardDeletePage(input: {
+		pageKey: string;
+		siteId?: number | null;
+	}) {
+		const existing = await this.findPage(input);
+		await this.db
+			.delete(sitePageRegistry)
+			.where(eq(sitePageRegistry.id, existing.id));
+		return 1;
+	}
+
+	public async hardDeletePages(input: {
+		pageKeys: string[];
+		siteId?: number | null;
+	}) {
+		if (input.pageKeys.length === 0) {
+			return 0;
+		}
+		let hardDeletedCount = 0;
+		for (const pageKey of input.pageKeys) {
+			try {
+				hardDeletedCount += await this.hardDeletePage({
+					pageKey,
+					siteId: input.siteId,
+				});
+			} catch (error) {
+				if (error instanceof ResourceNotFoundError) {
+					continue;
+				}
+				throw error;
+			}
+		}
+		return hardDeletedCount;
+	}
+
 	private async getPendingCandidate(input: {
 		siteKey: string;
 		pageKey: string;
@@ -483,6 +591,29 @@ export class PageRegistryService {
 		status: "active" | "trash" | "deleted",
 	) {
 		const nowIso = new Date().toISOString();
+		const page = await this.findPage(input);
+		await this.db
+			.update(sitePageRegistry)
+			.set({
+				status,
+				trashedAt: status === "trash" ? nowIso : null,
+				deletedAt: status === "deleted" ? nowIso : null,
+				updatedAt: nowIso,
+			})
+			.where(eq(sitePageRegistry.id, page.id));
+
+		return {
+			siteKey: input.siteKey ?? page.siteKey,
+			pageKey: page.pageKey,
+			pageUrl: page.pageUrl,
+			status,
+			trashedAt: status === "trash" ? nowIso : null,
+			deletedAt: status === "deleted" ? nowIso : null,
+			updatedAt: nowIso,
+		};
+	}
+
+	private async findPage(input: { pageKey: string; siteId?: number | null }) {
 		const [page] = await this.db
 			.select({
 				id: sitePageRegistry.id,
@@ -503,24 +634,6 @@ export class PageRegistryService {
 		if (!page) {
 			throw new ResourceNotFoundError("PAGE_NOT_FOUND", "页面不存在。");
 		}
-		await this.db
-			.update(sitePageRegistry)
-			.set({
-				status,
-				trashedAt: status === "trash" ? nowIso : null,
-				deletedAt: status === "deleted" ? nowIso : null,
-				updatedAt: nowIso,
-			})
-			.where(eq(sitePageRegistry.id, page.id));
-
-		return {
-			siteKey: input.siteKey ?? page.siteKey,
-			pageKey: page.pageKey,
-			pageUrl: page.pageUrl,
-			status,
-			trashedAt: status === "trash" ? nowIso : null,
-			deletedAt: status === "deleted" ? nowIso : null,
-			updatedAt: nowIso,
-		};
+		return page;
 	}
 }

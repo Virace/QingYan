@@ -2,6 +2,10 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	adminGroups,
+	adminUserGroups,
+	adminUserSiteAccess,
+	adminUsers,
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
@@ -9,6 +13,8 @@ import {
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { AdminRepository } from "../../src/modules/admin/repository";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -34,6 +40,65 @@ async function enableTrustedPageViews(
 	});
 }
 
+async function _createSecondSite(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+) {
+	const repository = new AdminRepository(fixture.app.db);
+	await repository.createSite({
+		siteKey: "qingyan",
+		name: "QingYan",
+		allowedOrigins: ["http://localhost:4322"],
+	});
+	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
+}
+
+async function _createSiteAdmin(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	input: {
+		username: string;
+		siteKeys: string[];
+	},
+) {
+	const [group] = await fixture.app.db
+		.select()
+		.from(adminGroups)
+		.where(eq(adminGroups.key, "site_admin"));
+	if (!group) {
+		throw new Error("Expected site_admin group");
+	}
+	await fixture.app.db.insert(adminUsers).values({
+		username: input.username,
+		email: `${input.username}@example.test`,
+		passwordHash: createPasswordHash("replace-me"),
+		displayName: input.username,
+		status: "active",
+	});
+	const [user] = await fixture.app.db
+		.select()
+		.from(adminUsers)
+		.where(eq(adminUsers.username, input.username));
+	if (!user) {
+		throw new Error(`Expected user ${input.username}`);
+	}
+	await fixture.app.db.insert(adminUserGroups).values({
+		userId: user.id,
+		groupId: group.id,
+	});
+	for (const siteKey of input.siteKeys) {
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, siteKey));
+		if (!site) {
+			throw new Error(`Expected site ${siteKey}`);
+		}
+		await fixture.app.db.insert(adminUserSiteAccess).values({
+			userId: user.id,
+			siteId: site.id,
+		});
+	}
+}
+
 describe("admin page registry", () => {
 	it("does not list registered pages as pending unknown pages", async () => {
 		const fixture = await createTestApp();
@@ -48,20 +113,20 @@ describe("admin page registry", () => {
 		}
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
-			pageKey: "posts/already-registered-pending/",
+			pageKey: "/posts/already-registered-pending/",
 			pageUrl: "/posts/already-registered-pending/",
 			status: "active",
 		});
 		await fixture.app.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
-			pageKey: "posts/already-registered-pending/",
+			pageKey: "/posts/already-registered-pending/",
 			pageUrl: "/posts/already-registered-pending/",
 			hitCount: 2,
 			status: "pending",
 		});
 		await fixture.app.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
-			pageKey: "posts/actually-unknown/",
+			pageKey: "/posts/actually-unknown/",
 			pageUrl: "/posts/actually-unknown/",
 			hitCount: 1,
 			status: "pending",
@@ -80,7 +145,7 @@ describe("admin page registry", () => {
 			items: [
 				{
 					siteKey: "fangyuan",
-					pageKey: "posts/actually-unknown/",
+					pageKey: "/posts/actually-unknown/",
 					status: "pending",
 				},
 			],
@@ -118,7 +183,7 @@ describe("admin page registry", () => {
 			items: [
 				{
 					siteKey: "fangyuan",
-					pageKey: "posts/pending-review/",
+					pageKey: "/posts/pending-review/",
 					pageUrl: "/posts/pending-review/",
 					hitCount: 1,
 					status: "pending",
@@ -135,7 +200,7 @@ describe("admin page registry", () => {
 			...withAdminWriteAuth(admin),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "posts/pending-review/",
+				pageKey: "/posts/pending-review/",
 				reason: "not a content page",
 			},
 		});
@@ -144,7 +209,7 @@ describe("admin page registry", () => {
 		expect(rejectResponse.json()).toMatchObject({
 			candidate: {
 				siteKey: "fangyuan",
-				pageKey: "posts/pending-review/",
+				pageKey: "/posts/pending-review/",
 				status: "rejected",
 				lastRejectReason: "not a content page",
 			},
@@ -165,7 +230,7 @@ describe("admin page registry", () => {
 			...withAdminWriteAuth(admin),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "posts/ignored-page/",
+				pageKey: "/posts/ignored-page/",
 				reason: "utility route",
 			},
 		});
@@ -174,20 +239,20 @@ describe("admin page registry", () => {
 		expect(ignoreResponse.json()).toMatchObject({
 			candidate: {
 				siteKey: "fangyuan",
-				pageKey: "posts/ignored-page/",
+				pageKey: "/posts/ignored-page/",
 				status: "ignored",
 				lastRejectReason: "utility route",
 			},
 			page: {
 				siteKey: "fangyuan",
-				pageKey: "posts/ignored-page/",
+				pageKey: "/posts/ignored-page/",
 				status: "ignored",
 			},
 		});
 		const [registryPage] = await fixture.app.db
 			.select()
 			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "posts/ignored-page/"));
+			.where(eq(sitePageRegistry.pageKey, "/posts/ignored-page/"));
 		expect(registryPage).toMatchObject({
 			status: "ignored",
 			pageUrl: "/posts/ignored-page/",
@@ -230,7 +295,7 @@ describe("admin page registry", () => {
 			...withAdminWriteAuth(admin),
 			payload: {
 				siteKey: "fangyuan",
-				pageKey: "posts/pending-approval/",
+				pageKey: "/posts/pending-approval/",
 			},
 		});
 
@@ -238,7 +303,7 @@ describe("admin page registry", () => {
 		expect(response.json()).toMatchObject({
 			page: {
 				siteKey: "fangyuan",
-				pageKey: "posts/pending-approval/",
+				pageKey: "/posts/pending-approval/",
 				status: "active",
 				mergedPageViews: 1,
 			},
@@ -246,25 +311,25 @@ describe("admin page registry", () => {
 		const [registryPage] = await fixture.app.db
 			.select()
 			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.pageKey, "posts/pending-approval/"));
+			.where(eq(sitePageRegistry.pageKey, "/posts/pending-approval/"));
 		expect(registryPage).toMatchObject({
-			pageKey: "posts/pending-approval/",
+			pageKey: "/posts/pending-approval/",
 			pageUrl: "/posts/pending-approval/",
 			status: "active",
 		});
 		const [thread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "posts/pending-approval/"));
+			.where(eq(pageThreads.pageKey, "/posts/pending-approval/"));
 		expect(thread).toMatchObject({
-			pageKey: "posts/pending-approval/",
+			pageKey: "/posts/pending-approval/",
 			pageUrl: "/posts/pending-approval/",
 			pageViewCount: 1,
 		});
 		const [candidate] = await fixture.app.db
 			.select()
 			.from(pendingPageCandidates)
-			.where(eq(pendingPageCandidates.pageKey, "posts/pending-approval/"));
+			.where(eq(pendingPageCandidates.pageKey, "/posts/pending-approval/"));
 		expect(candidate).toMatchObject({
 			status: "approved",
 		});

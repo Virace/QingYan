@@ -1,4 +1,4 @@
-export type CommentAuthorIdentity = "visitor" | "verified";
+export type CommentAuthorIdentity = "visitor" | "verified" | "staff";
 export type StaffDisplayNameMode = "current_profile" | "snapshot";
 
 export interface VerifiedAuthorSettings {

@@ -70,6 +70,10 @@ function mapCommentRequestMetadata(
 export class CommentsWriteRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
+	public get database(): AppDatabase {
+		return this.db;
+	}
+
 	public createCaptchaSessionId() {
 		return createEntityId("cap");
 	}
@@ -174,6 +178,7 @@ export class CommentsWriteRepository {
 		pageThreadId: number;
 		parentCommentId: string | null;
 		visitorId: number | null;
+		authorUserId?: number | null;
 		authorIdentity?: CommentAuthorIdentity;
 		authorName: string;
 		authorEmail?: string;
@@ -193,6 +198,7 @@ export class CommentsWriteRepository {
 			pageThreadId: input.pageThreadId,
 			parentId: input.parentCommentId,
 			visitorId: input.visitorId,
+			authorUserId: input.authorUserId,
 			authorIdentity: input.authorIdentity ?? "visitor",
 			status: input.status,
 			authorName: input.authorName,

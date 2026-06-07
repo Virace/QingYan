@@ -230,6 +230,8 @@ export function buildDefaultSiteSettings(siteId: number) {
 		moderationJson: serializeSiteModerationSettings(
 			defaultSiteModerationSettings,
 		),
-		emailNotificationsEnabled: false,
+		pageRegistryJson: null,
+		commenterReplyEmailEnabled: false,
+		backendNotificationsEnabled: false,
 	};
 }

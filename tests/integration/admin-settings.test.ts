@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { siteSettings, sites } from "../../src/db/schema";
+import { scheduledTasks, siteSettings, sites } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -80,14 +80,22 @@ describe("admin settings", () => {
 					enabled: true,
 				},
 				pageViews: {
-					enabled: false,
+					enabled: true,
 				},
 				pageLikes: {
-					enabled: false,
+					enabled: true,
 				},
 				commentVotes: {
-					enabled: false,
+					enabled: true,
 				},
+			},
+			pageRegistry: {
+				mode: "discovery",
+				authoritativeSitemapUrls: [],
+				unknownPageResponse: "inactive_payload",
+				requireHealthySource: true,
+				sourceFreshnessGraceSec: 7200,
+				emergencyLockdown: false,
 			},
 		});
 
@@ -143,7 +151,12 @@ describe("admin settings", () => {
 					allowLike: false,
 				},
 				notifications: {
-					emailEnabled: true,
+					commenter: {
+						replyEmailEnabled: true,
+					},
+					backend: {
+						enabled: true,
+					},
 				},
 				engagement: {
 					visitors: {
@@ -211,7 +224,12 @@ describe("admin settings", () => {
 				allowLike: true,
 			},
 			notifications: {
-				emailEnabled: true,
+				commenter: {
+					replyEmailEnabled: true,
+				},
+				backend: {
+					enabled: true,
+				},
 			},
 			engagement: {
 				visitors: {
@@ -255,13 +273,13 @@ describe("admin settings", () => {
 				enabled: false,
 			},
 			pageViews: {
-				enabled: false,
+				enabled: true,
 			},
 			pageLikes: {
-				enabled: false,
+				enabled: true,
 			},
 			commentVotes: {
-				enabled: false,
+				enabled: true,
 			},
 		});
 
@@ -287,10 +305,283 @@ describe("admin settings", () => {
 				enabled: true,
 			},
 			pageLikes: {
-				enabled: false,
+				enabled: true,
 			},
 			commentVotes: {
+				enabled: true,
+			},
+		});
+	});
+
+	it("persists page registry settings patches", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				pageRegistry: {
+					unknownPageResponse: "forbidden",
+					sourceFreshnessGraceSec: 3600,
+					emergencyLockdown: true,
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json().pageRegistry).toEqual({
+			mode: "discovery",
+			authoritativeSitemapUrls: [],
+			unknownPageResponse: "forbidden",
+			requireHealthySource: true,
+			sourceFreshnessGraceSec: 3600,
+			emergencyLockdown: true,
+		});
+
+		const readResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+		expect(readResponse.statusCode).toBe(200);
+		expect(readResponse.json().pageRegistry.unknownPageResponse).toBe(
+			"forbidden",
+		);
+	});
+
+	it("ensures and disables protected page source refresh tasks for authoritative mode", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				pageRegistry: {
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				},
+			},
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json().pageRegistry).toMatchObject({
+			mode: "authoritative",
+			authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+			requireHealthySource: true,
+		});
+		const tasksAfterEnable = await fixture.app.db
+			.select()
+			.from(scheduledTasks)
+			.where(
+				eq(
+					scheduledTasks.systemKey,
+					"page_registry:authoritative_source_refresh:fangyuan",
+				),
+			);
+		expect(tasksAfterEnable).toHaveLength(1);
+		expect(tasksAfterEnable[0]).toMatchObject({
+			type: "page_source_refresh",
+			enabled: true,
+			protectionJson: expect.any(String),
+			payloadJson: expect.any(String),
+		});
+		expect(JSON.parse(tasksAfterEnable[0].payloadJson)).toMatchObject({
+			siteKey: "fangyuan",
+			sitemapUrls: ["http://localhost:4321/sitemap.xml"],
+			mode: "replace",
+		});
+
+		const repeatResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				pageRegistry: {
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/other.xml"],
+				},
+			},
+		});
+		expect(repeatResponse.statusCode).toBe(200);
+		const tasksAfterRepeat = await fixture.app.db
+			.select()
+			.from(scheduledTasks)
+			.where(
+				eq(
+					scheduledTasks.systemKey,
+					"page_registry:authoritative_source_refresh:fangyuan",
+				),
+			);
+		expect(tasksAfterRepeat).toHaveLength(1);
+		expect(JSON.parse(tasksAfterRepeat[0].payloadJson)).toMatchObject({
+			siteKey: "fangyuan",
+			sitemapUrls: ["http://localhost:4321/other.xml"],
+			mode: "replace",
+		});
+
+		const disableResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				pageRegistry: {
+					mode: "discovery",
+				},
+			},
+		});
+		expect(disableResponse.statusCode).toBe(200);
+		const [releasedTask] = await fixture.app.db
+			.select()
+			.from(scheduledTasks)
+			.where(eq(scheduledTasks.id, tasksAfterEnable[0].id));
+		expect(releasedTask).toMatchObject({
+			systemKey: "page_registry:authoritative_source_refresh:fangyuan",
+			enabled: false,
+			disabledReason: "authoritative_disabled",
+			protectionJson: expect.any(String),
+		});
+
+		const reenableResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				pageRegistry: {
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+				},
+			},
+		});
+		expect(reenableResponse.statusCode).toBe(200);
+		const tasksAfterReenable = await fixture.app.db
+			.select()
+			.from(scheduledTasks)
+			.where(
+				eq(
+					scheduledTasks.systemKey,
+					"page_registry:authoritative_source_refresh:fangyuan",
+				),
+			);
+		expect(tasksAfterReenable).toHaveLength(1);
+		expect(tasksAfterReenable[0]).toMatchObject({
+			id: tasksAfterEnable[0].id,
+			enabled: true,
+			protectionJson: expect.any(String),
+		});
+	});
+
+	it("rejects authoritative mode without sitemap URLs", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				pageRegistry: {
+					mode: "authoritative",
+					authoritativeSitemapUrls: [],
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+				fields: [
+					{
+						path: "pageRegistry.authoritativeSitemapUrls",
+						code: "AUTHORITATIVE_SOURCE_REQUIRED",
+					},
+				],
+			},
+		});
+	});
+
+	it("patches one site settings section without erasing sibling sections", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/settings/fangyuan/sections/engagement",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				visitors: {
+					enabled: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			siteKey: "fangyuan",
+			comments: {
+				enabled: true,
+				defaultStatus: "pending",
+			},
+			engagement: {
+				visitors: {
+					enabled: false,
+				},
+				pageViews: {
+					enabled: true,
+				},
+				pageLikes: {
+					enabled: true,
+				},
+				commentVotes: {
+					enabled: true,
+				},
+			},
+		});
+
+		const readResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(readResponse.statusCode).toBe(200);
+		expect(readResponse.json().engagement.visitors.enabled).toBe(false);
+		expect(readResponse.json().comments.defaultStatus).toBe("pending");
+	});
+
+	it("rejects unknown site settings sections", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const response = await fixture.app.inject({
+			method: "PATCH",
+			url: "/qingyan/api/admin/settings/fangyuan/sections/security",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
 				enabled: false,
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
 			},
 		});
 	});
@@ -333,7 +624,11 @@ describe("admin settings", () => {
 		const updateResponse = await fixture.app.inject({
 			method: "PUT",
 			url: "/qingyan/api/admin/sites/default/settings",
-			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			...withAdminWriteAuth({
+				adminCookie,
+				csrfToken,
+				origin: fixture.runtimeOptions.devMode.adminOrigin,
+			}),
 			payload: {
 				comments: {
 					enabled: false,

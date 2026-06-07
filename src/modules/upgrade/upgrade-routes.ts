@@ -4,7 +4,6 @@ import { z } from "zod";
 import { AppError, InvalidRequestError } from "../shared/errors";
 import type { UpgradeService } from "./upgrade-service";
 
-export const UPGRADE_COOKIE_NAME = "qingyan_upgrade";
 export const UPGRADE_PATH = "/upgrade";
 
 const upgradeApplySchema = z.object({
@@ -13,28 +12,8 @@ const upgradeApplySchema = z.object({
 	backupDirectory: z.string().min(1).optional(),
 });
 
-function readUpgradeCookie(
-	cookieHeader: string | undefined,
-): string | undefined {
-	if (!cookieHeader) {
-		return undefined;
-	}
-	for (const part of cookieHeader.split(";")) {
-		const [name, ...valueParts] = part.trim().split("=");
-		if (name === UPGRADE_COOKIE_NAME) {
-			return decodeURIComponent(valueParts.join("="));
-		}
-	}
-	return undefined;
-}
-
-function assertToken(input: {
-	payloadToken?: string;
-	cookieHeader?: string;
-	expectedToken: string;
-}) {
-	const token = input.payloadToken ?? readUpgradeCookie(input.cookieHeader);
-	if (token !== input.expectedToken) {
+function assertToken(input: { payloadToken?: string; expectedToken: string }) {
+	if (input.payloadToken !== input.expectedToken) {
 		throw new AppError(403, "UPGRADE_TOKEN_INVALID", "升级令牌无效。");
 	}
 }
@@ -54,7 +33,6 @@ export const upgradeRoutes: FastifyPluginAsync<{
 		}
 		assertToken({
 			payloadToken: parsed.data.token,
-			cookieHeader: request.headers.cookie,
 			expectedToken: options.token,
 		});
 		try {

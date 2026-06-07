@@ -9,7 +9,7 @@ import type { MigrationReport, MigrationReportItem } from "../report";
 
 export interface ConvertReportInput {
 	report: MigrationReport;
-	authorDecisions?: Record<string, "verified" | "visitor">;
+	authorDecisions?: Record<string, "staff" | "verified" | "visitor">;
 	maxDepth?: number;
 	now?: Date;
 }
@@ -39,25 +39,31 @@ function isImportableComment(
 
 function resolveAuthorIdentity(
 	comment: MigrationReportItem["comments"][number],
-	authorDecisions: Record<string, "verified" | "visitor"> | undefined,
-): "verified" | "visitor" {
+	authorDecisions: Record<string, "staff" | "verified" | "visitor"> | undefined,
+): "staff" | "verified" | "visitor" {
 	switch (comment.authorMatch?.kind) {
 		case "staff_strong":
 			return "verified";
+		case "staff_existing_user":
+			return "staff";
 		case "staff_email_candidate": {
 			const decision = authorDecisions?.[comment.oldCommentId];
-			if (!decision) {
-				throw new Error(
-					`Unresolved WordPress author candidates: ${comment.oldCommentId}`,
-				);
-			}
-			return decision;
+			return decision ?? "visitor";
 		}
 		case "registered_unknown":
 		case "visitor":
 		case undefined:
 			return "visitor";
 	}
+}
+
+function resolveAuthorUserId(
+	comment: MigrationReportItem["comments"][number],
+): number | undefined {
+	if (comment.authorMatch?.kind !== "staff_existing_user") {
+		return undefined;
+	}
+	return comment.authorMatch.adminUser?.id;
 }
 
 function convertItem(
@@ -89,6 +95,7 @@ function convertItem(
 			authorIp: comment.authorIp,
 			userAgent: comment.userAgent,
 			authorIdentity: resolveAuthorIdentity(comment, authorDecisions),
+			authorUserId: resolveAuthorUserId(comment),
 			content: comment.content,
 			createdAt: comment.createdAt,
 			parentOldCommentId: comment.oldParentCommentId,
