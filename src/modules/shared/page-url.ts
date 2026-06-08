@@ -12,6 +12,7 @@ function isAbsoluteHttpUrl(value: string): boolean {
 export const pageUrlInputSchema = z
 	.string()
 	.min(1)
+	.max(4096)
 	.refine((value) => value.startsWith("/") || isAbsoluteHttpUrl(value), {
 		message: "pageUrl 必须是 http(s) 完整地址或以 / 开头的页面路径。",
 	});

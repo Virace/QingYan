@@ -1,159 +1,276 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { envMappings } from "../src/config/env-mapping";
+import { loadConfig } from "../src/config/load-config";
 import { configSchema } from "../src/config/types";
+import { createSystemSettingsDefaults } from "../src/modules/system-settings/definitions";
+
+function createStartupConfig() {
+	return {
+		server: {
+			host: "0.0.0.0",
+			port: 4401,
+			publicBaseUrl: "http://localhost:4401",
+			trustProxy: false,
+		},
+		database: {
+			client: "sqlite",
+			sqlite: {
+				file: "./data/qingyan.db",
+			},
+		},
+		admin: {
+			session: {
+				cookieName: "qingyan_admin",
+				ttlMinutes: 4320,
+				sameSite: "lax",
+				secure: false,
+			},
+		},
+		security: {
+			requestIdHeader: "x-request-id",
+			globalFloodGuard: {
+				enabled: false,
+				windowSec: 10,
+				maxRequests: 120,
+			},
+			publicOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: false,
+			},
+			rateLimit: {
+				adminLogin: {
+					windowSec: 600,
+					maxFailures: 5,
+				},
+				commentCreate: {
+					windowSec: 300,
+					maxRequests: 5,
+				},
+				commentVote: {
+					windowSec: 300,
+					maxRequests: 15,
+				},
+				captchaVerify: {
+					windowSec: 300,
+					maxFailures: 8,
+				},
+				pageLike: {
+					windowSec: 300,
+					maxRequests: 10,
+				},
+			},
+		},
+	};
+}
 
 describe("configSchema", () => {
-	it("accepts the documented qingyan example shape", () => {
-		const parsed = configSchema.parse({
-			server: {
-				host: "0.0.0.0",
-				port: 4401,
-				publicBaseUrl: "http://localhost:4401",
-				trustProxy: false,
-			},
-			database: {
-				client: "sqlite",
-				sqlite: {
-					file: "./data/qingyan.db",
-				},
-			},
-			admin: {
-				tokenHash: "replace-me",
-				session: {
-					cookieName: "qingyan_admin",
-					ttlMinutes: 1440,
-					sameSite: "lax",
-					secure: false,
-				},
-			},
-			security: {
-				requestIdHeader: "x-request-id",
-				globalFloodGuard: {
-					enabled: false,
-					windowSec: 10,
-					maxRequests: 120,
-				},
-				rateLimit: {
-					adminLogin: {
-						windowSec: 600,
-						maxFailures: 5,
-					},
-					commentCreate: {
-						windowSec: 300,
-						maxRequests: 5,
-					},
-					commentVote: {
-						windowSec: 300,
-						maxRequests: 15,
-					},
-					captchaVerify: {
-						windowSec: 300,
-						maxFailures: 8,
-					},
-					pageLike: {
-						windowSec: 300,
-						maxRequests: 10,
-					},
-				},
-			},
-			captcha: {
-				provider: "image",
-				image: {
-					width: 160,
-					height: 60,
-					ttlSec: 600,
-				},
-			},
-			logging: {
-				directory: "./logs",
-				defaults: {
-					level: "info",
-					retentionDays: 7,
-				},
-			},
-			mail: {
-				enabled: false,
-				smtp: {
-					host: "smtp.example.com",
-					port: 465,
-					secure: true,
-					username: "notify@example.com",
-					password: "secret",
-					from: "notify@example.com",
-				},
-			},
-			sites: [
-				{
-					siteKey: "fangyuan",
-					name: "FangYuan",
-					allowedOrigins: ["http://localhost:4321"],
-					defaults: {
-						comments: {
-							enabled: true,
-							defaultStatus: "pending",
-							maxDepth: 3,
-							rootLimit: 20,
-							identity: {
-								require: ["nickname", "email"],
-							},
-							captcha: {
-								mode: "threshold",
-								thresholdWindowSec: 60,
-								thresholdMaxActions: 3,
-							},
-							abuseGuard: {
-								enabled: true,
-								windowSec: 600,
-								maxWriteActions: 100,
-								autoBlacklist: {
-									enabled: true,
-									scope: "post",
-									ttlSec: 1800,
-								},
-							},
-							allowWebsite: true,
-						},
-						pageFeedback: {
-							allowLike: true,
-						},
-						notifications: {
-							emailEnabled: false,
-						},
-					},
-				},
-			],
+	it("accepts startup-only configuration", () => {
+		const parsed = configSchema.parse(createStartupConfig());
+
+		expect(parsed.server.port).toBe(4401);
+		expect(parsed.server.publicPath).toBe("/qingyan");
+		expect("sites" in parsed).toBe(false);
+		expect("captcha" in parsed).toBe(false);
+		expect("logging" in parsed).toBe(false);
+		expect("mail" in parsed).toBe(false);
+	});
+
+	it("fills runtime defaults for optional startup security fields", () => {
+		const parsed = configSchema.parse(createStartupConfig());
+		const defaults = createSystemSettingsDefaults({
+			adminSession: { ttlMinutes: parsed.admin.session.ttlMinutes },
+			security: parsed.security,
 		});
 
-		expect(parsed.sites[0]?.siteKey).toBe("fangyuan");
-		expect(parsed.security.globalFloodGuard).toEqual({
-			enabled: false,
-			windowSec: 10,
-			maxRequests: 120,
-		});
-		expect(parsed.logging).toEqual({
-			directory: "./logs",
-			defaults: {
-				level: "info",
-				retentionDays: 7,
-			},
-		});
-		expect(parsed.sites[0]?.defaults.comments.identity).toEqual({
-			require: ["nickname", "email"],
-		});
-		expect(parsed.sites[0]?.defaults.comments.captcha).toEqual({
-			mode: "threshold",
-			thresholdWindowSec: 60,
-			thresholdMaxActions: 3,
-		});
-		expect(parsed.sites[0]?.defaults.comments.abuseGuard).toEqual({
-			enabled: true,
+		expect(defaults.security.rateLimit.adminLogin).toEqual({
 			windowSec: 600,
-			maxWriteActions: 100,
-			autoBlacklist: {
-				enabled: true,
-				scope: "post",
-				ttlSec: 1800,
-			},
+			maxFailures: 5,
+			autoBlacklistSec: 1800,
 		});
+	});
+
+	it("rejects old DB-owned top-level configuration fields", () => {
+		for (const key of ["sites", "captcha", "logging", "mail"] as const) {
+			expect(() =>
+				configSchema.parse({
+					...createStartupConfig(),
+					[key]: {},
+				}),
+			).toThrow();
+		}
+	});
+
+	it("exposes startup and system-settings seed env mapping metadata", () => {
+		expect(envMappings).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					path: "server.port",
+					envName: "QINGYAN_SERVER_PORT",
+					category: "startup",
+					restartRequired: true,
+				}),
+				expect.objectContaining({
+					path: "server.publicPath",
+					envName: "QINGYAN_PUBLIC_PATH",
+					category: "startup",
+					restartRequired: true,
+				}),
+				expect.objectContaining({
+					path: "database.sqlite.file",
+					envName: "QINGYAN_SQLITE_FILE",
+					category: "startup",
+					restartRequired: true,
+				}),
+				expect.objectContaining({
+					path: "admin.session.ttlMinutes",
+					envName: "QINGYAN_ADMIN_SESSION_TTL_MINUTES",
+					category: "system_settings_seed",
+					restartRequired: false,
+				}),
+				expect.objectContaining({
+					path: "mail.smtp.password",
+					envName: "QINGYAN_SMTP_PASSWORD",
+					category: "system_settings_seed",
+					secret: true,
+					readable: false,
+				}),
+			]),
+		);
+	});
+
+	it("applies whitelisted startup environment overrides while loading", async () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "qingyan-config-"));
+		const configPath = path.join(directory, "qingyan.yml");
+		writeFileSync(
+			configPath,
+			[
+				"server:",
+				"  host: 0.0.0.0",
+				"  port: 4401",
+				"  publicBaseUrl: http://localhost:4401",
+				"  trustProxy: false",
+				"database:",
+				"  client: sqlite",
+				"  sqlite:",
+				"    file: ./data/qingyan.db",
+				"admin:",
+				"  session:",
+				"    cookieName: qingyan_admin",
+				"    ttlMinutes: 4320",
+				"    sameSite: lax",
+				"    secure: false",
+				"security:",
+				"  requestIdHeader: x-request-id",
+				"  globalFloodGuard:",
+				"    enabled: false",
+				"    windowSec: 10",
+				"    maxRequests: 120",
+				"  publicOriginGuard:",
+				"    enabled: true",
+				"    allowMissingOrigin: false",
+				"  rateLimit:",
+				"    adminLogin:",
+				"      windowSec: 600",
+				"      maxFailures: 5",
+				"    commentCreate:",
+				"      windowSec: 300",
+				"      maxRequests: 5",
+				"    commentVote:",
+				"      windowSec: 300",
+				"      maxRequests: 15",
+				"    captchaVerify:",
+				"      windowSec: 300",
+				"      maxFailures: 8",
+				"    pageLike:",
+				"      windowSec: 300",
+				"      maxRequests: 10",
+				"",
+			].join("\n"),
+			"utf-8",
+		);
+
+		try {
+			const config = await loadConfig(configPath, {
+				QINGYAN_SERVER_PORT: "5501",
+				QINGYAN_PUBLIC_PATH: "qingyan",
+				QINGYAN_SQLITE_FILE: "./data/env.db",
+			});
+
+			expect(config.server.port).toBe(5501);
+			expect(config.server.publicPath).toBe("/qingyan");
+			expect(config.database.sqlite.file).toBe("./data/env.db");
+			expect("sites" in config).toBe(false);
+			expect("captcha" in config).toBe(false);
+			expect("mail" in config).toBe(false);
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects root public path from environment overrides", async () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "qingyan-config-"));
+		const configPath = path.join(directory, "qingyan.yml");
+		writeFileSync(
+			configPath,
+			[
+				"server:",
+				"  host: 0.0.0.0",
+				"  port: 4401",
+				"  publicBaseUrl: http://localhost:4401",
+				"  trustProxy: false",
+				"database:",
+				"  client: sqlite",
+				"  sqlite:",
+				"    file: ./data/qingyan.db",
+				"admin:",
+				"  session:",
+				"    cookieName: qingyan_admin",
+				"    ttlMinutes: 4320",
+				"    sameSite: lax",
+				"    secure: false",
+				"security:",
+				"  requestIdHeader: x-request-id",
+				"  globalFloodGuard:",
+				"    enabled: false",
+				"    windowSec: 10",
+				"    maxRequests: 120",
+				"  publicOriginGuard:",
+				"    enabled: true",
+				"    allowMissingOrigin: false",
+				"  rateLimit:",
+				"    adminLogin:",
+				"      windowSec: 600",
+				"      maxFailures: 5",
+				"    commentCreate:",
+				"      windowSec: 300",
+				"      maxRequests: 5",
+				"    commentVote:",
+				"      windowSec: 300",
+				"      maxRequests: 15",
+				"    captchaVerify:",
+				"      windowSec: 300",
+				"      maxFailures: 8",
+				"    pageLike:",
+				"      windowSec: 300",
+				"      maxRequests: 10",
+				"",
+			].join("\n"),
+			"utf-8",
+		);
+
+		try {
+			await expect(
+				loadConfig(configPath, {
+					QINGYAN_PUBLIC_PATH: "/",
+				}),
+			).rejects.toThrow(/server.publicPath/);
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
 	});
 });

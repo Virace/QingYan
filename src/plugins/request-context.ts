@@ -61,7 +61,6 @@ const requestContextPlugin: FastifyPluginAsync = async (fastify) => {
 		const pageKey = resolvePageKey(request);
 		request.context.siteKey = siteKey;
 		request.context.pageKey = pageKey;
-		request.context.site = fastify.siteRegistry.getConfiguredSite(siteKey);
 	});
 };
 

@@ -24,3 +24,29 @@ export function normalizePagination(input: PaginationInput): PaginationOptions {
 		offset,
 	};
 }
+
+export interface LimitOffsetInput {
+	limit?: number;
+	offset?: number;
+}
+
+export function normalizeLimitOffset(input: LimitOffsetInput = {}) {
+	return {
+		limit: Math.min(Math.max(input.limit ?? 20, 1), 100),
+		offset: Math.max(input.offset ?? 0, 0),
+	};
+}
+
+export function buildPaginationResult<T>(
+	items: T[],
+	pagination: { limit: number; offset: number; totalCount: number },
+) {
+	return { items, pagination };
+}
+
+export function paginateArray<T>(
+	items: readonly T[],
+	input: { limit: number; offset: number },
+) {
+	return items.slice(input.offset, input.offset + input.limit);
+}

@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { pageThreads } from "./page-threads";
+import { adminUsers } from "./admin-users";
 import { sites } from "./sites";
 import { visitors } from "./visitors";
 
@@ -24,6 +25,8 @@ export const comments = sqliteTable(
 			.references(() => pageThreads.id),
 		parentId: text("parent_id").references((): AnySQLiteColumn => comments.id),
 		visitorId: integer("visitor_id").references(() => visitors.id),
+		authorUserId: integer("author_user_id").references(() => adminUsers.id),
+		authorIdentity: text("author_identity").notNull().default("visitor"),
 		status: text("status").notNull().default("pending"),
 		authorName: text("author_name").notNull(),
 		authorEmail: text("author_email"),

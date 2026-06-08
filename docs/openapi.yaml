@@ -5,23 +5,21 @@ info:
   description: |
     QingYan 是一个面向内容站点的第一方评论后端。
 
-    当前规格以仓库内已经实现并通过自动化验证的接口为准，覆盖公开评论接口、页面点赞接口、验证码接口和后台管理接口。
+    当前规格以仓库内已经实现并通过自动化验证的接口为准，覆盖公开评论接口、页面点赞接口、验证码接口和 Web Upgrade Mode 最小接口。
+
+    普通公开请求的页面身份由已允许 `Referer` 的 URL pathname 派生：保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash。请求体或 query 中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段，不作为生产公开运行时身份来源。启用页面来源权威模式后，未登记页面默认返回 inactive payload；配置为 forbidden 或开启 emergency lockdown 时返回 `PAGE_NOT_REGISTERED`，且不会创建 visitor、pending page candidate、PV、captcha 或页面反馈写入。
+
+    `/api/admin/*` 属于 QingYan 自带 Admin Console 的管理接口，不进入公开 OpenAPI；这些接口可以随内置后台一起演进。开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`，但第三方站点前端不建议把它当作公开稳定合同依赖。
 servers:
   - url: http://localhost:4401
     description: 本地开发默认地址
 tags:
   - name: System
   - name: Comments
+  - name: Notifications
   - name: Captcha
   - name: Page Feedback
-  - name: Admin Session
-  - name: Admin Comments
-  - name: Admin Pages
-  - name: Admin Users
-  - name: Admin Visitors
-  - name: Admin Blacklist
-  - name: Admin Sites
-  - name: Admin Settings
+  - name: Upgrade
 paths:
   /healthz:
     get:
@@ -57,6 +55,8 @@ paths:
                 $ref: '#/components/schemas/BootstrapResponse'
         '400':
           $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
         '404':
           $ref: '#/components/responses/Error404'
   /api/comments/thread:
@@ -79,6 +79,8 @@ paths:
                 $ref: '#/components/schemas/ThreadResponse'
         '400':
           $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
         '404':
           $ref: '#/components/responses/Error404'
   /api/comments:
@@ -156,8 +158,80 @@ paths:
                 $ref: '#/components/schemas/CaptchaStateResponse'
         '400':
           $ref: '#/components/responses/Error400'
+        '403':
+          $ref: '#/components/responses/Error403'
         '404':
           $ref: '#/components/responses/Error404'
+  /api/comments/captcha/refresh:
+    post:
+      tags: [Captcha]
+      summary: 刷新当前页面验证码 challenge
+      operationId: refreshCaptcha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptchaRefreshRequest'
+      responses:
+        '200':
+          description: 验证码 challenge 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaStateResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /api/comments/captcha/widget:
+    get:
+      tags: [Captcha]
+      summary: 返回当前 challenge 的验证码组件宿主页
+      operationId: getCaptchaWidget
+      parameters:
+        - $ref: '#/components/parameters/SiteKey'
+        - $ref: '#/components/parameters/PageKey'
+        - name: challengeId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 验证码组件 HTML
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /api/comments/captcha/complete:
+    post:
+      tags: [Captcha]
+      summary: 完成 iframe 组件验证码并写回当前 captcha session
+      operationId: completeCaptcha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptchaCompleteRequest'
+      responses:
+        '200':
+          description: iframe 验证码校验成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaVerifyResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '429':
+          $ref: '#/components/responses/Error429'
   /api/comments/captcha/verify:
     post:
       tags: [Captcha]
@@ -210,427 +284,71 @@ paths:
           $ref: '#/components/responses/Error409'
         '429':
           $ref: '#/components/responses/Error429'
-  /api/admin/session/captcha:
+  /notifications/unsubscribe:
     get:
-      tags: [Admin Session]
-      summary: 获取管理员登录验证码
-      operationId: adminCaptcha
-      responses:
-        '200':
-          description: 管理员登录验证码
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminCaptchaChallengeResponse'
-        '403':
-          $ref: '#/components/responses/Error403'
-  /api/admin/session/login:
-    post:
-      tags: [Admin Session]
-      summary: 管理后台登录
-      operationId: adminLogin
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminLoginRequest'
-      responses:
-        '200':
-          description: 登录成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminLoginResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-        '403':
-          $ref: '#/components/responses/Error403'
-  /api/admin/session/logout:
-    post:
-      tags: [Admin Session]
-      summary: 管理后台登出
-      operationId: adminLogout
-      security:
-        - AdminSessionCookie: []
-      responses:
-        '200':
-          description: 登出成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminLogoutResponse'
-  /api/admin/session/me:
-    get:
-      tags: [Admin Session]
-      summary: 获取当前后台会话信息
-      operationId: adminMe
-      security:
-        - AdminSessionCookie: []
-      responses:
-        '200':
-          description: 当前后台会话
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminMeResponse'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/comments:
-    get:
-      tags: [Admin Comments]
-      summary: 列出后台评论
-      operationId: listAdminComments
-      security:
-        - AdminSessionCookie: []
+      tags: [Notifications]
+      summary: 退订普通评论者回复邮件通知
+      operationId: unsubscribeCommenterNotifications
+      description: |
+        使用邮件中的一次性退订 token 关闭对应普通评论者邮箱在对应站点的回复通知。数据库只保存 token hash；明文 token 只出现在邮件链接中。浏览器默认返回可读 HTML 退订结果页；自动化或 API 客户端传入 `Accept: application/json` 时返回 JSON 状态。无效、过期或已消费 token 返回 404。
       parameters:
-        - name: siteKey
+        - name: token
           in: query
-          schema:
-            type: string
-        - name: pageKey
-          in: query
-          schema:
-            type: string
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [pending, approved]
-        - name: search
-          in: query
-          schema:
-            type: string
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: 评论列表
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminCommentsListResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/comments/{commentId}:
-    patch:
-      tags: [Admin Comments]
-      summary: 更新评论状态或展示属性
-      operationId: updateAdminComment
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - $ref: '#/components/parameters/CommentId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminCommentPatchRequest'
-      responses:
-        '200':
-          description: 评论更新成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminCommentMutationResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-        '404':
-          $ref: '#/components/responses/Error404'
-    delete:
-      tags: [Admin Comments]
-      summary: 软删除评论
-      operationId: deleteAdminComment
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - $ref: '#/components/parameters/CommentId'
-      responses:
-        '200':
-          description: 评论删除成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminCommentMutationResponse'
-        '401':
-          $ref: '#/components/responses/Error401'
-        '404':
-          $ref: '#/components/responses/Error404'
-  /api/admin/pages:
-    get:
-      tags: [Admin Pages]
-      summary: 列出页面管理聚合数据
-      operationId: listAdminPages
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - name: siteKey
-          in: query
-          schema:
-            type: string
-        - name: search
-          in: query
-          schema:
-            type: string
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: 页面管理列表
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminPagesListResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/users:
-    get:
-      tags: [Admin Users]
-      summary: 按邮箱聚合列出用户视图
-      operationId: listAdminUsers
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - name: siteKey
-          in: query
-          schema:
-            type: string
-        - name: search
-          in: query
-          schema:
-            type: string
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: 用户管理列表
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminUsersListResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/visitors:
-    get:
-      tags: [Admin Visitors]
-      summary: 列出访客管理聚合数据
-      operationId: listAdminVisitors
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - name: siteKey
-          in: query
-          schema:
-            type: string
-        - name: search
-          in: query
-          schema:
-            type: string
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: 访客管理列表
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminVisitorsListResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/blacklist:
-    get:
-      tags: [Admin Blacklist]
-      summary: 列出黑名单规则
-      operationId: listAdminBlacklist
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - name: siteKey
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: 黑名单规则列表
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminBlacklistListResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-    post:
-      tags: [Admin Blacklist]
-      summary: 创建黑名单规则
-      operationId: createAdminBlacklistRule
-      security:
-        - AdminSessionCookie: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminBlacklistCreateRequest'
-      responses:
-        '200':
-          description: 黑名单规则创建成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminBlacklistMutationResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/blacklist/{ruleId}:
-    delete:
-      tags: [Admin Blacklist]
-      summary: 删除黑名单规则
-      operationId: deleteAdminBlacklistRule
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - name: ruleId
-          in: path
           required: true
           schema:
-            type: integer
-            minimum: 1
+            type: string
+            minLength: 1
       responses:
         '200':
-          description: 黑名单规则删除成功
+          description: 退订成功
           content:
+            text/html:
+              schema:
+                type: string
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminBlacklistMutationResponse'
-        '401':
-          $ref: '#/components/responses/Error401'
-        '404':
-          $ref: '#/components/responses/Error404'
-  /api/admin/settings:
-    get:
-      tags: [Admin Settings]
-      summary: 获取站点运行时设置
-      operationId: getAdminSettings
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - $ref: '#/components/parameters/SiteKey'
-      responses:
-        '200':
-          description: 运行时设置
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSettingsResponse'
+                $ref: '#/components/schemas/UnsubscribeResponse'
         '400':
           $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
         '404':
           $ref: '#/components/responses/Error404'
-  /api/admin/system-settings:
+  /api/upgrade/state:
     get:
-      tags: [Admin System Settings]
-      summary: 获取全局系统设置
-      operationId: getAdminSystemSettings
-      security:
-        - AdminSessionCookie: []
+      tags: [Upgrade]
+      summary: 获取 Web Upgrade Mode 状态
+      operationId: getUpgradeState
       responses:
         '200':
-          description: 全局系统设置
+          description: 当前升级状态
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminSystemSettingsResponse'
-        '401':
-          $ref: '#/components/responses/Error401'
-    put:
-      tags: [Admin System Settings]
-      summary: 更新全局系统设置
-      operationId: updateAdminSystemSettings
-      security:
-        - AdminSessionCookie: []
+                $ref: '#/components/schemas/UpgradeStateResponse'
+  /api/upgrade/apply:
+    post:
+      tags: [Upgrade]
+      summary: 执行确认后的 Web upgrade
+      operationId: applyUpgrade
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdminSystemSettingsUpdateRequest'
+              $ref: '#/components/schemas/UpgradeApplyRequest'
       responses:
         '200':
-          description: 全局系统设置更新成功
+          description: 升级执行完成
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminSystemSettingsResponse'
+                $ref: '#/components/schemas/UpgradeApplyResponse'
         '400':
           $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-  /api/admin/sites:
-    get:
-      tags: [Admin Sites]
-      summary: 列出站点总览与运行时摘要
-      operationId: listAdminSites
-      security:
-        - AdminSessionCookie: []
-      responses:
-        '200':
-          description: 站点总览
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSitesListResponse'
-        '401':
-          $ref: '#/components/responses/Error401'
-    put:
-      tags: [Admin Settings]
-      summary: 更新站点运行时设置
-      operationId: updateAdminSettings
-      security:
-        - AdminSessionCookie: []
-      parameters:
-        - $ref: '#/components/parameters/SiteKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminSettingsUpdateRequest'
-      responses:
-        '200':
-          description: 运行时设置更新成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSettingsResponse'
-        '400':
-          $ref: '#/components/responses/Error400'
-        '401':
-          $ref: '#/components/responses/Error401'
-        '404':
-          $ref: '#/components/responses/Error404'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
 components:
-  securitySchemes:
-    AdminSessionCookie:
-      type: apiKey
-      in: cookie
-      name: qingyan_admin
   parameters:
     SiteKey:
       name: siteKey
@@ -639,19 +357,29 @@ components:
       schema:
         type: string
         minLength: 1
-    PageKey:
-      name: pageKey
-      in: query
+    SiteKeyPath:
+      name: siteKey
+      in: path
       required: true
       schema:
         type: string
         minLength: 1
+    PageKey:
+      name: pageKey
+      in: query
+      required: true
+      description: Dev/mock compatibility field. Normal public requests derive the canonical page key from the allowed Referer pathname.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1024
     PageTitleOptional:
       name: pageTitle
       in: query
       required: false
       schema:
         type: string
+        maxLength: 500
     PageUrlOptional:
       name: pageUrl
       in: query
@@ -660,8 +388,10 @@ components:
         oneOf:
           - type: string
             format: uri
+            maxLength: 4096
           - type: string
             pattern: ^/
+            maxLength: 4096
       description: 完整页面 URL，或去掉域名后的页面路径（如 `/posts/welcome/`）
     SortBy:
       name: sortBy
@@ -709,7 +439,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     Error403:
-      description: 当前请求被拒绝
+      description: 当前请求被拒绝。常见公开错误码包括 PAGE_NOT_REGISTERED、PAGE_NOT_INTERACTIVE、COMMENTS_DISABLED、COMMENT_VOTE_DISABLED、PAGE_FEEDBACK_DISABLED。
       content:
         application/json:
           schema:
@@ -765,34 +495,179 @@ components:
       properties:
         error:
           $ref: '#/components/schemas/ErrorObject'
-    CommentCapability:
+    UnsubscribeResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [unsubscribed]
+    UpgradePlan:
       type: object
       required:
-        - enabled
-        - supportsReply
-        - supportsVote
-        - supportsCaptcha
-        - defaultStatus
-        - message
+        - currentVersion
+        - targetVersion
+        - schemaMigrations
+        - applicationUpgrades
+        - configChanges
+        - dbSettingChanges
+        - secretHandling
+        - backupPaths
+        - risks
       properties:
-        enabled:
-          type: boolean
-        supportsReply:
-          type: boolean
-        supportsVote:
-          type: boolean
-        supportsCaptcha:
-          type: boolean
-        defaultStatus:
+        currentVersion:
           type: string
-          enum: [pending, approved]
-        message:
-          type:
-            - string
-            - 'null'
+        targetVersion:
+          type: string
+        schemaMigrations:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+        applicationUpgrades:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              fromVersion:
+                type: string
+              toVersion:
+                type: string
+              summary:
+                type: object
+                additionalProperties: true
+        configChanges:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        dbSettingChanges:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        secretHandling:
+          type: array
+          items:
+            type: string
+        backupPaths:
+          type: object
+          additionalProperties: true
+        risks:
+          type: array
+          items:
+            type: string
+    PartialUpgradeMarker:
+      type: object
+      required:
+        - kind
+        - startedAt
+        - fromVersion
+        - toVersion
+        - planPath
+        - backupDirectory
+        - currentStep
+      properties:
+        kind:
+          type: string
+          const: qingyan_partial_upgrade
+        startedAt:
+          type: string
+        fromVersion:
+          type: string
+        toVersion:
+          type: string
+        planPath:
+          type: string
+        backupDirectory:
+          type: string
+        currentStep:
+          type: string
+        error:
+          type: string
+    UpgradeStateResponse:
+      oneOf:
+        - type: object
+          required: [state, plan]
+          properties:
+            state:
+              type: string
+              const: upgrade_required
+            plan:
+              $ref: '#/components/schemas/UpgradePlan'
+        - type: object
+          required: [state, reason, recovery]
+          properties:
+            state:
+              type: string
+              const: recovery_required
+            reason:
+              type: string
+            recovery:
+              oneOf:
+                - $ref: '#/components/schemas/PartialUpgradeMarker'
+                - type: 'null'
+        - type: object
+          required: [state, reason]
+          properties:
+            state:
+              type: string
+              const: broken_config
+            reason:
+              type: string
+        - type: object
+          required: [state]
+          properties:
+            state:
+              type: string
+              enum: [normal_current, not_installed]
+    UpgradeApplyRequest:
+      type: object
+      required: [confirm]
+      properties:
+        token:
+          type: string
+          description: 可选；浏览器流程通常通过 HttpOnly cookie 提供
+        confirm:
+          type: string
+          const: UPGRADE QINGYAN
+        backupDirectory:
+          type: string
+    UpgradeApplyResponse:
+      type: object
+      required: [state, backup, applied, restartRequired]
+      properties:
+        state:
+          type: string
+          const: applied
+        backup:
+          type: object
+          additionalProperties: true
+        applied:
+          type: object
+          required: [schemaMigrations, applicationUpgrades]
+          properties:
+            schemaMigrations:
+              type: array
+              items:
+                type: string
+            applicationUpgrades:
+              type: array
+              items:
+                type: string
+        restartRequired:
+          type: boolean
     CommentForm:
       type: object
-      required: [allow, require]
+      required: [allow, require, limits]
       properties:
         allow:
           type: array
@@ -804,18 +679,43 @@ components:
           items:
             type: string
             enum: [nickname, email, website]
-    ThreadSummary:
+        limits:
+          $ref: '#/components/schemas/CommentInputLimits'
+    CommentInputLimits:
       type: object
-      required: [siteKey, pageKey, pageTitle]
+      required:
+        - authorNameMaxLength
+        - authorWebsiteMaxLength
+        - pageTitleMaxLength
+        - pageKeyMaxLength
+        - contentMaxLength
+      description: 当前站点实际生效的公开评论输入长度上限。默认值分别为 40、2048、200、512、2000；Admin Console 可在后端硬上限内下调或上调。
       properties:
-        siteKey:
-          type: string
-        pageKey:
-          type: string
-        pageTitle:
-          type:
-            - string
-            - 'null'
+        authorNameMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 40
+        authorWebsiteMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 4096
+          default: 2048
+        pageTitleMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 200
+        pageKeyMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 1024
+          default: 512
+        contentMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 2000
     CommentPagination:
       type: object
       required: [sortBy, limit, offset, totalCount, rootCount]
@@ -842,6 +742,17 @@ components:
             - string
             - 'null'
           format: uri
+        avatarUrl:
+          type: string
+          format: uri
+          description: Optional external avatar image URL generated from the comment author email. QingYan does not host, proxy, cache, upload, or guarantee avatar files.
+        badge:
+          type: object
+          required: [label]
+          properties:
+            label:
+              type: string
+          description: Optional trusted author badge. The label is resolved from current site settings and is only emitted for verified comments. Verified comment names may follow current staff profile settings or the stored comment snapshot depending on site configuration; ordinary visitor comments always use the stored snapshot name.
     CommentContent:
       type: object
       required: [raw, html]
@@ -850,23 +761,86 @@ components:
           type: string
         html:
           type: string
+    CommentDisplayLocation:
+      type: object
+      required: [label, precision]
+      properties:
+        label:
+          type: string
+        precision:
+          type: string
+          enum: [country, province, city]
+    CommentDisplayDevice:
+      type: object
+      required: [browser, browserVersion, os, osVersion, type]
+      properties:
+        browser:
+          type: string
+          enum: [chrome, edge, firefox, safari, opera, samsung, wechat, unknown]
+        browserVersion:
+          type:
+            - string
+            - 'null'
+        os:
+          type: string
+          enum: [windows, macos, ios, android, linux, unknown]
+        osVersion:
+          type:
+            - string
+            - 'null'
+        type:
+          type: string
+          enum: [desktop, mobile, tablet, bot, unknown]
+    CommentDisplayMeta:
+      type: object
+      description: Public display metadata derived from stored author IP and authorUserAgent when the site enables metadata collection. Raw author IP and User-Agent values are not exposed by public comment responses.
+      properties:
+        location:
+          $ref: '#/components/schemas/CommentDisplayLocation'
+        device:
+          $ref: '#/components/schemas/CommentDisplayDevice'
+    CommentAvatarDisplay:
+      type: object
+      required: [external]
+      description: Avatar metadata for public comment frontends. QingYan may emit third-party author.avatarUrl and does not host avatar images. Optional display hints are returned only when publicApi.advisoryFields.enabled is true.
+      properties:
+        external:
+          type: object
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+              description: Whether public comments may include author.avatarUrl.
+        display:
+          type: object
+          required: [shape, sizePx]
+          description: Optional frontend display hints. These are advisory settings, not authoritative layout requirements.
+          properties:
+            shape:
+              type: string
+              enum: [circle, rounded, square]
+            sizePx:
+              type: integer
+              minimum: 16
+              maximum: 256
+    CommentDisplay:
+      type: object
+      required: [avatar]
+      properties:
+        avatar:
+          $ref: '#/components/schemas/CommentAvatarDisplay'
     PublicComment:
       type: object
       required:
         - id
-        - parentId
         - author
         - content
         - status
         - isPinned
         - isFolded
         - replyCount
-        - voteUp
-        - voteDown
-        - viewerVote
         - createdAt
         - updatedAt
-        - children
       properties:
         id:
           type: string
@@ -878,24 +852,20 @@ components:
           $ref: '#/components/schemas/CommentAuthor'
         content:
           $ref: '#/components/schemas/CommentContent'
+        displayMeta:
+          $ref: '#/components/schemas/CommentDisplayMeta'
         status:
           type: string
           enum: [pending, approved]
+          description: Public responses never expose internal spam/trash states. Comments stored as spam or trash are hidden from public thread lists, and create responses normalize non-approved internal states to pending.
         isPinned:
           type: boolean
         isFolded:
           type: boolean
         replyCount:
           type: integer
-        voteUp:
-          type: integer
-        voteDown:
-          type: integer
-        viewerVote:
-          type:
-            - string
-            - 'null'
-          enum: [up, down, null]
+        vote:
+          $ref: '#/components/schemas/CommentVote'
         createdAt:
           type:
             - string
@@ -910,23 +880,130 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PublicComment'
-    PageMetrics:
+    CommentVote:
       type: object
-      required: [pageViewCount]
+      required: [up, down]
       properties:
-        pageViewCount:
+        up:
           type: integer
-    PageFeedbackSummary:
+        down:
+          type: integer
+        viewer:
+          type: string
+          enum: [up, down]
+    FeatureDisabledReason:
+      type: string
+      enum:
+        - site_disabled
+        - page_inactive
+        - comments_disabled
+        - feature_disabled
+        - unsupported
+    FeatureFlag:
       type: object
-      required: [supportsLike, likeCount, liked]
+      required: [enabled]
       properties:
-        supportsLike:
+        enabled:
           type: boolean
-        likeCount:
+        reason:
+          $ref: '#/components/schemas/FeatureDisabledReason'
+    PublicFeatures:
+      type: object
+      required:
+        - comments
+        - commentReplies
+        - commentVotes
+        - commentCaptcha
+        - pageViews
+        - pageLikes
+        - visitors
+        - replyEmailNotification
+      properties:
+        comments:
+          $ref: '#/components/schemas/FeatureFlag'
+        commentReplies:
+          allOf:
+            - $ref: '#/components/schemas/FeatureFlag'
+            - type: object
+              properties:
+                maxDepth:
+                  type: integer
+        commentVotes:
+          $ref: '#/components/schemas/FeatureFlag'
+        commentCaptcha:
+          allOf:
+            - $ref: '#/components/schemas/FeatureFlag'
+            - type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [never, always, threshold]
+        pageViews:
+          $ref: '#/components/schemas/FeatureFlag'
+        pageLikes:
+          $ref: '#/components/schemas/FeatureFlag'
+        visitors:
+          $ref: '#/components/schemas/FeatureFlag'
+        replyEmailNotification:
+          allOf:
+            - $ref: '#/components/schemas/FeatureFlag'
+            - description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is enabled only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
+    BootstrapSite:
+      type: object
+      required: [siteKey]
+      properties:
+        siteKey:
+          type: string
+    BootstrapPage:
+      type: object
+      required: [pageKey, status]
+      properties:
+        pageKey:
+          type: string
+          description: Canonical page key derived from the allowed Referer pathname.
+        status:
+          type: string
+    BootstrapData:
+      type: object
+      description: Omitted feature payloads are represented by absent properties. Authoritative unknown pages with inactive_payload return an empty object.
+      properties:
+        comments:
+          $ref: '#/components/schemas/BootstrapCommentsData'
+        pageViews:
+          $ref: '#/components/schemas/BootstrapPageViewsData'
+        pageLikes:
+          $ref: '#/components/schemas/BootstrapPageLikesData'
+    BootstrapCommentsData:
+      type: object
+      required: [form, display, pagination, items]
+      properties:
+        form:
+          $ref: '#/components/schemas/CommentForm'
+        display:
+          $ref: '#/components/schemas/CommentDisplay'
+        pagination:
+          $ref: '#/components/schemas/CommentPagination'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicComment'
+        captcha:
+          $ref: '#/components/schemas/CaptchaStateResponse'
+    BootstrapPageViewsData:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+    BootstrapPageLikesData:
+      type: object
+      required: [count, liked]
+      properties:
+        count:
           type: integer
         liked:
           type: boolean
-    CaptchaChallenge:
+    InlineValueCaptchaChallenge:
       type: object
       required: [challengeId, mode, imageData]
       properties:
@@ -934,13 +1011,32 @@ components:
           type: string
         mode:
           type: string
-          enum: [inline_value]
+          const: inline_value
         imageData:
           type: string
           description: data URL 形式的 SVG 图片
+    IframeWidgetCaptchaChallenge:
+      type: object
+      required: [challengeId, mode, iframeSrc, width, height]
+      properties:
+        challengeId:
+          type: string
+        mode:
+          type: string
+          const: iframe_widget
+        iframeSrc:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+    CaptchaChallenge:
+      oneOf:
+        - $ref: '#/components/schemas/InlineValueCaptchaChallenge'
+        - $ref: '#/components/schemas/IframeWidgetCaptchaChallenge'
     CaptchaStateResponse:
       type: object
-      required: [required, verified, mode, challenge]
+      required: [required, verified, mode]
       properties:
         required:
           type: boolean
@@ -948,11 +1044,9 @@ components:
           type: boolean
         mode:
           type: string
-          enum: [inline_value]
+          enum: [inline_value, iframe_widget]
         challenge:
-          oneOf:
-            - $ref: '#/components/schemas/CaptchaChallenge'
-            - type: 'null'
+          $ref: '#/components/schemas/CaptchaChallenge'
     CaptchaVerifyResponse:
       type: object
       required: [required, verified]
@@ -961,45 +1055,49 @@ components:
           type: boolean
         verified:
           type: boolean
+    BootstrapViewer:
+      type: object
+      properties:
+        verifiedAuthor:
+          type: object
+          required: [displayName, badgeLabel]
+          properties:
+            displayName:
+              type: string
+            badgeLabel:
+              type: string
+          description: Minimal verified author state for the current admin session. Anonymous visitors omit the viewer object.
     BootstrapResponse:
       type: object
       required:
-        - capability
-        - commentForm
-        - thread
-        - pagination
-        - comments
-        - pageMetrics
-        - pageFeedback
-        - captcha
+        - schemaVersion
+        - site
+        - page
+        - features
+        - data
       properties:
-        capability:
-          $ref: '#/components/schemas/CommentCapability'
-        commentForm:
-          $ref: '#/components/schemas/CommentForm'
-        thread:
-          $ref: '#/components/schemas/ThreadSummary'
-        pagination:
-          $ref: '#/components/schemas/CommentPagination'
-        comments:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublicComment'
-        pageMetrics:
-          $ref: '#/components/schemas/PageMetrics'
-        pageFeedback:
-          $ref: '#/components/schemas/PageFeedbackSummary'
-        captcha:
-          $ref: '#/components/schemas/CaptchaStateResponse'
+        schemaVersion:
+          type: string
+          const: '2026-05-31'
+        site:
+          $ref: '#/components/schemas/BootstrapSite'
+        page:
+          $ref: '#/components/schemas/BootstrapPage'
+        features:
+          $ref: '#/components/schemas/PublicFeatures'
+        data:
+          $ref: '#/components/schemas/BootstrapData'
+        viewer:
+          $ref: '#/components/schemas/BootstrapViewer'
     ThreadResponse:
       type: object
-      required: [thread, pagination, comments]
+      required: [display, pagination, items]
       properties:
-        thread:
-          $ref: '#/components/schemas/ThreadSummary'
+        display:
+          $ref: '#/components/schemas/CommentDisplay'
         pagination:
           $ref: '#/components/schemas/CommentPagination'
-        comments:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/PublicComment'
@@ -1007,69 +1105,71 @@ components:
       type: object
       required:
         - siteKey
-        - pageKey
         - pageTitle
-        - pageUrl
         - parentCommentId
         - author
         - content
-        - options
       properties:
         siteKey:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
+          maxLength: 500
         pageUrl:
           oneOf:
             - type: string
               format: uri
+              maxLength: 4096
             - type: string
               pattern: ^/
-          description: 完整页面 URL，或去掉域名后的页面路径
+              maxLength: 4096
+          description: Dev/mock compatibility field. Normal public requests derive and store the page path from the allowed Referer header and ignore explicit page identity.
         parentCommentId:
           type:
             - string
             - 'null'
         author:
           type: object
+          description: Author fields submitted by an ordinary commenter or by a verified-author frontend flow. Public frontends may store successful ordinary author fields in their own origin storage for later form prefill; this is a frontend convenience, not authentication.
           properties:
             name:
               type: string
+              maxLength: 100
             email:
               type: string
               format: email
+              maxLength: 254
             website:
               type: string
               format: uri
+              maxLength: 4096
         content:
           type: object
           required: [raw]
           properties:
             raw:
               type: string
+              maxLength: 10000
         options:
           type: object
-          required: [notifyOnReply]
+          description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference only when bootstrap `features.replyEmailNotification.enabled` is true and the submitted author email passes notification email policy. It does not affect staff/admin comments or backend-user notifications.
           properties:
             notifyOnReply:
               type: boolean
+        captcha:
+          oneOf:
+            - $ref: '#/components/schemas/InlineCaptchaPayload'
+            - type: 'null'
     CreateCommentResponse:
       type: object
       required: [comment, thread]
       properties:
         comment:
-          type: object
-          required: [id, status, message]
-          properties:
-            id:
-              type: string
-            status:
-              type: string
-              enum: [pending, approved]
-            message:
-              type: string
+          $ref: '#/components/schemas/PublicComment'
         thread:
           type: object
           required: [commentCount, rootCommentCount]
@@ -1086,22 +1186,23 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         choice:
           type: string
           enum: [up, down]
+        captcha:
+          oneOf:
+            - $ref: '#/components/schemas/InlineCaptchaPayload'
+            - type: 'null'
     VoteCommentResponse:
       type: object
-      required: [commentId, voteUp, voteDown, viewerVote]
+      required: [commentId, vote]
       properties:
         commentId:
           type: string
-        voteUp:
-          type: integer
-        voteDown:
-          type: integer
-        viewerVote:
-          type: string
-          enum: [up, down]
+        vote:
+          $ref: '#/components/schemas/CommentVote'
     CaptchaVerifyRequest:
       type: object
       required: [siteKey, pageKey, challengeId, mode, value]
@@ -1110,12 +1211,66 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         challengeId:
           type: string
         mode:
           type: string
           enum: [inline_value]
         value:
+          type: string
+    InlineCaptchaPayload:
+      type: object
+      required: [challengeId, value]
+      properties:
+        challengeId:
+          type: string
+        value:
+          type: string
+    CaptchaRefreshRequest:
+      type: object
+      required: [siteKey, pageKey]
+      properties:
+        siteKey:
+          type: string
+        pageKey:
+          type: string
+          maxLength: 1024
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
+        pageTitle:
+          type: string
+          maxLength: 500
+        pageUrl:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 4096
+            - type: string
+              pattern: ^/
+              maxLength: 4096
+          description: 完整页面 URL，或去掉域名后的页面路径
+    CaptchaCompleteRequest:
+      type: object
+      required: [siteKey, pageKey, challengeId]
+      properties:
+        siteKey:
+          type: string
+        pageKey:
+          type: string
+          maxLength: 1024
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
+        challengeId:
+          type: string
+        token:
+          type: string
+        lotNumber:
+          type: string
+        captchaOutput:
+          type: string
+        passToken:
+          type: string
+        genTime:
           type: string
     PageLikeRequest:
       type: object
@@ -1125,751 +1280,27 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
+          description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
+          maxLength: 500
         pageUrl:
           oneOf:
             - type: string
               format: uri
+              maxLength: 4096
             - type: string
               pattern: ^/
+              maxLength: 4096
           description: 完整页面 URL，或去掉域名后的页面路径
+        captcha:
+          oneOf:
+            - $ref: '#/components/schemas/InlineCaptchaPayload'
+            - type: 'null'
     PageLikeResponse:
       type: object
-      required: [pageFeedback]
+      required: [pageLikes]
       properties:
-        pageFeedback:
-          $ref: '#/components/schemas/PageFeedbackSummary'
-    AdminLoginRequest:
-      type: object
-      required: [token, challengeId, captchaValue]
-      properties:
-        token:
-          type: string
-        challengeId:
-          type: string
-        captchaValue:
-          type: string
-    AdminCaptchaChallengeResponse:
-      type: object
-      required: [challenge]
-      properties:
-        challenge:
-          type: object
-          required: [challengeId, mode, imageData, expiresAt]
-          properties:
-            challengeId:
-              type: string
-            mode:
-              type: string
-              const: inline_value
-            imageData:
-              type: string
-            expiresAt:
-              type: string
-              format: date-time
-    AdminLoginResponse:
-      type: object
-      required: [authenticated, session]
-      properties:
-        authenticated:
-          type: boolean
-          const: true
-        session:
-          type: object
-          required: [expiresAt]
-          properties:
-            expiresAt:
-              type: string
-              format: date-time
-    AdminLogoutResponse:
-      type: object
-      required: [authenticated]
-      properties:
-        authenticated:
-          type: boolean
-          const: false
-    AdminMeResponse:
-      type: object
-      required: [authenticated, session, sites]
-      properties:
-        authenticated:
-          type: boolean
-          const: true
-        session:
-          type: object
-          required: [expiresAt]
-          properties:
-            expiresAt:
-              type: string
-              format: date-time
-        sites:
-          type: array
-          items:
-            type: object
-            required: [siteKey, name]
-            properties:
-              siteKey:
-                type: string
-              name:
-                type: string
-    AdminCommentListItem:
-      type: object
-      required:
-        - id
-        - parentId
-        - status
-        - authorName
-        - authorEmail
-        - contentRaw
-        - isPinned
-        - isFolded
-        - replyCount
-        - voteUpCount
-        - voteDownCount
-        - createdAt
-        - updatedAt
-        - pageKey
-        - pageTitle
-        - pageUrl
-      properties:
-        id:
-          type: string
-        parentId:
-          type:
-            - string
-            - 'null'
-        status:
-          type: string
-          enum: [pending, approved]
-        authorName:
-          type: string
-        authorEmail:
-          type:
-            - string
-            - 'null'
-          format: email
-        contentRaw:
-          type: string
-        isPinned:
-          type: boolean
-        isFolded:
-          type: boolean
-        replyCount:
-          type: integer
-        voteUpCount:
-          type: integer
-        voteDownCount:
-          type: integer
-        createdAt:
-          type: string
-        updatedAt:
-          type: string
-        pageKey:
-          type: string
-        pageTitle:
-          type:
-            - string
-            - 'null'
-        pageUrl:
-          type:
-            - string
-            - 'null'
-          format: uri
-    AdminCollectionPagination:
-      type: object
-      required: [limit, offset, totalCount]
-      properties:
-        limit:
-          type: integer
-        offset:
-          type: integer
-        totalCount:
-          type: integer
-    AdminCommentsListResponse:
-      type: object
-      required: [items, pagination]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminCommentListItem'
-        pagination:
-          $ref: '#/components/schemas/AdminCollectionPagination'
-    AdminPageListItem:
-      type: object
-      required:
-        - siteKey
-        - pageKey
-        - pageTitle
-        - pageUrl
-        - commentCount
-        - rootCommentCount
-        - pageLikeCount
-        - updatedAt
-        - visitorCount
-        - userCount
-      properties:
-        siteKey:
-          type: string
-        pageKey:
-          type: string
-        pageTitle:
-          type:
-            - string
-            - 'null'
-        pageUrl:
-          type:
-            - string
-            - 'null'
-          format: uri
-        commentCount:
-          type: integer
-        rootCommentCount:
-          type: integer
-        pageLikeCount:
-          type: integer
-        updatedAt:
-          type: string
-        visitorCount:
-          type: integer
-        userCount:
-          type: integer
-    AdminPagesListResponse:
-      type: object
-      required: [items, pagination]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminPageListItem'
-        pagination:
-          $ref: '#/components/schemas/AdminCollectionPagination'
-    AdminUserListItem:
-      type: object
-      required:
-        - email
-        - names
-        - commentCount
-        - pendingCount
-        - approvedCount
-        - lastCommentAt
-        - pageCount
-        - siteCount
-        - isBlacklisted
-      properties:
-        email:
-          type: string
-          format: email
-        names:
-          type: array
-          items:
-            type: string
-        commentCount:
-          type: integer
-        pendingCount:
-          type: integer
-        approvedCount:
-          type: integer
-        lastCommentAt:
-          type: string
-        pageCount:
-          type: integer
-        siteCount:
-          type: integer
-        isBlacklisted:
-          type: boolean
-    AdminUsersListResponse:
-      type: object
-      required: [items, pagination]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminUserListItem'
-        pagination:
-          $ref: '#/components/schemas/AdminCollectionPagination'
-    AdminVisitorBlacklistState:
-      type: object
-      required: [visitor, ip]
-      properties:
-        visitor:
-          type: boolean
-        ip:
-          oneOf:
-            - type: boolean
-            - type: 'null'
-    AdminVisitorListItem:
-      type: object
-      required:
-        - siteKey
-        - visitorKey
-        - lastSeenAt
-        - createdAt
-        - commentCount
-        - pageCount
-        - emailCount
-        - emails
-        - blacklist
-      properties:
-        siteKey:
-          type: string
-        visitorKey:
-          type: string
-        lastSeenAt:
-          type: string
-        createdAt:
-          type: string
-        commentCount:
-          type: integer
-        pageCount:
-          type: integer
-        emailCount:
-          type: integer
-        emails:
-          type: array
-          items:
-            type: string
-            format: email
-        blacklist:
-          $ref: '#/components/schemas/AdminVisitorBlacklistState'
-    AdminVisitorsListResponse:
-      type: object
-      required: [items, pagination]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminVisitorListItem'
-        pagination:
-          $ref: '#/components/schemas/AdminCollectionPagination'
-    AdminCommentPatchRequest:
-      type: object
-      minProperties: 1
-      properties:
-        status:
-          type: string
-          enum: [pending, approved]
-        isPinned:
-          type: boolean
-        isFolded:
-          type: boolean
-        contentRaw:
-          type: string
-    AdminCommentRecord:
-      type: object
-      required:
-        - id
-        - siteId
-        - pageThreadId
-        - parentId
-        - visitorId
-        - status
-        - authorName
-        - authorEmail
-        - authorEmailHash
-        - authorWebsite
-        - contentRaw
-        - contentHtml
-        - isPinned
-        - isFolded
-        - replyCount
-        - voteUpCount
-        - voteDownCount
-        - createdAt
-        - updatedAt
-        - deletedAt
-      properties:
-        id:
-          type: string
-        siteId:
-          type: integer
-        pageThreadId:
-          type: integer
-        parentId:
-          type:
-            - string
-            - 'null'
-        visitorId:
-          type:
-            - integer
-            - 'null'
-        status:
-          type: string
-          enum: [pending, approved]
-        authorName:
-          type: string
-        authorEmail:
-          type:
-            - string
-            - 'null'
-        authorEmailHash:
-          type:
-            - string
-            - 'null'
-        authorWebsite:
-          type:
-            - string
-            - 'null'
-          format: uri
-        contentRaw:
-          type: string
-        contentHtml:
-          type:
-            - string
-            - 'null'
-        isPinned:
-          type: boolean
-        isFolded:
-          type: boolean
-        replyCount:
-          type: integer
-        voteUpCount:
-          type: integer
-        voteDownCount:
-          type: integer
-        createdAt:
-          type: string
-        updatedAt:
-          type: string
-        deletedAt:
-          type:
-            - string
-            - 'null'
-    AdminCommentMutationResponse:
-      type: object
-      required: [comment]
-      properties:
-        comment:
-          $ref: '#/components/schemas/AdminCommentRecord'
-    AdminBlacklistRule:
-      type: object
-      required:
-        - id
-        - siteId
-        - scope
-        - targetType
-        - targetValue
-        - matchMode
-        - reason
-        - source
-        - expiresAt
-        - createdAt
-      properties:
-        id:
-          type: integer
-        siteId:
-          type:
-            - integer
-            - 'null'
-        scope:
-          type: string
-          enum: [post, all]
-        targetType:
-          type: string
-          enum: [ip, email, visitor]
-        targetValue:
-          type: string
-        matchMode:
-          type: string
-          enum: [exact, cidr, wildcard]
-        reason:
-          type:
-            - string
-            - 'null'
-        source:
-          type: string
-        expiresAt:
-          type:
-            - string
-            - 'null'
-          format: date-time
-        createdAt:
-          type: string
-    AdminBlacklistListResponse:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminBlacklistRule'
-    AdminBlacklistCreateRequest:
-      type: object
-      required: [targetType, targetValue]
-      properties:
-        siteKey:
-          type: string
-        targetType:
-          type: string
-          enum: [ip, email, visitor]
-        matchMode:
-          type: string
-          enum: [exact, cidr, wildcard]
-          default: exact
-        targetValue:
-          type: string
-        scope:
-          type: string
-          enum: [post, all]
-          default: post
-        reason:
-          type: string
-        expiresAt:
-          type: string
-          format: date-time
-    AdminBlacklistMutationResponse:
-      type: object
-      required: [rule]
-      properties:
-        rule:
-          $ref: '#/components/schemas/AdminBlacklistRule'
-    AdminSettingsComments:
-      type: object
-      required:
-        - enabled
-        - defaultStatus
-        - maxDepth
-        - rootLimit
-        - identity
-        - allowWebsite
-        - captcha
-        - abuseGuard
-      properties:
-        enabled:
-          type: boolean
-        defaultStatus:
-          type: string
-          enum: [pending, approved]
-        maxDepth:
-          type: integer
-        rootLimit:
-          type: integer
-        identity:
-          $ref: '#/components/schemas/CommentForm'
-        allowWebsite:
-          type: boolean
-        captcha:
-          type: object
-          required: [mode, thresholdWindowSec, thresholdMaxActions]
-          properties:
-            mode:
-              type: string
-              enum: [never, always, threshold]
-            thresholdWindowSec:
-              type: integer
-            thresholdMaxActions:
-              type: integer
-        abuseGuard:
-          type: object
-          required: [enabled, windowSec, maxWriteActions, autoBlacklist]
-          properties:
-            enabled:
-              type: boolean
-            windowSec:
-              type: integer
-            maxWriteActions:
-              type: integer
-            autoBlacklist:
-              type: object
-              required: [enabled, scope, ttlSec]
-              properties:
-                enabled:
-                  type: boolean
-                scope:
-                  type: string
-                  enum: [post, all]
-                ttlSec:
-                  type: integer
-    AdminSettingsPageFeedback:
-      type: object
-      required: [allowLike]
-      properties:
-        allowLike:
-          type: boolean
-    AdminSettingsNotifications:
-      type: object
-      required: [emailEnabled]
-      properties:
-        emailEnabled:
-          type: boolean
-    AdminSettingsResponse:
-      type: object
-      required: [siteKey, comments, pageFeedback, notifications]
-      properties:
-        siteKey:
-          type: string
-        comments:
-          $ref: '#/components/schemas/AdminSettingsComments'
-        pageFeedback:
-          $ref: '#/components/schemas/AdminSettingsPageFeedback'
-        notifications:
-          $ref: '#/components/schemas/AdminSettingsNotifications'
-    AdminSettingsUpdateRequest:
-      type: object
-      minProperties: 1
-      properties:
-        comments:
-          type: object
-          properties:
-            enabled:
-              type: boolean
-            defaultStatus:
-              type: string
-              enum: [pending, approved]
-            maxDepth:
-              type: integer
-              minimum: 1
-            rootLimit:
-              type: integer
-              minimum: 1
-            identity:
-              type: object
-              properties:
-                require:
-                  type: array
-                  items:
-                    type: string
-                    enum: [nickname, email, website]
-            allowWebsite:
-              type: boolean
-            captcha:
-              type: object
-              properties:
-                mode:
-                  type: string
-                  enum: [never, always, threshold]
-                thresholdWindowSec:
-                  type: integer
-                  minimum: 1
-                thresholdMaxActions:
-                  type: integer
-                  minimum: 1
-            abuseGuard:
-              type: object
-              properties:
-                enabled:
-                  type: boolean
-                windowSec:
-                  type: integer
-                  minimum: 1
-                maxWriteActions:
-                  type: integer
-                  minimum: 1
-                autoBlacklist:
-                  type: object
-                  properties:
-                    enabled:
-                      type: boolean
-                    scope:
-                      type: string
-                      enum: [post, all]
-                    ttlSec:
-                      type: integer
-                      minimum: 1
-        pageFeedback:
-          type: object
-          properties:
-            allowLike:
-              type: boolean
-        notifications:
-          type: object
-          properties:
-            emailEnabled:
-              type: boolean
-    AdminSystemLoggingSettings:
-      type: object
-      required: [level, retentionDays, directory]
-      properties:
-        level:
-          type: string
-          enum: [error, warn, info, debug]
-        retentionDays:
-          type: integer
-          minimum: 1
-          maximum: 3650
-        directory:
-          type: string
-    AdminSystemSettingsResponse:
-      type: object
-      required: [logging]
-      properties:
-        logging:
-          $ref: '#/components/schemas/AdminSystemLoggingSettings'
-    AdminSystemSettingsUpdateRequest:
-      type: object
-      required: [logging]
-      properties:
-        logging:
-          type: object
-          required: [level, retentionDays]
-          properties:
-            level:
-              type: string
-              enum: [error, warn, info, debug]
-            retentionDays:
-              type: integer
-              minimum: 1
-              maximum: 3650
-    AdminSiteSummaryItem:
-      type: object
-      required:
-        - siteKey
-        - name
-        - allowedOrigins
-        - comments
-        - pageFeedback
-        - notifications
-        - pageCount
-        - commentCount
-        - userCount
-        - visitorCount
-      properties:
-        siteKey:
-          type: string
-        name:
-          type: string
-        allowedOrigins:
-          type: array
-          items:
-            type: string
-        comments:
-          type: object
-          required: [enabled, defaultStatus, identity, allowWebsite, captcha]
-          properties:
-            enabled:
-              type: boolean
-            defaultStatus:
-              type: string
-              enum: [pending, approved]
-            identity:
-              $ref: '#/components/schemas/CommentForm'
-            allowWebsite:
-              type: boolean
-            captcha:
-              type: object
-              required: [mode]
-              properties:
-                mode:
-                  type: string
-                  enum: [never, always, threshold]
-        pageFeedback:
-          $ref: '#/components/schemas/AdminSettingsPageFeedback'
-        notifications:
-          $ref: '#/components/schemas/AdminSettingsNotifications'
-        pageCount:
-          type: integer
-        commentCount:
-          type: integer
-        userCount:
-          type: integer
-        visitorCount:
-          type: integer
-    AdminSitesListResponse:
-      type: object
-      required: [items]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminSiteSummaryItem'
+        pageLikes:
+          $ref: '#/components/schemas/BootstrapPageLikesData'

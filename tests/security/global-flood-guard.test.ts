@@ -4,6 +4,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -12,23 +18,42 @@ afterEach(async () => {
 
 describe("global flood guard", () => {
 	it("returns GLOBAL_RATE_LIMITED after hitting the global request ceiling", async () => {
-		const fixture = await createTestApp();
+		const fixture = await createTestApp({
+			mutateConfig(config) {
+				config.security.globalFloodGuard.enabled = true;
+				config.security.globalFloodGuard.windowSec = 10;
+				config.security.globalFloodGuard.maxRequests = 2;
+			},
+		});
 		cleanups.push(fixture.cleanup);
 
-		fixture.app.config.security.globalFloodGuard.enabled = true;
-		fixture.app.config.security.globalFloodGuard.windowSec = 10;
-		fixture.app.config.security.globalFloodGuard.maxRequests = 2;
+		const url =
+			"/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:flood";
 
-		const url = "/api/comments/thread?siteKey=fangyuan&pageKey=post:flood";
+		expect(
+			(
+				await fixture.app.inject({
+					method: "GET",
+					url,
+					headers: refererFor("post:flood"),
+				})
+			).statusCode,
+		).toBe(200);
+		expect(
+			(
+				await fixture.app.inject({
+					method: "GET",
+					url,
+					headers: refererFor("post:flood"),
+				})
+			).statusCode,
+		).toBe(200);
 
-		expect((await fixture.app.inject({ method: "GET", url })).statusCode).toBe(
-			200,
-		);
-		expect((await fixture.app.inject({ method: "GET", url })).statusCode).toBe(
-			200,
-		);
-
-		const blocked = await fixture.app.inject({ method: "GET", url });
+		const blocked = await fixture.app.inject({
+			method: "GET",
+			url,
+			headers: refererFor("post:flood"),
+		});
 
 		expect(blocked.statusCode).toBe(429);
 		expect(blocked.json()).toMatchObject({

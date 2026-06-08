@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { validateAdminConsolePath } from "./admin-console-path";
+import { DEFAULT_PUBLIC_PATH, normalizePublicPath } from "./public-path";
+
 const rateLimitRuleSchema = z.object({
 	windowSec: z.number().int().positive(),
 	maxRequests: z.number().int().positive().optional(),
@@ -7,125 +10,145 @@ const rateLimitRuleSchema = z.object({
 	autoBlacklistSec: z.number().int().positive().optional(),
 });
 
-const commentsCaptchaDefaultsSchema = z.object({
-	mode: z.enum(["never", "always", "threshold"]),
-	thresholdWindowSec: z.number().int().positive(),
-	thresholdMaxActions: z.number().int().positive(),
+const publicOriginGuardSchema = z.object({
+	enabled: z.boolean().default(true),
+	allowMissingOrigin: z.boolean().default(false),
 });
 
-const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
-const logLevelSchema = z.enum(["error", "warn", "info", "debug"]);
-
-const commentsIdentitySchema = z.object({
-	require: z.array(commentIdentityFieldSchema),
+const adminOriginGuardSchema = z.object({
+	enabled: z.boolean().default(true),
+	allowMissingOrigin: z.boolean().default(false),
+	allowedOrigins: z.array(z.string().url()).default([]),
 });
 
-const commentsAutoBlacklistDefaultsSchema = z.object({
-	enabled: z.boolean(),
-	scope: z.enum(["post", "all"]),
-	ttlSec: z.number().int().positive(),
+const adminConsoleSchema = z
+	.object({
+		path: z
+			.string()
+			.min(1)
+			.refine((value) => validateAdminConsolePath(value) === null, {
+				message: "admin.console.path must be a safe non-reserved path",
+			})
+			.optional(),
+	})
+	.default({});
+
+const adminAuthSchema = z
+	.object({
+		username: z.string().min(1).optional(),
+		passwordHash: z.string().min(1).optional(),
+	})
+	.default({});
+
+const startupAdminSchema = z
+	.object({
+		session: z
+			.object({
+				cookieName: z.string().min(1),
+				ttlMinutes: z.number().int().positive(),
+				sameSite: z.enum(["strict", "lax", "none"]),
+				secure: z.boolean(),
+			})
+			.strict(),
+	})
+	.strict();
+
+const publicPathSchema = z
+	.string()
+	.optional()
+	.transform((value) => normalizePublicPath(value))
+	.default(DEFAULT_PUBLIC_PATH);
+
+export const configSchema = z
+	.object({
+		server: z
+			.object({
+				host: z.string().min(1),
+				port: z.number().int().positive(),
+				publicBaseUrl: z.string().url(),
+				publicPath: publicPathSchema,
+				trustProxy: z.boolean(),
+			})
+			.strict(),
+		database: z
+			.object({
+				client: z.literal("sqlite"),
+				sqlite: z
+					.object({
+						file: z.string().min(1),
+					})
+					.strict(),
+			})
+			.strict(),
+		admin: startupAdminSchema,
+		security: z
+			.object({
+				requestIdHeader: z.string().min(1),
+				globalFloodGuard: z
+					.object({
+						enabled: z.boolean(),
+						windowSec: z.number().int().positive(),
+						maxRequests: z.number().int().positive(),
+					})
+					.strict(),
+				publicOriginGuard: publicOriginGuardSchema.default({
+					enabled: true,
+					allowMissingOrigin: false,
+				}),
+				adminOriginGuard: adminOriginGuardSchema.default({
+					enabled: true,
+					allowMissingOrigin: false,
+					allowedOrigins: [],
+				}),
+				rateLimit: z
+					.object({
+						adminLogin: rateLimitRuleSchema,
+						commentCreate: rateLimitRuleSchema,
+						commentVote: rateLimitRuleSchema,
+						captchaVerify: rateLimitRuleSchema,
+						pageLike: rateLimitRuleSchema.optional(),
+					})
+					.strict(),
+			})
+			.strict(),
+	})
+	.strict();
+
+const loggingConfigSchema = z.object({
+	directory: z.string().min(1),
 });
 
-const commentsAbuseGuardDefaultsSchema = z.object({
-	enabled: z.boolean(),
-	windowSec: z.number().int().positive(),
-	maxWriteActions: z.number().int().positive(),
-	autoBlacklist: commentsAutoBlacklistDefaultsSchema,
-});
+export type StartupConfig = z.infer<typeof configSchema>;
+export type LoggingConfig = z.infer<typeof loggingConfigSchema>;
 
-const commentsDefaultsSchema = z.object({
-	enabled: z.boolean(),
-	defaultStatus: z.enum(["pending", "approved"]),
-	maxDepth: z.number().int().positive(),
-	rootLimit: z.number().int().positive(),
-	identity: commentsIdentitySchema,
-	captcha: commentsCaptchaDefaultsSchema,
-	abuseGuard: commentsAbuseGuardDefaultsSchema,
-	allowWebsite: z.boolean().default(true),
-});
+export interface TransitionalRuntimeConfig {
+	admin: StartupConfig["admin"] & {
+		console: z.infer<typeof adminConsoleSchema>;
+		auth: z.infer<typeof adminAuthSchema>;
+		tokenHash?: string;
+	};
+	logging: LoggingConfig;
+}
 
-const siteSchema = z.object({
-	siteKey: z.string().min(1),
-	name: z.string().min(1),
-	allowedOrigins: z
-		.array(z.string().url().or(z.string().startsWith("http://localhost:")))
-		.min(1),
-	defaults: z.object({
-		comments: commentsDefaultsSchema,
-		pageFeedback: z.object({
-			allowLike: z.boolean(),
-		}),
-		notifications: z.object({
-			emailEnabled: z.boolean(),
-		}),
-	}),
-});
+export type AppConfig = Omit<StartupConfig, "admin"> &
+	Pick<TransitionalRuntimeConfig, "admin" | "logging">;
 
-export const configSchema = z.object({
-	server: z.object({
-		host: z.string().min(1),
-		port: z.number().int().positive(),
-		publicBaseUrl: z.string().url(),
-		trustProxy: z.boolean(),
-	}),
-	database: z.object({
-		client: z.literal("sqlite"),
-		sqlite: z.object({
-			file: z.string().min(1),
-		}),
-	}),
-	admin: z.object({
-		tokenHash: z.string().min(1),
-		session: z.object({
-			cookieName: z.string().min(1),
-			ttlMinutes: z.number().int().positive(),
-			sameSite: z.enum(["strict", "lax", "none"]),
-			secure: z.boolean(),
-		}),
-	}),
-	security: z.object({
-		requestIdHeader: z.string().min(1),
-		globalFloodGuard: z.object({
-			enabled: z.boolean(),
-			windowSec: z.number().int().positive(),
-			maxRequests: z.number().int().positive(),
-		}),
-		rateLimit: z.object({
-			adminLogin: rateLimitRuleSchema,
-			commentCreate: rateLimitRuleSchema,
-			commentVote: rateLimitRuleSchema,
-			captchaVerify: rateLimitRuleSchema,
-			pageLike: rateLimitRuleSchema.optional(),
-		}),
-	}),
-	captcha: z.object({
-		provider: z.literal("image"),
-		image: z.object({
-			width: z.number().int().positive(),
-			height: z.number().int().positive(),
-			ttlSec: z.number().int().positive(),
-		}),
-	}),
-	logging: z.object({
-		directory: z.string().min(1),
-		defaults: z.object({
-			level: logLevelSchema,
-			retentionDays: z.number().int().positive().max(3650),
-		}),
-	}),
-	mail: z.object({
-		enabled: z.boolean(),
-		smtp: z.object({
-			host: z.string().min(1),
-			port: z.number().int().positive(),
-			secure: z.boolean(),
-			username: z.string().min(1),
-			password: z.string().min(1),
-			from: z.string().email(),
-		}),
-	}),
-	sites: z.array(siteSchema).min(1),
-});
+const transitionalRuntimeDefaults: Omit<TransitionalRuntimeConfig, "admin"> = {
+	logging: {
+		directory: "./logs",
+	},
+};
 
-export type AppConfig = z.infer<typeof configSchema>;
-export type SiteConfig = z.infer<typeof siteSchema>;
+export function withTransitionalRuntimeDefaults(
+	config: StartupConfig,
+): AppConfig {
+	return {
+		...structuredClone(config),
+		admin: {
+			...structuredClone(config.admin),
+			console: {},
+			auth: {},
+		},
+		...structuredClone(transitionalRuntimeDefaults),
+	};
+}

@@ -1,9 +1,62 @@
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
-import { runtimeSettings } from "../../src/db/schema";
+import {
+	blacklistRules,
+	captchaSessions,
+	pageFeedbackRecords,
+	pageThreads,
+	sitePageRegistry,
+	siteSettings,
+	sites,
+	visitors,
+} from "../../src/db/schema";
+import {
+	type EngagementSettings,
+	serializeCommentInputLimits,
+	serializeEngagementSettings,
+} from "../../src/modules/shared/site-settings-defaults";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
+
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(fixture: TestFixture, pageKey: string) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
+		status: "active",
+	});
+}
+
+async function updateEngagement(
+	fixture: TestFixture,
+	engagement: EngagementSettings,
+) {
+	await fixture.app.db.update(siteSettings).set({
+		allowPageLike: engagement.pageLikes.enabled,
+		engagementJson: serializeEngagementSettings(engagement),
+	});
+}
+
+async function enableTrustedPageLikes(fixture: TestFixture) {
+	await updateEngagement(fixture, {
+		visitors: { enabled: true },
+		pageViews: { enabled: false },
+		pageLikes: { enabled: true },
+		commentVotes: { enabled: false },
+	});
+}
 
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
@@ -11,14 +64,131 @@ afterEach(async () => {
 	}
 });
 
-describe("POST /api/page-feedback/like", () => {
-	it("likes a page once and blocks repeated likes from the same visitor", async () => {
+describe("POST /qingyan/api/page-feedback/like", () => {
+	it("rejects page identity fields over the configured site input limits", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			commentInputLimitsJson: serializeCommentInputLimits({
+				pageTitleMaxLength: 8,
+				pageKeyMaxLength: 16,
+			}),
+		});
+		await seedActivePage(fixture, "post:like-limits");
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like-limits",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:like-limits",
+				pageTitle: "A title that is too long",
+				pageUrl: "https://fangyuan.example.com/posts/like-limits/",
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+				fields: [
+					{
+						path: "pageKey",
+						code: "too_big",
+					},
+					{
+						path: "pageTitle",
+						code: "too_big",
+					},
+				],
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
+	it("rejects likes for pages missing from the registry without creating a page thread", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/posts/unregistered-like/",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/unregistered-like/",
+				pageTitle: "Unregistered Like",
+				pageUrl: "https://fangyuan.example.com/posts/unregistered-like/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
+	it("rejects likes for deleted registry pages without creating a page thread", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "/posts/deleted-like/",
+			pageUrl: "/posts/deleted-like/",
+			status: "deleted",
+			deletedAt: "2026-05-29T00:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/posts/deleted-like/",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "posts/deleted-like/",
+				pageTitle: "Deleted Like",
+				pageUrl: "https://fangyuan.example.com/posts/deleted-like/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_INTERACTIVE",
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
+	it("likes a page once and blocks repeated likes from the same visitor", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:like");
+		await enableTrustedPageLikes(fixture);
+
 		const firstLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like",
+			},
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "post:like",
@@ -29,21 +199,27 @@ describe("POST /api/page-feedback/like", () => {
 
 		expect(firstLike.statusCode).toBe(200);
 		expect(firstLike.json()).toMatchObject({
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: 1,
+			pageLikes: {
+				count: 1,
 				liked: true,
 			},
 		});
+		expect(Object.keys(firstLike.json()).sort()).toEqual(["pageLikes"]);
+		expect(firstLike.json()).not.toHaveProperty("pageFeedback");
+		expect(JSON.stringify(firstLike.json())).not.toContain("trustMode");
+		expect(JSON.stringify(firstLike.json())).not.toContain("supportsLike");
 
 		const visitorCookie = firstLike.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
 		);
 		const secondLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
+			url: "/qingyan/api/page-feedback/like",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			headers: {
+				referer: "http://localhost:4321/post:like",
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -61,66 +237,121 @@ describe("POST /api/page-feedback/like", () => {
 		});
 	});
 
-	it("reuses required page captcha state for page like without counting it toward the threshold", async () => {
+	it("auto-blacklists page likes by exact ip after the long-window write threshold is exceeded", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
-			captchaMode: "threshold",
-			captchaThresholdWindowSec: 60,
-			captchaThresholdMaxActions: 3,
+		await fixture.app.db.update(siteSettings).set({
+			abuseGuardEnabled: true,
+			abuseGuardWindowSec: 600,
+			abuseGuardMaxWriteActions: 2,
+			autoBlacklistEnabled: true,
+			autoBlacklistScope: "post",
+			autoBlacklistTtlSec: 1800,
+		});
+		await updateEngagement(fixture, {
+			visitors: { enabled: false },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: true },
+			commentVotes: { enabled: false },
+		});
+		await seedActivePage(fixture, "post:like-auto-blacklist");
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:like-auto-blacklist",
+			pageTitle: "Like Auto Blacklist",
+			pageUrl: "https://fangyuan.example.com/posts/like-auto-blacklist/",
+		};
+
+		for (const _ of [1, 2, 3]) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/page-feedback/like",
+				headers: {
+					referer: "http://localhost:4321/post:like-auto-blacklist",
+				},
+				payload,
+			});
+			expect(response.statusCode).toBe(200);
+		}
+		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([
+			expect.objectContaining({
+				targetType: "ip",
+				matchMode: "exact",
+				source: "auto",
+				reason: "abuse_guard",
+			}),
+		]);
+
+		const blocked = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like-auto-blacklist",
+			},
+			payload,
 		});
 
-		const postComment = async (raw: string, cookieValue?: string) =>
-			fixture.app.inject({
-				method: "POST",
-				url: "/api/comments",
-				cookies: cookieValue
-					? {
-							qingyan_visitor: cookieValue,
-						}
-					: undefined,
-				payload: {
-					siteKey: "fangyuan",
-					pageKey: "post:like-threshold",
-					pageTitle: "Like Threshold",
-					pageUrl: "https://fangyuan.example.com/posts/like-threshold/",
-					parentCommentId: null,
-					author: {
-						name: "Alice",
-						email: "alice@example.com",
-					},
-					content: {
-						raw,
-					},
-					options: {
-						notifyOnReply: false,
-					},
-				},
-			});
-
-		const first = await postComment("first");
-		expect(first.statusCode).toBe(200);
-		const visitorCookie = first.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
-		const cookieValue = visitorCookie?.value ?? "";
-
-		const second = await postComment("second", cookieValue);
-		expect(second.statusCode).toBe(200);
-
-		const third = await postComment("third", cookieValue);
-		expect(third.statusCode).toBe(400);
-		expect(third.json()).toMatchObject({
+		expect(blocked.statusCode).toBe(403);
+		expect(blocked.json()).toMatchObject({
 			error: {
-				code: "COMMENT_CAPTCHA_REQUIRED",
+				code: "COMMENT_BLACKLISTED",
+			},
+		});
+	});
+
+	it("creates page threads from Referer when explicit like payload identity is stale", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "lol_voice_collation.html");
+		await enableTrustedPageLikes(fixture);
+
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/lol_voice_collation.html",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "lol_voice_collation",
+				pageTitle: "Like HTML Page",
+				pageUrl: "https://x-item.com/lol_voice_collation.html",
 			},
 		});
 
-		const like = await fixture.app.inject({
+		expect(firstLike.statusCode).toBe(200);
+
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			pageKey: "/lol_voice_collation.html",
+			pageUrl: "/lol_voice_collation.html",
+			pageTitle: "Like HTML Page",
+			pageLikeCount: 1,
+		});
+	});
+
+	it("accepts captcha payload inline when retrying page like", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "always",
+			allowPageLike: true,
+			engagementJson: serializeEngagementSettings({
+				visitors: { enabled: true },
+				pageViews: { enabled: false },
+				pageLikes: { enabled: true },
+				commentVotes: { enabled: false },
+			}),
+		});
+		await seedActivePage(fixture, "post:like-threshold");
+
+		const blockedLike = await fixture.app.inject({
 			method: "POST",
-			url: "/api/page-feedback/like",
-			cookies: {
-				qingyan_visitor: cookieValue,
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like-threshold",
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -129,11 +360,241 @@ describe("POST /api/page-feedback/like", () => {
 				pageUrl: "https://fangyuan.example.com/posts/like-threshold/",
 			},
 		});
-
-		expect(like.statusCode).toBe(400);
-		expect(like.json()).toMatchObject({
+		expect(blockedLike.statusCode).toBe(400);
+		expect(blockedLike.json()).toMatchObject({
 			error: {
-				code: "COMMENT_CAPTCHA_REQUIRED",
+				code: "PAGE_FEEDBACK_CAPTCHA_REQUIRED",
+			},
+		});
+		const captchaState = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:like-threshold",
+			headers: {
+				referer: "http://localhost:4321/post:like-threshold",
+			},
+		});
+		expect(captchaState.statusCode).toBe(200);
+		const visitorCookie = captchaState.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		const cookieValue = visitorCookie?.value ?? "";
+		const challengeId = captchaState.json().challenge.challengeId as string;
+		const [session] = await fixture.app.db
+			.select()
+			.from(captchaSessions)
+			.where(eq(captchaSessions.id, challengeId));
+		if (!session) {
+			throw new Error("Expected captcha session to exist");
+		}
+		const payload = JSON.parse(session.challengePayloadJson ?? "{}") as {
+			answer: string;
+			publicChallenge: {
+				imageData: string;
+			};
+		};
+
+		const like = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			cookies: {
+				qingyan_visitor: cookieValue,
+			},
+			headers: {
+				referer: "http://localhost:4321/post:like-threshold",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:like-threshold",
+				pageTitle: "Like Threshold",
+				pageUrl: "https://fangyuan.example.com/posts/like-threshold/",
+				captcha: {
+					challengeId,
+					value: payload.answer,
+				},
+			},
+		});
+
+		expect(like.statusCode).toBe(200);
+		expect(like.json()).toMatchObject({
+			pageLikes: {
+				count: 1,
+				liked: true,
+			},
+		});
+	});
+
+	it("uses runtime-only overlay for default site likes in dev mode", async () => {
+		const fixture = await createTestApp({
+			devMode: true,
+			devAdminToken: "dev-token",
+		});
+		cleanups.push(fixture.cleanup);
+
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			payload: {
+				siteKey: "default",
+				pageKey: "post:dev-like",
+				pageTitle: "Dev Like",
+				pageUrl: "https://example.test/posts/dev-like",
+			},
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+		expect(firstLike.json()).toMatchObject({
+			pageLikes: {
+				count: 1,
+				liked: true,
+			},
+		});
+
+		const visitorCookie = firstLike.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		const secondLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			payload: {
+				siteKey: "default",
+				pageKey: "post:dev-like",
+				pageTitle: "Dev Like",
+				pageUrl: "https://example.test/posts/dev-like",
+			},
+		});
+
+		expect(secondLike.statusCode).toBe(409);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
+	});
+
+	it("rejects page likes when pageLikes is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:disabled-like");
+		await updateEngagement(fixture, {
+			visitors: { enabled: true },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: false },
+			commentVotes: { enabled: false },
+		});
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:disabled-like",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:disabled-like",
+				pageTitle: "Disabled Like",
+				pageUrl: "https://fangyuan.example.com/posts/disabled-like/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_FEEDBACK_DISABLED",
+			},
+		});
+	});
+
+	it("increments lightweight page likes without visitor rows or like records", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:lightweight-like");
+		await updateEngagement(fixture, {
+			visitors: { enabled: false },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: true },
+			commentVotes: { enabled: false },
+		});
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:lightweight-like",
+			pageTitle: "Lightweight Like",
+			pageUrl: "https://fangyuan.example.com/posts/lightweight-like/",
+		};
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:lightweight-like",
+			},
+			payload,
+		});
+		const secondLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:lightweight-like",
+			},
+			payload,
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+		expect(secondLike.statusCode).toBe(200);
+		expect(firstLike.cookies).not.toContainEqual(
+			expect.objectContaining({ name: "qingyan_visitor" }),
+		);
+		expect(secondLike.json()).toMatchObject({
+			pageLikes: {
+				count: 2,
+				liked: true,
+			},
+		});
+		expect(secondLike.json()).not.toHaveProperty("pageFeedback");
+		expect(JSON.stringify(secondLike.json())).not.toContain("trustMode");
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
+	});
+
+	it("keeps trusted page likes deduped by visitor", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:trusted-like");
+		await enableTrustedPageLikes(fixture);
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:trusted-like",
+			pageTitle: "Trusted Like",
+			pageUrl: "https://fangyuan.example.com/posts/trusted-like/",
+		};
+		const firstLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:trusted-like",
+			},
+			payload,
+		});
+		const visitorCookie = firstLike.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		const secondLike = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			headers: {
+				referer: "http://localhost:4321/post:trusted-like",
+			},
+			payload,
+		});
+
+		expect(firstLike.statusCode).toBe(200);
+		expect(secondLike.statusCode).toBe(409);
+		expect(secondLike.json()).toMatchObject({
+			error: {
+				code: "PAGE_FEEDBACK_ALREADY_LIKED",
 			},
 		});
 	});

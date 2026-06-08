@@ -1,10 +1,20 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
-import { adminSettingsBodySchema, adminSettingsQuerySchema } from "./schemas";
+import {
+	adminSectionPatchBodySchema,
+	adminSettingsBodySchema,
+	adminSiteSettingsSectionParamsSchema,
+} from "./schemas";
 import { AdminSessionService } from "./session-service";
+import { requireSiteAccess } from "./authorization";
+import { toValidationFields } from "./validation-fields";
+import { ValidationFailedError } from "../shared/errors";
+
+type SiteSettingsUpdateInput = Parameters<
+	AdminManagementService["updateSettings"]
+>[1];
 
 export const adminSettingsRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new AdminRepository(fastify.db);
@@ -12,6 +22,7 @@ export const adminSettingsRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.config,
 		fastify.security,
 		repository,
+		fastify.adminBootstrap,
 	);
 	const service = new AdminManagementService(
 		fastify.security,
@@ -19,34 +30,50 @@ export const adminSettingsRoutes: FastifyPluginAsync = async (fastify) => {
 		repository,
 	);
 
-	fastify.get("/", async (request) => {
-		await sessionService.requireSession(request);
-		const parsed = adminSettingsQuerySchema.safeParse(request.query);
-		if (!parsed.success) {
-			throw new InvalidRequestError({
-				issues: parsed.error.issues,
-			});
+	fastify.patch("/:siteKey/sections/:section", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const parsedParams = adminSiteSettingsSectionParamsSchema.safeParse(
+			request.params,
+		);
+		const parsedBody = adminSectionPatchBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new ValidationFailedError(
+				toValidationFields(
+					[
+						...(parsedParams.success ? [] : parsedParams.error.issues),
+						...(parsedBody.success ? [] : parsedBody.error.issues),
+					],
+					{
+						params: request.params,
+						body: request.body,
+					},
+				),
+			);
 		}
 
-		return service.getSettings(parsed.data.siteKey);
-	});
-
-	fastify.put("/", async (request) => {
-		await sessionService.requireSession(request);
-		const parsedQuery = adminSettingsQuerySchema.safeParse(request.query);
-		const parsedBody = adminSettingsBodySchema.safeParse(request.body);
-		if (!parsedQuery.success || !parsedBody.success) {
-			throw new InvalidRequestError({
-				issues: [
-					...(parsedQuery.success ? [] : parsedQuery.error.issues),
-					...(parsedBody.success ? [] : parsedBody.error.issues),
-				],
-			});
-		}
-
-		return service.updateSettings(parsedQuery.data.siteKey, {
-			...parsedBody.data,
-			requestId: request.context?.requestId,
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsedParams.data.siteKey,
+			permission: "site_settings.update",
 		});
+
+		const parsedSettings = adminSettingsBodySchema.safeParse({
+			[parsedParams.data.section]: parsedBody.data,
+		});
+		if (!parsedSettings.success) {
+			throw new ValidationFailedError(
+				toValidationFields(parsedSettings.error.issues, {
+					[parsedParams.data.section]: parsedBody.data,
+				}),
+			);
+		}
+
+		const updateInput: SiteSettingsUpdateInput = {
+			...parsedSettings.data,
+			requestId: request.context?.requestId,
+			actorUserId: session.user.id,
+		};
+		return service.updateSettings(parsedParams.data.siteKey, updateInput);
 	});
 };

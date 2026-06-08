@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { blacklistRules, runtimeSettings, sites } from "../../src/db/schema";
+import { blacklistRules, siteSettings, sites } from "../../src/db/schema";
 import { MemoryRateLimitStore } from "../../src/modules/shared/rate-limit";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -39,7 +39,7 @@ describe("MemoryRateLimitStore", () => {
 });
 
 describe("security plugin", () => {
-	it("syncs configured sites, seeds runtime settings and rejects blacklisted visitors", async () => {
+	it("loads seeded sites and rejects blacklisted visitors", async () => {
 		const fixture = await createTestApp();
 
 		try {
@@ -54,8 +54,8 @@ describe("security plugin", () => {
 
 			const [settings] = await fixture.app.db
 				.select()
-				.from(runtimeSettings)
-				.where(eq(runtimeSettings.siteId, site.id));
+				.from(siteSettings)
+				.where(eq(siteSettings.siteId, site.id));
 			expect(settings?.rootLimit).toBe(20);
 
 			await fixture.app.db.insert(blacklistRules).values({

@@ -2,33 +2,166 @@ import type { FastifyRequest } from "fastify";
 
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
+import { defaultSystemSettings } from "../system-settings/definitions";
+import {
+	createSystemSettingsDefaults,
+	RuntimeSystemSettingsService,
+} from "../system-settings/service";
 import { AppError } from "../shared/errors";
+import type { SiteRegistry } from "../shared/site-registry";
+import type { AdminBootstrap } from "./bootstrap-service";
+import { AdminUsersRepository } from "./admin-users-repository";
+import {
+	isAdminGroupKey,
+	permissionsForGroup,
+	type AdminPermission,
+	type AdminGroupKey,
+} from "./permissions";
+import { verifyPasswordHash } from "./password-hash";
 import type { AdminRepository } from "./repository";
 import { AdminLoginChallengeStore } from "./login-challenge-store";
 import {
+	createCsrfToken,
 	createSessionToken,
+	hashCsrfToken,
 	hashSessionToken,
-	verifyAdminToken,
 } from "./session-utils";
 
-const ADMIN_LOGIN_BLACKLIST_THRESHOLD = 5;
+export interface AuthenticatedAdminSession {
+	id: string;
+	userId: number | null;
+	tokenHash: string;
+	csrfTokenHash: string | null;
+	csrfIssuedAt: string | null;
+	ip: string | null;
+	userAgent: string | null;
+	expiresAt: string;
+	revokedAt: string | null;
+	revokedByUserId: number | null;
+	revocationReason: string | null;
+	lastSeenAt: string;
+	createdAt: string;
+	user: {
+		id: number;
+		username: string;
+		email: string;
+		displayName: string;
+		website: string | null;
+		avatarUrl: string | null;
+		status: string;
+		isInitialAdmin: boolean;
+		passwordChangeRequired: boolean;
+	};
+	groupKey: AdminGroupKey;
+	groupName: string;
+	permissions: AdminPermission[];
+	siteIds: number[];
+	isAdmin: boolean;
+	isInitialAdmin: boolean;
+}
 
 export class AdminSessionService {
 	private readonly failedLoginCounts = new Map<string, number>();
 	private readonly loginChallengeStore: AdminLoginChallengeStore;
+	private readonly usersRepository: AdminUsersRepository;
 
 	public constructor(
 		private readonly config: AppConfig,
 		private readonly security: SecurityToolkit,
 		private readonly repository: AdminRepository,
+		private readonly adminBootstrap: AdminBootstrap,
+		private readonly siteRegistry?: SiteRegistry,
+		private readonly systemSettings = new RuntimeSystemSettingsService(
+			repository.database,
+			createSystemSettingsDefaults({
+				adminSession: {
+					ttlMinutes: config.admin.session.ttlMinutes,
+				},
+				security: config.security,
+			}),
+		),
 	) {
+		this.usersRepository = new AdminUsersRepository(repository.database);
 		this.loginChallengeStore = new AdminLoginChallengeStore(
-			this.config.captcha.image.ttlSec,
+			defaultSystemSettings.captcha.image.ttlSec,
 		);
 	}
 
 	public getSessionCookieName() {
 		return this.config.admin.session.cookieName;
+	}
+
+	public async getSessionTtlMinutes() {
+		return (await this.systemSettings.getAdminSessionSettings()).ttlMinutes;
+	}
+
+	private async issueCsrfToken(sessionId: string) {
+		const csrfToken = createCsrfToken();
+		const csrfIssuedAt = new Date().toISOString();
+		await this.repository.updateAdminSessionCsrf({
+			id: sessionId,
+			csrfTokenHash: hashCsrfToken(csrfToken),
+			csrfIssuedAt,
+		});
+		return {
+			header: "x-qingyan-csrf-token" as const,
+			token: csrfToken,
+			issuedAt: csrfIssuedAt,
+		};
+	}
+
+	public async createDevSession(input: {
+		expectedToken: string;
+		devToken: string;
+		ip?: string;
+		requestId?: string;
+		userAgent?: string;
+	}) {
+		if (input.devToken !== input.expectedToken) {
+			throw new AppError(401, "DEV_AUTH_REQUIRED", "开发模式认证失败。");
+		}
+
+		const sessionToken = createSessionToken();
+		const sessionId = createSessionToken();
+		const ttlMinutes = await this.getSessionTtlMinutes();
+		const expiresAt = new Date(
+			Date.now() + ttlMinutes * 60 * 1000,
+		).toISOString();
+		const user = await this.usersRepository.getUserByUsername(
+			this.adminBootstrap.username,
+		);
+		if (!user) {
+			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
+		}
+		await this.repository.createAdminSession({
+			id: sessionId,
+			userId: user.id,
+			tokenHash: hashSessionToken(sessionToken),
+			ip: input.ip,
+			userAgent: input.userAgent,
+			expiresAt,
+		});
+		const csrf = await this.issueCsrfToken(sessionId);
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			actorType: "admin",
+			event: "admin.login.succeeded",
+			message: "开发模式管理员会话已创建",
+			targetType: "ip",
+			targetId: input.ip,
+			payload: {
+				bootstrap: "dev",
+				ip: input.ip,
+			},
+		});
+
+		return {
+			sessionToken,
+			expiresAt,
+			ttlMinutes,
+			csrf,
+		};
 	}
 
 	private async assertAdminLoginAllowed(input: {
@@ -44,7 +177,7 @@ export class AdminSessionService {
 				requestId: input.requestId,
 				ip: input.ip,
 				errorCode: "ADMIN_BLACKLISTED",
-				errorMessage: "当前来源已被永久禁止登录。",
+				errorMessage: "当前来源已被临时禁止登录。",
 			});
 		} catch (error) {
 			await this.security.writeAudit({
@@ -87,8 +220,15 @@ export class AdminSessionService {
 
 		const nextFailures = (this.failedLoginCounts.get(input.ip) ?? 0) + 1;
 		this.failedLoginCounts.set(input.ip, nextFailures);
+		const adminLoginRule = (await this.systemSettings.getSecuritySettings())
+			.rateLimit.adminLogin;
+		const maxFailures = adminLoginRule.maxFailures ?? 5;
+		const autoBlacklistSec = adminLoginRule.autoBlacklistSec ?? 1800;
 
-		if (nextFailures >= ADMIN_LOGIN_BLACKLIST_THRESHOLD) {
+		if (nextFailures >= maxFailures) {
+			const expiresAt = new Date(
+				Date.now() + autoBlacklistSec * 1000,
+			).toISOString();
 			await this.repository.createBlacklistRule({
 				scope: "all",
 				targetType: "ip",
@@ -96,18 +236,19 @@ export class AdminSessionService {
 				targetValue: input.ip,
 				reason: "admin login failures",
 				source: "auto",
+				expiresAt,
 			});
 			await this.security.writeAudit({
 				requestId: input.requestId,
 				actorType: "system",
 				event: "security.blacklist.added",
 				level: "error",
-				message: "已加入永久黑名单",
+				message: "已加入临时黑名单",
 				targetType: "ip",
 				targetId: input.ip,
 				payload: {
 					reason: "admin_login_failed_limit",
-					ttl: "permanent",
+					ttlSec: autoBlacklistSec,
 				},
 			});
 			this.failedLoginCounts.delete(input.ip);
@@ -115,13 +256,13 @@ export class AdminSessionService {
 			throw new AppError(
 				403,
 				"ADMIN_BLACKLISTED",
-				"当前来源已被永久禁止登录。",
+				"当前来源已被临时禁止登录。",
 			);
 		}
 
 		throw new AppError(input.statusCode, input.code, input.message, {
 			failureCount: nextFailures,
-			maxFailures: ADMIN_LOGIN_BLACKLIST_THRESHOLD,
+			maxFailures,
 		});
 	}
 
@@ -142,7 +283,8 @@ export class AdminSessionService {
 	public async login(input: {
 		captchaValue?: string;
 		challengeId?: string;
-		token: string;
+		username: string;
+		password: string;
 		ip?: string;
 		requestId?: string;
 		userAgent?: string;
@@ -171,15 +313,33 @@ export class AdminSessionService {
 			});
 		}
 
-		const isValid = verifyAdminToken(input.token, this.config.admin.tokenHash);
-		if (!isValid) {
+		const user = await this.usersRepository.getUserByUsername(input.username);
+		const isValid =
+			Boolean(user) &&
+			user?.status === "active" &&
+			!user.deletedAt &&
+			verifyPasswordHash(input.password, user.passwordHash);
+		if (!isValid || !user) {
 			await this.recordFailedLogin({
-				code: "ADMIN_TOKEN_INVALID",
+				code: "ADMIN_CREDENTIALS_INVALID",
 				ip: input.ip,
-				message: "管理员口令无效。",
+				message: "管理员用户名或密码无效。",
 				requestId: input.requestId,
 				statusCode: 401,
 			});
+		}
+		if (
+			user.loginBlockedUntil &&
+			new Date(user.loginBlockedUntil).getTime() > Date.now()
+		) {
+			throw new AppError(
+				403,
+				"ADMIN_LOGIN_BLOCKED",
+				"该后台用户已被临时禁止登录。",
+				{
+					loginBlockedUntil: user.loginBlockedUntil,
+				},
+			);
 		}
 
 		if (input.ip) {
@@ -187,20 +347,26 @@ export class AdminSessionService {
 		}
 
 		const sessionToken = createSessionToken();
+		const sessionId = createSessionToken();
+		const ttlMinutes = await this.getSessionTtlMinutes();
 		const expiresAt = new Date(
-			Date.now() + this.config.admin.session.ttlMinutes * 60 * 1000,
+			Date.now() + ttlMinutes * 60 * 1000,
 		).toISOString();
 		await this.repository.createAdminSession({
-			id: createSessionToken(),
+			id: sessionId,
+			userId: user.id,
 			tokenHash: hashSessionToken(sessionToken),
 			ip: input.ip,
 			userAgent: input.userAgent,
 			expiresAt,
 		});
+		await this.usersRepository.updateLastLogin(user.id);
+		const csrf = await this.issueCsrfToken(sessionId);
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
-			actorType: "admin",
+			actorType: "admin_user",
+			actorId: String(user.id),
 			event: "admin.login.succeeded",
 			message: "管理员登录成功",
 			targetType: "ip",
@@ -213,10 +379,15 @@ export class AdminSessionService {
 		return {
 			sessionToken,
 			expiresAt,
+			ttlMinutes,
+			csrf,
 		};
 	}
 
-	public async requireSession(request: FastifyRequest) {
+	public async requireSession(
+		request: FastifyRequest,
+		options: { allowPasswordChangeRequired?: boolean } = {},
+	) {
 		const sessionCookie = request.cookies[this.getSessionCookieName()];
 		if (!sessionCookie) {
 			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
@@ -227,6 +398,9 @@ export class AdminSessionService {
 		);
 		if (!session) {
 			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
+		}
+		if (session.revokedAt) {
+			throw new AppError(401, "ADMIN_SESSION_REVOKED", "管理员会话已失效。");
 		}
 		if (new Date(session.expiresAt).getTime() <= Date.now()) {
 			await this.repository.deleteAdminSession(session.id);
@@ -239,8 +413,64 @@ export class AdminSessionService {
 			});
 			throw new AppError(401, "ADMIN_SESSION_EXPIRED", "管理员会话已过期。");
 		}
+		if (!session.userId) {
+			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
+		}
+		const user = await this.usersRepository.getUserById(session.userId);
+		if (user?.status !== "active" || user.deletedAt) {
+			throw new AppError(401, "ADMIN_USER_DISABLED", "后台用户不可用。");
+		}
+		const group = await this.usersRepository.getUserGroup(user.id);
+		if (!group || !isAdminGroupKey(group.key)) {
+			throw new AppError(403, "ADMIN_PERMISSION_REQUIRED", "缺少后台权限。");
+		}
+		const siteIds =
+			group.key === "admin"
+				? []
+				: await this.usersRepository.listUserSiteIds(user.id);
 
-		return session;
+		const authenticatedSession = {
+			...session,
+			user: {
+				id: user.id,
+				username: user.username,
+				email: user.email,
+				displayName: user.displayName,
+				website: user.website,
+				avatarUrl: user.avatarUrl,
+				status: user.status,
+				isInitialAdmin: user.isInitialAdmin,
+				passwordChangeRequired: user.passwordChangeRequired,
+			},
+			groupKey: group.key,
+			groupName: group.name,
+			permissions: permissionsForGroup(group.key),
+			siteIds,
+			isAdmin: group.key === "admin",
+			isInitialAdmin: user.isInitialAdmin,
+		} satisfies AuthenticatedAdminSession;
+		if (
+			authenticatedSession.user.passwordChangeRequired &&
+			!options.allowPasswordChangeRequired
+		) {
+			throw new AppError(
+				403,
+				"ADMIN_PASSWORD_CHANGE_REQUIRED",
+				"需要先修改后台登录密码。",
+			);
+		}
+		return authenticatedSession;
+	}
+
+	public async getOptionalSession(request: FastifyRequest) {
+		try {
+			return await this.requireSession(request);
+		} catch (error) {
+			if (error instanceof AppError) {
+				return null;
+			}
+			throw error;
+		}
 	}
 
 	public async logout(request: FastifyRequest) {
@@ -258,24 +488,56 @@ export class AdminSessionService {
 
 		await this.repository.deleteAdminSession(session.id);
 		await this.security.writeAudit({
-			actorType: "admin",
+			actorType: session.userId ? "admin_user" : "admin",
+			actorId: session.userId ? String(session.userId) : undefined,
 			action: "admin.logout",
 		});
 	}
 
 	public async getMe(request: FastifyRequest) {
-		const session = await this.requireSession(request);
-		const sites = await this.repository.listSites();
+		const session = await this.requireSession(request, {
+			allowPasswordChangeRequired: true,
+		});
+		const csrf = await this.issueCsrfToken(session.id);
+		const sites =
+			this.siteRegistry?.listRegisteredSites() ??
+			(await this.repository.listSites());
 
 		return {
 			authenticated: true,
 			session: {
 				expiresAt: session.expiresAt,
 			},
-			sites: sites.map((site) => ({
-				siteKey: site.siteKey,
-				name: site.name,
-			})),
+			csrf: {
+				header: csrf.header,
+				token: csrf.token,
+			},
+			user: {
+				id: session.user.id,
+				username: session.user.username,
+				email: session.user.email,
+				displayName: session.user.displayName,
+				groupKey: session.groupKey,
+				groupName: session.groupName,
+				isInitialAdmin: session.isInitialAdmin,
+				passwordChangeRequired: session.user.passwordChangeRequired,
+			},
+			permissions: session.permissions,
+			sites: sites
+				.filter((site) => {
+					if (session.isAdmin) {
+						return true;
+					}
+					return "id" in site ? session.siteIds.includes(site.id) : true;
+				})
+				.map((site) => ({
+					siteKey: site.siteKey,
+					name: site.name,
+					allowedOrigins:
+						"allowedOrigins" in site
+							? site.allowedOrigins
+							: (JSON.parse(site.allowedOriginsJson) as string[]),
+				})),
 		};
 	}
 }

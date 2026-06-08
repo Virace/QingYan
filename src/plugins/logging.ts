@@ -4,16 +4,22 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { LoggerManager } from "../logging/logger-manager";
 import type { AccessEventName } from "../logging/types";
 import { AppError } from "../modules/shared/errors";
+import { stripPublicPath } from "../config/public-path";
 
 function resolveRequestPath(request: FastifyRequest): string {
 	const [pathWithoutQuery] = request.url.split("?");
 	return pathWithoutQuery ?? request.url;
 }
 
-function shouldLogAccess(pathname: string, statusCode: number): boolean {
+function shouldLogAccess(
+	pathname: string,
+	statusCode: number,
+	publicPath: string,
+): boolean {
+	const internalPathname = stripPublicPath(publicPath, pathname) ?? pathname;
 	return (
-		pathname.startsWith("/api") ||
-		pathname.startsWith("/admin") ||
+		internalPathname.startsWith("/api") ||
+		internalPathname.startsWith("/admin") ||
 		statusCode >= 400
 	);
 }
@@ -37,6 +43,18 @@ function resolveAccessEvent(
 	return statusCode >= 400 ? "request.failed" : "request.completed";
 }
 
+function statusGroup(statusCode: number): string {
+	return `${Math.floor(statusCode / 100)}xx`;
+}
+
+function isPublicWriteMetric(method: string, pathname: string): boolean {
+	return (
+		["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
+		pathname.startsWith("/api") &&
+		!pathname.startsWith("/api/admin")
+	);
+}
+
 const loggingPlugin: FastifyPluginAsync = async (fastify) => {
 	const loggerManager = await LoggerManager.create({
 		config: fastify.config,
@@ -48,7 +66,15 @@ const loggingPlugin: FastifyPluginAsync = async (fastify) => {
 
 	fastify.addHook("onSend", async (request, reply, payload) => {
 		const pathname = resolveRequestPath(request);
-		if (!shouldLogAccess(pathname, reply.statusCode)) {
+		const internalPathname =
+			stripPublicPath(fastify.config.server.publicPath, pathname) ?? pathname;
+		if (
+			!shouldLogAccess(
+				pathname,
+				reply.statusCode,
+				fastify.config.server.publicPath,
+			)
+		) {
 			return payload;
 		}
 
@@ -80,6 +106,49 @@ const loggingPlugin: FastifyPluginAsync = async (fastify) => {
 			pageKey: request.context?.pageKey,
 			errorCode: request.context?.accessEvent?.errorCode,
 		});
+		const event =
+			request.context?.accessEvent?.event ??
+			resolveAccessEvent(
+				(request as typeof request & { routeError?: unknown }).routeError,
+				reply.statusCode,
+			);
+		await fastify.taskMetricRollups
+			.increment({
+				siteId: request.context?.siteKey
+					? (fastify.siteRegistry.getRegisteredSite(request.context.siteKey)
+							?.id ?? null)
+					: null,
+				siteKey: request.context?.siteKey ?? null,
+				metricKey: event,
+				dimensions: {
+					method: request.method,
+					statusGroup: statusGroup(reply.statusCode),
+				},
+			})
+			.catch((error: unknown) => {
+				fastify.log.warn({ err: error }, "Failed to write task metric rollup");
+			});
+		if (isPublicWriteMetric(request.method, internalPathname)) {
+			await fastify.taskMetricRollups
+				.increment({
+					siteId: request.context?.siteKey
+						? (fastify.siteRegistry.getRegisteredSite(request.context.siteKey)
+								?.id ?? null)
+						: null,
+					siteKey: request.context?.siteKey ?? null,
+					metricKey: "public.write",
+					dimensions: {
+						method: request.method,
+						statusGroup: statusGroup(reply.statusCode),
+					},
+				})
+				.catch((error: unknown) => {
+					fastify.log.warn(
+						{ err: error },
+						"Failed to write public write task metric rollup",
+					);
+				});
+		}
 
 		return payload;
 	});

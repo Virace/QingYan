@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { sites } from "./sites";
+import { adminUsers } from "./admin-users";
 
 export const blacklistRules = sqliteTable(
 	"blacklist_rules",
@@ -26,10 +27,18 @@ export const adminSessions = sqliteTable(
 	"admin_sessions",
 	{
 		id: text("id").primaryKey(),
+		userId: integer("user_id").references(() => adminUsers.id),
 		tokenHash: text("token_hash").notNull(),
+		csrfTokenHash: text("csrf_token_hash"),
+		csrfIssuedAt: text("csrf_issued_at"),
 		ip: text("ip"),
 		userAgent: text("user_agent"),
 		expiresAt: text("expires_at").notNull(),
+		revokedAt: text("revoked_at"),
+		revokedByUserId: integer("revoked_by_user_id").references(
+			() => adminUsers.id,
+		),
+		revocationReason: text("revocation_reason"),
 		lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 	},

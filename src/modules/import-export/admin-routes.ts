@@ -1,0 +1,561 @@
+import type { FastifyPluginAsync } from "fastify";
+import { existsSync, statSync, readFileSync } from "node:fs";
+import { z } from "zod";
+import { eq } from "drizzle-orm";
+
+import type { AppDatabase } from "../../db/client";
+import { adminUsers, pageThreads } from "../../db/schema";
+import { AdminRepository } from "../admin/repository";
+import { AdminSessionService } from "../admin/session-service";
+import { requirePermission } from "../admin/authorization";
+import { DatabaseBackupService } from "../database-backup/database-backup-service";
+import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
+import { ImportJobRepository } from "./job-repository";
+import { ImportJobService } from "./job-service";
+import { QingYanExportService } from "./qingyan/export-service";
+import { QingYanImportService } from "./qingyan/import-service";
+import { WordPressAdminImportService } from "./wordpress/admin-service";
+import { parseSitemapIndexUrls } from "./wordpress/dist-verifier";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
+
+const explicitMappingSchema = z.object({
+	siteKey: z.string().optional(),
+	sourceBasePath: z.string().optional(),
+	items: z.array(
+		z.object({
+			wpPostId: z.string().optional(),
+			sourceRelativePath: z.string().optional(),
+			decision: z.enum(["map", "skip"]),
+			reason: z.string().optional(),
+			target: z
+				.object({
+					pageKey: z.string(),
+					pageUrl: z.string().optional(),
+				})
+				.optional(),
+		}),
+	),
+});
+
+const wordpressAnalyzeBodySchema = z.object({
+	siteKey: z.string().min(1),
+	fileName: z.string().min(1),
+	xml: z.string().min(1),
+	sourceBasePath: z.string().optional(),
+	targetDistRoot: z.string().optional(),
+	pageKeyStrategy: z
+		.enum([
+			"path_without_leading_slash",
+			"path_with_leading_slash",
+			"page_url_path",
+			"custom_template",
+			"explicit_only",
+		])
+		.optional(),
+	postPathTemplate: z.string().optional(),
+	pagePathTemplate: z.string().optional(),
+	mapping: explicitMappingSchema.optional(),
+});
+
+const wordpressAnalyzeQuerySchema = wordpressAnalyzeBodySchema
+	.omit({
+		xml: true,
+		mapping: true,
+	})
+	.extend({
+		mappingJson: z.string().optional(),
+	});
+const importJobParamsSchema = z.object({
+	jobId: z.string().min(1),
+});
+const importJobsQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	status: z.string().min(1).optional(),
+	sourceType: z.string().min(1).optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+const dryRunBodySchema = z.object({
+	existingStrategy: z.enum(["fail_on_existing", "skip_existing"]),
+});
+const wordpressPlanBodySchema = z
+	.object({
+		authorDecisions: z
+			.record(z.string(), z.enum(["staff", "verified", "visitor"]))
+			.optional(),
+	})
+	.optional();
+const qingyanImportModeSchema = z
+	.enum(["data_only", "settings_only", "full_site"])
+	.default("full_site");
+const qingyanSettingsStrategySchema = z
+	.enum(["fail_on_existing", "replace_settings"])
+	.default("fail_on_existing");
+const applyBodySchema = dryRunBodySchema;
+const qingyanApplyBodySchema = dryRunBodySchema.extend({
+	importMode: qingyanImportModeSchema.optional(),
+	settingsStrategy: qingyanSettingsStrategySchema.optional(),
+});
+const qingyanExportBodySchema = z.object({
+	siteKey: z.string().min(1),
+	format: z.literal("qingyan.export.v1"),
+	include: z
+		.object({
+			siteSettings: z.boolean().optional(),
+			systemSettings: z.boolean().optional(),
+			pageThreads: z.boolean().optional(),
+			comments: z.boolean().optional(),
+			rawUserAgent: z.boolean().optional(),
+			visitors: z.boolean().optional(),
+			voteRecords: z.boolean().optional(),
+			pageFeedbackRecords: z.boolean().optional(),
+			blacklistRules: z.boolean().optional(),
+		})
+		.optional(),
+});
+const qingyanDryRunBodySchema = z.object({
+	siteKey: z.string().min(1),
+	fileName: z.string().min(1),
+	payload: z.unknown(),
+	existingStrategy: z.enum(["fail_on_existing", "skip_existing"]),
+	importMode: qingyanImportModeSchema.optional(),
+	settingsStrategy: qingyanSettingsStrategySchema.optional(),
+});
+
+function parseMappingJson(mappingJson?: string) {
+	if (!mappingJson) {
+		return undefined;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(mappingJson);
+	} catch (error) {
+		throw new InvalidRequestError({
+			message: "mappingJson 不是有效 JSON。",
+			cause: error instanceof Error ? error.message : String(error),
+		});
+	}
+
+	const mapping = explicitMappingSchema.safeParse(parsed);
+	if (!mapping.success) {
+		throw new InvalidRequestError({
+			issues: mapping.error.issues,
+		});
+	}
+
+	return mapping.data;
+}
+
+function parseJsonField(value: string | null | undefined) {
+	if (!value) {
+		return null;
+	}
+	return JSON.parse(value) as unknown;
+}
+
+function isUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === "http:" || url.protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
+async function fetchText(url: string): Promise<string> {
+	const response = await fetch(url);
+	if (!response.ok) {
+		throw new InvalidRequestError({
+			message: `静态站点来源获取失败：${response.status} ${response.statusText}`,
+		});
+	}
+	return response.text();
+}
+
+async function resolveStaticSiteSource(
+	targetDistRoot: string | undefined,
+): Promise<string | undefined> {
+	if (!targetDistRoot) {
+		return targetDistRoot;
+	}
+	if (!isUrl(targetDistRoot)) {
+		if (existsSync(targetDistRoot) && statSync(targetDistRoot).isFile()) {
+			return readFileSync(targetDistRoot, "utf-8");
+		}
+		return targetDistRoot;
+	}
+	const rootXml = await fetchText(targetDistRoot);
+	const childUrls = parseSitemapIndexUrls(rootXml);
+	if (childUrls.length === 0) {
+		return rootXml;
+	}
+	const childXml = await Promise.all(childUrls.map((url) => fetchText(url)));
+	return [rootXml, ...childXml].join("\n");
+}
+
+function summarizeJobPayload(value: string) {
+	const payload = parseJsonField(value);
+	if (!payload || typeof payload !== "object") {
+		return {};
+	}
+	const record = payload as Record<string, unknown>;
+	return {
+		report:
+			record.report &&
+			typeof record.report === "object" &&
+			"summary" in record.report
+				? (record.report as { summary?: unknown }).summary
+				: undefined,
+		plan:
+			record.plan && typeof record.plan === "object" && "summary" in record.plan
+				? (record.plan as { summary?: unknown }).summary
+				: undefined,
+		dryRun:
+			record.dryRun &&
+			typeof record.dryRun === "object" &&
+			"summary" in record.dryRun
+				? (record.dryRun as { summary?: unknown }).summary
+				: undefined,
+		apply:
+			record.apply &&
+			typeof record.apply === "object" &&
+			"summary" in record.apply
+				? (record.apply as { summary?: unknown }).summary
+				: undefined,
+	};
+}
+
+function serializeImportJob(
+	batch: Awaited<ReturnType<ImportJobRepository["getBatch"]>>,
+) {
+	if (!batch) {
+		return null;
+	}
+	return {
+		id: batch.id,
+		siteId: batch.siteId,
+		sourceType: batch.sourceType,
+		sourceFileName: batch.sourceFileName,
+		format: batch.format,
+		formatVersion: batch.formatVersion,
+		status: batch.status,
+		createdAt: batch.createdAt,
+		updatedAt: batch.updatedAt,
+		appliedAt: batch.appliedAt,
+		summary: summarizeJobPayload(batch.summaryJson),
+		backup: parseJsonField(batch.backupJson),
+		error: parseJsonField(batch.errorJson),
+	};
+}
+
+async function listExistingPageCandidates(input: {
+	db: AppDatabase;
+	siteId: number;
+}) {
+	return input.db
+		.select({
+			pageKey: pageThreads.pageKey,
+			pageTitle: pageThreads.pageTitle,
+			pageUrl: pageThreads.pageUrl,
+		})
+		.from(pageThreads)
+		.where(eq(pageThreads.siteId, input.siteId));
+}
+
+async function listAdminUserAuthorCandidates(input: { db: AppDatabase }) {
+	return input.db
+		.select({
+			id: adminUsers.id,
+			email: adminUsers.email,
+			displayName: adminUsers.displayName,
+			username: adminUsers.username,
+			status: adminUsers.status,
+		})
+		.from(adminUsers);
+}
+
+export const adminImportExportRoutes: FastifyPluginAsync = async (fastify) => {
+	fastify.addContentTypeParser(
+		["application/xml", "text/xml"],
+		{
+			parseAs: "string",
+			bodyLimit: Number.MAX_SAFE_INTEGER,
+		},
+		(_, body, done) => {
+			done(null, body);
+		},
+	);
+
+	const repository = new AdminRepository(fastify.db);
+	const sessionService = new AdminSessionService(
+		fastify.config,
+		fastify.security,
+		repository,
+		fastify.adminBootstrap,
+		fastify.siteRegistry,
+	);
+	const wordpressService = new WordPressAdminImportService();
+	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
+	const metadataResolver = new DefaultCommentMetadataResolver();
+	fastify.addHook("onClose", async () => {
+		metadataResolver.close();
+	});
+	const importJobRepository = new ImportJobRepository(fastify.db);
+	const backupService = new DatabaseBackupService({
+		engine: fastify.config.database.client,
+		databaseFile: fastify.config.database.sqlite.file,
+		sqlite: fastify.sqlite,
+	});
+	const jobService = new ImportJobService(
+		importJobRepository,
+		fastify.sqlite,
+		backupService,
+		metadataResolver,
+		() => systemSettingsService.getIpRegionSettings(),
+	);
+	const qingyanExportService = new QingYanExportService(fastify.sqlite);
+	const qingyanImportService = new QingYanImportService(
+		fastify.sqlite,
+		backupService,
+	);
+
+	fastify.get("/jobs", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
+		const parsed = importJobsQuerySchema.safeParse(request.query);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const siteId = parsed.data.siteKey
+			? fastify.siteRegistry.getRegisteredSite(parsed.data.siteKey)?.id
+			: undefined;
+		if (parsed.data.siteKey && !siteId) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+		const rows = await importJobRepository.listBatches({
+			siteId,
+			status: parsed.data.status,
+			sourceType: parsed.data.sourceType,
+			limit: parsed.data.limit,
+		});
+		return {
+			items: rows.map((row) => serializeImportJob(row)),
+			nextCursor: null,
+		};
+	});
+
+	fastify.get("/jobs/:jobId", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
+		const parsed = importJobParamsSchema.safeParse(request.params);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const batch = await importJobRepository.getBatch(parsed.data.jobId);
+		const job = serializeImportJob(batch);
+		if (!job) {
+			throw new ResourceNotFoundError(
+				"IMPORT_JOB_NOT_FOUND",
+				"导入任务不存在。",
+			);
+		}
+		return { job };
+	});
+
+	fastify.post("/export", async (request, reply) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.export");
+		const parsed = qingyanExportBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+
+		const site = fastify.siteRegistry.getRegisteredSite(parsed.data.siteKey);
+		if (!site) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+
+		const payload = qingyanExportService.exportSite(parsed.data);
+		const date = new Date().toISOString().slice(0, 10);
+		return reply
+			.type("application/json; charset=utf-8")
+			.header(
+				"content-disposition",
+				`attachment; filename="qingyan-${parsed.data.siteKey}-${date}.json"`,
+			)
+			.send(payload);
+	});
+
+	fastify.post("/qingyan/dry-run", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
+		const parsed = qingyanDryRunBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+
+		return qingyanImportService.createDryRun(parsed.data);
+	});
+
+	fastify.post("/wordpress/analyze", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "wordpress_migration.analyze");
+
+		if (typeof request.body === "string") {
+			const parsed = wordpressAnalyzeQuerySchema.safeParse(request.query);
+			if (!parsed.success) {
+				throw new InvalidRequestError({
+					issues: parsed.error.issues,
+				});
+			}
+			const data = {
+				...parsed.data,
+				xml: request.body,
+				mapping: parseMappingJson(parsed.data.mappingJson),
+			};
+			const site = fastify.siteRegistry.getRegisteredSite(data.siteKey);
+			if (!site) {
+				throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+			}
+
+			const existingPages = await listExistingPageCandidates({
+				db: fastify.db,
+				siteId: site.id,
+			});
+			const adminUserCandidates = await listAdminUserAuthorCandidates({
+				db: fastify.db,
+			});
+			const result = wordpressService.analyze({
+				...data,
+				targetDistRoot: await resolveStaticSiteSource(data.targetDistRoot),
+				existingPages,
+				adminUsers: adminUserCandidates,
+			});
+			await jobService.createWordPressAnalyzeJob({
+				siteId: site.id,
+				xml: data.xml,
+				result,
+				options: parsed.data,
+			});
+			return result;
+		}
+
+		const parsed = wordpressAnalyzeBodySchema.safeParse(request.body);
+		if (!parsed.success) {
+			throw new InvalidRequestError({
+				issues: parsed.error.issues,
+			});
+		}
+		const site = fastify.siteRegistry.getRegisteredSite(parsed.data.siteKey);
+		if (!site) {
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		}
+
+		const existingPages = await listExistingPageCandidates({
+			db: fastify.db,
+			siteId: site.id,
+		});
+		const adminUserCandidates = await listAdminUserAuthorCandidates({
+			db: fastify.db,
+		});
+		const result = wordpressService.analyze({
+			...parsed.data,
+			targetDistRoot: await resolveStaticSiteSource(parsed.data.targetDistRoot),
+			existingPages,
+			adminUsers: adminUserCandidates,
+		});
+		await jobService.createWordPressAnalyzeJob({
+			siteId: site.id,
+			xml: parsed.data.xml,
+			result,
+			options: {
+				...parsed.data,
+				xml: undefined,
+			},
+		});
+		return result;
+	});
+
+	fastify.post("/wordpress/jobs/:jobId/plan", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "wordpress_migration.plan");
+		const parsed = importJobParamsSchema.safeParse(request.params);
+		const parsedBody = wordpressPlanBodySchema.safeParse(request.body);
+		if (!parsed.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsed.success ? [] : parsed.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return jobService.convertWordPressJobToPlan(
+			parsed.data.jobId,
+			parsedBody.data,
+		);
+	});
+
+	fastify.post("/jobs/:jobId/dry-run", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import");
+		const parsedParams = importJobParamsSchema.safeParse(request.params);
+		const parsedBody = dryRunBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return jobService.dryRun(parsedParams.data.jobId, parsedBody.data);
+	});
+
+	fastify.post("/jobs/:jobId/apply", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "wordpress_migration.apply");
+		const parsedParams = importJobParamsSchema.safeParse(request.params);
+		const parsedBody = applyBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return jobService.apply(parsedParams.data.jobId, parsedBody.data);
+	});
+
+	fastify.post("/qingyan/jobs/:jobId/apply", async (request) => {
+		const session = await sessionService.requireSession(request);
+		requirePermission(session, "data.import_apply");
+		const parsedParams = importJobParamsSchema.safeParse(request.params);
+		const parsedBody = qingyanApplyBodySchema.safeParse(request.body);
+		if (!parsedParams.success || !parsedBody.success) {
+			throw new InvalidRequestError({
+				issues: [
+					...(parsedParams.success ? [] : parsedParams.error.issues),
+					...(parsedBody.success ? [] : parsedBody.error.issues),
+				],
+			});
+		}
+
+		return qingyanImportService.applyWithBackup(
+			parsedParams.data.jobId,
+			parsedBody.data,
+		);
+	});
+};

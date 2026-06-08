@@ -1,4 +1,7 @@
-import type { SiteConfig } from "../../config/types";
+import {
+	defaultCommentRequire,
+	mergeCommentInputLimits,
+} from "../shared/site-settings-defaults";
 
 export const commentIdentityFields = ["nickname", "email", "website"] as const;
 
@@ -19,7 +22,7 @@ function parseRequireFields(payload?: string | null): unknown {
 function sanitizeRequireFields(
 	value: unknown,
 	allowWebsite: boolean,
-	fallback: CommentIdentityField[],
+	fallback: readonly CommentIdentityField[],
 ): CommentIdentityField[] {
 	const source = Array.isArray(value) ? value : fallback;
 	const normalized: CommentIdentityField[] = [];
@@ -44,15 +47,12 @@ function sanitizeRequireFields(
 	return normalized;
 }
 
-export function buildCommentForm(
-	site: SiteConfig,
-	settings?: {
-		allowWebsite?: boolean;
-		commentRequireJson?: string | null;
-	},
-) {
-	const allowWebsite =
-		settings?.allowWebsite ?? site.defaults.comments.allowWebsite;
+export function buildCommentForm(settings?: {
+	allowWebsite?: boolean;
+	commentRequireJson?: string | null;
+	commentInputLimitsJson?: string | null;
+}) {
+	const allowWebsite = settings?.allowWebsite ?? true;
 	const allow = allowWebsite
 		? [...commentIdentityFields]
 		: commentIdentityFields.filter((field) => field !== "website");
@@ -62,7 +62,8 @@ export function buildCommentForm(
 		require: sanitizeRequireFields(
 			parseRequireFields(settings?.commentRequireJson),
 			allowWebsite,
-			site.defaults.comments.identity.require,
+			defaultCommentRequire,
 		),
+		limits: mergeCommentInputLimits(settings?.commentInputLimitsJson),
 	};
 }

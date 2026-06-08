@@ -8,8 +8,8 @@ import {
 
 import { sites } from "./sites";
 
-export const runtimeSettings = sqliteTable(
-	"runtime_settings",
+export const siteSettings = sqliteTable(
+	"site_settings",
 	{
 		id: integer("id").primaryKey({ autoIncrement: true }),
 		siteId: integer("site_id")
@@ -55,7 +55,19 @@ export const runtimeSettings = sqliteTable(
 		autoBlacklistTtlSec: integer("auto_blacklist_ttl_sec")
 			.notNull()
 			.default(1800),
-		emailNotificationsEnabled: integer("email_notifications_enabled", {
+		commentInputLimitsJson: text("comment_input_limits_json"),
+		commentMetadataJson: text("comment_metadata_json"),
+		engagementJson: text("engagement_json"),
+		verifiedAuthorJson: text("verified_author_json"),
+		staffDisplayJson: text("staff_display_json"),
+		moderationJson: text("moderation_json"),
+		pageRegistryJson: text("page_registry_json"),
+		commenterReplyEmailEnabled: integer("commenter_reply_email_enabled", {
+			mode: "boolean",
+		})
+			.notNull()
+			.default(false),
+		backendNotificationsEnabled: integer("backend_notifications_enabled", {
 			mode: "boolean",
 		})
 			.notNull()
@@ -63,5 +75,5 @@ export const runtimeSettings = sqliteTable(
 		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 	},
-	(table) => [uniqueIndex("runtime_settings_site_id_idx").on(table.siteId)],
+	(table) => [uniqueIndex("site_settings_site_id_idx").on(table.siteId)],
 );

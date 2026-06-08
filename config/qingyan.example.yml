@@ -2,6 +2,7 @@ server:
   host: 0.0.0.0
   port: 4401
   publicBaseUrl: http://localhost:4401
+  publicPath: /qingyan
   trustProxy: false
 
 database:
@@ -10,7 +11,6 @@ database:
     file: ./data/qingyan.db
 
 admin:
-  tokenHash: "<replace-with-argon2id-hash>"
   session:
     cookieName: qingyan_admin
     ttlMinutes: 1440
@@ -23,10 +23,18 @@ security:
     enabled: false
     windowSec: 10
     maxRequests: 120
+  publicOriginGuard:
+    enabled: true
+    allowMissingOrigin: false
+  adminOriginGuard:
+    enabled: true
+    allowMissingOrigin: false
+    allowedOrigins: []
   rateLimit:
     adminLogin:
       windowSec: 600
       maxFailures: 5
+      autoBlacklistSec: 1800
     commentCreate:
       windowSec: 300
       maxRequests: 5
@@ -39,59 +47,3 @@ security:
     pageLike:
       windowSec: 300
       maxRequests: 10
-
-captcha:
-  provider: image
-  image:
-    width: 160
-    height: 60
-    ttlSec: 600
-
-logging:
-  directory: ./logs
-  defaults:
-    level: info
-    retentionDays: 7
-
-mail:
-  enabled: false
-  smtp:
-    host: smtp.example.com
-    port: 465
-    secure: true
-    username: notify@example.com
-    password: "<secret>"
-    from: notify@example.com
-
-sites:
-  - siteKey: fangyuan
-    name: FangYuan
-    allowedOrigins:
-      - http://localhost:4321
-    defaults:
-      comments:
-        enabled: true
-        defaultStatus: pending
-        maxDepth: 3
-        rootLimit: 20
-        identity:
-          require:
-            - nickname
-            - email
-        captcha:
-          mode: threshold
-          thresholdWindowSec: 60
-          thresholdMaxActions: 3
-        abuseGuard:
-          enabled: true
-          windowSec: 600
-          maxWriteActions: 100
-          autoBlacklist:
-            enabled: true
-            scope: post
-            ttlSec: 1800
-        allowWebsite: true
-      pageFeedback:
-        allowLike: true
-      notifications:
-        emailEnabled: false

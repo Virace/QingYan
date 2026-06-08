@@ -5,6 +5,10 @@ import { eq } from "drizzle-orm";
 import type { AppConfig } from "../config/types";
 import type { AppDatabase } from "../db/client";
 import { systemSettings } from "../db/schema";
+import {
+	defaultSystemSettings,
+	type SystemSettings,
+} from "../modules/system-settings/definitions";
 import { LogFileSink } from "./file-sink";
 import {
 	formatAccessJsonlLine,
@@ -37,7 +41,7 @@ function parseSystemSettingValue<T>(valueJson: string): T | undefined {
 export class LoggerManager {
 	private readonly logDirectory: string;
 	private readonly sink: LogFileSink;
-	private runtimeSettings: LogRuntimeSettings;
+	private siteSettings: LogRuntimeSettings;
 	private fileLoggingEnabled = true;
 
 	private constructor(
@@ -47,9 +51,9 @@ export class LoggerManager {
 	) {
 		this.logDirectory = normalizeLogDirectory(config.logging.directory);
 		this.sink = new LogFileSink(this.logDirectory);
-		this.runtimeSettings = {
-			level: config.logging.defaults.level,
-			retentionDays: config.logging.defaults.retentionDays,
+		this.siteSettings = {
+			level: defaultSystemSettings.logging.level,
+			retentionDays: defaultSystemSettings.logging.retentionDays,
 		};
 	}
 
@@ -65,8 +69,8 @@ export class LoggerManager {
 
 	public getRuntimeSettings(): LogRuntimeSettings {
 		return {
-			level: this.runtimeSettings.level,
-			retentionDays: this.runtimeSettings.retentionDays,
+			level: this.siteSettings.level,
+			retentionDays: this.siteSettings.retentionDays,
 		};
 	}
 
@@ -80,12 +84,12 @@ export class LoggerManager {
 				.select()
 				.from(systemSettings)
 				.where(eq(systemSettings.category, "logging"));
-			const nextSettings = { ...this.runtimeSettings };
+			const nextSettings = { ...this.siteSettings };
 
 			for (const row of rows) {
 				if (row.key === "level") {
 					const value = parseSystemSettingValue<
-						AppConfig["logging"]["defaults"]["level"]
+						SystemSettings["logging"]["level"]
 					>(row.valueJson);
 					if (value) {
 						nextSettings.level = value;
@@ -100,12 +104,12 @@ export class LoggerManager {
 				}
 			}
 
-			this.runtimeSettings = nextSettings;
+			this.siteSettings = nextSettings;
 			this.fileLoggingEnabled = true;
 		} catch (error) {
-			this.runtimeSettings = {
-				level: this.config.logging.defaults.level,
-				retentionDays: this.config.logging.defaults.retentionDays,
+			this.siteSettings = {
+				level: defaultSystemSettings.logging.level,
+				retentionDays: defaultSystemSettings.logging.retentionDays,
 			};
 			this.stderr.write(
 				`[qingyan-logging] failed to load runtime settings: ${String(error)}\n`,
@@ -157,9 +161,7 @@ export class LoggerManager {
 	}
 
 	private shouldWrite(level: AccessLogRecord["level"] | AppLogRecord["level"]) {
-		return (
-			logLevelPriority[level] <= logLevelPriority[this.runtimeSettings.level]
-		);
+		return logLevelPriority[level] <= logLevelPriority[this.siteSettings.level];
 	}
 
 	private async write(input: {
@@ -179,7 +181,7 @@ export class LoggerManager {
 				ts: input.ts,
 				textLine: input.textLine,
 				jsonlLine: input.jsonlLine,
-				retentionDays: this.runtimeSettings.retentionDays,
+				retentionDays: this.siteSettings.retentionDays,
 			});
 		} catch (error) {
 			this.fileLoggingEnabled = false;

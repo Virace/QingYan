@@ -7,6 +7,12 @@ import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function refererFor(pageKey: string) {
+	return {
+		referer: `http://localhost:4321/${pageKey}`,
+	};
+}
+
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
@@ -28,7 +34,8 @@ describe("logging system", () => {
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging",
+			headers: refererFor("post:logging"),
 		});
 
 		expect(bootstrap.statusCode).toBe(200);
@@ -53,13 +60,14 @@ describe("logging system", () => {
 
 		const healthz = await fixture.app.inject({
 			method: "GET",
-			url: "/healthz",
+			url: "/qingyan/healthz",
 		});
 		expect(healthz.statusCode).toBe(200);
 
 		const bootstrap = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging-access",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:logging-access",
+			headers: refererFor("post:logging-access"),
 		});
 
 		expect(bootstrap.statusCode).toBe(200);
@@ -70,8 +78,45 @@ describe("logging system", () => {
 		);
 		expect(accessJsonl).toContain('"channel":"access"');
 		expect(accessJsonl).toContain('"event":"request.completed"');
-		expect(accessJsonl).toContain('"/api/comments/bootstrap"');
+		expect(accessJsonl).toContain('"/qingyan/api/comments/bootstrap"');
 		expect(accessJsonl).toContain('"pageKey":"post:logging-access"');
-		expect(accessJsonl).not.toContain("/healthz");
+		expect(accessJsonl).not.toContain("/qingyan/healthz");
+	});
+
+	it("writes unhandled request errors into the app jsonl channel", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const today = new Date().toISOString().slice(0, 10);
+		await fixture.app.get("/qingyan/api/__boom", async () => {
+			throw new Error("logging probe failure");
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/__boom",
+			headers: {
+				"x-request-id": "req_logging_probe",
+			},
+		});
+
+		expect(response.statusCode).toBe(500);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "INTERNAL_ERROR",
+				requestId: "req_logging_probe",
+			},
+		});
+
+		const appJsonl = readFileSync(
+			path.join(fixture.logsDirectory, "app", `${today}.jsonl`),
+			"utf-8",
+		);
+		expect(appJsonl).toContain('"channel":"app"');
+		expect(appJsonl).toContain('"event":"service.crashed"');
+		expect(appJsonl).toContain('"requestId":"req_logging_probe"');
+		expect(appJsonl).toContain('"message":"Unhandled request error"');
+		expect(appJsonl).toContain('"name":"Error"');
+		expect(appJsonl).toContain('"errorMessage":"logging probe failure"');
+		expect(appJsonl).toContain('"path":"/qingyan/api/__boom"');
 	});
 });

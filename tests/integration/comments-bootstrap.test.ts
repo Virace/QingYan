@@ -1,18 +1,45 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
+	captchaSessions,
+	commentRequestMetadata,
 	comments,
 	pageFeedbackRecords,
 	pageThreads,
-	runtimeSettings,
+	pageViewSessions,
+	pendingPageCandidates,
+	pendingPageViewSessions,
+	sitePageRegistry,
+	siteSettings,
 	sites,
 	visitors,
 	voteRecords,
 } from "../../src/db/schema";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { serializeCommentInputLimits } from "../../src/modules/shared/site-settings-defaults";
+import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
+
+type TestFixture = Awaited<ReturnType<typeof createTestApp>>;
+
+async function seedActivePage(
+	fixture: TestFixture,
+	siteId: number,
+	pageKey: string,
+	pageUrl: string,
+) {
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId,
+		pageKey,
+		pageUrl,
+		status: "active",
+	});
+}
 
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
@@ -20,7 +47,176 @@ afterEach(async () => {
 	}
 });
 
-describe("GET /api/comments/bootstrap", () => {
+describe("GET /qingyan/api/comments/bootstrap", () => {
+	it("uses lightweight page views without visitor records when visitors are disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: false,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/lightweight-bootstrap/",
+			"/posts/lightweight-bootstrap/",
+		);
+
+		const first = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Lightweight",
+			headers: {
+				referer: "http://localhost:4321/posts/lightweight-bootstrap/",
+				"user-agent": "lightweight-bootstrap-test",
+			},
+		});
+		const second = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Lightweight",
+			headers: {
+				referer: "http://localhost:4321/posts/lightweight-bootstrap/",
+				"user-agent": "lightweight-bootstrap-test",
+			},
+		});
+
+		expect(first.statusCode).toBe(200);
+		expect(second.statusCode).toBe(200);
+		expect(
+			first.cookies.find((cookie) => cookie.name === "qingyan_visitor"),
+		).toBeUndefined();
+		expect(
+			second.cookies.find((cookie) => cookie.name === "qingyan_visitor"),
+		).toBeUndefined();
+		expect(second.json()).toMatchObject({
+			schemaVersion: "2026-05-31",
+			features: {
+				commentVotes: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+				pageViews: {
+					enabled: true,
+				},
+				pageLikes: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+				visitors: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+			},
+			data: {
+				comments: {
+					items: [],
+				},
+				pageViews: {
+					count: 2,
+				},
+			},
+		});
+		expect(second.json()).not.toHaveProperty("capability");
+		expect(second.json()).not.toHaveProperty("pageMetrics");
+		expect(second.json()).not.toHaveProperty("pageFeedback");
+		expect(second.json().data).not.toHaveProperty("pageLikes");
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			pageKey: "/posts/lightweight-bootstrap/",
+			pageViewCount: 2,
+		});
+	});
+
+	it("does not record page views when page view tracking is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: false,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"posts/no-page-views/",
+			"/posts/no-page-views/",
+		);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=No%20Page%20Views",
+			headers: {
+				referer: "http://localhost:4321/posts/no-page-views/",
+				"user-agent": "no-page-views-test",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			features: {
+				pageViews: {
+					enabled: false,
+					reason: "feature_disabled",
+				},
+			},
+			data: {
+				comments: {
+					items: [],
+				},
+			},
+		});
+		expect(response.json().data).not.toHaveProperty("pageViews");
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
+	});
+
 	it("returns bootstrap payload with threaded comments, viewer vote and page feedback", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -32,6 +228,31 @@ describe("GET /api/comments/bootstrap", () => {
 		if (!site) {
 			throw new Error("Expected site to exist");
 		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/welcome/",
+			"/posts/welcome/",
+		);
 
 		await fixture.app.db.insert(visitors).values({
 			siteId: site.id,
@@ -47,7 +268,7 @@ describe("GET /api/comments/bootstrap", () => {
 
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
-			pageKey: "post:welcome",
+			pageKey: "/posts/welcome/",
 			pageTitle: "Welcome",
 			pageUrl: "/posts/welcome/",
 			commentCount: 2,
@@ -58,7 +279,7 @@ describe("GET /api/comments/bootstrap", () => {
 		const [pageThread] = await fixture.app.db
 			.select()
 			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:welcome"));
+			.where(eq(pageThreads.pageKey, "/posts/welcome/"));
 		if (!pageThread) {
 			throw new Error("Expected page thread to exist");
 		}
@@ -109,109 +330,1300 @@ describe("GET /api/comments/bootstrap", () => {
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:welcome&pageTitle=Welcome&pageUrl=https://fangyuan.example.com/posts/welcome/&sortBy=newest&limit=20&offset=0",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:welcome&pageTitle=Welcome&pageUrl=https://fangyuan.example.com/posts/welcome/&sortBy=newest&limit=20&offset=0",
 			cookies: {
 				qingyan_visitor: "viewer_seed",
 			},
 			headers: {
+				referer: "http://localhost:4321/posts/welcome/",
 				"user-agent": "bootstrap-test",
 			},
 		});
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			capability: {
-				enabled: true,
-				supportsReply: true,
-				supportsVote: true,
-				supportsCaptcha: true,
-				defaultStatus: "pending",
+			features: {
+				comments: { enabled: true },
+				commentReplies: { enabled: true, maxDepth: 3 },
+				commentVotes: { enabled: true },
+				commentCaptcha: { enabled: true, mode: "threshold" },
+				pageViews: { enabled: true },
+				pageLikes: { enabled: true },
+				visitors: { enabled: true },
 			},
-			commentForm: {
-				allow: ["nickname", "email", "website"],
-				require: ["nickname", "email"],
-			},
-			thread: {
-				siteKey: "fangyuan",
-				pageKey: "post:welcome",
-				pageTitle: "Welcome",
-			},
-			pagination: {
-				sortBy: "newest",
-				limit: 20,
-				offset: 0,
-				totalCount: 2,
-				rootCount: 1,
-			},
-			pageMetrics: {
-				pageViewCount: 6,
-			},
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: 1,
-				liked: true,
-			},
-			captcha: {
-				required: false,
-				verified: false,
-				mode: "inline_value",
-				challenge: null,
+			data: {
+				comments: {
+					form: {
+						allow: ["nickname", "email", "website"],
+						require: ["nickname", "email"],
+						limits: {
+							authorNameMaxLength: 40,
+							authorWebsiteMaxLength: 2048,
+							pageTitleMaxLength: 200,
+							pageKeyMaxLength: 512,
+							contentMaxLength: 2000,
+						},
+					},
+					pagination: {
+						sortBy: "newest",
+						limit: 20,
+						offset: 0,
+						totalCount: 2,
+						rootCount: 1,
+					},
+					captcha: {
+						required: false,
+						verified: false,
+						mode: "inline_value",
+					},
+				},
+				pageViews: {
+					count: 6,
+				},
+				pageLikes: {
+					count: 1,
+					liked: true,
+				},
 			},
 		});
-		expect(response.json().capability.requiredAuthorFields).toBeUndefined();
-		expect(response.json().capability.optionalAuthorFields).toBeUndefined();
+		expect(response.json()).not.toHaveProperty("capability");
+		expect(response.json()).not.toHaveProperty("commentForm");
+		expect(response.json()).not.toHaveProperty("pagination");
+		expect(response.json()).not.toHaveProperty("pageMetrics");
+		expect(response.json()).not.toHaveProperty("pageFeedback");
+		expect(response.json()).not.toHaveProperty("captcha");
+		expect(response.json().data.comments.captcha).not.toHaveProperty(
+			"challenge",
+		);
+		expect(response.json().thread).toBeUndefined();
 
 		const payload = response.json();
-		expect(payload.comments).toHaveLength(1);
-		expect(payload.comments[0]).toMatchObject({
+		expect(payload.data.comments.items).toHaveLength(1);
+		expect(payload.data.comments.items[0]).toMatchObject({
 			id: "c_root",
-			viewerVote: "up",
+			vote: {
+				viewer: "up",
+			},
 		});
-		expect(payload.comments[0].children).toHaveLength(1);
-		expect(payload.comments[0].children[0]).toMatchObject({
+		expect(payload.data.comments.items[0]).not.toHaveProperty("viewerVote");
+		expect(payload.data.comments.items[0].author.gravatarUrl).toBeUndefined();
+		expect(payload.data.comments.items[0].author.avatarUrl).toBeUndefined();
+		expect(payload.data.comments.items[0].displayMeta).toBeUndefined();
+		expect(payload.data.comments.items[0].children).toHaveLength(1);
+		expect(payload.data.comments.items[0].children[0]).toMatchObject({
 			id: "c_child",
 			parentId: "c_root",
+		});
+	});
+
+	it("returns site-configured comment form input limits", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commentInputLimitsJson: serializeCommentInputLimits({
+					authorNameMaxLength: 24,
+					contentMaxLength: 1200,
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/form-limits/",
+			"/posts/form-limits/",
+		);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Form%20Limits",
+			headers: {
+				referer: "http://localhost:4321/posts/form-limits/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().data.comments.form.limits).toEqual({
+			authorNameMaxLength: 24,
+			authorWebsiteMaxLength: 2048,
+			pageTitleMaxLength: 200,
+			pageKeyMaxLength: 512,
+			contentMaxLength: 1200,
+		});
+	});
+
+	it("resolves imported html page keys from Referer instead of explicit query values", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/lol_voice_collation.html",
+			"/lol_voice_collation.html",
+		);
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_html_import",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_html_import"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "/lol_voice_collation.html",
+			pageTitle: "英雄联盟音频文件整理计划——15.15",
+			pageUrl: "/lol_voice_collation.html",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "/lol_voice_collation.html"));
+		if (!pageThread) {
+			throw new Error("Expected imported page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_html_import",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			status: "approved",
+			authorName: "Alice",
+			contentRaw: "imported comment",
+			contentHtml: "<p>imported comment</p>",
+			createdAt: "2026-05-27T10:00:00.000Z",
+			updatedAt: "2026-05-27T10:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=lol_voice_collation&pageTitle=%E8%8B%B1%E9%9B%84%E8%81%94%E7%9B%9F%E9%9F%B3%E9%A2%91%E6%96%87%E4%BB%B6%E6%95%B4%E7%90%86%E8%AE%A1%E5%88%92%E2%80%94%E2%80%9415.15&pageUrl=https%3A%2F%2Fx-item.com%2Flol_voice_collation.html&sortBy=newest&limit=5&offset=0",
+			headers: {
+				referer: "http://localhost:4321/lol_voice_collation.html",
+			},
+			cookies: {
+				qingyan_visitor: "viewer_html_import",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 1,
+						rootCount: 1,
+					},
+				},
+			},
+		});
+		expect(response.json().thread).toBeUndefined();
+		expect(response.json().data.comments.items).toHaveLength(1);
+		expect(response.json().data.comments.items[0]).toMatchObject({
+			id: "c_html_import",
+		});
+
+		const allThreads = await fixture.app.db.select().from(pageThreads);
+		expect(allThreads.map((thread) => thread.pageKey).sort()).toEqual([
+			"/lol_voice_collation.html",
+		]);
+	});
+
+	it("records pending PV without creating page threads for unknown bootstrap pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Unknown",
+			headers: {
+				referer: "http://localhost:4321/posts/unknown-bootstrap/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 0,
+						rootCount: 0,
+					},
+					items: [],
+				},
+				pageViews: {
+					count: 0,
+				},
+			},
+		});
+		expect(response.json().data).not.toHaveProperty("pageLikes");
+		expect(response.json().thread).toBeUndefined();
+		expect(response.json().data.comments.items).toEqual([]);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		const candidates = await fixture.app.db
+			.select()
+			.from(pendingPageCandidates);
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0]).toMatchObject({
+			siteKey: "fangyuan",
+			pageKey: "/posts/unknown-bootstrap/",
+			pageUrl: "/posts/unknown-bootstrap/",
+			hitCount: 1,
+			status: "pending",
+		});
+		const pendingSessions = await fixture.app.db
+			.select()
+			.from(pendingPageViewSessions);
+		expect(pendingSessions).toHaveLength(1);
+		expect(pendingSessions[0]).toMatchObject({
+			siteKey: "fangyuan",
+			pageKey: "/posts/unknown-bootstrap/",
+			hitCount: 1,
+		});
+	});
+
+	it("returns inactive payload without writes for authoritative unknown bootstrap pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				pageRegistryJson: JSON.stringify({
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+					unknownPageResponse: "inactive_payload",
+					requireHealthySource: true,
+					sourceFreshnessGraceSec: 7200,
+					emergencyLockdown: false,
+				}),
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+				captchaMode: "always",
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Unknown%20Authoritative",
+			headers: {
+				referer: "http://localhost:4321/posts/authoritative-unknown/",
+				"user-agent": "authoritative-unknown-bootstrap",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			page: {
+				pageKey: "/posts/authoritative-unknown/",
+				status: "active",
+			},
+			features: {
+				comments: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				pageViews: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				pageLikes: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				visitors: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+			},
+			data: {},
+		});
+		expect(response.json()).not.toHaveProperty("visitorKey");
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(commentRequestMetadata)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageViewSessions)).toEqual([]);
+		expect(await fixture.app.db.select().from(captchaSessions)).toEqual([]);
+		expect(await fixture.app.db.select().from(pageFeedbackRecords)).toEqual([]);
+	});
+
+	it("rejects authoritative unknown bootstrap pages when forbidden is configured", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				pageRegistryJson: JSON.stringify({
+					mode: "authoritative",
+					authoritativeSitemapUrls: ["http://localhost:4321/sitemap.xml"],
+					unknownPageResponse: "forbidden",
+					requireHealthySource: true,
+					sourceFreshnessGraceSec: 7200,
+					emergencyLockdown: false,
+				}),
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+				captchaMode: "always",
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Forbidden%20Unknown",
+			headers: {
+				referer: "http://localhost:4321/posts/authoritative-forbidden/",
+				"user-agent": "authoritative-forbidden-bootstrap",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(commentRequestMetadata)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(captchaSessions)).toEqual([]);
+	});
+
+	it("rejects unknown bootstrap pages during emergency lockdown", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				pageRegistryJson: JSON.stringify({
+					mode: "discovery",
+					authoritativeSitemapUrls: [],
+					unknownPageResponse: "inactive_payload",
+					requireHealthySource: true,
+					sourceFreshnessGraceSec: 7200,
+					emergencyLockdown: true,
+				}),
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: true,
+					},
+					commentVotes: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Locked",
+			headers: {
+				referer: "http://localhost:4321/posts/lockdown-unknown/",
+				"user-agent": "lockdown-unknown-bootstrap",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PAGE_NOT_REGISTERED",
+			},
+		});
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(commentRequestMetadata)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
+	it("records official PV for active registry pages without creating pending candidates", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+					pageLikes: {
+						enabled: false,
+					},
+					commentVotes: {
+						enabled: false,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "/posts/registered-bootstrap/",
+			pageUrl: "/posts/registered-bootstrap/",
+			status: "active",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Registered",
+			headers: {
+				referer: "http://localhost:4321/posts/registered-bootstrap/",
+				"user-agent": "registered-bootstrap-test",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			data: {
+				comments: {
+					pagination: {
+						totalCount: 0,
+						rootCount: 0,
+					},
+					items: [],
+				},
+				pageViews: {
+					count: 1,
+				},
+			},
+		});
+		expect(response.json().data).not.toHaveProperty("pageLikes");
+		expect(response.json().thread).toBeUndefined();
+		expect(response.json().data.comments.items).toEqual([]);
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]).toMatchObject({
+			siteId: site.id,
+			pageKey: "/posts/registered-bootstrap/",
+			pageUrl: "/posts/registered-bootstrap/",
+			pageViewCount: 1,
+			pageLikeCount: 0,
+		});
+	});
+
+	it("deduplicates official PV for registered pages in the same visitor window", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: {
+						enabled: true,
+					},
+					pageViews: {
+						enabled: true,
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "/posts/registered-dedupe/",
+			pageUrl: "/posts/registered-dedupe/",
+			status: "active",
+		});
+
+		const first = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Registered%20Dedupe",
+			headers: {
+				referer: "http://localhost:4321/posts/registered-dedupe/",
+				"user-agent": "registered-dedupe-test",
+			},
+		});
+		const visitorCookie = first.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
+		expect(first.statusCode).toBe(200);
+		expect(first.json().data.pageViews.count).toBe(1);
+
+		const second = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Registered%20Dedupe",
+			cookies: {
+				qingyan_visitor: visitorCookie?.value ?? "",
+			},
+			headers: {
+				referer: "http://localhost:4321/posts/registered-dedupe/",
+				"user-agent": "registered-dedupe-test",
+			},
+		});
+
+		expect(second.statusCode).toBe(200);
+		expect(second.json().data.pageViews.count).toBe(1);
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+		const threads = await fixture.app.db.select().from(pageThreads);
+		expect(threads).toHaveLength(1);
+		expect(threads[0]?.pageViewCount).toBe(1);
+	});
+
+	it("does not record official or pending page views for trashed registry pages", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey: "/posts/trashed-bootstrap/",
+			pageUrl: "/posts/trashed-bootstrap/",
+			status: "trash",
+			trashedAt: "2026-05-29T00:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Trashed",
+			headers: {
+				referer: "http://localhost:4321/posts/trashed-bootstrap/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({
+			features: {
+				comments: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+				pageViews: {
+					enabled: false,
+					reason: "page_inactive",
+				},
+			},
+			data: {},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(pendingPageCandidates)).toEqual(
+			[],
+		);
+		expect(await fixture.app.db.select().from(pendingPageViewSessions)).toEqual(
+			[],
+		);
+	});
+
+	it("rejects bootstrap requests without Referer", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Missing",
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PUBLIC_REFERER_REQUIRED",
+			},
+		});
+	});
+
+	it("rejects bootstrap requests from a foreign Referer origin", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Foreign",
+			headers: {
+				referer: "https://evil.example/posts/foreign/",
+			},
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "PUBLIC_REFERER_FORBIDDEN",
+			},
+		});
+	});
+
+	it("returns configured display metadata without raw request metadata", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/metadata-display/",
+			"/posts/metadata-display/",
+		);
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commentMetadataJson: JSON.stringify({
+					ipRegion: {
+						enabled: true,
+						precision: "city",
+					},
+					device: {
+						display: {
+							enabled: true,
+						},
+					},
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_metadata",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_metadata"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "/posts/metadata-display/",
+			pageTitle: "Metadata Display",
+			pageUrl: "/posts/metadata-display/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "/posts/metadata-display/"));
+		if (!pageThread) {
+			throw new Error("Expected page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_metadata",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			status: "approved",
+			authorName: "Alice",
+			contentRaw: "metadata",
+			contentHtml: "<p>metadata</p>",
+			replyCount: 0,
+			voteUpCount: 0,
+			voteDownCount: 0,
+			createdAt: "2026-05-05T10:00:00.000Z",
+			updatedAt: "2026-05-05T10:00:00.000Z",
+		});
+		await fixture.app.db.insert(commentRequestMetadata).values({
+			commentId: "c_metadata",
+			authorIp: "203.0.113.8",
+			authorUserAgent: "Mozilla/5.0 metadata-test",
+			ipCountry: "中国",
+			ipRegion: "广东省",
+			ipCity: "深圳市",
+			ipLocationRaw: "中国|广东省|深圳市|移动|CN",
+			deviceBrowser: "chrome",
+			deviceBrowserVersion: "120.0.0.0",
+			deviceOs: "windows",
+			deviceOsVersion: "10",
+			deviceType: "desktop",
+			deviceIcon: "chrome",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:metadata-display&pageTitle=Metadata&pageUrl=https://fangyuan.example.com/posts/metadata-display/",
+			cookies: {
+				qingyan_visitor: "viewer_metadata",
+			},
+			headers: {
+				referer: "http://localhost:4321/posts/metadata-display/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		const payload = response.json();
+		expect(payload.data.comments.items[0]).toMatchObject({
+			id: "c_metadata",
+			displayMeta: {
+				location: {
+					label: "广东深圳",
+					precision: "city",
+				},
+				device: {
+					browser: "chrome",
+					browserVersion: "120.0.0.0",
+					os: "windows",
+					osVersion: "10",
+					type: "desktop",
+				},
+			},
+		});
+		expect(
+			payload.data.comments.items[0].displayMeta.device,
+		).not.toHaveProperty("icon");
+		const publicBody = JSON.stringify(payload);
+		expect(publicBody).not.toContain("203.0.113.8");
+		expect(publicBody).not.toContain("Mozilla/5.0 metadata-test");
+		expect(publicBody).not.toContain("中国|广东省|深圳市|移动|CN");
+	});
+
+	it("returns external avatar URL when enabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/gravatar/",
+			"/posts/gravatar/",
+		);
+
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert("avatar", "external.enabled", true);
+		await systemSettings.upsert(
+			"avatar",
+			"external.baseUrl",
+			"https://cravatar.cn/avatar",
+		);
+		await systemSettings.upsert("avatar", "external.hashAlgorithm", "md5");
+		await systemSettings.upsert(
+			"avatar",
+			"external.query",
+			"s=160&d=identicon&f=y",
+		);
+		await systemSettings.upsert("avatar", "display.shape", "rounded");
+		await systemSettings.upsert("avatar", "display.sizePx", 48);
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_gravatar",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_gravatar"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "/posts/gravatar/",
+			pageTitle: "Gravatar",
+			pageUrl: "/posts/gravatar/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "/posts/gravatar/"));
+		if (!pageThread) {
+			throw new Error("Expected page thread to exist");
+		}
+
+		const aliceMd5 = createHash("md5")
+			.update("alice@example.com")
+			.digest("hex");
+		await fixture.app.db.insert(comments).values({
+			id: "c_gravatar",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			status: "approved",
+			authorName: "Alice",
+			authorEmail: "alice@example.com",
+			contentRaw: "hello",
+			contentHtml: "<p>hello</p>",
+			createdAt: "2026-05-06T10:00:00.000Z",
+			updatedAt: "2026-05-06T10:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:gravatar&pageTitle=Gravatar&pageUrl=https://fangyuan.example.com/posts/gravatar/",
+			cookies: {
+				qingyan_visitor: "viewer_gravatar",
+			},
+			headers: {
+				referer: "http://localhost:4321/posts/gravatar/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().data.comments.items[0].author).toMatchObject({
+			name: "Alice",
+			avatarUrl: `https://cravatar.cn/avatar/${aliceMd5}?s=160&d=identicon&f=y`,
+		});
+		expect(
+			response.json().data.comments.items[0].author.gravatarUrl,
+		).toBeUndefined();
+		expect(response.json().data.comments.display).toMatchObject({
+			avatar: {
+				external: {
+					enabled: true,
+				},
+			},
+		});
+		expect(
+			response.json().data.comments.display.avatar.display,
+		).toBeUndefined();
+	});
+
+	it("returns configured avatar display hints only when advisory fields are enabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+		await systemSettings.upsert("publicApi", "advisoryFields.enabled", true);
+		await systemSettings.upsert("avatar", "display.shape", "rounded");
+		await systemSettings.upsert("avatar", "display.sizePx", 48);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:avatar-hints&pageTitle=Avatar%20Hints&pageUrl=https://fangyuan.example.com/posts/avatar-hints/",
+			headers: {
+				referer: "http://localhost:4321/post:avatar-hints",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().data.comments.display).toMatchObject({
+			avatar: {
+				external: {
+					enabled: false,
+				},
+				display: {
+					shape: "rounded",
+					sizePx: 48,
+				},
+			},
+		});
+	});
+
+	it("returns verified author badge from the current site settings", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/verified-badge/",
+			"/posts/verified-badge/",
+		);
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		await fixture.app.db.insert(visitors).values({
+			siteId: site.id,
+			visitorKey: "viewer_verified_badge",
+		});
+		const [visitor] = await fixture.app.db
+			.select()
+			.from(visitors)
+			.where(eq(visitors.visitorKey, "viewer_verified_badge"));
+		if (!visitor) {
+			throw new Error("Expected visitor to exist");
+		}
+
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "/posts/verified-badge/",
+			pageTitle: "Verified Badge",
+			pageUrl: "/posts/verified-badge/",
+			commentCount: 1,
+			rootCommentCount: 1,
+		});
+		const [pageThread] = await fixture.app.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.pageKey, "/posts/verified-badge/"));
+		if (!pageThread) {
+			throw new Error("Expected page thread to exist");
+		}
+
+		await fixture.app.db.insert(comments).values({
+			id: "c_verified_badge",
+			siteId: site.id,
+			pageThreadId: pageThread.id,
+			parentId: null,
+			visitorId: visitor.id,
+			authorIdentity: "verified",
+			status: "approved",
+			authorName: "Virace",
+			contentRaw: "verified",
+			contentHtml: "<p>verified</p>",
+			createdAt: "2026-05-09T10:00:00.000Z",
+			updatedAt: "2026-05-09T10:00:00.000Z",
+		});
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
+			cookies: {
+				qingyan_visitor: "viewer_verified_badge",
+			},
+			headers: {
+				referer: "http://localhost:4321/posts/verified-badge/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().data.comments.items[0].author.badge).toEqual({
+			label: "楼主",
+		});
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "博主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const updatedResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:verified-badge&pageTitle=Verified%20Badge&pageUrl=https://fangyuan.example.com/posts/verified-badge/",
+			cookies: {
+				qingyan_visitor: "viewer_verified_badge",
+			},
+			headers: {
+				referer: "http://localhost:4321/posts/verified-badge/",
+			},
+		});
+
+		expect(updatedResponse.statusCode).toBe(200);
+		expect(updatedResponse.json().data.comments.items[0].author.badge).toEqual({
+			label: "博主",
+		});
+	});
+
+	it("returns minimal verified author viewer only for logged-in admin", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+
+		const publicResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+			headers: {
+				referer: "http://localhost:4321/post:viewer-state",
+			},
+		});
+		expect(publicResponse.statusCode).toBe(200);
+		expect(publicResponse.json()).not.toHaveProperty("viewer");
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const adminResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:viewer-state&pageTitle=Viewer&pageUrl=https://fangyuan.example.com/posts/viewer-state/",
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+			headers: {
+				referer: "http://localhost:4321/post:viewer-state",
+			},
+		});
+
+		expect(adminResponse.statusCode).toBe(200);
+		expect(adminResponse.json().viewer).toEqual({
+			verifiedAuthor: {
+				displayName: "Virace",
+				badgeLabel: "楼主",
+			},
 		});
 	});
 
 	it("inlines captcha challenge in bootstrap when captcha mode is always", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await fixture.app.db.update(runtimeSettings).set({
+		await fixture.app.db.update(siteSettings).set({
 			captchaMode: "always",
+		});
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await seedActivePage(fixture, site.id, "/post:always", "/post:always");
+		await fixture.app.db.insert(pageThreads).values({
+			siteId: site.id,
+			pageKey: "/post:always",
+			pageTitle: "Always",
+			pageUrl: "/post:always",
 		});
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:always&pageTitle=Always&pageUrl=https://fangyuan.example.com/posts/always/",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:always&pageTitle=Always&pageUrl=https://fangyuan.example.com/posts/always/",
+			headers: {
+				referer: "http://localhost:4321/post:always",
+			},
 		});
 
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
-			captcha: {
-				required: true,
-				verified: false,
-				mode: "inline_value",
+			features: {
+				commentCaptcha: {
+					enabled: true,
+					mode: "always",
+				},
+			},
+			data: {
+				comments: {
+					captcha: {
+						required: true,
+						verified: false,
+						mode: "inline_value",
+					},
+				},
 			},
 		});
-		expect(response.json().captcha.challenge.challengeId).toMatch(/^cap_/);
+		expect(response.json().data.comments.captcha.challenge.challengeId).toMatch(
+			/^cap_/,
+		);
 	});
 
-	it("accepts path-only pageUrl in bootstrap requests and stores the normalized path", async () => {
+	it("ignores explicit path-only pageUrl in bootstrap requests without storing unknown pages", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const response = await fixture.app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:path-only-bootstrap&pageTitle=Path%20Only&pageUrl=%2Fposts%2Fpath-only-bootstrap%2F",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:path-only-bootstrap&pageTitle=Path%20Only&pageUrl=%2Fposts%2Fpath-only-bootstrap%2F",
+			headers: {
+				referer: "http://localhost:4321/post:path-only-bootstrap",
+			},
 		});
 
 		expect(response.statusCode).toBe(200);
-
-		const [pageThread] = await fixture.app.db
-			.select()
-			.from(pageThreads)
-			.where(eq(pageThreads.pageKey, "post:path-only-bootstrap"));
-		expect(pageThread?.pageUrl).toBe("/posts/path-only-bootstrap/");
+		expect(response.json().thread).toBeUndefined();
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 	});
 });

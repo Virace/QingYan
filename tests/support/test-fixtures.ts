@@ -5,16 +5,37 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import { buildApp } from "../../src/app";
+import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
+import { createDatabaseClients } from "../../src/db/client";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import type { AdminProfileEmailSender } from "../../src/modules/admin/profile-service";
+import type { CommentMetadataResolver } from "../../src/modules/comments/metadata/resolver";
+import type { EmailSender } from "../../src/modules/notifications/channels/email-channel";
+import type { ServiceControlController } from "../../src/modules/service-control/systemd-service";
+import {
+	createSiteRegistry,
+	type SiteSeed,
+} from "../../src/modules/shared/site-registry";
 
-function createTempWorkspace() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-"));
+export interface TestWorkspace {
+	directory: string;
+	databaseFile: string;
+	configPath: string;
+	logsDirectory: string;
+	cleanup: () => void;
+}
+
+export function createTestWorkspace(prefix = "qingyan-"): TestWorkspace {
+	const directory = mkdtempSync(path.join(tmpdir(), prefix));
 	const databaseFile = path.join(directory, "qingyan.db");
+	const configPath = path.join(directory, "config", "qingyan.yml");
 	const logsDirectory = path.join(directory, "logs");
 
 	return {
 		directory,
 		databaseFile,
+		configPath,
 		logsDirectory,
 		cleanup() {
 			rmSync(directory, { recursive: true, force: true });
@@ -37,6 +58,24 @@ export function applyInitialMigration(databaseFile: string): void {
 	sqlite.close();
 }
 
+async function seedTestSite(
+	databaseFile: string,
+	site: SiteSeed,
+): Promise<void> {
+	const { db, sqlite } = createDatabaseClients(databaseFile);
+	try {
+		await createSiteRegistry().seedSiteFromTemplate(db, site);
+	} finally {
+		sqlite.close();
+	}
+}
+
+export const defaultTestSite: SiteSeed = {
+	siteKey: "fangyuan",
+	name: "FangYuan",
+	allowedOrigins: ["http://localhost:4321"],
+};
+
 export function createTestConfig(
 	databaseFile: string,
 	logsDirectory = "./logs",
@@ -46,6 +85,7 @@ export function createTestConfig(
 			host: "127.0.0.1",
 			port: 4401,
 			publicBaseUrl: "http://localhost:4401",
+			publicPath: "/qingyan",
 			trustProxy: false,
 		},
 		database: {
@@ -55,10 +95,16 @@ export function createTestConfig(
 			},
 		},
 		admin: {
-			tokenHash: "replace-me",
+			console: {
+				path: "/admin",
+			},
+			auth: {
+				username: "admin",
+				passwordHash: createPasswordHash("replace-me"),
+			},
 			session: {
 				cookieName: "qingyan_admin",
-				ttlMinutes: 1440,
+				ttlMinutes: 4320,
 				sameSite: "lax",
 				secure: false,
 			},
@@ -70,10 +116,20 @@ export function createTestConfig(
 				windowSec: 10,
 				maxRequests: 120,
 			},
+			publicOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: true,
+			},
+			adminOriginGuard: {
+				enabled: true,
+				allowMissingOrigin: false,
+				allowedOrigins: [],
+			},
 			rateLimit: {
 				adminLogin: {
 					windowSec: 600,
 					maxFailures: 5,
+					autoBlacklistSec: 1800,
 				},
 				commentCreate: {
 					windowSec: 300,
@@ -93,87 +149,73 @@ export function createTestConfig(
 				},
 			},
 		},
-		captcha: {
-			provider: "image",
-			image: {
-				width: 160,
-				height: 60,
-				ttlSec: 600,
-			},
-		},
 		logging: {
 			directory: logsDirectory,
-			defaults: {
-				level: "info",
-				retentionDays: 7,
-			},
 		},
-		mail: {
-			enabled: false,
-			smtp: {
-				host: "smtp.example.com",
-				port: 465,
-				secure: true,
-				username: "notify@example.com",
-				password: "secret",
-				from: "notify@example.com",
-			},
-		},
-		sites: [
-			{
-				siteKey: "fangyuan",
-				name: "FangYuan",
-				allowedOrigins: ["http://localhost:4321"],
-				defaults: {
-					comments: {
-						enabled: true,
-						defaultStatus: "pending",
-						maxDepth: 3,
-						rootLimit: 20,
-						identity: {
-							require: ["nickname", "email"],
-						},
-						captcha: {
-							mode: "threshold",
-							thresholdWindowSec: 60,
-							thresholdMaxActions: 3,
-						},
-						abuseGuard: {
-							enabled: true,
-							windowSec: 600,
-							maxWriteActions: 100,
-							autoBlacklist: {
-								enabled: true,
-								scope: "post",
-								ttlSec: 1800,
-							},
-						},
-						allowWebsite: true,
-					},
-					pageFeedback: {
-						allowLike: true,
-					},
-					notifications: {
-						emailEnabled: false,
-					},
-				},
-			},
-		],
 	};
 }
 
-export async function createTestApp() {
-	const workspace = createTempWorkspace();
+export async function createTestApp(options?: {
+	devMode?: boolean;
+	devAdminToken?: string;
+	adminDistDirectory?: string;
+	commentMetadataResolver?: CommentMetadataResolver;
+	seedSite?: SiteSeed | false;
+	mutateConfig?: (config: AppConfig) => void;
+	pageSourceFetchText?: (
+		url: string,
+		options: {
+			allowedOrigins: string[];
+			timeoutMs?: number;
+			maxBytes?: number;
+		},
+	) => Promise<string>;
+	pageTitleFetchHtml?: (
+		url: string,
+		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
+	) => Promise<{ status: number; text: string }>;
+	serviceControl?: ServiceControlController;
+	emailSender?: EmailSender;
+	adminProfileEmailSender?: AdminProfileEmailSender;
+}) {
+	const workspace = createTestWorkspace();
 	applyInitialMigration(workspace.databaseFile);
 
-	const app = await buildApp(
-		createTestConfig(workspace.databaseFile, workspace.logsDirectory),
+	const baseConfig = createTestConfig(
+		workspace.databaseFile,
+		workspace.logsDirectory,
 	);
+	options?.mutateConfig?.(baseConfig);
+	if (!options?.devMode) {
+		const site =
+			options?.seedSite === false
+				? undefined
+				: (options?.seedSite ?? defaultTestSite);
+		if (!site) {
+			throw new Error("Test fixture requires a default site seed.");
+		}
+		await seedTestSite(workspace.databaseFile, site);
+	}
+	const resolved = resolveRuntimeOptions(baseConfig, {
+		QINGYAN_DEV_MODE: options?.devMode ? "true" : "false",
+		QINGYAN_DEV_ADMIN_TOKEN: options?.devAdminToken,
+		QINGYAN_DEV_ALLOWED_ORIGIN: "http://localhost:4321",
+	});
+	const app = await buildApp(resolved.config, resolved.runtimeOptions, {
+		adminDistDirectory: options?.adminDistDirectory,
+		commentMetadataResolver: options?.commentMetadataResolver,
+		pageSourceFetchText: options?.pageSourceFetchText,
+		pageTitleFetchHtml: options?.pageTitleFetchHtml,
+		serviceControl: options?.serviceControl,
+		emailSender: options?.emailSender,
+		adminProfileEmailSender: options?.adminProfileEmailSender,
+	});
 
 	return {
 		app,
 		databaseFile: workspace.databaseFile,
 		logsDirectory: workspace.logsDirectory,
+		runtimeOptions: resolved.runtimeOptions,
 		async cleanup() {
 			await app.close();
 			workspace.cleanup();

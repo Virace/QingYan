@@ -47,4 +47,22 @@ export class PageFeedbackRepository {
 
 		return thread;
 	}
+
+	public async incrementPageLike(pageThreadId: number) {
+		await this.db
+			.update(pageThreads)
+			.set({
+				pageLikeCount: sql`${pageThreads.pageLikeCount} + 1`,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(pageThreads.id, pageThreadId));
+
+		const [thread] = await this.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.id, pageThreadId))
+			.limit(1);
+
+		return thread;
+	}
 }

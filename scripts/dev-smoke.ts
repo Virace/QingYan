@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { buildApp } from "../src/app";
-import { captchaSessions, comments, runtimeSettings } from "../src/db/schema";
+import { captchaSessions, comments, siteSettings } from "../src/db/schema";
 import {
 	applyInitialMigration,
 	createTestConfig,
@@ -19,13 +19,13 @@ async function main() {
 	await app.ready();
 
 	try {
-		await app.db.update(runtimeSettings).set({
+		await app.db.update(siteSettings).set({
 			captchaMode: "always",
 		});
 
 		const captchaState = await app.inject({
 			method: "GET",
-			url: "/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:smoke",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:smoke",
 		});
 		const visitorCookie = captchaState.cookies.find(
 			(cookie) => cookie.name === "qingyan_visitor",
@@ -46,7 +46,7 @@ async function main() {
 		};
 		await app.inject({
 			method: "POST",
-			url: "/api/comments/captcha/verify",
+			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -61,7 +61,7 @@ async function main() {
 
 		const createComment = await app.inject({
 			method: "POST",
-			url: "/api/comments",
+			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
@@ -86,7 +86,7 @@ async function main() {
 
 		const adminLogin = await app.inject({
 			method: "POST",
-			url: "/api/admin/session/login",
+			url: "/qingyan/api/admin/session/login",
 			payload: {
 				token: "replace-me",
 			},
@@ -96,7 +96,7 @@ async function main() {
 		);
 		await app.inject({
 			method: "PATCH",
-			url: `/api/admin/comments/${commentId}`,
+			url: `/qingyan/api/admin/comments/${commentId}`,
 			cookies: {
 				qingyan_admin: adminCookie?.value ?? "",
 			},
@@ -107,14 +107,14 @@ async function main() {
 
 		const bootstrap = await app.inject({
 			method: "GET",
-			url: "/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:smoke&pageTitle=Smoke&pageUrl=https://fangyuan.example.com/posts/smoke/&sortBy=newest&limit=20&offset=0",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageKey=post:smoke&pageTitle=Smoke&pageUrl=https://fangyuan.example.com/posts/smoke/&sortBy=newest&limit=20&offset=0",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},
 		});
 		const thread = await app.inject({
 			method: "GET",
-			url: "/api/comments/thread?siteKey=fangyuan&pageKey=post:smoke&sortBy=newest&limit=20&offset=0",
+			url: "/qingyan/api/comments/thread?siteKey=fangyuan&pageKey=post:smoke&sortBy=newest&limit=20&offset=0",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
 			},

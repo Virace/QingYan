@@ -1,8 +1,15 @@
-import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
-import { AppError, ResourceNotFoundError } from "../shared/errors";
-import type { CommentsRepository } from "../comments/repository";
 import type { CaptchaService } from "../comments/captcha-service";
+import { resolveRequestMetadata } from "../comments/metadata/request-metadata";
+import type { CommentMetadataResolver } from "../comments/metadata/resolver";
+import type { CommentsRepository } from "../comments/repository";
+import { assertCommentInputLimits } from "../shared/comment-input-limits";
+import { AppError, ResourceNotFoundError } from "../shared/errors";
+import {
+	mergeEngagementSettings,
+	resolveEngagementTrustMode,
+} from "../shared/site-settings-defaults";
+import type { SystemSettings } from "../system-settings/definitions";
 import type { PageFeedbackRepository } from "./repository";
 
 function resolveIdentity(
@@ -15,11 +22,14 @@ function resolveIdentity(
 
 export class PageFeedbackService {
 	public constructor(
-		private readonly config: AppConfig,
 		private readonly security: SecurityToolkit,
 		private readonly commentsRepository: CommentsRepository,
 		private readonly captchaService: CaptchaService,
 		private readonly pageFeedbackRepository: PageFeedbackRepository,
+		private readonly metadataResolver?: CommentMetadataResolver,
+		private readonly loadIpRegionSettings?: () => Promise<
+			SystemSettings["ipRegion"]
+		>,
 	) {}
 
 	public async likePage(input: {
@@ -27,61 +37,149 @@ export class PageFeedbackService {
 		pageKey: string;
 		pageTitle: string;
 		pageUrl: string;
+		captcha?: {
+			challengeId: string;
+			value: string;
+		} | null;
 		visitorKey?: string;
 		ip?: string;
 		userAgent?: string;
 	}) {
 		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
-		const configuredSite = this.commentsRepository.getConfiguredSite(
-			input.siteKey,
-		);
-		if (!site || !configuredSite) {
+		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
-
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
+		await this.commentsRepository.assertPageInteractive({
 			siteId: site.id,
-			visitorKey: input.visitorKey,
+			pageKey: input.pageKey,
+		});
+
+		const settings = await this.commentsRepository.getSiteSettings(site.id);
+		assertCommentInputLimits(
+			{
+				pageKey: input.pageKey,
+				pageTitle: input.pageTitle,
+			},
+			settings?.commentInputLimitsJson,
+		);
+		const engagement = mergeEngagementSettings(settings?.engagementJson);
+		const trustMode = resolveEngagementTrustMode(engagement);
+		if (!engagement.pageLikes.enabled) {
+			throw new AppError(403, "PAGE_FEEDBACK_DISABLED", "页面点赞功能未开启。");
+		}
+		const metadataConfig = this.commentsRepository.resolveCommentMetadata(
+			settings ?? undefined,
+		);
+		const requestMetadata = await resolveRequestMetadata({
+			resolver: this.metadataResolver,
 			ip: input.ip,
 			userAgent: input.userAgent,
+			metadata: metadataConfig,
+			ipRegion: this.loadIpRegionSettings
+				? await this.loadIpRegionSettings()
+				: undefined,
 		});
+
+		const visitor = engagement.visitors.enabled
+			? await this.commentsRepository.getOrCreateVisitor({
+					siteId: site.id,
+					visitorKey: input.visitorKey,
+					ip: requestMetadata.ip,
+					userAgent: requestMetadata.userAgent,
+					metadata: requestMetadata.snapshot,
+					pageKey: input.pageKey,
+					pageUrl: input.pageUrl,
+				})
+			: undefined;
 		const thread = await this.commentsRepository.getOrCreatePageThread({
 			siteId: site.id,
 			pageKey: input.pageKey,
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 		});
-		const settings = await this.commentsRepository.getRuntimeSettings(site.id);
-		const supportsLike =
-			settings?.allowPageLike ?? configuredSite.defaults.pageFeedback.allowLike;
-		if (!supportsLike) {
-			throw new AppError(403, "PAGE_FEEDBACK_DISABLED", "页面点赞功能未开启。");
-		}
 
 		await this.security.assertNotBlacklisted({
 			siteKey: input.siteKey,
-			visitorKey: visitor.visitorKey,
+			visitorKey: visitor?.visitorKey,
 			ip: input.ip,
 			requestScope: "write",
 			errorCode: "COMMENT_BLACKLISTED",
 			errorMessage: "当前请求已被拒绝。",
 		});
 		await this.security.consumeRateLimit({
-			key: `public:${resolveIdentity(input.siteKey, visitor.visitorKey, input.ip)}:page_like`,
-			rule:
-				this.config.security.rateLimit.pageLike ??
-				this.config.security.rateLimit.commentVote,
+			key: `public:${resolveIdentity(input.siteKey, visitor?.visitorKey ?? "", input.ip)}:page_like`,
+			rule: await this.security.getRateLimitRule("pageLike"),
 			errorCode: "VOTE_RATE_LIMITED",
 			errorMessage: "提交过于频繁，请稍后再试。",
 		});
-		await this.captchaService.ensureSatisfied({
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			action: "comment_create",
-			visitorKey: visitor.visitorKey,
-			ip: input.ip,
-			userAgent: input.userAgent,
-		});
+		if (visitor && input.captcha) {
+			await this.captchaService.consumeInlineCaptcha({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				challengeId: input.captcha.challengeId,
+				value: input.captcha.value,
+				action: "page_like",
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
+		}
+		if (visitor) {
+			await this.captchaService.ensureSatisfied({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				action: "page_like",
+				visitorKey: visitor.visitorKey,
+				ip: input.ip,
+				userAgent: input.userAgent,
+			});
+		}
+
+		if (!visitor) {
+			const updatedThread = await this.pageFeedbackRepository.incrementPageLike(
+				thread.id,
+			);
+			if (!updatedThread) {
+				throw new ResourceNotFoundError("THREAD_NOT_FOUND", "页面线程不存在。");
+			}
+
+			await this.security.writeAudit({
+				siteKey: input.siteKey,
+				actorType: "visitor",
+				actorId: input.ip ?? "anonymous",
+				action: "page.like",
+				targetType: "page_thread",
+				targetId: String(thread.id),
+				payload: {
+					trustMode,
+				},
+			});
+			const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
+			const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
+			if (abuseGuardEnabled && autoBlacklistEnabled) {
+				await this.security.recordAbuseWriteAction({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					ip: input.ip,
+					rule: {
+						windowSec: settings?.abuseGuardWindowSec ?? 600,
+						maxRequests: settings?.abuseGuardMaxWriteActions ?? 100,
+					},
+					scope:
+						(settings?.autoBlacklistScope as "post" | "all" | undefined) ??
+						"post",
+					ttlSec: settings?.autoBlacklistTtlSec ?? 1800,
+				});
+			}
+
+			return {
+				visitorKey: undefined,
+				pageLikes: {
+					count: updatedThread.pageLikeCount,
+					liked: true,
+				},
+			};
+		}
 
 		const existingLike = await this.pageFeedbackRepository.getLikeRecord(
 			thread.id,
@@ -111,12 +209,28 @@ export class PageFeedbackService {
 			targetType: "page_thread",
 			targetId: String(thread.id),
 		});
+		const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
+		const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
+		if (abuseGuardEnabled && autoBlacklistEnabled) {
+			await this.security.recordAbuseWriteAction({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				ip: input.ip,
+				rule: {
+					windowSec: settings?.abuseGuardWindowSec ?? 600,
+					maxRequests: settings?.abuseGuardMaxWriteActions ?? 100,
+				},
+				scope:
+					(settings?.autoBlacklistScope as "post" | "all" | undefined) ??
+					"post",
+				ttlSec: settings?.autoBlacklistTtlSec ?? 1800,
+			});
+		}
 
 		return {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,
-			pageFeedback: {
-				supportsLike: true,
-				likeCount: updatedThread.pageLikeCount,
+			pageLikes: {
+				count: updatedThread.pageLikeCount,
 				liked: true,
 			},
 		};

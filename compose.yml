@@ -8,20 +8,23 @@ services:
       - "4401:4401"
     environment:
       NODE_ENV: production
+      TZ: Asia/Shanghai
       QINGYAN_CONFIG_PATH: /app/config/qingyan.yml
+      QINGYAN_INSTALL_TRANSITION_MODE: exit_for_supervisor
     volumes:
       - ./config:/app/config
       - ./data:/app/data
+      - ./logs:/app/logs
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:4401/healthz').then((res)=>{if(!res.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:4401/qingyan/healthz').then((res)=>{if(!res.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     restart: unless-stopped
