@@ -8,6 +8,7 @@ import {
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/app";
@@ -28,6 +29,7 @@ import {
 	resolveInstallLockPath,
 	resolveInstallState,
 } from "../../src/modules/install/state";
+import { resolveStartupMode } from "../../src/startup-mode";
 import { createTestWorkspace } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -1422,6 +1424,20 @@ describe("install bootstrap", () => {
 			databasePath: path.resolve(process.cwd(), workspace.databaseFile),
 			adminConsolePath: "/admin",
 		});
+		await expect(
+			resolveStartupMode({
+				installed: true,
+				configPath: workspace.configPath,
+				currentApplicationVersion: "0.1.0",
+				partialUpgradeMarkerPath: path.join(
+					workspace.directory,
+					"data",
+					"upgrade",
+					"partial-upgrade.json",
+				),
+				createSqliteClient: (file) => new Database(file),
+			}),
+		).resolves.toMatchObject({ mode: "normal" });
 
 		const { db, sqlite } = createDatabaseClients(workspace.databaseFile);
 		try {
