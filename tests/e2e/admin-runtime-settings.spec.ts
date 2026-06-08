@@ -759,7 +759,7 @@ test("blacklist rules are created from a dialog without leaking cancelled drafts
 
 	await page.getByRole("button", { name: "黑名单", exact: true }).click();
 	await expect(page.getByRole("heading", { name: "黑名单" })).toBeVisible();
-	await expect(page.getByText("黑名单规则", { exact: true })).toBeVisible();
+	await expect(page.getByText("安全规则", { exact: true })).toBeVisible();
 	const target = `cancelled-${Date.now()}@example.test`;
 	await page.getByRole("button", { name: "新增规则" }).click();
 	const dialog = page.getByRole("dialog", { name: "新增黑名单规则" });
