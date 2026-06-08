@@ -9,6 +9,7 @@ import {
 	avatarSettingsSchema,
 	securitySettingsSchema,
 } from "../system-settings/definitions";
+import { commentInputLimitHardCaps } from "../shared/site-settings-defaults";
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
 const commentMetadataSchema = z.object({
@@ -78,6 +79,41 @@ const engagementSettingsSchema = z.object({
 		})
 		.optional(),
 });
+
+const commentInputLimitsSchema = z.object({
+	authorNameMaxLength: z
+		.number()
+		.int()
+		.positive()
+		.max(commentInputLimitHardCaps.authorNameMaxLength)
+		.optional(),
+	authorWebsiteMaxLength: z
+		.number()
+		.int()
+		.positive()
+		.max(commentInputLimitHardCaps.authorWebsiteMaxLength)
+		.optional(),
+	pageTitleMaxLength: z
+		.number()
+		.int()
+		.positive()
+		.max(commentInputLimitHardCaps.pageTitleMaxLength)
+		.optional(),
+	pageKeyMaxLength: z
+		.number()
+		.int()
+		.positive()
+		.max(commentInputLimitHardCaps.pageKeyMaxLength)
+		.optional(),
+	contentMaxLength: z
+		.number()
+		.int()
+		.positive()
+		.max(commentInputLimitHardCaps.contentMaxLength)
+		.optional(),
+});
+
+const siteKeySchema = z.string().min(1).max(128);
 
 const adminNotificationDeliverySettingsSchema = z.object({
 	globalMaxPerMinute: z.number().int().positive().optional(),
@@ -546,8 +582,73 @@ export const adminBlacklistTargetBodySchema = z.object({
 	targetValue: z.string().min(1),
 });
 
+const allowlistTargetTypeSchema = z.enum(["ip", "email", "visitor"]);
+const allowlistMatchModeSchema = z.enum(["exact", "cidr", "domain"]);
+
+function addAllowlistMatchModeIssue(
+	input: { targetType?: string; matchMode?: string },
+	context: z.RefinementCtx,
+) {
+	const valid =
+		(input.targetType === "ip" &&
+			(input.matchMode === "exact" || input.matchMode === "cidr")) ||
+		(input.targetType === "email" &&
+			(input.matchMode === "exact" || input.matchMode === "domain")) ||
+		(input.targetType === "visitor" && input.matchMode === "exact");
+	if (!valid) {
+		context.addIssue({
+			code: "custom",
+			path: ["matchMode"],
+			message: "匹配模式与目标类型不兼容",
+		});
+	}
+}
+
+export const adminAllowlistQuerySchema = z.object({
+	siteKey: z.string().min(1).optional(),
+	targetType: allowlistTargetTypeSchema.optional(),
+	search: z.string().min(1).optional(),
+	q: z.string().min(1).optional(),
+	limit: z.coerce.number().int().positive().max(100).default(20),
+	offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const adminAllowlistBodySchema = z
+	.object({
+		siteKey: z.string().min(1).optional(),
+		targetType: allowlistTargetTypeSchema,
+		matchMode: allowlistMatchModeSchema.default("exact"),
+		targetValue: z.string().min(1),
+		scope: z.enum(["post", "all"]).default("all"),
+		reason: z.string().min(1).optional(),
+		expiresAt: z.string().datetime().optional(),
+	})
+	.superRefine(addAllowlistMatchModeIssue);
+
+export const adminAllowlistPatchBodySchema = z
+	.object({
+		targetType: allowlistTargetTypeSchema.optional(),
+		matchMode: allowlistMatchModeSchema.optional(),
+		targetValue: z.string().min(1).optional(),
+		scope: z.enum(["post", "all"]).optional(),
+		reason: z.string().min(1).nullable().optional(),
+		expiresAt: z.string().datetime().nullable().optional(),
+	})
+	.refine((value) => Object.keys(value).length > 0, {
+		message: "至少需要一个更新字段",
+	})
+	.superRefine((value, context) => {
+		if (value.targetType && value.matchMode) {
+			addAllowlistMatchModeIssue(value, context);
+		}
+	});
+
+export const adminAllowlistParamsSchema = z.object({
+	ruleId: z.coerce.number().int().positive(),
+});
+
 export const adminSettingsQuerySchema = z.object({
-	siteKey: z.string().min(1),
+	siteKey: siteKeySchema,
 });
 
 export const adminSettingsBodySchema = z
@@ -564,6 +665,7 @@ export const adminSettingsBodySchema = z
 					})
 					.optional(),
 				allowWebsite: z.boolean().optional(),
+				inputLimits: commentInputLimitsSchema.optional(),
 				captcha: z
 					.object({
 						mode: z.enum(["never", "always", "threshold"]).optional(),

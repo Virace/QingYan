@@ -206,6 +206,110 @@ describe("admin api ACL", () => {
 		});
 	});
 
+	it("enforces allowlist permissions and site scope", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createSecondSite(fixture);
+		await createScopedUser(fixture, {
+			username: "allowlist-site-admin",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		await createScopedUser(fixture, {
+			username: "allowlist-site-moderator",
+			groupKey: "site_moderator",
+			siteKeys: ["fangyuan"],
+		});
+
+		const siteAdmin = await loginAsAdmin(fixture.app, {
+			username: "allowlist-site-admin",
+			password: "replace-me",
+		});
+		const moderator = await loginAsAdmin(fixture.app, {
+			username: "allowlist-site-moderator",
+			password: "replace-me",
+		});
+		const admin = await loginAsAdmin(fixture.app);
+
+		const ownCreate = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/allowlist",
+			...withAdminWriteAuth(siteAdmin),
+			payload: {
+				siteKey: "fangyuan",
+				targetType: "ip",
+				matchMode: "exact",
+				targetValue: "203.0.113.1",
+				scope: "post",
+			},
+		});
+		expect(ownCreate.statusCode).toBe(200);
+		const ownRuleId = (ownCreate.json() as { rule: { id: number } }).rule.id;
+
+		const otherSiteCreate = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/allowlist",
+			...withAdminWriteAuth(siteAdmin),
+			payload: {
+				siteKey: "qingyan",
+				targetType: "ip",
+				matchMode: "exact",
+				targetValue: "203.0.113.2",
+				scope: "post",
+			},
+		});
+		expect(otherSiteCreate.statusCode).toBe(403);
+		expect(otherSiteCreate.json()).toMatchObject({
+			error: {
+				code: "ADMIN_SITE_ACCESS_REQUIRED",
+			},
+		});
+
+		const moderatorCreate = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/allowlist",
+			...withAdminWriteAuth(moderator),
+			payload: {
+				siteKey: "fangyuan",
+				targetType: "ip",
+				matchMode: "exact",
+				targetValue: "203.0.113.3",
+				scope: "post",
+			},
+		});
+		expect(moderatorCreate.statusCode).toBe(403);
+		expect(moderatorCreate.json()).toMatchObject({
+			error: {
+				code: "ADMIN_PERMISSION_REQUIRED",
+			},
+		});
+
+		const moderatorDelete = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/allowlist/${ownRuleId}`,
+			...withAdminWriteAuth(moderator),
+		});
+		expect(moderatorDelete.statusCode).toBe(403);
+		expect(moderatorDelete.json()).toMatchObject({
+			error: {
+				code: "ADMIN_PERMISSION_REQUIRED",
+			},
+		});
+
+		const globalCreate = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/allowlist",
+			...withAdminWriteAuth(admin),
+			payload: {
+				targetType: "email",
+				matchMode: "domain",
+				targetValue: "trusted.example",
+				scope: "all",
+			},
+		});
+		expect(globalCreate.statusCode).toBe(200);
+	});
+
 	it("rejects global ops and import/export routes for site-scoped users", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

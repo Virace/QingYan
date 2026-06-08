@@ -330,6 +330,21 @@ export interface AdminBlacklistRule {
 	createdAt: string;
 }
 
+export interface AdminAllowlistRule {
+	id: number;
+	siteId: number | null;
+	scope: "post" | "all";
+	targetType: "ip" | "email" | "visitor";
+	targetValue: string;
+	matchMode: "exact" | "cidr" | "domain";
+	reason: string | null;
+	expiresAt: string | null;
+	createdByUserId: number | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+}
+
 export interface AdminSite {
 	siteKey: string;
 	name: string;
@@ -427,6 +442,13 @@ export interface AdminSettings {
 				scope: "post" | "all";
 				ttlSec: number;
 			};
+		};
+		inputLimits: {
+			authorNameMaxLength: number;
+			authorWebsiteMaxLength: number;
+			pageTitleMaxLength: number;
+			pageKeyMaxLength: number;
+			contentMaxLength: number;
 		};
 		metadata: {
 			collectIp: boolean;
@@ -958,6 +980,62 @@ export function deleteBlacklistTarget(input: {
 		{
 			method: "DELETE",
 			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function listAllowlistRules(input: {
+	siteKey?: string;
+	targetType?: "ip" | "email" | "visitor";
+	search?: string;
+	limit?: number;
+	offset?: number;
+}) {
+	return requestJson<Page<AdminAllowlistRule>>(
+		`/api/admin/allowlist?${queryString(input)}`,
+	);
+}
+
+export function createAllowlistRule(input: {
+	siteKey?: string;
+	targetType: "ip" | "email" | "visitor";
+	matchMode: "exact" | "cidr" | "domain";
+	targetValue: string;
+	scope: "post" | "all";
+	reason?: string;
+	expiresAt?: string;
+}) {
+	return requestJson<{ rule: AdminAllowlistRule }>("/api/admin/allowlist", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+export function updateAllowlistRule(
+	ruleId: number,
+	input: {
+		targetType?: "ip" | "email" | "visitor";
+		matchMode?: "exact" | "cidr" | "domain";
+		targetValue?: string;
+		scope?: "post" | "all";
+		reason?: string | null;
+		expiresAt?: string | null;
+	},
+) {
+	return requestJson<{ rule: AdminAllowlistRule }>(
+		`/api/admin/allowlist/${ruleId}`,
+		{
+			method: "PATCH",
+			body: JSON.stringify(input),
+		},
+	);
+}
+
+export function deleteAllowlistRule(ruleId: number) {
+	return requestJson<{ rule: AdminAllowlistRule }>(
+		`/api/admin/allowlist/${ruleId}`,
+		{
+			method: "DELETE",
 		},
 	);
 }

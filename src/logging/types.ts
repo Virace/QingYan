@@ -29,6 +29,7 @@ export type AppEventName =
 	| "security.blacklist.hit"
 	| "security.blacklist.added"
 	| "security.blacklist.deleted"
+	| "security.allowlist.added"
 	| "captcha.required"
 	| "captcha.verified"
 	| "captcha.failed"

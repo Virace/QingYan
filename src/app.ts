@@ -3,6 +3,7 @@ import { joinPublicPath } from "./config/public-path";
 import type { AppRuntimeOptions } from "./config/runtime-options";
 import type { AppConfig } from "./config/types";
 import { createMemoryLoggerManager } from "./logging/memory-logger-manager";
+import { adminAllowlistRoutes } from "./modules/admin/allowlist-routes";
 import { adminBlacklistRoutes } from "./modules/admin/blacklist-routes";
 import { adminOpsRoutes } from "./modules/admin/ops-routes";
 import { adminOverviewRoutes } from "./modules/admin/overview-routes";
@@ -309,6 +310,9 @@ export async function buildApp(
 	});
 	await app.register(adminBlacklistRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/blacklist"),
+	});
+	await app.register(adminAllowlistRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/allowlist"),
 	});
 	await app.register(adminSitesRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/sites"),

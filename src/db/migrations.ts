@@ -203,6 +203,12 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 			addColumnIfMissing(
 				sqlite,
 				"site_settings",
+				"comment_input_limits_json",
+				"text",
+			);
+			addColumnIfMissing(
+				sqlite,
+				"site_settings",
 				"commenter_reply_email_enabled",
 				"integer NOT NULL DEFAULT 0",
 			);
@@ -228,6 +234,26 @@ function applyUnreleasedBaselineBackfill(sqlite: SqliteClient): void {
 		}
 
 		sqlite.exec(`
+			CREATE TABLE IF NOT EXISTS allowlist_rules (
+				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+				site_id integer,
+				target_type text NOT NULL,
+				match_mode text NOT NULL,
+				target_value text NOT NULL,
+				scope text DEFAULT 'all' NOT NULL,
+				reason text,
+				expires_at text,
+				created_by_user_id integer,
+				created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+				deleted_at text,
+				FOREIGN KEY (site_id) REFERENCES sites(id) ON UPDATE no action ON DELETE no action,
+				FOREIGN KEY (created_by_user_id) REFERENCES admin_users(id) ON UPDATE no action ON DELETE no action
+			);
+			CREATE INDEX IF NOT EXISTS allowlist_rules_site_target_idx ON allowlist_rules (site_id, target_type, target_value);
+			CREATE INDEX IF NOT EXISTS allowlist_rules_target_idx ON allowlist_rules (target_type, target_value);
+			CREATE INDEX IF NOT EXISTS allowlist_rules_expires_at_idx ON allowlist_rules (expires_at);
+
 			CREATE TABLE IF NOT EXISTS task_runs (
 				id text PRIMARY KEY NOT NULL,
 				queue_backend text NOT NULL,

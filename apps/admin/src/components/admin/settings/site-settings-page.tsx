@@ -461,6 +461,164 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 												}
 											/>
 											<SettingsSection
+												title="公开输入上限"
+												description="限制公开评论、页面身份和作者信息的最大长度。保存后前台 bootstrap 会返回这些限制。"
+											>
+												<div className="grid gap-4 md:grid-cols-2">
+													<Field
+														label="评论正文"
+														error={firstFieldError(
+															saveError,
+															"comments.inputLimits.contentMaxLength",
+														)}
+													>
+														<Input
+															type="number"
+															min={1}
+															max={10000}
+															value={
+																draft.comments.inputLimits.contentMaxLength
+															}
+															onChange={(event) =>
+																setDraft({
+																	...draft,
+																	comments: {
+																		...draft.comments,
+																		inputLimits: {
+																			...draft.comments.inputLimits,
+																			contentMaxLength: Number(
+																				event.target.value,
+																			),
+																		},
+																	},
+																})
+															}
+														/>
+													</Field>
+													<Field
+														label="作者昵称"
+														error={firstFieldError(
+															saveError,
+															"comments.inputLimits.authorNameMaxLength",
+														)}
+													>
+														<Input
+															type="number"
+															min={1}
+															max={100}
+															value={
+																draft.comments.inputLimits.authorNameMaxLength
+															}
+															onChange={(event) =>
+																setDraft({
+																	...draft,
+																	comments: {
+																		...draft.comments,
+																		inputLimits: {
+																			...draft.comments.inputLimits,
+																			authorNameMaxLength: Number(
+																				event.target.value,
+																			),
+																		},
+																	},
+																})
+															}
+														/>
+													</Field>
+													<Field
+														label="作者站点 URL"
+														error={firstFieldError(
+															saveError,
+															"comments.inputLimits.authorWebsiteMaxLength",
+														)}
+													>
+														<Input
+															type="number"
+															min={1}
+															max={4096}
+															value={
+																draft.comments.inputLimits
+																	.authorWebsiteMaxLength
+															}
+															onChange={(event) =>
+																setDraft({
+																	...draft,
+																	comments: {
+																		...draft.comments,
+																		inputLimits: {
+																			...draft.comments.inputLimits,
+																			authorWebsiteMaxLength: Number(
+																				event.target.value,
+																			),
+																		},
+																	},
+																})
+															}
+														/>
+													</Field>
+													<Field
+														label="页面标题"
+														error={firstFieldError(
+															saveError,
+															"comments.inputLimits.pageTitleMaxLength",
+														)}
+													>
+														<Input
+															type="number"
+															min={1}
+															max={500}
+															value={
+																draft.comments.inputLimits.pageTitleMaxLength
+															}
+															onChange={(event) =>
+																setDraft({
+																	...draft,
+																	comments: {
+																		...draft.comments,
+																		inputLimits: {
+																			...draft.comments.inputLimits,
+																			pageTitleMaxLength: Number(
+																				event.target.value,
+																			),
+																		},
+																	},
+																})
+															}
+														/>
+													</Field>
+													<Field
+														label="页面标识"
+														error={firstFieldError(
+															saveError,
+															"comments.inputLimits.pageKeyMaxLength",
+														)}
+													>
+														<Input
+															type="number"
+															min={1}
+															max={1024}
+															value={
+																draft.comments.inputLimits.pageKeyMaxLength
+															}
+															onChange={(event) =>
+																setDraft({
+																	...draft,
+																	comments: {
+																		...draft.comments,
+																		inputLimits: {
+																			...draft.comments.inputLimits,
+																			pageKeyMaxLength: Number(
+																				event.target.value,
+																			),
+																		},
+																	},
+																})
+															}
+														/>
+													</Field>
+												</div>
+											</SettingsSection>
+											<SettingsSection
 												title="评论身份必填项"
 												description="控制普通访客提交评论时必须提供哪些身份字段。"
 											>
@@ -644,6 +802,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 											</SettingsSection>
 											<BooleanField
 												label="滥用防护"
+												description="开启后 QingYan 会记录公开写操作并按窗口阈值触发自动拉黑；关闭后需依赖前置 WAF、反向代理或外部限流。"
 												checked={draft.comments.abuseGuard.enabled}
 												onCheckedChange={(enabled) =>
 													setDraft({
@@ -682,7 +841,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 											</Field>
 											<Field
 												label="窗口内最大写操作次数"
-												description="单位是次数；评论提交、评论投票等公开写操作都会计入。"
+												description="单位是次数；评论提交、评论投票、页面点赞等公开写操作都会计入。"
 											>
 												<Input
 													type="number"
@@ -704,6 +863,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 											</Field>
 											<BooleanField
 												label="自动拉黑"
+												description="关闭后仍保留手动黑名单、验证码和基础限流，但超出滥用阈值不会自动新增黑名单规则。"
 												checked={
 													draft.comments.abuseGuard.autoBlacklist.enabled
 												}

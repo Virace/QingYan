@@ -34,12 +34,15 @@ import {
 import { buildPaginationResult } from "../shared/pagination";
 import type { SiteRegistry } from "../shared/site-registry";
 import {
+	type CommentInputLimitsSettings,
 	type CommentMetadataSettings,
 	defaultCommentMetadata,
 	type EngagementSettingsPatch,
+	mergeCommentInputLimits,
 	mergeEngagementSettings,
 	mergeEngagementSettingsPatch,
 	readPersistedBoolean,
+	serializeCommentInputLimits,
 	serializeEngagementSettings,
 } from "../shared/site-settings-defaults";
 import {
@@ -127,6 +130,19 @@ function mergeCommentMetadata(
 	} catch {
 		return defaultCommentMetadata;
 	}
+}
+
+function isAllowlistMatchModeValid(input: {
+	targetType: "ip" | "email" | "visitor";
+	matchMode: "exact" | "cidr" | "domain";
+}) {
+	return (
+		(input.targetType === "ip" &&
+			(input.matchMode === "exact" || input.matchMode === "cidr")) ||
+		(input.targetType === "email" &&
+			(input.matchMode === "exact" || input.matchMode === "domain")) ||
+		(input.targetType === "visitor" && input.matchMode === "exact")
+	);
 }
 
 export class AdminManagementService {
@@ -332,6 +348,7 @@ export class AdminManagementService {
 							identity: buildCommentForm({
 								allowWebsite: item.comments.allowWebsite,
 								commentRequireJson: item.comments.commentRequireJson,
+								commentInputLimitsJson: item.comments.commentInputLimitsJson,
 							}),
 							allowWebsite: item.comments.allowWebsite,
 							captcha: item.comments.captcha,
@@ -999,6 +1016,154 @@ export class AdminManagementService {
 		return rules;
 	}
 
+	public async listAllowlist(input: {
+		siteKey?: string;
+		targetType?: "ip" | "email" | "visitor";
+		search?: string;
+		q?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const result = await this.repository.listAllowlistRules({
+			siteId,
+			targetType: input.targetType,
+			search: input.search ?? input.q,
+			limit: input.limit,
+			offset: input.offset,
+		});
+
+		return buildPaginationResult(result.items, {
+			limit: input.limit,
+			offset: input.offset,
+			totalCount: result.totalCount,
+		});
+	}
+
+	public async createAllowlist(input: {
+		siteKey?: string;
+		targetType: "ip" | "email" | "visitor";
+		matchMode: "exact" | "cidr" | "domain";
+		targetValue: string;
+		scope: "post" | "all";
+		reason?: string;
+		expiresAt?: string;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		const siteId = await this.resolveSiteId(input.siteKey);
+		const rule = await this.repository.createAllowlistRule({
+			siteId,
+			scope: input.scope,
+			targetType: input.targetType,
+			matchMode: input.matchMode,
+			targetValue: input.targetValue,
+			reason: input.reason,
+			expiresAt: input.expiresAt,
+			createdByUserId: input.actorUserId,
+		});
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			siteKey: input.siteKey,
+			actorType: input.actorUserId ? "admin_user" : "system",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+			event: "security.allowlist.added",
+			message: "已新增白名单规则",
+			targetType: input.targetType,
+			targetId: input.targetValue,
+			payload: {
+				ruleId: rule?.id,
+				scope: input.scope,
+			},
+		});
+
+		return rule;
+	}
+
+	public async updateAllowlist(input: {
+		ruleId: number;
+		targetType?: "ip" | "email" | "visitor";
+		matchMode?: "exact" | "cidr" | "domain";
+		targetValue?: string;
+		scope?: "post" | "all";
+		reason?: string | null;
+		expiresAt?: string | null;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		const existingRule = await this.repository.getAllowlistRule(input.ruleId);
+		if (!existingRule) {
+			throw new ResourceNotFoundError(
+				"ALLOWLIST_RULE_NOT_FOUND",
+				"白名单规则不存在。",
+			);
+		}
+		const targetType = input.targetType ?? existingRule.targetType;
+		const matchMode = input.matchMode ?? existingRule.matchMode;
+		if (
+			!isAllowlistMatchModeValid({
+				targetType: targetType as "ip" | "email" | "visitor",
+				matchMode: matchMode as "exact" | "cidr" | "domain",
+			})
+		) {
+			throw new InvalidRequestError({
+				code: "ALLOWLIST_MATCH_MODE_INVALID",
+				message: "匹配模式与目标类型不兼容。",
+			});
+		}
+		const rule = await this.repository.updateAllowlistRule(input.ruleId, {
+			targetType: input.targetType,
+			matchMode: input.matchMode,
+			targetValue: input.targetValue,
+			scope: input.scope,
+			reason: input.reason,
+			expiresAt: input.expiresAt,
+		});
+		if (!rule) {
+			throw new ResourceNotFoundError(
+				"ALLOWLIST_RULE_NOT_FOUND",
+				"白名单规则不存在。",
+			);
+		}
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			actorType: input.actorUserId ? "admin_user" : "system",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+			action: "allowlist.updated",
+			targetType: "allowlist_rule",
+			targetId: String(input.ruleId),
+		});
+
+		return rule;
+	}
+
+	public async deleteAllowlist(input: {
+		ruleId: number;
+		requestId?: string;
+		actorUserId?: number;
+	}) {
+		const rule = await this.repository.deleteAllowlistRule(input.ruleId);
+		if (!rule) {
+			throw new ResourceNotFoundError(
+				"ALLOWLIST_RULE_NOT_FOUND",
+				"白名单规则不存在。",
+			);
+		}
+
+		await this.security.writeAudit({
+			requestId: input.requestId,
+			actorType: input.actorUserId ? "admin_user" : "system",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+			action: "allowlist.deleted",
+			targetType: "allowlist_rule",
+			targetId: String(input.ruleId),
+		});
+
+		return rule;
+	}
+
 	public async getSettings(siteKey: string) {
 		const { registeredSite } = this.resolveSite(siteKey);
 		const settings = await this.repository.getSiteSettings(registeredSite.id);
@@ -1021,6 +1186,7 @@ export class AdminManagementService {
 				identity: buildCommentForm({
 					allowWebsite: settings.allowWebsite,
 					commentRequireJson: settings.commentRequireJson,
+					commentInputLimitsJson: settings.commentInputLimitsJson,
 				}),
 				allowWebsite: settings.allowWebsite,
 				captcha: {
@@ -1038,6 +1204,7 @@ export class AdminManagementService {
 						ttlSec: settings.autoBlacklistTtlSec,
 					},
 				},
+				inputLimits: mergeCommentInputLimits(settings.commentInputLimitsJson),
 				metadata: mergeCommentMetadata(settings.commentMetadataJson),
 				verifiedAuthor: mergeVerifiedAuthorSettings(
 					settings.verifiedAuthorJson,
@@ -1203,6 +1370,7 @@ export class AdminManagementService {
 						ttlSec?: number;
 					};
 				};
+				inputLimits?: Partial<CommentInputLimitsSettings>;
 				metadata?: CommentMetadataPatch;
 				verifiedAuthor?: VerifiedAuthorSettings;
 				staffDisplay?: StaffDisplaySettings;
@@ -1245,6 +1413,12 @@ export class AdminManagementService {
 		const nextPageRegistry = input.pageRegistry
 			? mergePageRegistrySettingsPatch(currentPageRegistry, input.pageRegistry)
 			: undefined;
+		const nextCommentInputLimits = input.comments?.inputLimits
+			? mergeCommentInputLimits({
+					...mergeCommentInputLimits(existingSettings.commentInputLimitsJson),
+					...input.comments.inputLimits,
+				})
+			: undefined;
 		await this.validateNotificationRecipients({
 			siteId: registeredSite.id,
 			recipients: input.notifications?.backend?.recipients,
@@ -1278,6 +1452,9 @@ export class AdminManagementService {
 			autoBlacklistEnabled: input.comments?.abuseGuard?.autoBlacklist?.enabled,
 			autoBlacklistScope: input.comments?.abuseGuard?.autoBlacklist?.scope,
 			autoBlacklistTtlSec: input.comments?.abuseGuard?.autoBlacklist?.ttlSec,
+			commentInputLimitsJson: nextCommentInputLimits
+				? serializeCommentInputLimits(nextCommentInputLimits)
+				: undefined,
 			commentMetadataJson: input.comments?.metadata
 				? JSON.stringify(input.comments.metadata)
 				: undefined,

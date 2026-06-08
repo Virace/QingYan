@@ -1,5 +1,6 @@
 export * from "./admin-users";
 export * from "./admin-bootstrap";
+export * from "./allowlist";
 export * from "./captcha";
 export * from "./comment-metadata";
 export * from "./comment-moderation";

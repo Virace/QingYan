@@ -106,6 +106,13 @@ describe("public API contract", () => {
 					form: {
 						allow: ["nickname", "email", "website"],
 						require: ["nickname", "email"],
+						limits: {
+							authorNameMaxLength: 40,
+							authorWebsiteMaxLength: 2048,
+							pageTitleMaxLength: 200,
+							pageKeyMaxLength: 512,
+							contentMaxLength: 2000,
+						},
 					},
 				},
 				pageViews: { count: 1 },

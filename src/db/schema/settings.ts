@@ -55,6 +55,7 @@ export const siteSettings = sqliteTable(
 		autoBlacklistTtlSec: integer("auto_blacklist_ttl_sec")
 			.notNull()
 			.default(1800),
+		commentInputLimitsJson: text("comment_input_limits_json"),
 		commentMetadataJson: text("comment_metadata_json"),
 		engagementJson: text("engagement_json"),
 		verifiedAuthorJson: text("verified_author_json"),

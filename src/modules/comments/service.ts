@@ -341,6 +341,7 @@ export class CommentsService {
 			form: buildCommentForm({
 				allowWebsite: settings?.allowWebsite,
 				commentRequireJson: settings?.commentRequireJson,
+				commentInputLimitsJson: settings?.commentInputLimitsJson,
 			}),
 			thread:
 				refreshedThread ??

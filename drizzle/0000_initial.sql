@@ -448,6 +448,25 @@ CREATE TABLE `blacklist_rules` (
 	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action
 );--> statement-breakpoint
 CREATE INDEX `blacklist_rules_target_idx` ON `blacklist_rules` (`target_type`,`target_value`);--> statement-breakpoint
+CREATE TABLE `allowlist_rules` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`site_id` integer,
+	`target_type` text NOT NULL,
+	`match_mode` text NOT NULL,
+	`target_value` text NOT NULL,
+	`scope` text DEFAULT 'all' NOT NULL,
+	`reason` text,
+	`expires_at` text,
+	`created_by_user_id` integer,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`deleted_at` text,
+	FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `admin_users`(`id`) ON UPDATE no action ON DELETE no action
+);--> statement-breakpoint
+CREATE INDEX `allowlist_rules_site_target_idx` ON `allowlist_rules` (`site_id`,`target_type`,`target_value`);--> statement-breakpoint
+CREATE INDEX `allowlist_rules_target_idx` ON `allowlist_rules` (`target_type`,`target_value`);--> statement-breakpoint
+CREATE INDEX `allowlist_rules_expires_at_idx` ON `allowlist_rules` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `site_settings` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`site_id` integer NOT NULL,
@@ -467,6 +486,7 @@ CREATE TABLE `site_settings` (
 	`auto_blacklist_enabled` integer DEFAULT true NOT NULL,
 	`auto_blacklist_scope` text DEFAULT 'post' NOT NULL,
 	`auto_blacklist_ttl_sec` integer DEFAULT 1800 NOT NULL,
+	`comment_input_limits_json` text,
 	`commenter_reply_email_enabled` integer DEFAULT false NOT NULL,
 	`backend_notifications_enabled` integer DEFAULT false NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,

@@ -41,6 +41,14 @@ export type EngagementSettings = {
 	};
 };
 
+export type CommentInputLimitsSettings = {
+	authorNameMaxLength: number;
+	authorWebsiteMaxLength: number;
+	pageTitleMaxLength: number;
+	pageKeyMaxLength: number;
+	contentMaxLength: number;
+};
+
 export const defaultCommentRequire: Array<"nickname" | "email" | "website"> = [
 	"nickname",
 	"email",
@@ -76,6 +84,22 @@ export const defaultEngagementSettings: EngagementSettings = {
 	},
 };
 
+export const commentInputLimitHardCaps: CommentInputLimitsSettings = {
+	authorNameMaxLength: 100,
+	authorWebsiteMaxLength: 4096,
+	pageTitleMaxLength: 500,
+	pageKeyMaxLength: 1024,
+	contentMaxLength: 10000,
+};
+
+export const defaultCommentInputLimits: CommentInputLimitsSettings = {
+	authorNameMaxLength: 40,
+	authorWebsiteMaxLength: 2048,
+	pageTitleMaxLength: 200,
+	pageKeyMaxLength: 512,
+	contentMaxLength: 2000,
+};
+
 type LegacyBoolean = boolean | 0 | 1;
 
 export type EngagementSettingsPatch = {
@@ -92,6 +116,42 @@ export type EngagementSettingsPatch = {
 		enabled?: boolean;
 	};
 };
+
+type CommentInputLimitsPatch = Partial<
+	Record<keyof CommentInputLimitsSettings, unknown>
+>;
+
+function parseSettingsObject<T>(value?: string | T | null): Partial<T> {
+	if (typeof value === "string" && value.trim()) {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			return typeof parsed === "object" && parsed !== null
+				? (parsed as Partial<T>)
+				: {};
+		} catch {
+			return {};
+		}
+	}
+	if (typeof value === "object" && value !== null) {
+		return value as Partial<T>;
+	}
+	return {};
+}
+
+function resolvePositiveInteger(
+	value: unknown,
+	fallback: number,
+	hardCap: number,
+): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return fallback;
+	}
+	const normalized = Math.floor(value);
+	if (normalized < 1) {
+		return fallback;
+	}
+	return Math.min(normalized, hardCap);
+}
 
 type LegacyEngagementSettingsPatch = {
 	visitors?: {
@@ -196,6 +256,46 @@ export function serializeEngagementSettings(
 	return JSON.stringify(mergeEngagementSettings(settings));
 }
 
+export function mergeCommentInputLimits(
+	value?: string | CommentInputLimitsPatch | null,
+): CommentInputLimitsSettings {
+	const parsed = parseSettingsObject<CommentInputLimitsPatch>(value);
+
+	return {
+		authorNameMaxLength: resolvePositiveInteger(
+			parsed.authorNameMaxLength,
+			defaultCommentInputLimits.authorNameMaxLength,
+			commentInputLimitHardCaps.authorNameMaxLength,
+		),
+		authorWebsiteMaxLength: resolvePositiveInteger(
+			parsed.authorWebsiteMaxLength,
+			defaultCommentInputLimits.authorWebsiteMaxLength,
+			commentInputLimitHardCaps.authorWebsiteMaxLength,
+		),
+		pageTitleMaxLength: resolvePositiveInteger(
+			parsed.pageTitleMaxLength,
+			defaultCommentInputLimits.pageTitleMaxLength,
+			commentInputLimitHardCaps.pageTitleMaxLength,
+		),
+		pageKeyMaxLength: resolvePositiveInteger(
+			parsed.pageKeyMaxLength,
+			defaultCommentInputLimits.pageKeyMaxLength,
+			commentInputLimitHardCaps.pageKeyMaxLength,
+		),
+		contentMaxLength: resolvePositiveInteger(
+			parsed.contentMaxLength,
+			defaultCommentInputLimits.contentMaxLength,
+			commentInputLimitHardCaps.contentMaxLength,
+		),
+	};
+}
+
+export function serializeCommentInputLimits(
+	settings: string | CommentInputLimitsPatch | null | undefined,
+): string {
+	return JSON.stringify(mergeCommentInputLimits(settings));
+}
+
 export function resolveEngagementTrustMode(
 	settings: EngagementSettings,
 ): EngagementTrustMode {
@@ -221,6 +321,9 @@ export function buildDefaultSiteSettings(siteId: number) {
 		autoBlacklistEnabled: true,
 		autoBlacklistScope: "post",
 		autoBlacklistTtlSec: 1800,
+		commentInputLimitsJson: serializeCommentInputLimits(
+			defaultCommentInputLimits,
+		),
 		commentMetadataJson: JSON.stringify(defaultCommentMetadata),
 		engagementJson: serializeEngagementSettings(defaultEngagementSettings),
 		verifiedAuthorJson: serializeVerifiedAuthorSettings(defaultVerifiedAuthor),

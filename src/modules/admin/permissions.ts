@@ -31,6 +31,10 @@ export type AdminPermission =
 	| "blacklist.read"
 	| "blacklist.create"
 	| "blacklist.delete"
+	| "allowlist.read"
+	| "allowlist.create"
+	| "allowlist.update"
+	| "allowlist.delete"
 	| "data.export"
 	| "data.import"
 	| "data.import_apply"
@@ -106,6 +110,10 @@ export const allAdminPermissions: AdminPermission[] = [
 	"blacklist.read",
 	"blacklist.create",
 	"blacklist.delete",
+	"allowlist.read",
+	"allowlist.create",
+	"allowlist.update",
+	"allowlist.delete",
 	"data.export",
 	"data.import",
 	"data.import_apply",
@@ -154,6 +162,10 @@ const siteAdminPermissions: AdminPermission[] = [
 	"blacklist.read",
 	"blacklist.create",
 	"blacklist.delete",
+	"allowlist.read",
+	"allowlist.create",
+	"allowlist.update",
+	"allowlist.delete",
 ];
 
 const siteModeratorPermissions: AdminPermission[] = [

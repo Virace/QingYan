@@ -21,10 +21,10 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 - 评论首屏 bootstrap：`GET /qingyan/api/comments/bootstrap`
 - 评论线程分页：`GET /qingyan/api/comments/thread`
 - 评论创建、投票、验证码验证
-- bootstrap 返回 `features` 能力开关和 `data.comments.form.allow / require`，前端可先按能力判断再动态渲染 `nickname | email | website` 必填项
+- bootstrap 返回 `features` 能力开关和 `data.comments.form.allow / require / limits`，前端可先按能力判断再动态渲染 `nickname | email | website` 必填项与输入长度
 - 页面点赞
 - 后台登录（管理员登录验证码 + 5 次失败永久封禁 IP）
-- 后台评论审核、黑名单、页面管理、用户管理、访客管理、站点总览、站点设置、系统设置
+- 后台评论审核、黑名单、白名单、页面管理、用户管理、访客管理、站点总览、站点设置、系统设置
 - 本地 `logs/access` 与 `logs/app` 双通道日志
 - 文本 `.log` + 结构化 `.jsonl` 双格式落盘
 - 后台可动态调整日志等级和保留天数
@@ -171,6 +171,9 @@ qyctl update plan
 - startup config 示例见 `config/qingyan.example.yml`
 - 本地实参默认使用 `config/qingyan.yml`
 - 站点、站点设置、系统设置由数据库持久化，后台管理端维护
+- 当前仍处于首个正式 release 前；公开输入已由站点级上限约束，但最终 release 状态以完整发布验证通过为准
+- 应用层滥用保护和自动黑名单可在 Admin Console 关闭；关闭时建议由 WAF、反向代理、CDN 或 API 网关承担更强限流与拦截
+- 黑名单和白名单均在 Admin Console 的安全规则中管理；白名单只影响黑名单/自动黑名单优先级，不绕过页面状态、功能开关、验证码、基础限流或输入校验
 - 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
 - release 后破坏性升级规则由项目规范维护；开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`
 

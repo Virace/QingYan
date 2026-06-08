@@ -15,6 +15,7 @@ import {
 import type { AppDatabase } from "../../db/client";
 import {
 	adminSessions,
+	allowlistRules,
 	blacklistRules,
 	commentRequestMetadata,
 	commenterNotificationPreferences,
@@ -1544,6 +1545,7 @@ export class AdminRepository {
 				commentsEnabled: siteSettings.commentsEnabled,
 				defaultStatus: siteSettings.defaultStatus,
 				commentRequireJson: siteSettings.commentRequireJson,
+				commentInputLimitsJson: siteSettings.commentInputLimitsJson,
 				allowWebsite: siteSettings.allowWebsite,
 				captchaMode: siteSettings.captchaMode,
 				moderationJson: siteSettings.moderationJson,
@@ -1618,6 +1620,7 @@ export class AdminRepository {
 				enabled: row.commentsEnabled,
 				defaultStatus: row.defaultStatus,
 				commentRequireJson: row.commentRequireJson,
+				commentInputLimitsJson: row.commentInputLimitsJson,
 				allowWebsite: row.allowWebsite,
 				captcha: {
 					mode: row.captchaMode,
@@ -2021,6 +2024,148 @@ export class AdminRepository {
 		return rules;
 	}
 
+	public async listAllowlistRules(input: {
+		siteId?: number;
+		targetType?: "ip" | "email" | "visitor";
+		search?: string;
+		limit: number;
+		offset: number;
+	}) {
+		const searchValue = input.search ? `%${input.search}%` : undefined;
+		const whereCondition = and(
+			isNull(allowlistRules.deletedAt),
+			input.siteId ? eq(allowlistRules.siteId, input.siteId) : undefined,
+			input.targetType
+				? eq(allowlistRules.targetType, input.targetType)
+				: undefined,
+			searchValue
+				? or(
+						like(allowlistRules.targetValue, searchValue),
+						like(allowlistRules.reason, searchValue),
+						like(allowlistRules.targetType, searchValue),
+						like(allowlistRules.matchMode, searchValue),
+					)
+				: undefined,
+		);
+		const rows = await this.db
+			.select()
+			.from(allowlistRules)
+			.where(whereCondition)
+			.orderBy(desc(allowlistRules.createdAt), desc(allowlistRules.id))
+			.limit(input.limit)
+			.offset(input.offset);
+		const [total] = await this.db
+			.select({
+				value: count(),
+			})
+			.from(allowlistRules)
+			.where(whereCondition);
+
+		return {
+			items: rows,
+			totalCount: total?.value ?? 0,
+		};
+	}
+
+	public async createAllowlistRule(input: {
+		siteId?: number;
+		targetType: "ip" | "email" | "visitor";
+		matchMode: "exact" | "cidr" | "domain";
+		targetValue: string;
+		scope: "post" | "all";
+		reason?: string;
+		expiresAt?: string;
+		createdByUserId?: number;
+	}) {
+		await this.db.insert(allowlistRules).values({
+			siteId: input.siteId,
+			scope: input.scope,
+			targetType: input.targetType,
+			targetValue:
+				input.targetType === "email"
+					? input.targetValue.trim().toLowerCase()
+					: input.targetValue.trim(),
+			matchMode: input.matchMode,
+			reason: input.reason,
+			expiresAt: input.expiresAt,
+			createdByUserId: input.createdByUserId,
+		});
+
+		const [rule] = await this.db
+			.select()
+			.from(allowlistRules)
+			.orderBy(desc(allowlistRules.id))
+			.limit(1);
+
+		return rule;
+	}
+
+	public async getAllowlistRule(ruleId: number) {
+		const [rule] = await this.db
+			.select()
+			.from(allowlistRules)
+			.where(
+				and(eq(allowlistRules.id, ruleId), isNull(allowlistRules.deletedAt)),
+			)
+			.limit(1);
+		return rule;
+	}
+
+	public async updateAllowlistRule(
+		ruleId: number,
+		input: {
+			targetType?: "ip" | "email" | "visitor";
+			matchMode?: "exact" | "cidr" | "domain";
+			targetValue?: string;
+			scope?: "post" | "all";
+			reason?: string | null;
+			expiresAt?: string | null;
+		},
+	) {
+		const existingRule = await this.getAllowlistRule(ruleId);
+		if (!existingRule) {
+			return undefined;
+		}
+		const targetType = input.targetType ?? existingRule.targetType;
+		await this.db
+			.update(allowlistRules)
+			.set({
+				targetType: input.targetType,
+				matchMode: input.matchMode,
+				targetValue:
+					input.targetValue === undefined
+						? undefined
+						: targetType === "email"
+							? input.targetValue.trim().toLowerCase()
+							: input.targetValue.trim(),
+				scope: input.scope,
+				reason: input.reason,
+				expiresAt: input.expiresAt,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(
+				and(eq(allowlistRules.id, ruleId), isNull(allowlistRules.deletedAt)),
+			);
+
+		return this.getAllowlistRule(ruleId);
+	}
+
+	public async deleteAllowlistRule(ruleId: number) {
+		const rule = await this.getAllowlistRule(ruleId);
+		if (!rule) {
+			return undefined;
+		}
+
+		await this.db
+			.update(allowlistRules)
+			.set({
+				deletedAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
+			})
+			.where(eq(allowlistRules.id, ruleId));
+		return rule;
+	}
+
 	public async getSiteSettings(siteId: number) {
 		const [settings] = await this.db
 			.select()
@@ -2078,6 +2223,7 @@ export class AdminRepository {
 			autoBlacklistEnabled?: boolean;
 			autoBlacklistScope?: "post" | "all";
 			autoBlacklistTtlSec?: number;
+			commentInputLimitsJson?: string;
 			commentMetadataJson?: string;
 			verifiedAuthorJson?: string;
 			staffDisplayJson?: string;
@@ -2107,6 +2253,7 @@ export class AdminRepository {
 				autoBlacklistEnabled: input.autoBlacklistEnabled,
 				autoBlacklistScope: input.autoBlacklistScope,
 				autoBlacklistTtlSec: input.autoBlacklistTtlSec,
+				commentInputLimitsJson: input.commentInputLimitsJson,
 				commentMetadataJson: input.commentMetadataJson,
 				verifiedAuthorJson: input.verifiedAuthorJson,
 				staffDisplayJson: input.staffDisplayJson,

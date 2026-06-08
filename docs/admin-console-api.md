@@ -654,6 +654,132 @@ Query：
 }
 ```
 
+删除黑名单规则是解除自动封禁或人工封禁的后台路径；删除后，匹配该规则的公开写入不再因该规则被拒绝，但仍会继续经过页面状态、功能开关、输入长度、验证码、基础限流和后续滥用保护检查。
+
+## Allowlist
+
+白名单规则优先于黑名单和自动黑名单计数：匹配白名单的 IP / email / visitor 不会被现有黑名单拦截，也不会因为公开写入次数触发自动黑名单。白名单不绕过后台认证、CSRF、页面注册状态、页面交互状态、功能开关、必填字段、输入长度、验证码或基础限流。
+
+白名单匹配模式：
+
+- `ip`: `exact` 或 `cidr`
+- `email`: `exact` 或 `domain`
+- `visitor`: `exact`
+
+Query 列表、创建全局规则或管理全局规则需要对应的 `allowlist.*` 权限。系统管理员和初始管理员可管理全局和任意站点规则；站点管理员只能管理自己有访问权的站点规则；站点评论管理员默认没有白名单管理权限。
+
+### `GET /api/admin/allowlist`
+
+列出白名单规则。
+
+Query：
+
+```ts
+{
+  siteKey?: string;
+  targetType?: "ip" | "email" | "visitor";
+  search?: string;
+  q?: string;
+  limit?: number; // default 20, max 100
+  offset?: number; // default 0
+}
+```
+
+响应：
+
+```ts
+{
+  items: AdminAllowlistRule[];
+  pagination: {
+    limit: number;
+    offset: number;
+    totalCount: number;
+  };
+}
+```
+
+`AdminAllowlistRule`：
+
+```ts
+{
+  id: number;
+  siteId: number | null;
+  scope: "post" | "all";
+  targetType: "ip" | "email" | "visitor";
+  targetValue: string;
+  matchMode: "exact" | "cidr" | "domain";
+  reason: string | null;
+  expiresAt: string | null;
+  createdByUserId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+```
+
+### `POST /api/admin/allowlist`
+
+创建白名单规则。
+
+请求：
+
+```ts
+{
+  siteKey?: string;
+  targetType: "ip" | "email" | "visitor";
+  matchMode?: "exact" | "cidr" | "domain"; // default "exact"
+  targetValue: string;
+  scope?: "post" | "all"; // default "all"
+  reason?: string;
+  expiresAt?: string;
+}
+```
+
+响应：
+
+```ts
+{
+  rule: AdminAllowlistRule;
+}
+```
+
+### `PATCH /api/admin/allowlist/{ruleId}`
+
+更新白名单规则。请求至少包含一个字段；如果更新后的 `targetType` 与 `matchMode` 不兼容，会返回 `ALLOWLIST_MATCH_MODE_INVALID` 或字段级校验错误。
+
+请求：
+
+```ts
+{
+  targetType?: "ip" | "email" | "visitor";
+  matchMode?: "exact" | "cidr" | "domain";
+  targetValue?: string;
+  scope?: "post" | "all";
+  reason?: string | null;
+  expiresAt?: string | null;
+}
+```
+
+响应：
+
+```ts
+{
+  rule: AdminAllowlistRule;
+}
+```
+
+### `DELETE /api/admin/allowlist/{ruleId}`
+
+软删除白名单规则。删除后的规则不会再被列表、黑名单跳过或自动黑名单跳过逻辑使用。
+
+响应：
+
+```ts
+{
+  rule: AdminAllowlistRule;
+}
+```
+
 ## Sites
 
 ### `GET /api/admin/sites`
@@ -871,6 +997,13 @@ AdminSettings
         ttlSec: number;
       };
     };
+    inputLimits: {
+      authorNameMaxLength: number;
+      authorWebsiteMaxLength: number;
+      pageTitleMaxLength: number;
+      pageKeyMaxLength: number;
+      contentMaxLength: number;
+    };
     metadata: {
       collectIp: boolean;
       collectUserAgent: boolean;
@@ -943,6 +1076,22 @@ AdminSettings
   };
 }
 ```
+
+`comments.inputLimits` 是公开评论和页面反馈输入长度的站点级运行时上限。默认值为：
+
+```ts
+{
+  authorNameMaxLength: 40;
+  authorWebsiteMaxLength: 2048;
+  pageTitleMaxLength: 200;
+  pageKeyMaxLength: 512;
+  contentMaxLength: 2000;
+}
+```
+
+保存时会被后端硬上限截断到安全范围内：作者名 `100`、作者网站 / 页面 URL `4096`、页面标题 `500`、页面 key `1024`、评论正文 `10000`。公开 bootstrap 会在 `data.comments.form.limits` 返回当前生效值；公开写入口超过当前站点上限时返回字段级 `VALIDATION_FAILED`。
+
+`comments.abuseGuard.enabled=false` 会关闭 QingYan 应用层的公开写入滥用计数和自动黑名单触发，适用于实例前方已有更强 WAF、反向代理限流或边缘安全策略的部署。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态或输入校验。`maxWriteActions` 统计评论创建、评论投票和页面点赞等公开写入动作。
 
 后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；站点管理员只能配置自己有访问权的站点，且候选接收人也必须对该站点有访问权；站点评论管理员不可管理接收人。
 

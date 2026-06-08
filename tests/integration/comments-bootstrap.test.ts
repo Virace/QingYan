@@ -19,6 +19,7 @@ import {
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { serializeCommentInputLimits } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -355,6 +356,13 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 					form: {
 						allow: ["nickname", "email", "website"],
 						require: ["nickname", "email"],
+						limits: {
+							authorNameMaxLength: 40,
+							authorWebsiteMaxLength: 2048,
+							pageTitleMaxLength: 200,
+							pageKeyMaxLength: 512,
+							contentMaxLength: 2000,
+						},
 					},
 					pagination: {
 						sortBy: "newest",
@@ -405,6 +413,51 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(payload.data.comments.items[0].children[0]).toMatchObject({
 			id: "c_child",
 			parentId: "c_root",
+		});
+	});
+
+	it("returns site-configured comment form input limits", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				commentInputLimitsJson: serializeCommentInputLimits({
+					authorNameMaxLength: 24,
+					contentMaxLength: 1200,
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		await seedActivePage(
+			fixture,
+			site.id,
+			"/posts/form-limits/",
+			"/posts/form-limits/",
+		);
+
+		const response = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan&pageTitle=Form%20Limits",
+			headers: {
+				referer: "http://localhost:4321/posts/form-limits/",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(response.json().data.comments.form.limits).toEqual({
+			authorNameMaxLength: 24,
+			authorWebsiteMaxLength: 2048,
+			pageTitleMaxLength: 200,
+			pageKeyMaxLength: 512,
+			contentMaxLength: 1200,
 		});
 	});
 

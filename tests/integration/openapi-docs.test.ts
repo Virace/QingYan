@@ -71,6 +71,40 @@ describe("openapi docs", () => {
 		expect(
 			JSON.stringify(spec.components.schemas.CommentAvatarDisplay),
 		).not.toContain("gravatar");
+		expect(spec.components.schemas.CommentForm.required).toEqual([
+			"allow",
+			"require",
+			"limits",
+		]);
+		expect(spec.components.schemas.CommentForm.properties.limits.$ref).toBe(
+			"#/components/schemas/CommentInputLimits",
+		);
+		expect(
+			spec.components.schemas.CommentInputLimits.properties.authorNameMaxLength
+				.maximum,
+		).toBe(100);
+		expect(
+			spec.components.schemas.CommentInputLimits.properties.contentMaxLength
+				.default,
+		).toBe(2000);
+		expect(
+			spec.components.schemas.CreateCommentRequest.properties.pageKey.maxLength,
+		).toBe(1024);
+		expect(
+			spec.components.schemas.CreateCommentRequest.properties.pageTitle
+				.maxLength,
+		).toBe(500);
+		expect(
+			spec.components.schemas.CreateCommentRequest.properties.author.properties
+				.name.maxLength,
+		).toBe(100);
+		expect(
+			spec.components.schemas.CreateCommentRequest.properties.content.properties
+				.raw.maxLength,
+		).toBe(10_000);
+		expect(
+			spec.components.schemas.PageLikeRequest.properties.pageTitle.maxLength,
+		).toBe(500);
 		expect(spec.components.schemas.BootstrapResponse.required).toEqual([
 			"schemaVersion",
 			"site",

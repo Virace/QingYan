@@ -3,6 +3,7 @@ import type { CaptchaService } from "../comments/captcha-service";
 import { resolveRequestMetadata } from "../comments/metadata/request-metadata";
 import type { CommentMetadataResolver } from "../comments/metadata/resolver";
 import type { CommentsRepository } from "../comments/repository";
+import { assertCommentInputLimits } from "../shared/comment-input-limits";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import {
 	mergeEngagementSettings,
@@ -54,6 +55,13 @@ export class PageFeedbackService {
 		});
 
 		const settings = await this.commentsRepository.getSiteSettings(site.id);
+		assertCommentInputLimits(
+			{
+				pageKey: input.pageKey,
+				pageTitle: input.pageTitle,
+			},
+			settings?.commentInputLimitsJson,
+		);
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
 		const trustMode = resolveEngagementTrustMode(engagement);
 		if (!engagement.pageLikes.enabled) {
@@ -146,6 +154,23 @@ export class PageFeedbackService {
 					trustMode,
 				},
 			});
+			const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
+			const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
+			if (abuseGuardEnabled && autoBlacklistEnabled) {
+				await this.security.recordAbuseWriteAction({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					ip: input.ip,
+					rule: {
+						windowSec: settings?.abuseGuardWindowSec ?? 600,
+						maxRequests: settings?.abuseGuardMaxWriteActions ?? 100,
+					},
+					scope:
+						(settings?.autoBlacklistScope as "post" | "all" | undefined) ??
+						"post",
+					ttlSec: settings?.autoBlacklistTtlSec ?? 1800,
+				});
+			}
 
 			return {
 				visitorKey: undefined,
@@ -184,6 +209,23 @@ export class PageFeedbackService {
 			targetType: "page_thread",
 			targetId: String(thread.id),
 		});
+		const abuseGuardEnabled = settings?.abuseGuardEnabled ?? true;
+		const autoBlacklistEnabled = settings?.autoBlacklistEnabled ?? true;
+		if (abuseGuardEnabled && autoBlacklistEnabled) {
+			await this.security.recordAbuseWriteAction({
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				ip: input.ip,
+				rule: {
+					windowSec: settings?.abuseGuardWindowSec ?? 600,
+					maxRequests: settings?.abuseGuardMaxWriteActions ?? 100,
+				},
+				scope:
+					(settings?.autoBlacklistScope as "post" | "all" | undefined) ??
+					"post",
+				ttlSec: settings?.autoBlacklistTtlSec ?? 1800,
+			});
+		}
 
 		return {
 			visitorKey: visitor.created ? visitor.visitorKey : undefined,

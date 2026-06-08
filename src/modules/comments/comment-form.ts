@@ -1,4 +1,7 @@
-import { defaultCommentRequire } from "../shared/site-settings-defaults";
+import {
+	defaultCommentRequire,
+	mergeCommentInputLimits,
+} from "../shared/site-settings-defaults";
 
 export const commentIdentityFields = ["nickname", "email", "website"] as const;
 
@@ -47,6 +50,7 @@ function sanitizeRequireFields(
 export function buildCommentForm(settings?: {
 	allowWebsite?: boolean;
 	commentRequireJson?: string | null;
+	commentInputLimitsJson?: string | null;
 }) {
 	const allowWebsite = settings?.allowWebsite ?? true;
 	const allow = allowWebsite
@@ -60,5 +64,6 @@ export function buildCommentForm(settings?: {
 			allowWebsite,
 			defaultCommentRequire,
 		),
+		limits: mergeCommentInputLimits(settings?.commentInputLimitsJson),
 	};
 }

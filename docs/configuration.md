@@ -162,16 +162,25 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 
 - 评论开关、默认审核状态、最大嵌套深度、分页上限。
 - 评论身份字段：`nickname | email | website` 的允许和必填状态。
+- 评论公开输入长度上限：作者名、作者网站、页面标题、页面 key 和评论正文。默认值分别为 `40`、`2048`、`200`、`512`、`2000`；后端硬上限分别为 `100`、`4096`、`500`、`1024`、`10000`。
 - 可信评论作者：`comments.verifiedAuthor.enabled`、`displayName`、`email`、`website`、`badgeLabel`，用于管理员或楼主这类已验证来源回复。
 - 站点人员显示名策略：`comments.staffDisplay.nameMode`，可选 `current_profile` 或 `snapshot`。默认 `current_profile`，即已验证评论公开展示时跟随当前可信作者资料；`snapshot` 会展示评论写入或导入时保存的作者名称。
 - 验证码模式：`never | always | threshold` 及阈值窗口。
-- 滥用保护和自动黑名单策略。
+- 滥用保护和自动黑名单策略：`comments.abuseGuard.enabled` 控制 QingYan 应用层公开写入滥用计数，`comments.abuseGuard.autoBlacklist.enabled` 只控制是否自动创建黑名单规则。
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
 - 页面来源注册设置：`pageRegistry.mode`、权威 sitemap URL 列表、未知页面响应、健康宽限时间和紧急锁定。
 - 评论者回复邮件通知开关和后台用户通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
+
+`comments.inputLimits` 会随公开评论 bootstrap 返回到 `data.comments.form.limits`，内容站点前端可用它约束表单长度；服务端仍以数据库中的当前站点设置为准。超过当前站点上限的评论创建、页面点赞等公开写入口会返回字段级 `VALIDATION_FAILED`。硬上限用于防止后台误配置过大的输入，不表示建议前端展示到最大值。
+
+`comments.abuseGuard.enabled=false` 表示关闭 QingYan 应用层的公开写入滥用计数和自动封禁触发；此时部署前方应有 WAF、反向代理、CDN、API 网关或等价基础设施限流。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态、功能开关或输入长度校验。滥用保护的写入计数覆盖评论创建、评论投票和页面点赞等公开写动作。
+
+黑名单规则可由后台人工创建，也可由自动黑名单策略创建。解除某个 IP / email / visitor 的封禁应在 Admin Console 删除对应黑名单规则；删除后只解除该规则带来的拒绝，后续请求仍会继续经过页面状态、功能开关、输入长度、验证码、基础限流和滥用保护检查。
+
+白名单规则独立于黑名单规则，支持 IP `exact | cidr`、email `exact | domain`、visitor `exact`。匹配白名单时，QingYan 会跳过对应黑名单拦截，并且不会把该请求计入自动黑名单触发；白名单优先级只服务于黑名单/自动黑名单。白名单不会绕过后台认证、CSRF、页面注册状态、页面交互状态、功能开关、必填字段、输入长度、验证码或基础限流。站点管理员只能管理自己有访问权的站点白名单，站点评论管理员默认不能管理白名单；全局规则只应由系统管理员维护。
 
 页面来源注册设置是站点级 DB setting，不属于 startup YAML。公开运行时页面身份由允许 `Referer` 的 URL pathname 派生：保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash；请求参数中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段。`discovery` 模式下未知页面会继续写入 pending candidate / pending PV 供后台审核；`authoritative` 模式下未知页面默认返回 inactive payload，不创建 visitor、pending、PV、captcha、thread、评论、投票或页面反馈记录。若 `unknownPageResponse=forbidden` 或 `emergencyLockdown=true`，未知页面返回 `PAGE_NOT_REGISTERED`。
 

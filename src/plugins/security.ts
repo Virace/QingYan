@@ -9,6 +9,10 @@ import {
 	type BlacklistSubject,
 } from "../modules/shared/blacklist-match";
 import {
+	matchAllowlistRule,
+	type AllowlistSubject,
+} from "../modules/shared/allowlist-match";
+import {
 	hashCsrfToken,
 	hashSessionToken,
 } from "../modules/admin/session-utils";
@@ -18,7 +22,12 @@ import type {
 } from "../modules/shared/rate-limit";
 import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
 import { AppError } from "../modules/shared/errors";
-import { adminSessions, auditLogs, blacklistRules } from "../db/schema";
+import {
+	adminSessions,
+	allowlistRules,
+	auditLogs,
+	blacklistRules,
+} from "../db/schema";
 import { joinPublicPath, stripPublicPath } from "../config/public-path";
 import {
 	createSystemSettingsDefaults,
@@ -187,6 +196,63 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 				fastify.log.warn({ err: error }, "Failed to write security metric");
 			});
 	};
+	const matchesSecurityScope = (
+		ruleScope: string,
+		requestScope: "read" | "write",
+	) =>
+		ruleScope === "all" || (ruleScope === "post" && requestScope === "write");
+	const isAllowlisted = async (input: {
+		siteKey?: string;
+		visitorKey?: string;
+		email?: string;
+		ip?: string;
+		requestScope?: "read" | "write";
+		nowIso?: string;
+	}) => {
+		const subject: AllowlistSubject = {
+			visitorKey: input.visitorKey,
+			email: input.email,
+			ip: input.ip,
+		};
+		if (!subject.visitorKey && !subject.email && !subject.ip) {
+			return false;
+		}
+
+		const siteId = fastify.siteRegistry.getRegisteredSite(input.siteKey)?.id;
+		const nowIso = input.nowIso ?? new Date().toISOString();
+		const activeRules = await fastify.db
+			.select()
+			.from(allowlistRules)
+			.where(
+				and(
+					siteId === undefined
+						? isNull(allowlistRules.siteId)
+						: or(
+								isNull(allowlistRules.siteId),
+								eq(allowlistRules.siteId, siteId),
+							),
+					isNull(allowlistRules.deletedAt),
+					or(
+						isNull(allowlistRules.expiresAt),
+						gte(allowlistRules.expiresAt, nowIso),
+					),
+				),
+			);
+
+		const requestScope = input.requestScope ?? "write";
+		return activeRules.some(
+			(rule) =>
+				matchesSecurityScope(rule.scope, requestScope) &&
+				matchAllowlistRule(
+					{
+						targetType: rule.targetType,
+						targetValue: rule.targetValue,
+						matchMode: rule.matchMode,
+					},
+					subject,
+				),
+		);
+	};
 
 	const security: SecurityToolkit = {
 		async assertGlobalFloodAllowed({ ip }) {
@@ -238,6 +304,18 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			if (!subject.visitorKey && !subject.email && !subject.ip) {
 				return;
 			}
+			if (
+				await isAllowlisted({
+					siteKey: input.siteKey,
+					visitorKey: input.visitorKey,
+					email: input.email,
+					ip: input.ip,
+					requestScope: input.requestScope,
+					nowIso: expiresAfter,
+				})
+			) {
+				return;
+			}
 
 			const activeRules = await fastify.db
 				.select()
@@ -259,9 +337,7 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 			const requestScope = input.requestScope ?? "write";
 			const matchedRule = activeRules.find((rule) => {
-				const blocksRequest =
-					rule.scope === "all" ||
-					(rule.scope === "post" && requestScope === "write");
+				const blocksRequest = matchesSecurityScope(rule.scope, requestScope);
 
 				return (
 					blocksRequest &&
@@ -306,6 +382,16 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		},
 		async recordAbuseWriteAction(input) {
 			if (!input.ip) {
+				return false;
+			}
+			if (
+				await isAllowlisted({
+					siteKey: input.siteKey,
+					ip: input.ip,
+					requestScope: "write",
+					nowIso: new Date(input.now ?? Date.now()).toISOString(),
+				})
+			) {
 				return false;
 			}
 

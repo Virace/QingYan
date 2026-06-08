@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	blacklistRules,
 	captchaSessions,
 	commentRequestMetadata,
 	comments,
@@ -12,7 +13,10 @@ import {
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
-import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
+import {
+	serializeCommentInputLimits,
+	serializeEngagementSettings,
+} from "../../src/modules/shared/site-settings-defaults";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -256,6 +260,59 @@ describe("POST /qingyan/api/comments", () => {
 		expect(response.json()).toMatchObject({
 			error: {
 				code: "COMMENT_CAPTCHA_REQUIRED",
+			},
+		});
+	});
+
+	it("rejects comment fields over the configured site input limits", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			commentInputLimitsJson: serializeCommentInputLimits({
+				authorNameMaxLength: 5,
+				contentMaxLength: 12,
+			}),
+		});
+		await seedActivePage(fixture, "post:input-limits");
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: refererFor("post:input-limits"),
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:input-limits",
+				pageTitle: "Input Limits",
+				pageUrl: "https://fangyuan.example.com/posts/input-limits/",
+				parentCommentId: null,
+				author: {
+					name: "Long Alice",
+					email: "alice@example.com",
+				},
+				content: {
+					raw: "this comment is too long",
+				},
+				options: {
+					notifyOnReply: false,
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+				fields: [
+					{
+						path: "author.name",
+						code: "too_big",
+					},
+					{
+						path: "content.raw",
+						code: "too_big",
+					},
+				],
 			},
 		});
 	});
@@ -1029,5 +1086,95 @@ describe("POST /qingyan/api/comments", () => {
 				code: "COMMENT_BLACKLISTED",
 			},
 		});
+	});
+
+	it("does not create auto blacklist rules when the abuse guard is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			abuseGuardEnabled: false,
+			abuseGuardWindowSec: 600,
+			abuseGuardMaxWriteActions: 1,
+			autoBlacklistEnabled: true,
+			autoBlacklistScope: "post",
+			autoBlacklistTtlSec: 1800,
+		});
+		await seedActivePage(fixture, "post:abuse-guard-disabled");
+
+		const makePayload = (suffix: string) => ({
+			siteKey: "fangyuan",
+			pageKey: "post:abuse-guard-disabled",
+			pageTitle: "Abuse Guard Disabled",
+			pageUrl: "https://fangyuan.example.com/posts/abuse-guard-disabled/",
+			parentCommentId: null,
+			author: {
+				name: "Alice",
+				email: "alice@example.com",
+			},
+			content: {
+				raw: `comment-${suffix}`,
+			},
+			options: {
+				notifyOnReply: false,
+			},
+		});
+
+		for (const suffix of ["1", "2", "3"]) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/comments",
+				headers: refererFor("post:abuse-guard-disabled"),
+				payload: makePayload(suffix),
+			});
+			expect(response.statusCode).toBe(200);
+		}
+
+		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([]);
+	});
+
+	it("does not create auto blacklist rules when auto blacklist is disabled", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			abuseGuardEnabled: true,
+			abuseGuardWindowSec: 600,
+			abuseGuardMaxWriteActions: 1,
+			autoBlacklistEnabled: false,
+			autoBlacklistScope: "post",
+			autoBlacklistTtlSec: 1800,
+		});
+		await seedActivePage(fixture, "post:auto-blacklist-disabled");
+
+		const makePayload = (suffix: string) => ({
+			siteKey: "fangyuan",
+			pageKey: "post:auto-blacklist-disabled",
+			pageTitle: "Auto Blacklist Disabled",
+			pageUrl: "https://fangyuan.example.com/posts/auto-blacklist-disabled/",
+			parentCommentId: null,
+			author: {
+				name: "Alice",
+				email: "alice@example.com",
+			},
+			content: {
+				raw: `comment-${suffix}`,
+			},
+			options: {
+				notifyOnReply: false,
+			},
+		});
+
+		for (const suffix of ["1", "2", "3"]) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/comments",
+				headers: refererFor("post:auto-blacklist-disabled"),
+				payload: makePayload(suffix),
+			});
+			expect(response.statusCode).toBe(200);
+		}
+
+		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([]);
 	});
 });

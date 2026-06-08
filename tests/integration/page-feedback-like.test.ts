@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	blacklistRules,
 	captchaSessions,
 	pageFeedbackRecords,
 	pageThreads,
@@ -11,6 +12,7 @@ import {
 } from "../../src/db/schema";
 import {
 	type EngagementSettings,
+	serializeCommentInputLimits,
 	serializeEngagementSettings,
 } from "../../src/modules/shared/site-settings-defaults";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
@@ -63,6 +65,50 @@ afterEach(async () => {
 });
 
 describe("POST /qingyan/api/page-feedback/like", () => {
+	it("rejects page identity fields over the configured site input limits", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			commentInputLimitsJson: serializeCommentInputLimits({
+				pageTitleMaxLength: 8,
+				pageKeyMaxLength: 16,
+			}),
+		});
+		await seedActivePage(fixture, "post:like-limits");
+
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like-limits",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageKey: "post:like-limits",
+				pageTitle: "A title that is too long",
+				pageUrl: "https://fangyuan.example.com/posts/like-limits/",
+			},
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({
+			error: {
+				code: "VALIDATION_FAILED",
+				fields: [
+					{
+						path: "pageKey",
+						code: "too_big",
+					},
+					{
+						path: "pageTitle",
+						code: "too_big",
+					},
+				],
+			},
+		});
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+	});
+
 	it("rejects likes for pages missing from the registry without creating a page thread", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -187,6 +233,69 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		expect(secondLike.json()).toMatchObject({
 			error: {
 				code: "PAGE_FEEDBACK_ALREADY_LIKED",
+			},
+		});
+	});
+
+	it("auto-blacklists page likes by exact ip after the long-window write threshold is exceeded", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			abuseGuardEnabled: true,
+			abuseGuardWindowSec: 600,
+			abuseGuardMaxWriteActions: 2,
+			autoBlacklistEnabled: true,
+			autoBlacklistScope: "post",
+			autoBlacklistTtlSec: 1800,
+		});
+		await updateEngagement(fixture, {
+			visitors: { enabled: false },
+			pageViews: { enabled: false },
+			pageLikes: { enabled: true },
+			commentVotes: { enabled: false },
+		});
+		await seedActivePage(fixture, "post:like-auto-blacklist");
+
+		const payload = {
+			siteKey: "fangyuan",
+			pageKey: "post:like-auto-blacklist",
+			pageTitle: "Like Auto Blacklist",
+			pageUrl: "https://fangyuan.example.com/posts/like-auto-blacklist/",
+		};
+
+		for (const _ of [1, 2, 3]) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/page-feedback/like",
+				headers: {
+					referer: "http://localhost:4321/post:like-auto-blacklist",
+				},
+				payload,
+			});
+			expect(response.statusCode).toBe(200);
+		}
+		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([
+			expect.objectContaining({
+				targetType: "ip",
+				matchMode: "exact",
+				source: "auto",
+				reason: "abuse_guard",
+			}),
+		]);
+
+		const blocked = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/page-feedback/like",
+			headers: {
+				referer: "http://localhost:4321/post:like-auto-blacklist",
+			},
+			payload,
+		});
+
+		expect(blocked.statusCode).toBe(403);
+		expect(blocked.json()).toMatchObject({
+			error: {
+				code: "COMMENT_BLACKLISTED",
 			},
 		});
 	});

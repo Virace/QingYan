@@ -8,10 +8,13 @@ import {
 	adminUsers,
 	auditLogs,
 	blacklistRules,
+	sitePageRegistry,
+	siteSettings,
 	sites,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -33,6 +36,26 @@ async function createSecondSite(
 		allowedOrigins: ["http://localhost:4322"],
 	});
 	await fixture.app.siteRegistry.loadFromDatabase(fixture.app.db);
+}
+
+async function seedActivePage(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	pageKey: string,
+) {
+	const canonicalPageKey = deriveCanonicalPageKeyFromPathname(pageKey);
+	const [site] = await fixture.app.db
+		.select()
+		.from(sites)
+		.where(eq(sites.siteKey, "fangyuan"));
+	if (!site) {
+		throw new Error("Expected site to exist");
+	}
+	await fixture.app.db.insert(sitePageRegistry).values({
+		siteId: site.id,
+		pageKey: canonicalPageKey,
+		pageUrl: canonicalPageKey,
+		status: "active",
+	});
 }
 
 async function createSiteAdmin(
@@ -84,6 +107,116 @@ async function createSiteAdmin(
 }
 
 describe("admin blacklist", () => {
+	it("lists and deletes auto-created blacklist rules so public writes are unblocked", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await fixture.app.db.update(siteSettings).set({
+			captchaMode: "never",
+			abuseGuardEnabled: true,
+			abuseGuardWindowSec: 600,
+			abuseGuardMaxWriteActions: 1,
+			autoBlacklistEnabled: true,
+			autoBlacklistScope: "post",
+			autoBlacklistTtlSec: 1800,
+		});
+		await seedActivePage(fixture, "post:auto-unblock");
+
+		const makePayload = (suffix: string) => ({
+			siteKey: "fangyuan",
+			pageKey: "post:auto-unblock",
+			pageTitle: "Auto Unblock",
+			pageUrl: "https://fangyuan.example.com/posts/auto-unblock/",
+			parentCommentId: null,
+			author: {
+				name: "Alice",
+				email: "alice@example.com",
+			},
+			content: {
+				raw: `comment-${suffix}`,
+			},
+			options: {
+				notifyOnReply: false,
+			},
+		});
+
+		for (const suffix of ["1", "2"]) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/comments",
+				headers: {
+					referer: "http://localhost:4321/post:auto-unblock",
+				},
+				payload: makePayload(suffix),
+			});
+			expect(response.statusCode).toBe(200);
+		}
+
+		const blocked = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/post:auto-unblock",
+			},
+			payload: makePayload("blocked"),
+		});
+		expect(blocked.statusCode).toBe(403);
+		expect(blocked.json()).toMatchObject({
+			error: {
+				code: "COMMENT_BLACKLISTED",
+			},
+		});
+
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const listResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/blacklist?siteKey=fangyuan",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(listResponse.statusCode).toBe(200);
+		const autoRule = (
+			listResponse.json() as {
+				items: Array<{
+					id: number;
+					targetType: string;
+					matchMode: string;
+					source: string;
+					reason: string;
+					expiresAt: string | null;
+				}>;
+			}
+		).items.find(
+			(rule) =>
+				rule.targetType === "ip" &&
+				rule.matchMode === "exact" &&
+				rule.source === "auto" &&
+				rule.reason === "abuse_guard",
+		);
+		expect(autoRule).toEqual(
+			expect.objectContaining({
+				expiresAt: expect.any(String),
+			}),
+		);
+
+		const deleteResponse = await fixture.app.inject({
+			method: "DELETE",
+			url: `/qingyan/api/admin/blacklist/${autoRule?.id}`,
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+		});
+		expect(deleteResponse.statusCode).toBe(200);
+
+		const unblocked = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/post:auto-unblock",
+			},
+			payload: makePayload("unblocked"),
+		});
+		expect(unblocked.statusCode).toBe(200);
+	});
+
 	it("creates, lists and deletes blacklist rules", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

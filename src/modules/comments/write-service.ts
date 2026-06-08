@@ -1,6 +1,7 @@
 import type { AppConfig } from "../../config/types";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import { assertCommentInputLimits } from "../shared/comment-input-limits";
 import { normalizeSafeHttpUrl } from "../shared/url-policy";
 import type { SystemSettings } from "../system-settings/definitions";
 import type { CaptchaService } from "./captcha-service";
@@ -96,13 +97,26 @@ export class CommentsWriteService {
 			pageKey: input.pageKey,
 		});
 
+		const settings = await this.readRepository.getSiteSettings(site.id);
+		const authorName = input.author.name?.trim() ?? "";
+		const authorEmail = input.author.email?.trim() || undefined;
+		const authorWebsiteInput = input.author.website?.trim() || undefined;
+		assertCommentInputLimits(
+			{
+				pageKey: input.pageKey,
+				pageTitle: input.pageTitle,
+				authorName,
+				authorWebsite: authorWebsiteInput,
+				contentRaw: input.contentRaw,
+			},
+			settings?.commentInputLimitsJson,
+		);
 		const thread = await this.readRepository.getOrCreatePageThread({
 			siteId: site.id,
 			pageKey: input.pageKey,
 			pageTitle: input.pageTitle,
 			pageUrl: input.pageUrl,
 		});
-		const settings = await this.readRepository.getSiteSettings(site.id);
 		const engagement = mergeEngagementSettings(settings?.engagementJson);
 		const metadataConfig = this.readRepository.resolveCommentMetadata(
 			settings ?? undefined,
@@ -142,9 +156,6 @@ export class CommentsWriteService {
 		);
 		const shouldUseVerifiedAuthor =
 			Boolean(input.verifiedAuthorSession) && verifiedAuthor.enabled;
-		const authorName = input.author.name?.trim() ?? "";
-		const authorEmail = input.author.email?.trim() || undefined;
-		const authorWebsiteInput = input.author.website?.trim() || undefined;
 		const authorWebsite = authorWebsiteInput
 			? normalizeSafeHttpUrl(authorWebsiteInput)
 			: undefined;

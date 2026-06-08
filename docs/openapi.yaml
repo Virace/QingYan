@@ -372,12 +372,14 @@ components:
       schema:
         type: string
         minLength: 1
+        maxLength: 1024
     PageTitleOptional:
       name: pageTitle
       in: query
       required: false
       schema:
         type: string
+        maxLength: 500
     PageUrlOptional:
       name: pageUrl
       in: query
@@ -386,8 +388,10 @@ components:
         oneOf:
           - type: string
             format: uri
+            maxLength: 4096
           - type: string
             pattern: ^/
+            maxLength: 4096
       description: 完整页面 URL，或去掉域名后的页面路径（如 `/posts/welcome/`）
     SortBy:
       name: sortBy
@@ -663,7 +667,7 @@ components:
           type: boolean
     CommentForm:
       type: object
-      required: [allow, require]
+      required: [allow, require, limits]
       properties:
         allow:
           type: array
@@ -675,6 +679,43 @@ components:
           items:
             type: string
             enum: [nickname, email, website]
+        limits:
+          $ref: '#/components/schemas/CommentInputLimits'
+    CommentInputLimits:
+      type: object
+      required:
+        - authorNameMaxLength
+        - authorWebsiteMaxLength
+        - pageTitleMaxLength
+        - pageKeyMaxLength
+        - contentMaxLength
+      description: 当前站点实际生效的公开评论输入长度上限。默认值分别为 40、2048、200、512、2000；Admin Console 可在后端硬上限内下调或上调。
+      properties:
+        authorNameMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 40
+        authorWebsiteMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 4096
+          default: 2048
+        pageTitleMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 200
+        pageKeyMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 1024
+          default: 512
+        contentMaxLength:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 2000
     CommentPagination:
       type: object
       required: [sortBy, limit, offset, totalCount, rootCount]
@@ -1073,15 +1114,19 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
           description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
+          maxLength: 500
         pageUrl:
           oneOf:
             - type: string
               format: uri
+              maxLength: 4096
             - type: string
               pattern: ^/
+              maxLength: 4096
           description: Dev/mock compatibility field. Normal public requests derive and store the page path from the allowed Referer header and ignore explicit page identity.
         parentCommentId:
           type:
@@ -1093,18 +1138,22 @@ components:
           properties:
             name:
               type: string
+              maxLength: 100
             email:
               type: string
               format: email
+              maxLength: 254
             website:
               type: string
               format: uri
+              maxLength: 4096
         content:
           type: object
           required: [raw]
           properties:
             raw:
               type: string
+              maxLength: 10000
         options:
           type: object
           description: Optional create options. `notifyOnReply` updates the ordinary commenter's per-site reply email preference only when bootstrap `features.replyEmailNotification.enabled` is true and the submitted author email passes notification email policy. It does not affect staff/admin comments or backend-user notifications.
@@ -1137,6 +1186,7 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
           description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         choice:
           type: string
@@ -1161,6 +1211,7 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
           description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         challengeId:
           type: string
@@ -1185,15 +1236,19 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
           description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
+          maxLength: 500
         pageUrl:
           oneOf:
             - type: string
               format: uri
+              maxLength: 4096
             - type: string
               pattern: ^/
+              maxLength: 4096
           description: 完整页面 URL，或去掉域名后的页面路径
     CaptchaCompleteRequest:
       type: object
@@ -1203,6 +1258,7 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
           description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         challengeId:
           type: string
@@ -1224,15 +1280,19 @@ components:
           type: string
         pageKey:
           type: string
+          maxLength: 1024
           description: Dev/mock compatibility field. Normal public requests derive the page key from the allowed Referer header and ignore explicit page identity.
         pageTitle:
           type: string
+          maxLength: 500
         pageUrl:
           oneOf:
             - type: string
               format: uri
+              maxLength: 4096
             - type: string
               pattern: ^/
+              maxLength: 4096
           description: 完整页面 URL，或去掉域名后的页面路径
         captcha:
           oneOf:

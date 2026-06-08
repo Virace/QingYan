@@ -36,6 +36,12 @@ export const blacklistMatchModeLabels = {
 	cidr: "CIDR",
 } as const;
 
+export const allowlistMatchModeLabels = {
+	exact: "精确",
+	cidr: "CIDR",
+	domain: "域名",
+} as const;
+
 export const scopeLabels = {
 	post: "当前页面",
 	all: "全局",

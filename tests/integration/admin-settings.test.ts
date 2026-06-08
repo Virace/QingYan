@@ -60,6 +60,13 @@ describe("admin settings", () => {
 						ttlSec: 1800,
 					},
 				},
+				inputLimits: {
+					authorNameMaxLength: 40,
+					authorWebsiteMaxLength: 2048,
+					pageTitleMaxLength: 200,
+					pageKeyMaxLength: 512,
+					contentMaxLength: 2000,
+				},
 				metadata: {
 					collectIp: true,
 					collectUserAgent: true,
@@ -123,6 +130,10 @@ describe("admin settings", () => {
 							scope: "all",
 							ttlSec: 2400,
 						},
+					},
+					inputLimits: {
+						authorNameMaxLength: 32,
+						contentMaxLength: 1800,
 					},
 					metadata: {
 						collectIp: false,
@@ -196,6 +207,13 @@ describe("admin settings", () => {
 						scope: "all",
 						ttlSec: 2400,
 					},
+				},
+				inputLimits: {
+					authorNameMaxLength: 32,
+					authorWebsiteMaxLength: 2048,
+					pageTitleMaxLength: 200,
+					pageKeyMaxLength: 512,
+					contentMaxLength: 1800,
 				},
 				metadata: {
 					collectIp: false,

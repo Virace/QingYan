@@ -45,6 +45,7 @@ describe("initial migration", () => {
 					"page_feedback_records",
 					"captcha_sessions",
 					"blacklist_rules",
+					"allowlist_rules",
 					"admin_sessions",
 					"admin_bootstrap_state",
 					"site_settings",
@@ -116,6 +117,9 @@ describe("initial migration", () => {
 			expect(combinedMigrationSql).toContain("`auto_blacklist_scope` text");
 			expect(combinedMigrationSql).toContain(
 				"`auto_blacklist_ttl_sec` integer",
+			);
+			expect(combinedMigrationSql).toContain(
+				"`comment_input_limits_json` text",
 			);
 			expect(combinedMigrationSql).toContain("`comment_metadata_json` text");
 			expect(combinedMigrationSql).toContain("`engagement_json` text");
@@ -189,6 +193,12 @@ describe("initial migration", () => {
 			const blacklistRuleColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(blacklist_rules)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const allowlistRuleColumns = fixture.sqlite
+				.prepare("PRAGMA table_info(allowlist_rules)")
+				.all() as Array<{ name: string; dflt_value: string | null }>;
+			const allowlistRuleIndexes = fixture.sqlite
+				.prepare("PRAGMA index_list(allowlist_rules)")
+				.all() as Array<{ name: string; unique: number }>;
 			const adminBootstrapColumns = fixture.sqlite
 				.prepare("PRAGMA table_info(admin_bootstrap_state)")
 				.all() as Array<{ name: string; dflt_value: string | null }>;
@@ -431,6 +441,7 @@ describe("initial migration", () => {
 					"auto_blacklist_enabled",
 					"auto_blacklist_scope",
 					"auto_blacklist_ttl_sec",
+					"comment_input_limits_json",
 					"comment_metadata_json",
 					"engagement_json",
 					"page_registry_json",
@@ -463,6 +474,32 @@ describe("initial migration", () => {
 			expect(blacklistRuleColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining(["scope", "match_mode"]),
 			);
+			expect(allowlistRuleColumns.map((column) => column.name)).toEqual(
+				expect.arrayContaining([
+					"site_id",
+					"target_type",
+					"match_mode",
+					"target_value",
+					"scope",
+					"reason",
+					"expires_at",
+					"created_by_user_id",
+					"created_at",
+					"updated_at",
+					"deleted_at",
+				]),
+			);
+			expect(allowlistRuleIndexes).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "allowlist_rules_site_target_idx",
+					}),
+					expect.objectContaining({ name: "allowlist_rules_target_idx" }),
+					expect.objectContaining({
+						name: "allowlist_rules_expires_at_idx",
+					}),
+				]),
+			);
 			expect(adminBootstrapColumns.map((column) => column.name)).toEqual(
 				expect.arrayContaining([
 					"id",
@@ -477,6 +514,10 @@ describe("initial migration", () => {
 				blacklistRuleColumns.find((column) => column.name === "scope")
 					?.dflt_value,
 			).toBe("'post'");
+			expect(
+				allowlistRuleColumns.find((column) => column.name === "scope")
+					?.dflt_value,
+			).toBe("'all'");
 			expect(upgradeLedgerColumns).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
@@ -1300,6 +1341,9 @@ describe("initial migration", () => {
 					"revoked_by_user_id",
 					"revocation_reason",
 				]),
+			);
+			expect(siteSettingsColumns.map((column) => column.name)).toContain(
+				"comment_input_limits_json",
 			);
 			expect(siteSettingsColumns.map((column) => column.name)).toContain(
 				"engagement_json",
