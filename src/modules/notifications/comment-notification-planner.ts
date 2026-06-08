@@ -62,11 +62,7 @@ export class CommentNotificationPlanner {
 		}
 
 		const context = await this.loadReplyContext(input.commentId);
-		if (
-			!context ||
-			context.reply.status !== "approved" ||
-			!context.reply.parentId
-		) {
+		if (context?.reply.status !== "approved" || !context.reply.parentId) {
 			return { createdCount: 0, taskIds: [] };
 		}
 		if (context.reply.siteId !== input.siteId) {

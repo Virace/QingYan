@@ -1422,7 +1422,7 @@ export class AdminTaskService {
 			.select()
 			.from(adminUsers)
 			.where(eq(adminUsers.id, ownerUserId));
-		if (!user || user.status !== "active" || user.deletedAt) {
+		if (user?.status !== "active" || user.deletedAt) {
 			throw new AppError(400, "TASK_OWNER_INVALID", "目标 owner 不可用。");
 		}
 		if (user.isInitialAdmin) {

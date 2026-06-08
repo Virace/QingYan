@@ -263,8 +263,7 @@ export class AdminProfileService {
 		const token =
 			await this.repository.getProfileVerificationTokenByHash(tokenHash);
 		if (
-			!token ||
-			token.purpose !== "password_change" ||
+			token?.purpose !== "password_change" ||
 			token.userId !== input.session.user.id ||
 			token.consumedAt !== null ||
 			!token.pendingPasswordHash
@@ -392,8 +391,7 @@ export class AdminProfileService {
 		const token =
 			await this.repository.getProfileVerificationTokenByHash(tokenHash);
 		if (
-			!token ||
-			token.purpose !== "email_change" ||
+			token?.purpose !== "email_change" ||
 			token.userId !== input.session.user.id ||
 			token.consumedAt !== null ||
 			!token.newEmail

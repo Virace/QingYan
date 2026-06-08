@@ -417,7 +417,7 @@ export class AdminSessionService {
 			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
 		}
 		const user = await this.usersRepository.getUserById(session.userId);
-		if (!user || user.status !== "active" || user.deletedAt) {
+		if (user?.status !== "active" || user.deletedAt) {
 			throw new AppError(401, "ADMIN_USER_DISABLED", "后台用户不可用。");
 		}
 		const group = await this.usersRepository.getUserGroup(user.id);
