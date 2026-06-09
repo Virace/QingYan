@@ -6,11 +6,13 @@
 
 ## 通用约定
 
+- 运行时完整路径带 `server.publicPath` 前缀，默认是 `/qingyan/api/admin/*`；本文后续用 Admin Console 源码中的相对写法 `/api/admin/*` 表示同一组接口。
 - Base URL 与服务部署地址一致，例如本地开发默认 `http://localhost:4401`。
-- Admin Console Web 使用 same-origin fetch，请求默认携带 cookie：`credentials: "include"`。
+- Admin Console Web 使用 same-origin fetch，请求默认携带 cookie：`credentials: "include"`。源码中的 `/api/*` 会通过页面注入的 `__QINGYAN_ADMIN__.apiBase` 解析到当前实例的 `${server.publicPath}/api`。
 - 除 WordPress WXR 上传分析接口外，请求体和响应体默认是 JSON。
 - 已登录接口使用后台会话 cookie，默认 cookie 名由 `admin.session.cookieName` 配置决定，示例为 `qingyan_admin`。
 - 登录验证码是内置图片验证码，当前后台登录接口接受 `challengeId` 和 `captchaValue`。
+- `POST`、`PUT`、`PATCH`、`DELETE` 写操作需要管理员会话和 CSRF token。登录和 `GET /api/admin/session/me` 会返回 `csrf.header` 与 `csrf.token`，Admin Console 后续写请求会把 token 放入对应 header。
 - 错误响应沿用全局错误结构：
 
 ```json
@@ -19,6 +21,7 @@
     "code": "ERROR_CODE",
     "message": "错误说明",
     "requestId": "可选请求 ID",
+    "fields": [],
     "details": {}
   }
 }
@@ -74,6 +77,10 @@
   session: {
     expiresAt: string;
   };
+  csrf: {
+    header: string;
+    token: string;
+  };
 }
 ```
 
@@ -101,9 +108,25 @@
   session: {
     expiresAt: string;
   };
+  csrf: {
+    header: string;
+    token: string;
+  };
+  user: {
+    id: number;
+    username: string;
+    email: string;
+    displayName: string;
+    groupKey: "admin" | "site_admin" | "site_moderator";
+    groupName: string;
+    isInitialAdmin: boolean;
+    passwordChangeRequired: boolean;
+  };
+  permissions: string[];
   sites: Array<{
     siteKey: string;
     name: string;
+    allowedOrigins: string[];
   }>;
 }
 ```

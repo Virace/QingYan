@@ -1,6 +1,6 @@
 # QingYan 配置说明
 
-QingYan 当前处于未发布阶段，本轮配置模型按 hard cut 收口：配置文件只负责进程启动前必须知道的部署信息；站点、站点设置、系统设置和后台 bootstrap 状态由数据库持久化。首次部署推荐走 install-first 流程，而不是手写完整业务 YAML。
+QingYan 从首个正式版本 `v0.1.0` 起使用当前配置模型：配置文件只负责进程启动前必须知道的部署信息；站点、站点设置、系统设置和后台 bootstrap 状态由数据库持久化。首次部署推荐走 install-first 流程，而不是手写完整业务 YAML。
 
 ## 配置所有权
 
@@ -40,7 +40,7 @@ startup 环境变量会覆盖安装表单中对应字段，并在安装计划中
 | `QINGYAN_SERVER_PORT` | install app 监听 port |
 | `QINGYAN_PUBLIC_PATH` | QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径 |
 
-首个正式 release 前已移除旧变量 `QINGYAN_INSTALL_RESTART_MODE`。安装切换模式只使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
+旧变量 `QINGYAN_INSTALL_RESTART_MODE` 已在 `v0.1.0` 前移除。安装切换模式只使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
 
 ## Startup Config
 
@@ -62,7 +62,7 @@ database:
 admin:
   session:
     cookieName: qingyan_admin
-    ttlMinutes: 4320
+    ttlMinutes: 1440
     sameSite: lax
     secure: false
 
@@ -75,10 +75,15 @@ security:
   publicOriginGuard:
     enabled: true
     allowMissingOrigin: false
+  adminOriginGuard:
+    enabled: true
+    allowMissingOrigin: false
+    allowedOrigins: []
   rateLimit:
     adminLogin:
       windowSec: 600
       maxFailures: 5
+      autoBlacklistSec: 1800
     commentCreate:
       windowSec: 300
       maxRequests: 5
@@ -119,9 +124,12 @@ security:
 - `requestIdHeader`: 外部请求链路传入 request id 时使用的 header 名。
 - `globalFloodGuard`: 进程级总请求洪峰保护。
 - `publicOriginGuard`: 公开写接口的浏览器来源保护。
+- `adminOriginGuard`: 后台写接口的浏览器来源保护。
 - `rateLimit`: 评论、投票、验证码和页面点赞限流参数。
 
 `publicOriginGuard` 使用请求体或查询参数中的 `siteKey` 查找数据库站点 `allowedOrigins`。`Origin` / CORS 是浏览器侧来源门禁，不是 API 密钥；公开写接口仍然需要验证码、限流、黑名单和审核策略承受直接调用。
+
+`adminOriginGuard` 使用 `system_settings.security.adminOriginGuard.allowedOrigins` 与当前请求的 `Origin` 校验后台写操作。默认启用且不允许缺失 `Origin`；同域部署通常不需要额外配置，跨域后台入口需要在 Admin Console 系统设置中加入精确 origin。
 
 ## 环境变量白名单
 
@@ -291,7 +299,7 @@ Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属
 - Cravatar：`baseUrl=https://cravatar.cn/avatar`，`hashAlgorithm=md5`，`query=s=160&d=identicon`。参考 [Cravatar API](https://cravatar.com/developer/api)。
 - WeAvatar：`baseUrl=https://weavatar.com/avatar`，按官方文档选择参数，例如 `d=initials&name=Alice` 或 `d=color`。参考 [WeAvatar 文档](https://weavatar.com/doc)。
 
-当前没有运行时代码兼容旧 `avatar.gravatar.*`。测试部署如需迁移 SQLite 中已有设置，可先备份数据库，再执行类似 SQL：
+当前没有运行时代码兼容旧 `avatar.gravatar.*`。历史测试实例如需迁移 SQLite 中已有设置，可先备份数据库，再执行类似 SQL：
 
 ```sql
 UPDATE system_settings SET key = 'external.enabled' WHERE category = 'avatar' AND key = 'gravatar.enabled';
@@ -366,9 +374,9 @@ WordPress WXR 导入会读取 `wp:author` 和每条评论的 `wp:comment_user_id
 
 WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内容包含 `<a>` 等 HTML-like 片段，QingYan 也会按文本转义输出。导入分析报告会统计疑似 HTML 评论数量，方便管理员后续人工检查；有限 HTML 白名单或 sanitizer 不在当前迁移默认行为中。
 
-## Future Upgrade Lifecycle
+## Upgrade Lifecycle
 
-当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
+`v0.1.0` 是当前 upgrade lifecycle 的首个正式基线。后续破坏性配置、settings owner、secret 存储位置、数据语义、schema 或导入导出格式变化必须走 upgrade lifecycle；长期约束由 `AGENTS.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
 
 启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，操作员需要输入启动日志或本机操作命令显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
@@ -416,11 +424,12 @@ qyctl restart
 
 裸运行 `qyctl` 或 `qingyanctl` 会显示帮助信息。`qyctl status/start/stop/restart` 面向 systemd 直接部署；Docker Compose 部署应使用 `docker compose ps/restart/logs` 管理容器生命周期。
 
-`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；当前仓库尚未发布首个 Release 时会显示“尚未发布 Release”。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；没有 published release 时返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
 
 ### Release 更新规则
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
+- 首个正式 release 为 `v0.1.0`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 

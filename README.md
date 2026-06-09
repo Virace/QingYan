@@ -16,6 +16,8 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
+当前首个正式版本为 [`v0.1.0`](https://github.com/Virace/QingYan/releases/tag/v0.1.0)。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+
 ## 当前能力
 
 - 评论首屏 bootstrap：`GET /qingyan/api/comments/bootstrap`
@@ -161,7 +163,7 @@ qyctl update check
 qyctl update plan
 ```
 
-`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。当前仓库尚未发布首个 Release 时，会显示“尚未发布 Release”。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
+`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。若没有 published release 会返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
 
 在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。即使安装时随机生成过管理员用户名和密码，dev mode 也会临时注入开发账号；非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态，安装完成页会显示一次性初始密码。
 
@@ -171,7 +173,7 @@ qyctl update plan
 - startup config 示例见 `config/qingyan.example.yml`
 - 本地实参默认使用 `config/qingyan.yml`
 - 站点、站点设置、系统设置由数据库持久化，后台管理端维护
-- 当前仍处于首个正式 release 前；公开输入已由站点级上限约束，但最终 release 状态以完整发布验证通过为准
+- 首个正式版本 `v0.1.0` 已发布；公开输入由站点级上限约束，后续破坏性升级必须走 upgrade lifecycle
 - 应用层滥用保护和自动黑名单可在 Admin Console 关闭；关闭时建议由 WAF、反向代理、CDN 或 API 网关承担更强限流与拦截
 - 黑名单和白名单均在 Admin Console 的安全规则中管理；白名单只影响黑名单/自动黑名单优先级，不绕过页面状态、功能开关、验证码、基础限流或输入校验
 - 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
@@ -179,7 +181,7 @@ qyctl update plan
 
 ## 升级入口
 
-当前尚无正式 release，不为旧未发布状态提供兼容升级。首次正式 release 后，如果启动时检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是启动正常评论 API 或 Admin Console。终端会输出：
+从 `v0.1.0` 起，已有实例升级必须走明确的 upgrade lifecycle。如果启动时检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是启动正常评论 API 或 Admin Console。终端会输出：
 
 ```text
 upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
