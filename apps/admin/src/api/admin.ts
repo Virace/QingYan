@@ -501,6 +501,45 @@ export interface AdminSettings {
 	};
 }
 
+export type NotificationDiagnosticStatus = "ready" | "conditional" | "blocked";
+
+export type NotificationDiagnosticFlowKey =
+	| "admin_comment_pending_email"
+	| "admin_comment_approved_email"
+	| "commenter_reply_email";
+
+export interface NotificationDiagnosticIssue {
+	code: string;
+	path?: string;
+	message: string;
+}
+
+export interface NotificationDiagnosticRecipient {
+	userId?: number;
+	displayName?: string;
+	email: string;
+	status: NotificationDiagnosticStatus;
+	notes: string[];
+}
+
+export interface NotificationDiagnostic {
+	generatedAt: string;
+	overall: NotificationDiagnosticStatus;
+	savedConfigOnly: true;
+	runtime: {
+		notificationWorker: NotificationDiagnosticStatus;
+		queueBackend: string;
+		lastTickAt: string | null;
+	};
+	flows: Array<{
+		key: NotificationDiagnosticFlowKey;
+		status: NotificationDiagnosticStatus;
+		recipients: NotificationDiagnosticRecipient[];
+		blockers: NotificationDiagnosticIssue[];
+		warnings: NotificationDiagnosticIssue[];
+	}>;
+}
+
 export interface AdminSystemSettings {
 	admin: {
 		session: {
@@ -1076,6 +1115,12 @@ export function updateSite(
 export function getSettings(siteKey: string) {
 	return requestJson<AdminSettings>(
 		`/api/admin/sites/${encodeURIComponent(siteKey)}/settings`,
+	);
+}
+
+export function getNotificationDiagnostics(siteKey: string) {
+	return requestJson<NotificationDiagnostic>(
+		`/api/admin/sites/${encodeURIComponent(siteKey)}/notification-diagnostics`,
 	);
 }
 

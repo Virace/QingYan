@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import { NotificationDiagnosticsService } from "../notifications/notification-diagnostics-service";
 import { InvalidRequestError, ValidationFailedError } from "../shared/errors";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
@@ -25,6 +26,12 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.security,
 		fastify.siteRegistry,
 		repository,
+	);
+	const notificationDiagnostics = new NotificationDiagnosticsService(
+		fastify.db,
+		{
+			notificationRuntimeState: () => fastify.notificationRuntime.state(),
+		},
 	);
 
 	fastify.get("/", async (request) => {
@@ -88,6 +95,24 @@ export const adminSitesRoutes: FastifyPluginAsync = async (fastify) => {
 			permission: "site_settings.read",
 		});
 		return service.getSettings(parsedParams.data.siteKey);
+	});
+
+	fastify.get("/:siteKey/notification-diagnostics", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const parsedParams = adminSiteParamsSchema.safeParse(request.params);
+		if (!parsedParams.success) {
+			throw new InvalidRequestError({
+				issues: parsedParams.error.issues,
+			});
+		}
+
+		requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: parsedParams.data.siteKey,
+			permission: "site_settings.read",
+		});
+		return notificationDiagnostics.diagnose(parsedParams.data.siteKey);
 	});
 
 	fastify.put("/:siteKey/settings", async (request) => {

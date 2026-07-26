@@ -184,6 +184,18 @@ export class BackendUserNotificationRecipientsRepository {
 		recipients: SiteNotificationRecipientInput[];
 	}) {
 		const nowIso = new Date().toISOString();
+		const existingRecipients = await this.db
+			.select({ id: siteNotificationRecipients.id })
+			.from(siteNotificationRecipients)
+			.where(eq(siteNotificationRecipients.siteId, input.siteId));
+		if (existingRecipients.length > 0) {
+			await this.db.delete(siteNotificationRecipientRoutes).where(
+				inArray(
+					siteNotificationRecipientRoutes.recipientId,
+					existingRecipients.map((recipient) => recipient.id),
+				),
+			);
+		}
 		await this.db
 			.delete(siteNotificationRecipients)
 			.where(eq(siteNotificationRecipients.siteId, input.siteId));
