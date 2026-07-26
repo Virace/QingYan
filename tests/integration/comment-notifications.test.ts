@@ -131,7 +131,7 @@ async function postComment(
 		parentCommentId: string | null;
 		email: string;
 		content: string;
-		notifyOnReply: boolean;
+		notifyOnReply?: boolean;
 		cookies?: Record<string, string>;
 	},
 ) {
@@ -154,9 +154,13 @@ async function postComment(
 			content: {
 				raw: input.content,
 			},
-			options: {
-				notifyOnReply: input.notifyOnReply,
-			},
+			...(input.notifyOnReply === undefined
+				? {}
+				: {
+						options: {
+							notifyOnReply: input.notifyOnReply,
+						},
+					}),
 		},
 	});
 }
@@ -340,6 +344,34 @@ describe("comment notifications", () => {
 			.from(commenterNotificationPreferences);
 		expect(preference).toMatchObject({
 			email: "unavailable@example.com",
+			notifyOnReply: false,
+			unsubscribedAt: null,
+		});
+	});
+
+	it("does not infer commenter consent when notifyOnReply is omitted", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const site = await seedActivePage(fixture, "post:preference-omitted");
+		await enableReplyEmailCapability(fixture, site.id);
+		await fixture.app.db
+			.update(siteSettings)
+			.set({ commenterReplyEmailDefaultChecked: true })
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await postComment(fixture, {
+			pageKey: "post:preference-omitted",
+			parentCommentId: null,
+			email: "omitted@example.com",
+			content: "client omitted notifyOnReply",
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [preference] = await fixture.app.db
+			.select()
+			.from(commenterNotificationPreferences);
+		expect(preference).toMatchObject({
+			email: "omitted@example.com",
 			notifyOnReply: false,
 			unsubscribedAt: null,
 		});

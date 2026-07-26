@@ -104,6 +104,12 @@ describe("admin settings", () => {
 				sourceFreshnessGraceSec: 7200,
 				emergencyLockdown: false,
 			},
+			notifications: {
+				commenter: {
+					replyEmailEnabled: false,
+					replyEmailDefaultChecked: false,
+				},
+			},
 		});
 
 		const updateResponse = await fixture.app.inject({
@@ -164,6 +170,7 @@ describe("admin settings", () => {
 				notifications: {
 					commenter: {
 						replyEmailEnabled: true,
+						replyEmailDefaultChecked: true,
 					},
 					backend: {
 						enabled: true,
@@ -244,6 +251,7 @@ describe("admin settings", () => {
 			notifications: {
 				commenter: {
 					replyEmailEnabled: true,
+					replyEmailDefaultChecked: true,
 				},
 				backend: {
 					enabled: true,
@@ -263,6 +271,19 @@ describe("admin settings", () => {
 					enabled: true,
 				},
 			},
+		});
+
+		const persistedResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminCookie?.value ?? "",
+			},
+		});
+		expect(persistedResponse.statusCode).toBe(200);
+		expect(persistedResponse.json().notifications.commenter).toEqual({
+			replyEmailEnabled: true,
+			replyEmailDefaultChecked: true,
 		});
 	});
 

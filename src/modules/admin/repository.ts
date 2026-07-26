@@ -1552,6 +1552,8 @@ export class AdminRepository {
 				allowPageLike: siteSettings.allowPageLike,
 				engagementJson: siteSettings.engagementJson,
 				commenterReplyEmailEnabled: siteSettings.commenterReplyEmailEnabled,
+				commenterReplyEmailDefaultChecked:
+					siteSettings.commenterReplyEmailDefaultChecked,
 				backendNotificationsEnabled: siteSettings.backendNotificationsEnabled,
 			})
 			.from(sites)
@@ -1636,6 +1638,7 @@ export class AdminRepository {
 			notifications: {
 				commenter: {
 					replyEmailEnabled: row.commenterReplyEmailEnabled,
+					replyEmailDefaultChecked: row.commenterReplyEmailDefaultChecked,
 				},
 				backend: {
 					enabled: row.backendNotificationsEnabled,
@@ -2231,6 +2234,7 @@ export class AdminRepository {
 			pageRegistryJson?: string;
 			engagementJson?: string;
 			commenterReplyEmailEnabled?: boolean;
+			commenterReplyEmailDefaultChecked?: boolean;
 			backendNotificationsEnabled?: boolean;
 		},
 	) {
@@ -2261,6 +2265,8 @@ export class AdminRepository {
 				pageRegistryJson: input.pageRegistryJson,
 				engagementJson: input.engagementJson,
 				commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
+				commenterReplyEmailDefaultChecked:
+					input.commenterReplyEmailDefaultChecked,
 				backendNotificationsEnabled: input.backendNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})

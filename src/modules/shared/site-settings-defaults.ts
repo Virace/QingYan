@@ -335,6 +335,7 @@ export function buildDefaultSiteSettings(siteId: number) {
 		),
 		pageRegistryJson: null,
 		commenterReplyEmailEnabled: false,
+		commenterReplyEmailDefaultChecked: false,
 		backendNotificationsEnabled: false,
 	};
 }

@@ -369,6 +369,7 @@ export interface AdminSite {
 	notifications: {
 		commenter: {
 			replyEmailEnabled: boolean;
+			replyEmailDefaultChecked: boolean;
 		};
 		backend: {
 			enabled: boolean;
@@ -490,6 +491,7 @@ export interface AdminSettings {
 	notifications: {
 		commenter: {
 			replyEmailEnabled: boolean;
+			replyEmailDefaultChecked: boolean;
 		};
 		backend: {
 			enabled: boolean;

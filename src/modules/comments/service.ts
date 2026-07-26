@@ -337,6 +337,8 @@ export class CommentsService {
 					: false,
 				commenterReplyEmailEnabled:
 					settings?.commenterReplyEmailEnabled ?? false,
+				commenterReplyEmailDefaultChecked:
+					settings?.commenterReplyEmailDefaultChecked ?? false,
 			}),
 			form: buildCommentForm({
 				allowWebsite: settings?.allowWebsite,

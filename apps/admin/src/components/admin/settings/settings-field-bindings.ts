@@ -49,6 +49,12 @@ export const siteSettingsFieldBindings = [
 		label: "评论者回复邮件通知",
 	},
 	{
+		path: "notifications.commenter.replyEmailDefaultChecked",
+		groupId: "site-notifications",
+		controlId: "commenter-reply-email-default-checked",
+		label: "回复提醒默认勾选",
+	},
+	{
 		path: "notifications.backend.enabled",
 		groupId: "site-notifications",
 		controlId: "backend-user-notifications",

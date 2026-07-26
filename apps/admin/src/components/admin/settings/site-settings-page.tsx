@@ -1167,6 +1167,29 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 												})
 											}
 										/>
+										<BooleanField
+											label="回复提醒默认勾选"
+											description="控制公开评论框首次显示时是否默认勾选“回复提醒”；评论者仍可自行取消。订阅能力关闭时，公开接口会强制返回未勾选。"
+											checked={
+												draft.notifications.commenter.replyEmailDefaultChecked
+											}
+											error={firstFieldError(
+												saveError,
+												"notifications.commenter.replyEmailDefaultChecked",
+											)}
+											onCheckedChange={(replyEmailDefaultChecked) =>
+												setDraft({
+													...draft,
+													notifications: {
+														...draft.notifications,
+														commenter: {
+															...draft.notifications.commenter,
+															replyEmailDefaultChecked,
+														},
+													},
+												})
+											}
+										/>
 									</SettingsSection>
 									<SettingsSection
 										title="后台用户通知"

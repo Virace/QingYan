@@ -1223,6 +1223,7 @@ export class AdminManagementService {
 			notifications: {
 				commenter: {
 					replyEmailEnabled: settings.commenterReplyEmailEnabled,
+					replyEmailDefaultChecked: settings.commenterReplyEmailDefaultChecked,
 				},
 				backend: {
 					enabled: settings.backendNotificationsEnabled,
@@ -1383,6 +1384,7 @@ export class AdminManagementService {
 			notifications?: {
 				commenter?: {
 					replyEmailEnabled?: boolean;
+					replyEmailDefaultChecked?: boolean;
 				};
 				backend?: {
 					enabled?: boolean;
@@ -1481,6 +1483,8 @@ export class AdminManagementService {
 				: undefined,
 			commenterReplyEmailEnabled:
 				input.notifications?.commenter?.replyEmailEnabled,
+			commenterReplyEmailDefaultChecked:
+				input.notifications?.commenter?.replyEmailDefaultChecked,
 			backendNotificationsEnabled: input.notifications?.backend?.enabled,
 		});
 		if (input.notifications?.backend?.recipients) {

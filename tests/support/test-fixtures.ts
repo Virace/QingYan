@@ -8,6 +8,7 @@ import { buildApp } from "../../src/app";
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import type { AppConfig } from "../../src/config/types";
 import { createDatabaseClients } from "../../src/db/client";
+import { applyDatabaseMigrations } from "../../src/db/migrations";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import type { AdminProfileEmailSender } from "../../src/modules/admin/profile-service";
 import type { CommentMetadataResolver } from "../../src/modules/comments/metadata/resolver";
@@ -50,12 +51,40 @@ export function applyInitialMigration(databaseFile: string): void {
 		.filter((fileName) => fileName.endsWith(".sql"))
 		.sort();
 
-	for (const fileName of migrationFiles) {
-		const sql = readFileSync(path.join(migrationDirectory, fileName), "utf-8");
-		sqlite.exec(sql);
+	try {
+		for (const fileName of migrationFiles) {
+			const sql = readFileSync(
+				path.join(migrationDirectory, fileName),
+				"utf-8",
+			);
+			sqlite.exec(sql);
+		}
+	} finally {
+		sqlite.close();
 	}
+}
 
-	sqlite.close();
+export function applyV010BaselineMigration(databaseFile: string): void {
+	const sqlite = new Database(databaseFile);
+	try {
+		sqlite.exec(
+			readFileSync(
+				path.resolve(process.cwd(), "drizzle", "0000_initial.sql"),
+				"utf-8",
+			),
+		);
+	} finally {
+		sqlite.close();
+	}
+}
+
+export function applyCurrentMigrations(databaseFile: string): void {
+	const sqlite = new Database(databaseFile);
+	try {
+		applyDatabaseMigrations(sqlite);
+	} finally {
+		sqlite.close();
+	}
 }
 
 async function seedTestSite(
@@ -179,7 +208,7 @@ export async function createTestApp(options?: {
 	adminProfileEmailSender?: AdminProfileEmailSender;
 }) {
 	const workspace = createTestWorkspace();
-	applyInitialMigration(workspace.databaseFile);
+	applyCurrentMigrations(workspace.databaseFile);
 
 	const baseConfig = createTestConfig(
 		workspace.databaseFile,

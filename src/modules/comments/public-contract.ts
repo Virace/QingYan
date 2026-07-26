@@ -25,7 +25,9 @@ export type PublicFeatures = {
 	pageViews: FeatureFlag;
 	pageLikes: FeatureFlag;
 	visitors: FeatureFlag;
-	replyEmailNotification: FeatureFlag;
+	replyEmailNotification: FeatureFlag & {
+		defaultChecked: boolean;
+	};
 };
 
 export function enabledFeature(): FeatureFlag {
@@ -58,6 +60,7 @@ export function buildPublicFeatures(input: {
 	engagement: EngagementSettings;
 	systemMailUsable: boolean;
 	commenterReplyEmailEnabled: boolean;
+	commenterReplyEmailDefaultChecked: boolean;
 }): PublicFeatures {
 	if (!input.pageInteractive) {
 		return {
@@ -68,7 +71,10 @@ export function buildPublicFeatures(input: {
 			pageViews: disabledFeature("page_inactive"),
 			pageLikes: disabledFeature("page_inactive"),
 			visitors: disabledFeature("page_inactive"),
-			replyEmailNotification: disabledFeature("page_inactive"),
+			replyEmailNotification: {
+				...disabledFeature("page_inactive"),
+				defaultChecked: false,
+			},
 		};
 	}
 
@@ -98,10 +104,16 @@ export function buildPublicFeatures(input: {
 		input.maxDepth > 1 &&
 		input.systemMailUsable &&
 		input.commenterReplyEmailEnabled
-			? enabledFeature()
-			: disabledFeature(
-					input.commentsEnabled ? "feature_disabled" : "comments_disabled",
-				);
+			? {
+					...enabledFeature(),
+					defaultChecked: input.commenterReplyEmailDefaultChecked,
+				}
+			: {
+					...disabledFeature(
+						input.commentsEnabled ? "feature_disabled" : "comments_disabled",
+					),
+					defaultChecked: false,
+				};
 
 	return {
 		comments,

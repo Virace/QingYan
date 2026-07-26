@@ -716,6 +716,7 @@ export const adminSettingsBodySchema = z
 				commenter: z
 					.object({
 						replyEmailEnabled: z.boolean().optional(),
+						replyEmailDefaultChecked: z.boolean().optional(),
 					})
 					.optional(),
 				backend: z

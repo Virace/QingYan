@@ -61,6 +61,7 @@ describe("public API contract", () => {
 			.update(siteSettings)
 			.set({
 				commenterReplyEmailEnabled: true,
+				commenterReplyEmailDefaultChecked: true,
 				engagementJson: serializeEngagementSettings({
 					visitors: { enabled: true },
 					pageViews: { enabled: true },
@@ -99,7 +100,10 @@ describe("public API contract", () => {
 				pageViews: { enabled: true },
 				pageLikes: { enabled: true },
 				visitors: { enabled: true },
-				replyEmailNotification: { enabled: true },
+				replyEmailNotification: {
+					enabled: true,
+					defaultChecked: true,
+				},
 			},
 			data: {
 				comments: {
@@ -144,6 +148,7 @@ describe("public API contract", () => {
 			.update(siteSettings)
 			.set({
 				commenterReplyEmailEnabled: true,
+				commenterReplyEmailDefaultChecked: true,
 			})
 			.where(eq(siteSettings.siteId, site.id));
 
@@ -159,6 +164,7 @@ describe("public API contract", () => {
 		expect(response.json().features.replyEmailNotification).toEqual({
 			enabled: false,
 			reason: "feature_disabled",
+			defaultChecked: false,
 		});
 	});
 
@@ -201,6 +207,7 @@ describe("public API contract", () => {
 		expect(body.features.replyEmailNotification).toEqual({
 			enabled: false,
 			reason: "comments_disabled",
+			defaultChecked: false,
 		});
 		expect(body.features.commentVotes).toEqual({
 			enabled: false,
@@ -279,6 +286,7 @@ describe("public API contract", () => {
 		expect(body.features.replyEmailNotification).toEqual({
 			enabled: false,
 			reason: "page_inactive",
+			defaultChecked: false,
 		});
 		expect(body.data).toEqual({});
 	});

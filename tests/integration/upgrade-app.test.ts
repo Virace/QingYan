@@ -7,7 +7,7 @@ import { stringify } from "yaml";
 
 import { createUpgradeApp } from "../../src/modules/upgrade/upgrade-app";
 import {
-	applyInitialMigration,
+	applyV010BaselineMigration,
 	createTestConfig,
 } from "../support/test-fixtures";
 
@@ -53,7 +53,7 @@ function writeConfig(configPath: string, databaseFile: string) {
 }
 
 function seedOldDatabase(databaseFile: string) {
-	applyInitialMigration(databaseFile);
+	applyV010BaselineMigration(databaseFile);
 	const sqlite = new Database(databaseFile);
 	try {
 		sqlite.exec(`

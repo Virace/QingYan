@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
 	createTestConfig,
-	applyInitialMigration,
+	applyV010BaselineMigration,
 } from "../support/test-fixtures";
 import { runUpgradeCli } from "../../scripts/upgrade";
 
@@ -47,7 +47,7 @@ function writeConfig(configPath: string, databaseFile: string) {
 }
 
 function seedOldDatabase(databaseFile: string) {
-	applyInitialMigration(databaseFile);
+	applyV010BaselineMigration(databaseFile);
 	const sqlite = new Database(databaseFile);
 	try {
 		sqlite.exec(`

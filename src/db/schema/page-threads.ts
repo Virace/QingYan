@@ -19,6 +19,7 @@ export const pageThreads = sqliteTable(
 		pageKey: text("page_key").notNull(),
 		pageTitle: text("page_title"),
 		pageUrl: text("page_url"),
+		kind: text("kind").notNull().default("public"),
 		commentCount: integer("comment_count").notNull().default(0),
 		rootCommentCount: integer("root_comment_count").notNull().default(0),
 		pageViewCount: integer("page_view_count").notNull().default(0),
