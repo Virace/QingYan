@@ -4,9 +4,9 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import {
+	adminUsers,
 	commentRequestMetadata,
 	comments,
-	adminUsers,
 	pageFeedbackRecords,
 	pageThreads,
 	pageViewSessions,
@@ -333,6 +333,22 @@ export class CommentsRepository {
 	public async getOrCreatePageThread(input: ThreadRecordInput) {
 		const normalizedPageUrl = normalizePagePath(input.pageUrl);
 		const nowIso = new Date().toISOString();
+		const [existingThread] = await this.db
+			.select()
+			.from(pageThreads)
+			.where(
+				and(
+					eq(pageThreads.siteId, input.siteId),
+					eq(pageThreads.pageKey, input.pageKey),
+				),
+			)
+			.limit(1);
+		if (
+			existingThread?.kind !== undefined &&
+			existingThread.kind !== "public"
+		) {
+			throw new AppError(404, "PAGE_NOT_FOUND", "页面不存在。");
+		}
 
 		await this.db
 			.insert(pageThreads)
@@ -341,6 +357,7 @@ export class CommentsRepository {
 				pageKey: input.pageKey,
 				pageTitle: input.pageTitle,
 				pageUrl: normalizedPageUrl,
+				kind: "public",
 			})
 			.onConflictDoUpdate({
 				target: [pageThreads.siteId, pageThreads.pageKey],
@@ -379,6 +396,7 @@ export class CommentsRepository {
 				and(
 					eq(pageThreads.siteId, input.siteId),
 					eq(pageThreads.pageKey, input.pageKey),
+					eq(pageThreads.kind, "public"),
 				),
 			)
 			.limit(1);
@@ -402,6 +420,7 @@ export class CommentsRepository {
 				and(
 					eq(pageThreads.siteId, input.siteId),
 					eq(pageThreads.pageKey, input.pageKey),
+					eq(pageThreads.kind, "public"),
 				),
 			)
 			.limit(1);
@@ -630,6 +649,7 @@ export class CommentsRepository {
 				},
 			})
 			.from(comments)
+			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 			.leftJoin(
 				commentRequestMetadata,
 				eq(commentRequestMetadata.commentId, comments.id),
@@ -638,6 +658,7 @@ export class CommentsRepository {
 			.where(
 				and(
 					eq(comments.pageThreadId, input.pageThreadId),
+					eq(pageThreads.kind, "public"),
 					eq(comments.status, "approved"),
 					isNull(comments.deletedAt),
 				),

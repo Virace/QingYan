@@ -329,6 +329,21 @@ export class TaskRunRepository {
 		return row ? serializeTaskRun(row) : null;
 	}
 
+	public async listByIds(ids: string[]) {
+		if (ids.length === 0) {
+			return [];
+		}
+		const rows = await this.db
+			.select()
+			.from(taskRuns)
+			.where(inArray(taskRuns.id, ids));
+		const byId = new Map(rows.map((row) => [row.id, serializeTaskRun(row)]));
+		return ids.flatMap((id) => {
+			const task = byId.get(id);
+			return task ? [task] : [];
+		});
+	}
+
 	public async listForTaskCenter(input: {
 		siteKey?: string;
 		type?: string;
@@ -635,6 +650,25 @@ export class TaskRunRepository {
 				updatedAt: timestamp,
 			})
 			.where(eq(taskRuns.id, id));
+		return this.getRequired(id);
+	}
+
+	public async cancelIfUnclaimed(id: string, reason: unknown) {
+		const timestamp = nowIso();
+		await this.db
+			.update(taskRuns)
+			.set({
+				status: "cancelled",
+				errorJson: stringifyJson(reason),
+				finishedAt: timestamp,
+				updatedAt: timestamp,
+			})
+			.where(
+				and(
+					eq(taskRuns.id, id),
+					inArray(taskRuns.status, ["queued", "delayed", "retrying"]),
+				),
+			);
 		return this.getRequired(id);
 	}
 

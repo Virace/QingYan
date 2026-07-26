@@ -41,6 +41,8 @@ export interface BackendUserNotificationEvent {
 	createdAt?: string | null;
 }
 
+export type NotificationChannelFilter = Array<"email" | "webhook" | "wxpusher">;
+
 export interface BackendUserNotificationPlanResult {
 	tasks: TaskRunRecord[];
 	deliveries: Array<
@@ -123,6 +125,9 @@ export class BackendUserNotificationPlanner {
 
 	public async planForCommentEvent(
 		event: BackendUserNotificationEvent,
+		options: {
+			channelFilter?: NotificationChannelFilter;
+		} = {},
 	): Promise<BackendUserNotificationPlanResult> {
 		const [settings] = await this.db
 			.select({
@@ -167,6 +172,9 @@ export class BackendUserNotificationPlanner {
 					continue;
 				}
 				const channel = route.channelConfig.type;
+				if (options.channelFilter && !options.channelFilter.includes(channel)) {
+					continue;
+				}
 				if (!route.channelConfig.enabled) {
 					continue;
 				}
