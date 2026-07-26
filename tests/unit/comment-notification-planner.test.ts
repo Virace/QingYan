@@ -289,12 +289,13 @@ describe("comment notification planner", () => {
 			name: "suppressed",
 			prepare: async (fixture: ReturnType<typeof createFixture>) => {
 				const reputation = new EmailReputationRepository(fixture.db);
+				const baseTime = Date.now();
 				for (let attempt = 0; attempt < 5; attempt += 1) {
 					await reputation.recordRecipientFailure({
 						siteId: 1,
 						email: "parent@example.com",
 						reason: "bounce",
-						nowIso: `2026-06-02T10:0${attempt}:00.000Z`,
+						nowIso: new Date(baseTime + attempt * 60_000).toISOString(),
 					});
 				}
 			},

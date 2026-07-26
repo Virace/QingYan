@@ -22,6 +22,11 @@ export interface NotificationChannelConfigRecord {
 	updatedAt: string | null;
 }
 
+export interface NotificationChannelRuntimeConfigRecord
+	extends NotificationChannelConfigRecord {
+	secretConfig: Record<string, unknown>;
+}
+
 export interface NotificationChannelConfigInput {
 	id?: string;
 	type: Exclude<NotificationChannelType, "email">;
@@ -77,6 +82,15 @@ function serializeChannelConfig(
 	};
 }
 
+function serializeRuntimeChannelConfig(
+	row: typeof notificationChannelConfigs.$inferSelect,
+): NotificationChannelRuntimeConfigRecord {
+	return {
+		...serializeChannelConfig(row),
+		secretConfig: parseJsonObject(row.secretConfigJson),
+	};
+}
+
 export class NotificationChannelConfigsRepository {
 	public constructor(private readonly db: AppDatabase) {}
 
@@ -101,6 +115,23 @@ export class NotificationChannelConfigsRepository {
 			.where(eq(notificationChannelConfigs.id, id))
 			.limit(1);
 		return row ? serializeChannelConfig(row) : null;
+	}
+
+	public async getRuntime(
+		id: string,
+	): Promise<NotificationChannelRuntimeConfigRecord | null> {
+		if (id === defaultEmailChannelConfig.id) {
+			return {
+				...defaultEmailChannelConfig,
+				secretConfig: {},
+			};
+		}
+		const [row] = await this.db
+			.select()
+			.from(notificationChannelConfigs)
+			.where(eq(notificationChannelConfigs.id, id))
+			.limit(1);
+		return row ? serializeRuntimeChannelConfig(row) : null;
 	}
 
 	public async listByIds(ids: string[]) {

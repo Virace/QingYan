@@ -113,6 +113,7 @@ async function createCustomTestApp(options?: {
 	}
 
 	const app = await buildApp(config, undefined, {
+		startNotificationRuntime: false,
 		akismetClient: options?.akismetVerdict
 			? {
 					commentCheck: async () => ({

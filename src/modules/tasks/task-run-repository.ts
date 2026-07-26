@@ -9,6 +9,7 @@ import {
 	isNotNull,
 	isNull,
 	lte,
+	notInArray,
 	or,
 } from "drizzle-orm";
 
@@ -24,6 +25,7 @@ import {
 	parseNullableJson,
 	stringifyJson,
 	type TaskActorType,
+	type TaskClaimOptions,
 	type TaskQueueBackend,
 	type TaskQueuePayload,
 	type TaskRunCategory,
@@ -414,15 +416,21 @@ export class TaskRunRepository {
 		return rows.map(serializeTaskRun);
 	}
 
-	public async claimRunnable(input: {
-		workerId: string;
-		nowIso?: string;
-		limit?: number;
-	}) {
+	public async claimRunnable(
+		input: TaskClaimOptions & {
+			workerId: string;
+		},
+	) {
 		const timestamp = input.nowIso ?? nowIso();
 		const runnableCondition = and(
 			inArray(taskRuns.status, ["queued", "delayed", "retrying"]),
 			or(isNull(taskRuns.runAfter), lte(taskRuns.runAfter, timestamp)),
+			input.includeCategories?.length
+				? inArray(taskRuns.category, input.includeCategories)
+				: undefined,
+			input.excludeCategories?.length
+				? notInArray(taskRuns.category, input.excludeCategories)
+				: undefined,
 		);
 		const rows = await this.db
 			.select({ id: taskRuns.id })

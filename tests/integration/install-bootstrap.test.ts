@@ -1607,7 +1607,11 @@ describe("install bootstrap", () => {
 		);
 		await installApp.close();
 
-		const app = await buildApp(await loadConfig(workspace.configPath, {}));
+		const app = await buildApp(
+			await loadConfig(workspace.configPath, {}),
+			undefined,
+			{ startNotificationRuntime: false },
+		);
 		cleanups.unshift(() => app.close());
 
 		expect(app.adminBootstrap.consolePath).toBe("/hidden-admin");

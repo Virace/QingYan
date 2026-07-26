@@ -1,10 +1,12 @@
 import type { TaskRunRepository } from "./task-run-repository";
 import type { TaskRunner } from "./task-runner";
+import type { TaskClaimScope } from "./types";
 
 export interface TaskRunWorkerOptions {
 	taskRuns: TaskRunRepository;
 	runner: TaskRunner;
 	workerId: string;
+	claimScope?: TaskClaimScope;
 	intervalMs?: number;
 	claimLimit?: number;
 	now?: () => Date;
@@ -75,6 +77,7 @@ export class TaskRunWorker {
 			workerId: this.options.workerId,
 			nowIso: this.now().toISOString(),
 			limit: this.claimLimit,
+			...this.options.claimScope,
 		});
 		for (const run of runs) {
 			await this.options.runner.runClaimed(run);

@@ -14,6 +14,12 @@ import { FullBackupService } from "../modules/backup/full-backup-service";
 import { IpRegionAutoUpdateScheduler } from "../modules/comments/metadata/ip-region-scheduler";
 import { CommentIpMaintenanceService } from "../modules/comments/metadata/comment-ip-maintenance-service";
 import { QingYanExportService } from "../modules/import-export/qingyan/export-service";
+import { EmailReputationRepository } from "../modules/notifications/email-reputation-repository";
+import { NotificationChannelConfigsRepository } from "../modules/notifications/channel-configs-repository";
+import { NotificationTemplateContextBuilder } from "../modules/notifications/notification-template-context";
+import { RuntimeNotificationChannelAdapterFactory } from "../modules/notifications/notification-channel-adapter-factory";
+import { NotificationRuntime } from "../modules/notifications/notification-runtime";
+import { NotificationWorker } from "../modules/notifications/notification-worker";
 import { fetchPageSourceText } from "../modules/page-registry/source-fetcher";
 import { PageSourceRefreshService } from "../modules/page-registry/source-refresh-service";
 import { PageMetadataRefreshService } from "../modules/page-registry/title-refresh-service";
@@ -28,6 +34,7 @@ import { TaskFailureNotificationService } from "../modules/tasks/task-failure-no
 import { TaskMetricRollupRepository } from "../modules/tasks/task-metric-rollup-repository";
 import { TaskRunRepository } from "../modules/tasks/task-run-repository";
 import { TaskRunWorker } from "../modules/tasks/task-run-worker";
+import { DatabaseTaskQueue } from "../modules/tasks/database-task-queue";
 import { TaskRunner } from "../modules/tasks/task-runner";
 import { TaskScheduler } from "../modules/tasks/scheduler";
 import type { TaskRunnerServices } from "../modules/tasks/task-runner-context";
@@ -174,10 +181,53 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 			failureNotifications: taskFailureNotifications,
 		}),
 		workerId: `task-worker:${process.pid}`,
+		claimScope: {
+			excludeCategories: ["notification"],
+		},
 	});
 	taskRunWorker.start();
+	const emailReputation = new EmailReputationRepository(db);
+	const notificationRuntime = new NotificationRuntime({
+		worker: new NotificationWorker({
+			queue: new DatabaseTaskQueue(db),
+			repository: taskRuns,
+			adapterFactory: new RuntimeNotificationChannelAdapterFactory({
+				configs: new NotificationChannelConfigsRepository(db),
+				systemSettings: systemSettingsService,
+				emailSender: fastify.emailSender,
+			}),
+			reputation: {
+				recordRecipientFailure: (input) =>
+					input.siteId
+						? emailReputation.recordRecipientFailure({
+								...input,
+								siteId: input.siteId,
+							})
+						: undefined,
+				recordSuccess: (input) =>
+					input.siteId
+						? emailReputation.recordSuccess({
+								...input,
+								siteId: input.siteId,
+							})
+						: undefined,
+			},
+			templateContextBuilder: new NotificationTemplateContextBuilder(
+				db,
+				fastify.config.server,
+			),
+		}),
+		onError: (error) => {
+			fastify.log.error({ err: error }, "Notification worker tick failed.");
+		},
+	});
+	fastify.decorate("notificationRuntime", notificationRuntime);
+	if (fastify.notificationRuntimeAutoStart) {
+		notificationRuntime.start();
+	}
 
 	fastify.addHook("onClose", async () => {
+		await notificationRuntime.stop();
 		await taskRunWorker.stop();
 		await taskScheduler.stop();
 		ipRegionScheduler.stop();

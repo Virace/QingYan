@@ -42,6 +42,7 @@ async function createQueuedTask(
 	input?: {
 		recipientType?: "backend_user" | "commenter";
 		recipientAddress?: string;
+		channelConfigRef?: string;
 		maxAttempts?: number;
 	},
 ) {
@@ -61,6 +62,7 @@ async function createQueuedTask(
 	const delivery = await repository.createDelivery({
 		taskRunId: task.id,
 		channel: "email",
+		channelConfigRef: input?.channelConfigRef,
 		recipientType: input?.recipientType ?? "backend_user",
 		recipientAddressSnapshot:
 			input?.recipientAddress ?? "recipient@example.test",
@@ -194,6 +196,44 @@ async function createQueuedCommenterReplyTask(
 }
 
 describe("notification worker", () => {
+	it("leaves non-notification tasks queued when claiming work", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		const maintenanceTask = await repository.create({
+			type: "page_metadata_refresh",
+			category: "maintenance",
+			payload: { pageKey: "/posts/maintenance/" },
+			payloadSummary: { pageKey: "/posts/maintenance/" },
+			createdAt: "2026-01-01T00:00:00.000Z",
+		});
+		const { task: notificationTask } = await createQueuedTask(repository);
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			adapters: {
+				email: {
+					send: async () => ({ providerMessageId: "smtp-scoped" }),
+				},
+			},
+		});
+
+		const processed = await worker.runNextNotificationTask({ limit: 1 });
+
+		expect(processed).toBe(1);
+		await expect(
+			repository.getRequired(notificationTask.id),
+		).resolves.toMatchObject({
+			status: "succeeded",
+		});
+		await expect(
+			repository.getRequired(maintenanceTask.id),
+		).resolves.toMatchObject({
+			status: "queued",
+			workerId: null,
+		});
+	});
+
 	it("marks successful email task and delivery as sent", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -218,6 +258,41 @@ describe("notification worker", () => {
 		).resolves.toMatchObject({
 			status: "sent",
 			providerMessageId: "smtp-1",
+		});
+	});
+
+	it("resolves adapters from each delivery channel config reference", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		const { delivery } = await createQueuedTask(repository, {
+			channelConfigRef: "email:transactional",
+		});
+		const send = vi.fn(async () => ({
+			providerMessageId: "smtp-transactional",
+		}));
+		const resolve = vi.fn(async () => ({ send }));
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			adapterFactory: { resolve },
+		});
+
+		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(1);
+
+		expect(resolve).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: delivery.id,
+				channel: "email",
+				channelConfigRef: "email:transactional",
+			}),
+		);
+		expect(send).toHaveBeenCalledOnce();
+		await expect(
+			repository.getDeliveryRequired(delivery.id),
+		).resolves.toMatchObject({
+			status: "sent",
+			providerMessageId: "smtp-transactional",
 		});
 	});
 

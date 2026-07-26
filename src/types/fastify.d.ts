@@ -13,6 +13,7 @@ import type { SiteRegistry } from "../modules/shared/site-registry";
 import type { EmailSender } from "../modules/notifications/channels/email-channel";
 import type { AdminProfileEmailSender } from "../modules/admin/profile-service";
 import type { TaskMetricRollupRepository } from "../modules/tasks/task-metric-rollup-repository";
+import type { NotificationRuntime } from "../modules/notifications/notification-runtime";
 
 export interface RequestContext {
 	requestId: string;
@@ -44,6 +45,8 @@ declare module "fastify" {
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
 		taskMetricRollups: TaskMetricRollupRepository;
+		notificationRuntime: NotificationRuntime;
+		notificationRuntimeAutoStart: boolean;
 		akismetClient?: Pick<AkismetClient, "commentCheck">;
 		commentMetadataResolver?: CommentMetadataResolver;
 		pageSourceFetchText?: (

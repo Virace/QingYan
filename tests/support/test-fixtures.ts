@@ -207,8 +207,11 @@ export async function createTestApp(options?: {
 		pageSourceFetchText: options?.pageSourceFetchText,
 		pageTitleFetchHtml: options?.pageTitleFetchHtml,
 		serviceControl: options?.serviceControl,
-		emailSender: options?.emailSender,
+		emailSender:
+			options?.emailSender ??
+			(async () => ({ providerMessageId: "test-smtp-message" })),
 		adminProfileEmailSender: options?.adminProfileEmailSender,
+		startNotificationRuntime: false,
 	});
 
 	return {

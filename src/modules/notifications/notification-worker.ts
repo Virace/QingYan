@@ -28,7 +28,12 @@ type ReputationRecorder = {
 type NotificationWorkerInput = {
 	queue: TaskQueue;
 	repository: TaskRunRepository;
-	adapters: Record<string, NotificationChannelAdapter | undefined>;
+	adapters?: Record<string, NotificationChannelAdapter | undefined>;
+	adapterFactory?: {
+		resolve(
+			delivery: NotificationDeliveryRecord,
+		): Promise<NotificationChannelAdapter | undefined>;
+	};
 	reputation?: ReputationRecorder;
 	retryDelaySec?: number;
 	templateContextBuilder?: {
@@ -71,12 +76,11 @@ export class NotificationWorker {
 		const tasks = await this.input.queue.claim("notification-worker", {
 			limit: options.limit,
 			nowIso,
+			includeCategories: ["notification"],
 		});
 		let processed = 0;
 
-		for (const task of tasks.filter(
-			(item) => item.category === "notification",
-		)) {
+		for (const task of tasks) {
 			processed += 1;
 			const deliveries = await this.input.repository.listDeliveriesForTask(
 				task.id,
@@ -87,21 +91,16 @@ export class NotificationWorker {
 			let terminalError: unknown = null;
 
 			for (const delivery of deliveries) {
-				const adapter = this.input.adapters[delivery.channel];
-				if (!adapter) {
-					terminalError = new NotificationChannelError(
-						"config",
-						`Notification channel is not configured: ${delivery.channel}`,
-					);
-					await this.input.repository.markDeliveryFailed({
-						id: delivery.id,
-						error: classifyChannelError(terminalError),
-					});
-					failed += 1;
-					continue;
-				}
-
 				try {
+					const adapter = this.input.adapterFactory
+						? await this.input.adapterFactory.resolve(delivery)
+						: this.input.adapters?.[delivery.channel];
+					if (!adapter) {
+						throw new NotificationChannelError(
+							"config",
+							`Notification channel is not configured: ${delivery.channel}`,
+						);
+					}
 					const payload = asTemplatePayload(task.payload);
 					const format = payload.format ?? "text";
 					const rendered = renderNotificationTemplate({

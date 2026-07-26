@@ -310,7 +310,13 @@ describe("TaskRunWorker", () => {
 			clients.sqlite.close();
 		}
 
-		const app = await buildApp(createTestConfig(workspace.databaseFile));
+		const app = await buildApp(
+			createTestConfig(workspace.databaseFile),
+			undefined,
+			{
+				startNotificationRuntime: false,
+			},
+		);
 		asyncCleanups.push(async () => {
 			await app.close();
 			workspace.cleanup();
