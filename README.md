@@ -16,7 +16,7 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
-当前正式版本为 [`v0.2.0`](https://github.com/Virace/QingYan/releases/tag/v0.2.0)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+当前正式版本为 [`v0.2.1`](https://github.com/Virace/QingYan/releases/tag/v0.2.1)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
 
 ## 当前能力
 
@@ -164,7 +164,7 @@ qyctl update check
 qyctl update plan
 ```
 
-`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。若没有 published release 会返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
+`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。若没有 published release 会返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`，并同时输出当前版本和最新版本。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
 
 在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。即使安装时随机生成过管理员用户名和密码，dev mode 也会临时注入开发账号；非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态，安装完成页会显示一次性初始密码。
 

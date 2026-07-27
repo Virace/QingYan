@@ -527,6 +527,9 @@ async function commandUpdate(
 		const result = await deps.updateCheckService.check();
 		deps.output.stdout.push("更新检测");
 		deps.output.stdout.push(`当前版本：${result.currentVersion}`);
+		if (result.latestVersion) {
+			deps.output.stdout.push(`最新版本：${result.latestVersion}`);
+		}
 		deps.output.stdout.push(
 			`更新源：GitHub Release / ${result.source.owner}/${result.source.repo}`,
 		);
