@@ -7,6 +7,7 @@
 - QingYan 是有状态后端，部署时必须保护 `config/`、`data/` 和 `logs/`。
 - `config/qingyan.yml`、`qingyan.installed.lock`、SQLite 数据库和日志不应打进镜像，也不应提交到仓库。
 - 当前推荐先手动部署并验证真实链路；自动化发布、拉取和替换程序文件应在备份与升级流程固定后再接入。
+- `v0.2.1` 的 Docker 依赖构建阶段暂时将 Debian 主仓库固定为 TUNA，并保留 Debian 官方 security 源；同时启用 3 次重试、30 秒 HTTP/HTTPS 超时和 IPv4。该调整只影响镜像构建，不改变 QingYan GitHub Release 更新源。镜像参数化留待本次远端构建验证后处理。
 - 程序更新前必须先备份当前实例；`qyctl upgrade` 只做数据升级，不负责下载或替换程序文件。
 - Web 安装流程不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令重启服务；安装完成后的切换行为由 `QINGYAN_INSTALL_TRANSITION_MODE` 决定。
 
@@ -229,14 +230,14 @@ docker compose exec qingyan qyctl restore /app/data/backups/<backup-dir> --dry-r
 
 当前仓库没有自动替换程序的 GitHub Actions 或容器更新器。`qyctl update check`
 只负责发现已发布的新版本；生产环境需要先用旧版本创建整站备份，再把工作树切换到目标
-release tag 并重建容器。以从 `v0.1.0` 更新到 `v0.2.0` 为例：
+release tag 并重建容器。以从 `v0.1.0` 或 `v0.2.0` 更新到 `v0.2.1` 为例：
 
 ```bash
 cd /opt/1panel/apps/qingyan
 docker compose exec qingyan qyctl update check
 docker compose exec qingyan qyctl backup /app/data/backups/pre-update-$(date +%Y%m%d%H%M%S) --yes
 git fetch --tags origin
-git switch --detach v0.2.0
+git switch --detach v0.2.1
 docker compose build --pull qingyan
 docker compose up -d qingyan
 docker compose logs --tail=200 qingyan

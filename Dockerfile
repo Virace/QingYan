@@ -9,8 +9,22 @@ WORKDIR /app
 
 FROM base AS deps
 
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends python3 make g++ \
+# 暂时固定主仓库到 TUNA；安全更新继续使用 Debian 官方源。
+RUN sed -i \
+		's|^URIs: http://deb.debian.org/debian$|URIs: https://mirrors.tuna.tsinghua.edu.cn/debian|' \
+		/etc/apt/sources.list.d/debian.sources \
+	&& apt-get \
+		-o Acquire::Retries=3 \
+		-o Acquire::http::Timeout=30 \
+		-o Acquire::https::Timeout=30 \
+		-o Acquire::ForceIPv4=true \
+		update \
+	&& apt-get \
+		-o Acquire::Retries=3 \
+		-o Acquire::http::Timeout=30 \
+		-o Acquire::https::Timeout=30 \
+		-o Acquire::ForceIPv4=true \
+		install -y --no-install-recommends python3 make g++ \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./

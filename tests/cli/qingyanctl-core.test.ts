@@ -128,7 +128,7 @@ describe("qingyanctl core commands", () => {
 
 			expect(result.exitCode).toBe(0);
 			expect(result.output.stderr).toEqual([]);
-			expect(result.output.stdout).toEqual(["QingYan 0.2.0"]);
+			expect(result.output.stdout).toEqual(["QingYan 0.2.1"]);
 		}
 	});
 
