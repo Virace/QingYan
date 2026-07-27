@@ -6,11 +6,13 @@
 
 ## 通用约定
 
+- 运行时完整路径带 `server.publicPath` 前缀，默认是 `/qingyan/api/admin/*`；本文后续用 Admin Console 源码中的相对写法 `/api/admin/*` 表示同一组接口。
 - Base URL 与服务部署地址一致，例如本地开发默认 `http://localhost:4401`。
-- Admin Console Web 使用 same-origin fetch，请求默认携带 cookie：`credentials: "include"`。
+- Admin Console Web 使用 same-origin fetch，请求默认携带 cookie：`credentials: "include"`。源码中的 `/api/*` 会通过页面注入的 `__QINGYAN_ADMIN__.apiBase` 解析到当前实例的 `${server.publicPath}/api`。
 - 除 WordPress WXR 上传分析接口外，请求体和响应体默认是 JSON。
 - 已登录接口使用后台会话 cookie，默认 cookie 名由 `admin.session.cookieName` 配置决定，示例为 `qingyan_admin`。
 - 登录验证码是内置图片验证码，当前后台登录接口接受 `challengeId` 和 `captchaValue`。
+- `POST`、`PUT`、`PATCH`、`DELETE` 写操作需要管理员会话和 CSRF token。登录和 `GET /api/admin/session/me` 会返回 `csrf.header` 与 `csrf.token`，Admin Console 后续写请求会把 token 放入对应 header。
 - 错误响应沿用全局错误结构：
 
 ```json
@@ -19,6 +21,7 @@
     "code": "ERROR_CODE",
     "message": "错误说明",
     "requestId": "可选请求 ID",
+    "fields": [],
     "details": {}
   }
 }
@@ -74,6 +77,10 @@
   session: {
     expiresAt: string;
   };
+  csrf: {
+    header: string;
+    token: string;
+  };
 }
 ```
 
@@ -101,9 +108,25 @@
   session: {
     expiresAt: string;
   };
+  csrf: {
+    header: string;
+    token: string;
+  };
+  user: {
+    id: number;
+    username: string;
+    email: string;
+    displayName: string;
+    groupKey: "admin" | "site_admin" | "site_moderator";
+    groupName: string;
+    isInitialAdmin: boolean;
+    passwordChangeRequired: boolean;
+  };
+  permissions: string[];
   sites: Array<{
     siteKey: string;
     name: string;
+    allowedOrigins: string[];
   }>;
 }
 ```
@@ -837,6 +860,7 @@ Query：
   notifications: {
     commenter: {
       replyEmailEnabled: boolean;
+      replyEmailDefaultChecked: boolean;
     };
     backend: {
       enabled: boolean;
@@ -921,6 +945,7 @@ Admin Settings API 的 canonical 开关路径：
 - 页面来源模式：`pageRegistry.mode`
 - 权威 sitemap URL 列表：`pageRegistry.authoritativeSitemapUrls`
 - 评论者回复邮件通知：`notifications.commenter.replyEmailEnabled`
+- 评论框“回复提醒”初始勾选：`notifications.commenter.replyEmailDefaultChecked`
 - 后台用户通知：`notifications.backend.enabled`
 - 当前站点后台用户通知接收人：`notifications.backend.recipients`
 
@@ -1047,6 +1072,7 @@ AdminSettings
   notifications: {
     commenter: {
       replyEmailEnabled: boolean;
+      replyEmailDefaultChecked: boolean;
     };
     backend: {
       enabled: boolean;
@@ -1077,6 +1103,11 @@ AdminSettings
 }
 ```
 
+`notifications.commenter.replyEmailDefaultChecked` 只控制公开评论框首次渲染时的
+初始勾选状态。公开 bootstrap 只有在回复邮件能力实际可用时才返回保存值；能力被任一依赖
+关闭时会返回 `defaultChecked=false`。该字段不会代替用户同意，评论创建请求仍必须显式提交
+`options.notifyOnReply=true` 才会写入订阅偏好。
+
 `comments.inputLimits` 是公开评论和页面反馈输入长度的站点级运行时上限。默认值为：
 
 ```ts
@@ -1093,7 +1124,7 @@ AdminSettings
 
 `comments.abuseGuard.enabled=false` 会关闭 QingYan 应用层的公开写入滥用计数和自动黑名单触发，适用于实例前方已有更强 WAF、反向代理限流或边缘安全策略的部署。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态或输入校验。`maxWriteActions` 统计评论创建、评论投票和页面点赞等公开写入动作。
 
-后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；站点管理员只能配置自己有访问权的站点，且候选接收人也必须对该站点有访问权；站点评论管理员不可管理接收人。
+后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；全局 `admin` 组用户视为拥有所有站点访问权，可直接成为接收人。其他候选接收人必须显式拥有目标站点权限；站点管理员只能配置自己有访问权的站点，站点评论管理员不可管理接收人。
 
 接收人配置的 canonical 模型是 `notifications.backend.recipients[].routes[]`。每条 route 绑定一个事件和一个具体渠道配置实例，例如 `email:default`、`wxpusher:ops` 或 `webhook:feishu`。`channels` 和 `events` 仍作为兼容投影返回，旧请求也可用它们生成默认 route；新 Admin UI 和新调用代码应提交 `routes`。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核只保留审核语义，不追加第二条后台用户通知。
 
@@ -1129,6 +1160,150 @@ Settings API 的双状态字段必须使用 JSON boolean。GET 会归一化历�
 公开 bootstrap 会把这些开关映射到 `features`：`comments.enabled=false` 时返回 `features.comments.enabled=false` 并省略 `data.comments`；`engagement.pageViews.enabled=false` 时省略 `data.pageViews`；`engagement.pageLikes.enabled=false` 时省略 `data.pageLikes`；`engagement.commentVotes.enabled=false` 时评论项不输出 `vote`。
 
 Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错误的 `path` 使用 Admin Settings API canonical path，不使用公开 bootstrap 的 `features.*` path。
+
+### `GET /api/admin/sites/{siteKey}/notification-diagnostics`
+
+按当前数据库中已保存的设置检测三条评论邮件链路。需要有效后台会话、当前站点访问权和
+`site_settings.read`。该接口不会创建评论、任务或邮件；Admin Console 中尚未保存的草稿不会
+参与结果。
+
+响应：
+
+```ts
+{
+  generatedAt: string;
+  overall: "ready" | "conditional" | "blocked";
+  savedConfigOnly: true;
+  runtime: {
+    notificationWorker: "ready" | "conditional" | "blocked";
+    queueBackend: string;
+    lastTickAt: string | null;
+  };
+  flows: Array<{
+    key:
+      | "admin_comment_pending_email"
+      | "admin_comment_approved_email"
+      | "commenter_reply_email";
+    status: "ready" | "conditional" | "blocked";
+    recipients: Array<{
+      userId?: number;
+      displayName?: string;
+      email: string;
+      status: "ready" | "conditional" | "blocked";
+      notes: string[];
+    }>;
+    blockers: Array<{
+      code: string;
+      path?: string;
+      message: string;
+    }>;
+    warnings: Array<{
+      code: string;
+      path?: string;
+      message: string;
+    }>;
+  }>;
+}
+```
+
+三条 flow 分别表示“待审核评论 → 站点人员”“直接发布评论 → 站点人员”和
+“站点人员回复 → 原评论者”。检测会同时检查系统邮件和 SMTP、通知 worker/队列、站点后台
+通知总开关、站点人员及其事件/邮件 route、后台用户状态/个人偏好，以及评论者回复能力。
+`blocked` 表示当前已保存配置一定阻断；`conditional` 表示仍需具体评论者邮箱、订阅状态或
+真实投递结果才能确认。`path` 使用 Admin Settings canonical 路径，便于操作员定位设置。
+
+### `POST /api/admin/sites/{siteKey}/notification-chain-tests`
+
+创建一项真实评论邮件链路测试。需要有效后台会话、当前站点访问权和
+`site_settings.update`。
+
+请求：
+
+```ts
+{
+  commenterEmail: string;
+}
+```
+
+响应：
+
+```ts
+{
+  runId: string;
+  status: "queued";
+}
+```
+
+该测试使用 QingYan 内置的 `notification_test` 逻辑页面/线程，不要求内容站点创建页面，
+也不依赖评论前端。它通过生产 planner、数据库任务、通知 worker、模板渲染器和 email
+adapter 执行：
+
+1. 创建评论 A，并按当前站点默认评论状态向所有匹配的站点人员 email route 发送真实邮件。
+2. 模拟站点人员回复评论 A，并把真实回复提醒发送到 `commenterEmail`。
+
+真实测试只发送 email，不会误触发同一接收人的 Webhook 或 WxPusher route。测试数据在终态
+清理，普通公开/后台评论、页面和统计接口不会显示内部线程；任务和投递证据会保留供排障。
+测试可临时准备评论者 opt-in，但不会绕过明确退订或 reputation suppression，终态会恢复原
+偏好。每个站点同一时间只允许一个 active run，终态后还有短 cooldown。
+
+请求邮箱无效时返回 `VALIDATION_FAILED`。已保存配置存在阻断项时返回
+`NOTIFICATION_CHAIN_TEST_BLOCKED`，详情包含安全的 `blockers[]`；已有测试或仍在 cooldown
+时分别返回 `NOTIFICATION_CHAIN_TEST_ACTIVE` 或 `NOTIFICATION_CHAIN_TEST_COOLDOWN`。
+
+### `GET /api/admin/sites/{siteKey}/notification-chain-tests/{runId}`
+
+读取并推进指定真实测试的结果。需要有效后台会话、当前站点访问权和
+`site_settings.read`。Admin Console 应在 `checking | queued | running` 时轮询，在任一终态
+停止。
+
+响应：
+
+```ts
+{
+  runId: string;
+  status:
+    | "checking"
+    | "blocked"
+    | "queued"
+    | "running"
+    | "passed"
+    | "failed"
+    | "timed_out";
+  createdAt: string;
+  finishedAt: string | null;
+  flows: {
+    adminComment: NotificationChainTestFlow;
+    commenterReply: NotificationChainTestFlow;
+  };
+  message: string;
+}
+
+type NotificationChainTestFlow = {
+  status:
+    | "checking"
+    | "blocked"
+    | "queued"
+    | "running"
+    | "passed"
+    | "failed"
+    | "timed_out";
+  taskIds: string[];
+  deliveries: Array<{
+    deliveryId: string;
+    recipient: string;
+    status: string;
+    providerMessageId?: string;
+    error?: {
+      kind: string;
+      message: string;
+    };
+  }>;
+};
+```
+
+`passed` 和 delivery `sent` 只表示邮件服务商已接受发送请求，不证明邮件已进入收件箱。
+最终验收仍需核对站点人员收件箱和 `commenterEmail` 收件箱；同时检查垃圾邮件、服务商
+退信和延迟投递。终态轮询不会重复写 completed/failed 审计。
 
 ## System Settings
 

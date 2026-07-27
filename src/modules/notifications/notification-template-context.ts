@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 import { buildPublicUrl } from "../../config/public-path";
 import type { AppConfig } from "../../config/types";
 import type { AppDatabase } from "../../db/client";
-import { comments, pageThreads, sites, siteSettings } from "../../db/schema";
+import { comments, pageThreads, siteSettings, sites } from "../../db/schema";
+import { mergeVerifiedAuthorSettings } from "../comments/verified-author";
 import { resolvePublicPageUrl } from "../shared/page-url";
 import type { NotificationDeliveryRecord, TaskRunRecord } from "../tasks/types";
-import { mergeVerifiedAuthorSettings } from "../comments/verified-author";
 import { CommenterPreferencesRepository } from "./commenter-preferences-repository";
 import { UnsubscribeTokenService } from "./unsubscribe-token-service";
 
@@ -67,6 +67,13 @@ export class NotificationTemplateContextBuilder {
 	) {}
 
 	public async build(input: NotificationTemplateContextBuilderInput) {
+		if (
+			input.delivery.recipientType === "backend_user" &&
+			(input.delivery.templateKey === "backend_user.comment.pending" ||
+				input.delivery.templateKey === "backend_user.comment.approved")
+		) {
+			return this.buildBackendCommentContext(input);
+		}
 		if (
 			input.delivery.templateKey !== "commenter.reply_approved" &&
 			asReplyApprovedPayload(input.task.payload).event !== "reply_approved"
@@ -173,6 +180,86 @@ export class NotificationTemplateContextBuilder {
 					this.config.publicPath,
 					"/notifications/unsubscribe",
 				)}?token=${encodeURIComponent(issued.token)}`,
+			},
+			time: {
+				iso: new Date().toISOString(),
+			},
+		};
+	}
+
+	private async buildBackendCommentContext(
+		input: NotificationTemplateContextBuilderInput,
+	) {
+		const commentId = input.task.subjectId;
+		if (!commentId || !input.task.siteId) {
+			return {};
+		}
+		const [comment] = await this.db
+			.select()
+			.from(comments)
+			.where(eq(comments.id, commentId))
+			.limit(1);
+		if (!comment) {
+			return {};
+		}
+		const [thread] = await this.db
+			.select()
+			.from(pageThreads)
+			.where(eq(pageThreads.id, comment.pageThreadId))
+			.limit(1);
+		const [site] = await this.db
+			.select()
+			.from(sites)
+			.where(eq(sites.id, input.task.siteId))
+			.limit(1);
+		const [settings] = await this.db
+			.select({
+				verifiedAuthorJson: siteSettings.verifiedAuthorJson,
+			})
+			.from(siteSettings)
+			.where(eq(siteSettings.siteId, input.task.siteId))
+			.limit(1);
+		if (!thread || !site) {
+			return {};
+		}
+		const commentAuthorName = fallbackText(comment.authorName, "评论者");
+		const badgeLabel = badgeLabelForReply({
+			authorIdentity: comment.authorIdentity,
+			verifiedAuthorJson: settings?.verifiedAuthorJson,
+		});
+		const adminCommentUrl = new URL(
+			buildPublicUrl(
+				this.config.publicBaseUrl,
+				this.config.publicPath,
+				"/admin",
+			),
+		);
+		adminCommentUrl.searchParams.set("commentId", comment.id);
+
+		return {
+			site: {
+				name: site.name,
+				key: site.siteKey,
+			},
+			page: {
+				title: fallbackText(thread.pageTitle, thread.pageKey),
+				key: thread.pageKey,
+				url:
+					resolvePublicPageUrl(
+						thread.pageUrl,
+						parseAllowedOrigins(site.allowedOriginsJson),
+					) ??
+					thread.pageUrl ??
+					thread.pageKey,
+			},
+			comment: {
+				authorName: commentAuthorName,
+				authorLabel: authorLabel(commentAuthorName, badgeLabel),
+				badgeLabel,
+				content: comment.contentRaw,
+			},
+			links: {
+				adminComment: adminCommentUrl.toString(),
 			},
 			time: {
 				iso: new Date().toISOString(),

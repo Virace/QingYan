@@ -3,6 +3,8 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { createDatabaseClients } from "../../src/db/client";
 import {
+	adminGroups,
+	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
 	notificationDeliveries,
@@ -62,6 +64,15 @@ async function createFixture(): Promise<Fixture> {
 		isInitialAdmin: true,
 	});
 	const [adminUser] = await clients.db.select().from(adminUsers).limit(1);
+	await clients.db.insert(adminGroups).values({
+		key: "site_admin",
+		name: "Site Admin",
+	});
+	const [adminGroup] = await clients.db.select().from(adminGroups).limit(1);
+	await clients.db.insert(adminUserGroups).values({
+		userId: adminUser.id,
+		groupId: adminGroup.id,
+	});
 	await clients.db.insert(adminUserSiteAccess).values({
 		userId: adminUser.id,
 		siteId: site.id,

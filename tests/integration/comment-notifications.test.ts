@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 import {
 	adminUsers,
+	adminUserSiteAccess,
 	commenterNotificationPreferences,
 	comments,
 	notificationDeliveries,
@@ -16,6 +17,8 @@ import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-se
 import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
+import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
+import { BackendUserNotificationPlanner } from "../../src/modules/notifications/backend-user-notification-planner";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
@@ -29,6 +32,7 @@ import { createTestApp } from "../support/test-fixtures";
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
 	}
@@ -85,6 +89,43 @@ async function enableReplyEmailCapability(
 		.where(eq(siteSettings.siteId, siteId));
 }
 
+async function configureBackendCommentRecipient(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+	siteId: number,
+	events: Array<"admin_comment_pending" | "admin_comment_approved">,
+) {
+	await fixture.app.db
+		.update(siteSettings)
+		.set({ backendNotificationsEnabled: true })
+		.where(eq(siteSettings.siteId, siteId));
+	const [admin] = await fixture.app.db.select().from(adminUsers).limit(1);
+	if (!admin) {
+		throw new Error("Expected initial admin user");
+	}
+	await fixture.app.db
+		.insert(adminUserSiteAccess)
+		.values({
+			userId: admin.id,
+			siteId,
+		})
+		.onConflictDoNothing();
+	await new BackendUserNotificationRecipientsRepository(
+		fixture.app.db,
+	).replaceSiteRecipients({
+		siteId,
+		recipients: [
+			{
+				userId: admin.id,
+				channels: ["email"],
+				events,
+				includeCommentContent: "summary",
+				enabled: true,
+			},
+		],
+	});
+	return admin;
+}
+
 async function postComment(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 	input: {
@@ -92,7 +133,7 @@ async function postComment(
 		parentCommentId: string | null;
 		email: string;
 		content: string;
-		notifyOnReply: boolean;
+		notifyOnReply?: boolean;
 		cookies?: Record<string, string>;
 	},
 ) {
@@ -115,14 +156,160 @@ async function postComment(
 			content: {
 				raw: input.content,
 			},
-			options: {
-				notifyOnReply: input.notifyOnReply,
-			},
+			...(input.notifyOnReply === undefined
+				? {}
+				: {
+						options: {
+							notifyOnReply: input.notifyOnReply,
+						},
+					}),
 		},
 	});
 }
 
 describe("comment notifications", () => {
+	it.each([
+		{
+			label: "pending",
+			manualModeration: true,
+			eventFamily: "admin_comment_pending",
+		},
+		{
+			label: "approved",
+			manualModeration: false,
+			eventFamily: "admin_comment_approved",
+		},
+	])("plans a backend-user delivery for an ordinary $label public comment", async ({
+		label,
+		manualModeration,
+		eventFamily,
+	}) => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const pageKey = `post:backend-${label}`;
+		const site = await seedActivePage(fixture, pageKey);
+		if (manualModeration) {
+			await fixture.app.db
+				.update(siteSettings)
+				.set({
+					moderationJson: serializeSiteModerationSettings({
+						mode: "manual",
+						provider: "none",
+						akismet: {
+							failPolicy: "pending",
+							discardBlatantSpam: false,
+						},
+					}),
+				})
+				.where(eq(siteSettings.siteId, site.id));
+		}
+		const admin = await configureBackendCommentRecipient(fixture, site.id, [
+			eventFamily as "admin_comment_pending" | "admin_comment_approved",
+		]);
+
+		const response = await postComment(fixture, {
+			pageKey,
+			parentCommentId: null,
+			email: `${label}@example.com`,
+			content: `${label} comment for backend recipient`,
+			notifyOnReply: false,
+		});
+
+		expect(response.statusCode).toBe(200);
+		const deliveries = await fixture.app.db
+			.select()
+			.from(notificationDeliveries);
+		expect(deliveries).toEqual([
+			expect.objectContaining({
+				recipientType: "backend_user",
+				recipientUserId: admin.id,
+				recipientAddressSnapshot: admin.email,
+				channel: "email",
+				channelConfigRef: "email:default",
+				eventFamily,
+			}),
+		]);
+	});
+
+	it("keeps the public comment successful when backend notification planning fails", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:backend-planner-failure");
+		const planner = vi
+			.spyOn(BackendUserNotificationPlanner.prototype, "planForCommentEvent")
+			.mockRejectedValueOnce(new Error("planner unavailable"));
+
+		const response = await postComment(fixture, {
+			pageKey: "post:backend-planner-failure",
+			parentCommentId: null,
+			email: "planner-failure@example.com",
+			content: "comment survives notification planner failure",
+			notifyOnReply: false,
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(planner).toHaveBeenCalledOnce();
+		expect(
+			await fixture.app.db
+				.select({ id: comments.id, contentRaw: comments.contentRaw })
+				.from(comments),
+		).toContainEqual({
+			id: response.json().comment.id,
+			contentRaw: "comment survives notification planner failure",
+		});
+	});
+
+	it("does not create a backend new-comment delivery for a staff reply", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const site = await seedActivePage(fixture, "post:staff-backend-skip");
+		await configureBackendCommentRecipient(fixture, site.id, [
+			"admin_comment_approved",
+		]);
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: true,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "https://fangyuan.example.com/about",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		const parent = await postComment(fixture, {
+			pageKey: "post:staff-backend-skip",
+			parentCommentId: null,
+			email: "parent-staff-skip@example.com",
+			content: "ordinary parent comment",
+			notifyOnReply: false,
+		});
+		expect(parent.statusCode).toBe(200);
+		const initialBackendDeliveries = (
+			await fixture.app.db.select().from(notificationDeliveries)
+		).filter((delivery) => delivery.recipientType === "backend_user");
+		expect(initialBackendDeliveries).toHaveLength(1);
+
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const reply = await postComment(fixture, {
+			pageKey: "post:staff-backend-skip",
+			parentCommentId: parent.json().comment.id,
+			email: "owner@example.com",
+			content: "staff reply should not notify staff again",
+			notifyOnReply: false,
+			cookies: {
+				qingyan_admin: adminCookie.value,
+			},
+		});
+
+		expect(reply.statusCode).toBe(200);
+		const backendDeliveries = (
+			await fixture.app.db.select().from(notificationDeliveries)
+		).filter((delivery) => delivery.recipientType === "backend_user");
+		expect(backendDeliveries).toHaveLength(1);
+	});
+
 	it("persists notifyOnReply preference for ordinary commenter writes", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -187,6 +374,34 @@ describe("comment notifications", () => {
 			.from(commenterNotificationPreferences);
 		expect(preference).toMatchObject({
 			email: "unavailable@example.com",
+			notifyOnReply: false,
+			unsubscribedAt: null,
+		});
+	});
+
+	it("does not infer commenter consent when notifyOnReply is omitted", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const site = await seedActivePage(fixture, "post:preference-omitted");
+		await enableReplyEmailCapability(fixture, site.id);
+		await fixture.app.db
+			.update(siteSettings)
+			.set({ commenterReplyEmailDefaultChecked: true })
+			.where(eq(siteSettings.siteId, site.id));
+
+		const response = await postComment(fixture, {
+			pageKey: "post:preference-omitted",
+			parentCommentId: null,
+			email: "omitted@example.com",
+			content: "client omitted notifyOnReply",
+		});
+
+		expect(response.statusCode).toBe(200);
+		const [preference] = await fixture.app.db
+			.select()
+			.from(commenterNotificationPreferences);
+		expect(preference).toMatchObject({
+			email: "omitted@example.com",
 			notifyOnReply: false,
 			unsubscribedAt: null,
 		});

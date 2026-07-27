@@ -52,22 +52,29 @@ export function BooleanField({
 	checked,
 	onCheckedChange,
 	error,
+	disabled = false,
 }: {
 	label: string;
 	description?: string;
 	checked: boolean;
 	onCheckedChange: (checked: boolean) => void;
 	error?: string;
+	disabled?: boolean;
 }) {
 	return (
 		<Field label={label} description={description} error={error}>
-			<div className="flex min-h-9 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+			<div
+				className={`flex min-h-9 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm ${
+					disabled ? "opacity-60" : ""
+				}`}
+			>
 				<span className="text-muted-foreground">
 					{checked ? "开启" : "关闭"}
 				</span>
 				<Switch
 					aria-label={label}
 					checked={checked}
+					disabled={disabled}
 					onCheckedChange={onCheckedChange}
 				/>
 			</div>

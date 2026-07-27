@@ -17,7 +17,7 @@ import {
 	UpgradeService,
 } from "../../src/modules/upgrade/upgrade-service";
 import {
-	applyInitialMigration,
+	applyV010BaselineMigration,
 	createTestConfig,
 } from "../support/test-fixtures";
 
@@ -65,7 +65,7 @@ function writeConfig(configPath: string, databaseFile: string) {
 }
 
 function seedOldDatabase(databaseFile: string) {
-	applyInitialMigration(databaseFile);
+	applyV010BaselineMigration(databaseFile);
 	const sqlite = new Database(databaseFile);
 	try {
 		sqlite.exec(`
@@ -97,23 +97,15 @@ function seedOldDatabase(databaseFile: string) {
 	}
 }
 
-function seedLegacyDatabaseWithoutLedgers(databaseFile: string) {
+function seedBaselineDatabaseWithoutLedgers(databaseFile: string) {
 	const sqlite = new Database(databaseFile);
 	try {
-		sqlite.exec(`
-			CREATE TABLE sites (
-				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-				site_key text NOT NULL,
-				name text NOT NULL,
-				allowed_origins_json text NOT NULL
-			);
-			CREATE TABLE admin_bootstrap_state (
-				id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-				console_path text NOT NULL,
-				username text NOT NULL,
-				password_hash text NOT NULL
-			);
-		`);
+		sqlite.exec(
+			readFileSync(
+				path.resolve(process.cwd(), "drizzle", "0000_initial.sql"),
+				"utf-8",
+			),
+		);
 		sqlite
 			.prepare(
 				"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
@@ -305,14 +297,14 @@ describe("UpgradeService", () => {
 		}
 	});
 
-	it("upgrades legacy databases that predate migration and upgrade ledgers", async () => {
+	it("upgrades complete baseline databases that predate migration and upgrade ledgers", async () => {
 		const workspace = createWorkspace();
 		try {
 			const loadedConfig = writeConfig(
 				workspace.configPath,
 				workspace.databaseFile,
 			);
-			seedLegacyDatabaseWithoutLedgers(workspace.databaseFile);
+			seedBaselineDatabaseWithoutLedgers(workspace.databaseFile);
 			const service = new UpgradeService({
 				configPath: workspace.configPath,
 				loadedConfig,

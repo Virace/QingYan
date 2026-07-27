@@ -26,6 +26,10 @@ import {
 import type { CommentsWriteRepository } from "./write-repository";
 import { CommenterPreferencesRepository } from "../notifications/commenter-preferences-repository";
 import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
+import {
+	type BackendUserCommentStatus,
+	BackendUserNotificationPlanner,
+} from "../notifications/backend-user-notification-planner";
 import { isSystemMailUsable } from "./public-contract";
 
 function resolveIdentity(
@@ -354,6 +358,15 @@ export class CommentsWriteService {
 					replyEmailNotificationUsable &&
 					(input.options?.notifyOnReply ?? false),
 			});
+			await this.planBackendUserNotification({
+				siteId: site.id,
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				commentId: created.commentId,
+				status,
+				contentRaw: input.contentRaw,
+				requestId: input.requestId,
+			});
 		}
 		if (input.parentCommentId && status === "approved") {
 			await this.planReplyNotification({
@@ -404,6 +417,50 @@ export class CommentsWriteService {
 				rootCommentCount: created.thread.rootCommentCount,
 			},
 		};
+	}
+
+	private async planBackendUserNotification(input: {
+		siteId: number;
+		siteKey: string;
+		pageKey: string;
+		commentId: string;
+		status: BackendUserCommentStatus;
+		contentRaw: string;
+		requestId?: string;
+	}) {
+		try {
+			await new BackendUserNotificationPlanner(
+				this.writeRepository.database,
+			).planForCommentEvent({
+				source: "public_api",
+				siteId: input.siteId,
+				siteKey: input.siteKey,
+				commentId: input.commentId,
+				pageKey: input.pageKey,
+				status: input.status,
+				previousStatus: null,
+				authorUserId: null,
+				contentRaw: input.contentRaw,
+			});
+		} catch (error) {
+			await this.security
+				.writeAudit({
+					requestId: input.requestId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					actorType: "system",
+					actorId: "backend_notification_planner",
+					event: "notification.email.failed",
+					message: "站点人员评论通知规划失败",
+					targetType: "comment",
+					targetId: input.commentId,
+					payload: {
+						source: "public_api",
+						error: error instanceof Error ? error.message : String(error),
+					},
+				})
+				.catch(() => undefined);
+		}
 	}
 
 	private async planReplyNotification(input: {

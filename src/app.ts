@@ -60,6 +60,7 @@ interface BuildAppOptions {
 	serviceControl?: ServiceControlController;
 	emailSender?: EmailSender;
 	adminProfileEmailSender?: AdminProfileEmailSender;
+	startNotificationRuntime?: boolean;
 }
 
 function registerBaseRoutes(
@@ -132,6 +133,10 @@ export async function buildApp(
 	app.decorate("config", config);
 	app.decorate("runtimeOptions", runtimeOptions);
 	app.decorate("siteRegistry", createSiteRegistry());
+	app.decorate(
+		"notificationRuntimeAutoStart",
+		options.startNotificationRuntime ?? true,
+	);
 	if (options.akismetClient) {
 		app.decorate("akismetClient", options.akismetClient);
 	}

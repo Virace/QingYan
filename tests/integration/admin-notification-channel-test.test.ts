@@ -7,6 +7,7 @@ import {
 	taskRuns,
 } from "../../src/db/schema";
 import { eq } from "drizzle-orm";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -165,6 +166,71 @@ describe("admin notification channel test", () => {
 		expect(task?.errorJson).not.toContain("smtp-secret");
 		expect(delivery).toMatchObject({ status: "failed" });
 		expect(delivery?.lastErrorJson).not.toContain("smtp-secret");
+	});
+
+	it("runs queued SMTP channel tests through the production notification runtime", async () => {
+		const sentMessages: unknown[] = [];
+		const fixture = await createTestApp({
+			emailSender: async (input) => {
+				sentMessages.push(input);
+				return { providerMessageId: "smtp-runtime-1" };
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const update = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/system-settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				logging: { level: "info", retentionDays: 7 },
+				mail: {
+					enabled: true,
+					smtp: {
+						host: "smtp.example.test",
+						port: 587,
+						secure: false,
+						username: "notify@example.test",
+						password: "smtp-secret",
+						from: "notify@example.test",
+					},
+				},
+			},
+		});
+		expect(update.statusCode).toBe(200);
+		const queued = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/system-settings/notifications/channel-test",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: {
+				channelConfigId: "email:default",
+				recipient: "runtime-recipient@example.test",
+				siteKey: "fangyuan",
+			},
+		});
+		expect(queued.statusCode).toBe(200);
+
+		fixture.app.notificationRuntime.start();
+		await fixture.app.notificationRuntime.tick();
+
+		const { deliveryId, taskId } = queued.json();
+		await expect(
+			new TaskRunRepository(fixture.app.db).getRequired(taskId),
+		).resolves.toMatchObject({
+			status: "succeeded",
+		});
+		await expect(
+			new TaskRunRepository(fixture.app.db).getDeliveryRequired(deliveryId),
+		).resolves.toMatchObject({
+			status: "sent",
+			providerMessageId: "smtp-runtime-1",
+		});
+		expect(sentMessages).toEqual([
+			expect.objectContaining({
+				to: "runtime-recipient@example.test",
+				from: "notify@example.test",
+			}),
+		]);
 	});
 
 	it("rejects email channel tests when saved SMTP settings are incomplete and does not create task records", async () => {

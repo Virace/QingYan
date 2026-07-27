@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: QingYan API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     QingYan 是一个面向内容站点的第一方评论后端。
 
@@ -947,7 +947,13 @@ components:
         replyEmailNotification:
           allOf:
             - $ref: '#/components/schemas/FeatureFlag'
-            - description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is enabled only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
+            - type: object
+              required: [defaultChecked]
+              description: Whether ordinary public commenters may opt in to reply email notifications on this page. This is enabled only when comments and replies are available, system mail is usable, and the site commenter reply email setting is enabled.
+              properties:
+                defaultChecked:
+                  type: boolean
+                  description: Initial state suggested for the public comment form checkbox. It is always false when this feature is disabled. This value does not opt a commenter in by itself; the create-comment request must still explicitly submit options.notifyOnReply=true.
     BootstrapSite:
       type: object
       required: [siteKey]

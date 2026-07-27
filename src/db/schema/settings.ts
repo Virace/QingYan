@@ -67,6 +67,14 @@ export const siteSettings = sqliteTable(
 		})
 			.notNull()
 			.default(false),
+		commenterReplyEmailDefaultChecked: integer(
+			"commenter_reply_email_default_checked",
+			{
+				mode: "boolean",
+			},
+		)
+			.notNull()
+			.default(false),
 		backendNotificationsEnabled: integer("backend_notifications_enabled", {
 			mode: "boolean",
 		})

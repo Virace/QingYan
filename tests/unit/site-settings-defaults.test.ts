@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	commentInputLimitHardCaps,
+	buildDefaultSiteSettings,
 	defaultCommentInputLimits,
 	mergeCommentInputLimits,
 	mergeEngagementSettings,
@@ -10,6 +11,14 @@ import {
 } from "../../src/modules/shared/site-settings-defaults";
 
 describe("site settings defaults", () => {
+	it("keeps commenter reply email default unchecked", () => {
+		expect(buildDefaultSiteSettings(1)).toMatchObject({
+			commenterReplyEmailEnabled: false,
+			commenterReplyEmailDefaultChecked: false,
+			backendNotificationsEnabled: false,
+		});
+	});
+
 	it("normalizes legacy numeric engagement booleans from persisted json", () => {
 		const settings = mergeEngagementSettings(
 			JSON.stringify({

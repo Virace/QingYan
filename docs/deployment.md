@@ -1,12 +1,12 @@
-# QingYan 测试部署指南
+# QingYan 部署指南
 
-本文档记录 QingYan 当前测试版的部署方式，重点覆盖单机 Docker Compose，同时说明直接部署或托管运行时需要调整的安装切换策略。它面向“先部署，后更新”的测试策略，不等同于正式 release 流程。
+本文档记录 QingYan `v0.1.0` 及后续版本的自部署方式，重点覆盖单机 Docker Compose，同时说明直接部署或托管运行时需要调整的安装切换策略。它面向实例部署和更新操作，不替代仓库发布流程。
 
 ## 部署边界
 
 - QingYan 是有状态后端，部署时必须保护 `config/`、`data/` 和 `logs/`。
 - `config/qingyan.yml`、`qingyan.installed.lock`、SQLite 数据库和日志不应打进镜像，也不应提交到仓库。
-- 当前推荐先手动部署并验证真实链路，等测试版稳定后再补 GitHub Actions 或 release 自动化。
+- 当前推荐先手动部署并验证真实链路；自动化发布、拉取和替换程序文件应在备份与升级流程固定后再接入。
 - 程序更新前必须先备份当前实例；`qyctl upgrade` 只做数据升级，不负责下载或替换程序文件。
 - Web 安装流程不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令重启服务；安装完成后的切换行为由 `QINGYAN_INSTALL_TRANSITION_MODE` 决定。
 
@@ -26,7 +26,7 @@
 
 ## 反向代理
 
-建议给测试版 QingYan 使用独立 HTTPS 域名，例如：
+建议给 QingYan 使用独立 HTTPS 域名，例如：
 
 ```text
 https://qingyan.example.com
@@ -74,7 +74,7 @@ cd /opt/1panel/apps/qingyan
 
 ### 2. 放置 Compose 文件
 
-可以直接使用仓库根目录的 `compose.yml` 作为起点。测试部署建议只在服务器环境里调整端口和环境变量，不把服务器专用配置提交回仓库。
+可以直接使用仓库根目录的 `compose.yml` 作为起点。部署时建议只在服务器环境里调整端口和环境变量，不把服务器专用配置提交回仓库。
 
 默认 Compose 会设置：
 
@@ -115,7 +115,7 @@ https://qingyan.example.com/qingyan/admin/install
 
 ### 4. 安装表单建议值
 
-测试部署建议：
+单机部署建议：
 
 - `server.host`: `0.0.0.0`
 - `server.port`: `4401`
@@ -133,7 +133,7 @@ https://qingyan.example.com/qingyan/admin/install
 安装完成后的切换模式：
 
 - `reload_in_process`：默认模式，不依赖外部 CLI 或 supervisor，安装完成后关闭 install app 并在同一进程内启动正常服务，适合直接运行、PaaS 或 serverless-like 环境。
-- `exit_for_supervisor`：安装完成后进程退出，交给 Docker Compose、systemd 或其他守护进程拉起，适合当前 Compose 测试部署。
+- `exit_for_supervisor`：安装完成后进程退出，交给 Docker Compose、systemd 或其他守护进程拉起，适合当前 Compose 部署。
 - `manual`：安装完成后停留在完成页，提示人工重启，适合运行时不允许进程自切换或没有可靠 supervisor 的环境。
 
 如果 Compose 部署没有自动恢复，手动执行：
@@ -196,7 +196,7 @@ docker compose exec qingyan qingyanctl --version
 
 ### 4. FangYuan / x-item 集成
 
-在 FangYuan / x-item 测试配置中把评论 API 指向 QingYan 测试域名后，至少验证。若与 x-item 同域部署，推荐配置 `qingyanConfig.apiBase: /qingyan/api`，一条 `/qingyan/` 反代即可接入 QingYan：
+在 FangYuan / x-item 配置中把评论 API 指向 QingYan 域名后，至少验证。若与 x-item 同域部署，推荐配置 `qingyanConfig.apiBase: /qingyan/api`，一条 `/qingyan/` 反代即可接入 QingYan：
 
 - 评论 bootstrap 正常返回。
 - 评论列表分页正常。
@@ -212,7 +212,7 @@ docker compose exec qingyan qingyanctl --version
 更新程序、调整数据库或大批量导入前，先做整站备份：
 
 ```bash
-docker compose exec qingyan qyctl backup /app/data/backups/full-$(date +%Y%m%d%H%M%S)
+docker compose exec qingyan qyctl backup /app/data/backups/full-$(date +%Y%m%d%H%M%S) --yes
 ```
 
 备份完成后可以用 dry-run 检查恢复计划：
@@ -227,33 +227,56 @@ docker compose exec qingyan qyctl restore /app/data/backups/<backup-dir> --dry-r
 
 ## 更新流程
 
-测试版更新建议先手动执行：
+当前仓库没有自动替换程序的 GitHub Actions 或容器更新器。`qyctl update check`
+只负责发现已发布的新版本；生产环境需要先用旧版本创建整站备份，再把工作树切换到目标
+release tag 并重建容器。以从 `v0.1.0` 更新到 `v0.2.0` 为例：
 
 ```bash
 cd /opt/1panel/apps/qingyan
-docker compose exec qingyan qyctl backup /app/data/backups/pre-update-$(date +%Y%m%d%H%M%S)
+docker compose exec qingyan qyctl update check
+docker compose exec qingyan qyctl backup /app/data/backups/pre-update-$(date +%Y%m%d%H%M%S) --yes
+git fetch --tags origin
+git switch --detach v0.2.0
 docker compose build --pull qingyan
 docker compose up -d qingyan
 docker compose logs --tail=200 qingyan
 ```
 
+生产目录应保持为未修改的 Git checkout；如果 `git switch` 报告本地改动，先停止更新并核对，
+不要覆盖 `config/`、`data/` 或 `logs/`。这三个目录承载实例状态，并由仓库的 `.gitignore`
+排除。
+
 如果新版本启动进入 Web Upgrade Mode，日志会输出：
 
 ```text
 upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
+upgrade.state=upgrade_required
+upgrade.token=qy_upgrade_<一次性随机值>
 ```
 
-此时访问反代后的 `/qingyan/upgrade`，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
+此时访问反代后的 `/qingyan/upgrade`，输入同一段日志中的升级 token，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
 
 ```bash
 docker compose exec qingyan qyctl upgrade --dry-run
 ```
 
-只有确认备份和计划无误后再 apply。
+只有确认备份和计划无误后再 apply。Docker Compose 环境使用：
+
+```bash
+docker compose exec qingyan qyctl upgrade --yes
+docker compose restart qingyan
+docker compose exec qingyan qyctl --version
+docker compose exec qingyan qyctl update check
+docker compose ps
+docker compose logs --tail=200 qingyan
+```
+
+升级完成后，`qyctl --version` 应输出目标版本，`qyctl update check` 应返回当前已是最新版本，
+容器应为 healthy。再访问 `/qingyan/healthz`、Admin Console，并执行一次评论邮件双链路测试。
 
 ## 回滚
 
-测试部署阶段的回滚优先级：
+回滚优先级：
 
 1. 如果只是新容器启动失败，先回到上一版镜像或上一份程序文件。
 2. 如果数据库尚未执行升级，直接用旧程序启动。
@@ -272,4 +295,4 @@ docker compose exec qingyan qyctl upgrade --dry-run
 - 启动服务并检查 `/qingyan/healthz`。
 - 如果进入 `upgrade_required`，停止自动流程并要求人工确认 UpgradePlan。
 
-在这些条件未固定前，不建议把 QingYan 绑定到 x-item 的静态站部署 workflow。
+在备份、升级确认、健康检查和回滚条件未固定前，不建议把 QingYan 绑定到 x-item 的静态站部署 workflow。

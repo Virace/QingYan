@@ -369,6 +369,7 @@ export interface AdminSite {
 	notifications: {
 		commenter: {
 			replyEmailEnabled: boolean;
+			replyEmailDefaultChecked: boolean;
 		};
 		backend: {
 			enabled: boolean;
@@ -490,6 +491,7 @@ export interface AdminSettings {
 	notifications: {
 		commenter: {
 			replyEmailEnabled: boolean;
+			replyEmailDefaultChecked: boolean;
 		};
 		backend: {
 			enabled: boolean;
@@ -497,6 +499,83 @@ export interface AdminSettings {
 		};
 		channelConfigs: NotificationChannelConfig[];
 	};
+}
+
+export type NotificationDiagnosticStatus = "ready" | "conditional" | "blocked";
+
+export type NotificationDiagnosticFlowKey =
+	| "admin_comment_pending_email"
+	| "admin_comment_approved_email"
+	| "commenter_reply_email";
+
+export interface NotificationDiagnosticIssue {
+	code: string;
+	path?: string;
+	message: string;
+}
+
+export interface NotificationDiagnosticRecipient {
+	userId?: number;
+	displayName?: string;
+	email: string;
+	status: NotificationDiagnosticStatus;
+	notes: string[];
+}
+
+export interface NotificationDiagnostic {
+	generatedAt: string;
+	overall: NotificationDiagnosticStatus;
+	savedConfigOnly: true;
+	runtime: {
+		notificationWorker: NotificationDiagnosticStatus;
+		queueBackend: string;
+		lastTickAt: string | null;
+	};
+	flows: Array<{
+		key: NotificationDiagnosticFlowKey;
+		status: NotificationDiagnosticStatus;
+		recipients: NotificationDiagnosticRecipient[];
+		blockers: NotificationDiagnosticIssue[];
+		warnings: NotificationDiagnosticIssue[];
+	}>;
+}
+
+export type NotificationChainTestStatus =
+	| "checking"
+	| "blocked"
+	| "queued"
+	| "running"
+	| "passed"
+	| "failed"
+	| "timed_out";
+
+export interface NotificationChainTestDelivery {
+	deliveryId: string;
+	recipient: string;
+	status: string;
+	providerMessageId?: string;
+	error?: {
+		kind: string;
+		message: string;
+	};
+}
+
+export interface NotificationChainTestFlow {
+	status: NotificationChainTestStatus;
+	taskIds: string[];
+	deliveries: NotificationChainTestDelivery[];
+}
+
+export interface NotificationChainTestResult {
+	runId: string;
+	status: NotificationChainTestStatus;
+	createdAt: string;
+	finishedAt: string | null;
+	flows: {
+		adminComment: NotificationChainTestFlow;
+		commenterReply: NotificationChainTestFlow;
+	};
+	message: string;
 }
 
 export interface AdminSystemSettings {
@@ -1074,6 +1153,33 @@ export function updateSite(
 export function getSettings(siteKey: string) {
 	return requestJson<AdminSettings>(
 		`/api/admin/sites/${encodeURIComponent(siteKey)}/settings`,
+	);
+}
+
+export function getNotificationDiagnostics(siteKey: string) {
+	return requestJson<NotificationDiagnostic>(
+		`/api/admin/sites/${encodeURIComponent(siteKey)}/notification-diagnostics`,
+	);
+}
+
+export function startNotificationChainTest(
+	siteKey: string,
+	commenterEmail: string,
+) {
+	return requestJson<{ runId: string; status: "queued" }>(
+		`/api/admin/sites/${encodeURIComponent(siteKey)}/notification-chain-tests`,
+		{
+			method: "POST",
+			body: JSON.stringify({ commenterEmail }),
+		},
+	);
+}
+
+export function getNotificationChainTest(siteKey: string, runId: string) {
+	return requestJson<NotificationChainTestResult>(
+		`/api/admin/sites/${encodeURIComponent(
+			siteKey,
+		)}/notification-chain-tests/${encodeURIComponent(runId)}`,
 	);
 }
 

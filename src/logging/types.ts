@@ -43,6 +43,9 @@ export type AppEventName =
 	| "users.updated"
 	| "settings.updated"
 	| "system.logging.updated"
+	| "notification.chain_test.started"
+	| "notification.chain_test.completed"
+	| "notification.chain_test.failed"
 	| "notification.email.sent"
 	| "notification.email.failed";
 

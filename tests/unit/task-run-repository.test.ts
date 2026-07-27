@@ -186,6 +186,38 @@ describe("task run repository and database queue", () => {
 		});
 	});
 
+	it("scopes runnable claims by task category", async () => {
+		const { repository } = createFixture();
+		const notification = await repository.create({
+			type: "notification.channel_test",
+			category: "notification",
+			payloadSummary: { channel: "email" },
+			payload: { channel: "email" },
+		});
+		const maintenance = await repository.create({
+			type: "page_metadata_refresh",
+			category: "maintenance",
+			payloadSummary: { pageKey: "/post/1" },
+			payload: { pageKey: "/post/1" },
+		});
+
+		const notificationClaims = await repository.claimRunnable({
+			workerId: "notification-worker",
+			includeCategories: ["notification"],
+			limit: 10,
+		});
+		const genericClaims = await repository.claimRunnable({
+			workerId: "task-worker",
+			excludeCategories: ["notification"],
+			limit: 10,
+		});
+
+		expect(notificationClaims.map((task) => task.id)).toEqual([
+			notification.id,
+		]);
+		expect(genericClaims.map((task) => task.id)).toEqual([maintenance.id]);
+	});
+
 	it("retries task runs and then records final failures", async () => {
 		const { queue, repository } = createFixture();
 		const task = await queue.enqueue({

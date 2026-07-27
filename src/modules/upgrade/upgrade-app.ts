@@ -147,3 +147,29 @@ export function createUpgradeApp(
 
 	return app;
 }
+
+export interface UpgradeAppLaunch {
+	app: FastifyInstance;
+	announce(input: {
+		url: string;
+		state: string;
+		output?: (line: string) => void;
+	}): void;
+}
+
+export function createUpgradeAppLaunch(
+	input: Omit<CreateUpgradeAppInput, "token"> & {
+		tokenFactory?: () => string;
+	},
+): UpgradeAppLaunch {
+	const { tokenFactory, ...appInput } = input;
+	const token = tokenFactory?.() ?? `qy_upgrade_${randomUUID()}`;
+	return {
+		app: createUpgradeApp({ ...appInput, token }),
+		announce({ url, state, output = console.log }) {
+			output(`upgrade.url=${url}`);
+			output(`upgrade.state=${state}`);
+			output(`upgrade.token=${token}`);
+		},
+	};
+}

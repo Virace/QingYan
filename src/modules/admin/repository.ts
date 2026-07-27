@@ -17,8 +17,8 @@ import {
 	adminSessions,
 	allowlistRules,
 	blacklistRules,
-	commentRequestMetadata,
 	commenterNotificationPreferences,
+	commentRequestMetadata,
 	comments,
 	emailDeliveryReputation,
 	pageThreads,
@@ -455,25 +455,37 @@ export class AdminRepository {
 				.select({
 					value: count(),
 				})
-				.from(pageThreads),
+				.from(pageThreads)
+				.where(eq(pageThreads.kind, "public")),
 			this.db
 				.select({
 					value: count(),
 				})
 				.from(comments)
-				.where(isNull(comments.deletedAt)),
+				.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
+				.where(and(isNull(comments.deletedAt), eq(pageThreads.kind, "public"))),
 			this.db
 				.select({
 					value: count(),
 				})
 				.from(comments)
-				.where(and(isNull(comments.deletedAt), eq(comments.status, "pending"))),
+				.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
+				.where(
+					and(
+						isNull(comments.deletedAt),
+						eq(comments.status, "pending"),
+						eq(pageThreads.kind, "public"),
+					),
+				),
 			this.db
 				.select({
 					value: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
 				})
 				.from(comments)
-				.where(isNotNull(comments.authorEmail)),
+				.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
+				.where(
+					and(isNotNull(comments.authorEmail), eq(pageThreads.kind, "public")),
+				),
 			this.db
 				.select({
 					value: count(),
@@ -636,6 +648,7 @@ export class AdminRepository {
 		const hasExplicitStatusFilter = Boolean(input.status || input.statusGroup);
 		const conditions = [
 			input.siteId ? eq(comments.siteId, input.siteId) : undefined,
+			eq(pageThreads.kind, "public"),
 			input.status ? eq(comments.status, input.status) : undefined,
 			input.statusGroup === "hidden"
 				? inArray(comments.status, ["spam", "trash"])
@@ -661,7 +674,11 @@ export class AdminRepository {
 		const pageKeyCondition =
 			input.pageKey === undefined
 				? undefined
-				: sql`${comments.pageThreadId} IN (SELECT id FROM ${pageThreads} WHERE ${pageThreads.pageKey} = ${input.pageKey})`;
+				: sql`${comments.pageThreadId} IN (
+						SELECT id FROM ${pageThreads}
+						WHERE ${pageThreads.pageKey} = ${input.pageKey}
+						AND ${pageThreads.kind} = 'public'
+					)`;
 
 		const whereCondition = and(
 			...conditions,
@@ -883,6 +900,7 @@ export class AdminRepository {
 				and(
 					eq(pageThreads.siteId, sitePageRegistry.siteId),
 					eq(pageThreads.pageKey, sitePageRegistry.pageKey),
+					eq(pageThreads.kind, "public"),
 				),
 			)
 			.where(
@@ -1036,6 +1054,7 @@ export class AdminRepository {
 				userAgentsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorUserAgent})`,
 			})
 			.from(comments)
+			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 			.leftJoin(
 				commentRequestMetadata,
 				eq(commentRequestMetadata.commentId, comments.id),
@@ -1044,6 +1063,7 @@ export class AdminRepository {
 				and(
 					isNull(comments.deletedAt),
 					isNotNull(comments.authorEmail),
+					eq(pageThreads.kind, "public"),
 					input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 					searchValue
 						? or(
@@ -1172,6 +1192,7 @@ export class AdminRepository {
 					deviceError: commentRequestMetadata.deviceError,
 				})
 				.from(comments)
+				.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 				.leftJoin(
 					commentRequestMetadata,
 					eq(commentRequestMetadata.commentId, comments.id),
@@ -1180,6 +1201,7 @@ export class AdminRepository {
 					and(
 						isNull(comments.deletedAt),
 						isNotNull(comments.authorEmail),
+						eq(pageThreads.kind, "public"),
 						input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 						inArray(normalizedEmail, pageEmails),
 					),
@@ -1552,6 +1574,8 @@ export class AdminRepository {
 				allowPageLike: siteSettings.allowPageLike,
 				engagementJson: siteSettings.engagementJson,
 				commenterReplyEmailEnabled: siteSettings.commenterReplyEmailEnabled,
+				commenterReplyEmailDefaultChecked:
+					siteSettings.commenterReplyEmailDefaultChecked,
 				backendNotificationsEnabled: siteSettings.backendNotificationsEnabled,
 			})
 			.from(sites)
@@ -1570,7 +1594,12 @@ export class AdminRepository {
 					value: count(),
 				})
 				.from(pageThreads)
-				.where(inArray(pageThreads.siteId, siteIds))
+				.where(
+					and(
+						inArray(pageThreads.siteId, siteIds),
+						eq(pageThreads.kind, "public"),
+					),
+				)
 				.groupBy(pageThreads.siteId),
 		);
 		const commentCountMap = toCountMap(
@@ -1580,8 +1609,13 @@ export class AdminRepository {
 					value: count(),
 				})
 				.from(comments)
+				.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 				.where(
-					and(inArray(comments.siteId, siteIds), isNull(comments.deletedAt)),
+					and(
+						inArray(comments.siteId, siteIds),
+						isNull(comments.deletedAt),
+						eq(pageThreads.kind, "public"),
+					),
 				)
 				.groupBy(comments.siteId),
 		);
@@ -1592,11 +1626,13 @@ export class AdminRepository {
 					value: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
 				})
 				.from(comments)
+				.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
 				.where(
 					and(
 						inArray(comments.siteId, siteIds),
 						isNull(comments.deletedAt),
 						isNotNull(comments.authorEmail),
+						eq(pageThreads.kind, "public"),
 					),
 				)
 				.groupBy(comments.siteId),
@@ -1636,6 +1672,7 @@ export class AdminRepository {
 			notifications: {
 				commenter: {
 					replyEmailEnabled: row.commenterReplyEmailEnabled,
+					replyEmailDefaultChecked: row.commenterReplyEmailDefaultChecked,
 				},
 				backend: {
 					enabled: row.backendNotificationsEnabled,
@@ -2231,6 +2268,7 @@ export class AdminRepository {
 			pageRegistryJson?: string;
 			engagementJson?: string;
 			commenterReplyEmailEnabled?: boolean;
+			commenterReplyEmailDefaultChecked?: boolean;
 			backendNotificationsEnabled?: boolean;
 		},
 	) {
@@ -2261,6 +2299,8 @@ export class AdminRepository {
 				pageRegistryJson: input.pageRegistryJson,
 				engagementJson: input.engagementJson,
 				commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
+				commenterReplyEmailDefaultChecked:
+					input.commenterReplyEmailDefaultChecked,
 				backendNotificationsEnabled: input.backendNotificationsEnabled,
 				updatedAt: new Date().toISOString(),
 			})

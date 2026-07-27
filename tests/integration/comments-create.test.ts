@@ -26,7 +26,7 @@ import type { AkismetReviewResult } from "../../src/modules/comments/akismet-cli
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin } from "../support/admin-login";
 import {
-	applyInitialMigration,
+	applyCurrentMigrations,
 	createTestConfig,
 	defaultTestSite,
 } from "../support/test-fixtures";
@@ -53,7 +53,7 @@ async function createCustomTestApp(options?: {
 		path.join(tmpdir(), "qingyan-comments-create-"),
 	);
 	const databaseFile = path.join(directory, "qingyan.db");
-	applyInitialMigration(databaseFile);
+	applyCurrentMigrations(databaseFile);
 
 	const config = createTestConfig(databaseFile);
 	const { db, sqlite } = createDatabaseClients(databaseFile);
@@ -113,6 +113,7 @@ async function createCustomTestApp(options?: {
 	}
 
 	const app = await buildApp(config, undefined, {
+		startNotificationRuntime: false,
 		akismetClient: options?.akismetVerdict
 			? {
 					commentCheck: async () => ({

@@ -16,15 +16,18 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
+当前正式版本为 [`v0.2.0`](https://github.com/Virace/QingYan/releases/tag/v0.2.0)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+
 ## 当前能力
 
 - 评论首屏 bootstrap：`GET /qingyan/api/comments/bootstrap`
 - 评论线程分页：`GET /qingyan/api/comments/thread`
 - 评论创建、投票、验证码验证
-- bootstrap 返回 `features` 能力开关和 `data.comments.form.allow / require / limits`，前端可先按能力判断再动态渲染 `nickname | email | website` 必填项与输入长度
+- bootstrap 返回 `features` 能力开关、回复提醒 `defaultChecked` 和 `data.comments.form.allow / require / limits`，前端可先按能力判断再动态渲染 `nickname | email | website` 必填项与输入长度
 - 页面点赞
 - 后台登录（管理员登录验证码 + 5 次失败永久封禁 IP）
 - 后台评论审核、黑名单、白名单、页面管理、用户管理、访客管理、站点总览、站点设置、系统设置
+- 后台通知页提供三条评论邮件静态诊断和 QingYan 内置双链路真实邮件测试
 - 本地 `logs/access` 与 `logs/app` 双通道日志
 - 文本 `.log` + 结构化 `.jsonl` 双格式落盘
 - 后台可动态调整日志等级和保留天数
@@ -161,7 +164,7 @@ qyctl update check
 qyctl update plan
 ```
 
-`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。当前仓库尚未发布首个 Release 时，会显示“尚未发布 Release”。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
+`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。若没有 published release 会返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
 
 在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。即使安装时随机生成过管理员用户名和密码，dev mode 也会临时注入开发账号；非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态，安装完成页会显示一次性初始密码。
 
@@ -171,7 +174,7 @@ qyctl update plan
 - startup config 示例见 `config/qingyan.example.yml`
 - 本地实参默认使用 `config/qingyan.yml`
 - 站点、站点设置、系统设置由数据库持久化，后台管理端维护
-- 当前仍处于首个正式 release 前；公开输入已由站点级上限约束，但最终 release 状态以完整发布验证通过为准
+- 首个正式版本 `v0.1.0` 已发布；公开输入由站点级上限约束，后续破坏性升级必须走 upgrade lifecycle
 - 应用层滥用保护和自动黑名单可在 Admin Console 关闭；关闭时建议由 WAF、反向代理、CDN 或 API 网关承担更强限流与拦截
 - 黑名单和白名单均在 Admin Console 的安全规则中管理；白名单只影响黑名单/自动黑名单优先级，不绕过页面状态、功能开关、验证码、基础限流或输入校验
 - 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
@@ -179,13 +182,15 @@ qyctl update plan
 
 ## 升级入口
 
-当前尚无正式 release，不为旧未发布状态提供兼容升级。首次正式 release 后，如果启动时检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是启动正常评论 API 或 Admin Console。终端会输出：
+从 `v0.1.0` 起，已有实例升级必须走明确的 upgrade lifecycle。如果启动时检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是启动正常评论 API 或 Admin Console。终端会输出：
 
 ```text
 upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
+upgrade.state=upgrade_required
+upgrade.token=qy_upgrade_<一次性随机值>
 ```
 
-浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
+浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，输入同一段启动日志中的升级 token，并在确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
 
 CLI 仍是底层运维入口，适合服务器、Docker、CI 或 Web 无法启动的场景：
 
@@ -204,6 +209,23 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 - 文档页：`GET /qingyan/docs`
 
 公开 OpenAPI 只覆盖内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口。Admin Console Web 使用的 `/api/admin/*` 管理接口不进入公开 OpenAPI；开发者调试或扩展内置后台时可参考 [`docs/admin-console-api.md`](docs/admin-console-api.md)。
+
+## 评论邮件排障
+
+评论邮件不是一个总开关，至少有三层独立配置：系统邮件与 SMTP、普通评论者回复邮件、
+后台用户通知与站点人员 route。只打开其中一层，不代表另外两条链路已经可发送。
+
+在 Admin Console 的“站点设置 → 通知”中可以：
+
+- 查看待审核评论、直接发布评论和评论回复三条 email flow 的 saved-config blocker；
+- 设置公开评论框“回复提醒”是否默认勾选；
+- 输入一个评论者邮箱，使用 QingYan 内置测试页走真实
+  planner → queue → worker → template → email adapter 链路。
+
+真实测试第一条线路把评论 A 发送给当前匹配的站点人员 email route，第二条线路模拟站点人员
+回复并通知评论 A 的用户；不要求内容站点创建页面或提供前端。结果中的 `passed` / `sent`
+表示邮件服务商接受了发送请求，不等于邮件已经进入收件箱，最终仍需核对两个收件箱、垃圾邮件
+和服务商退信。
 
 ## Docker / Compose
 

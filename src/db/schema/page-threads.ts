@@ -9,6 +9,8 @@ import {
 
 import { sites } from "./sites";
 
+export type PageThreadKind = "public" | "notification_test";
+
 export const pageThreads = sqliteTable(
 	"page_threads",
 	{
@@ -19,6 +21,11 @@ export const pageThreads = sqliteTable(
 		pageKey: text("page_key").notNull(),
 		pageTitle: text("page_title"),
 		pageUrl: text("page_url"),
+		kind: text("kind", {
+			enum: ["public", "notification_test"],
+		})
+			.notNull()
+			.default("public"),
 		commentCount: integer("comment_count").notNull().default(0),
 		rootCommentCount: integer("root_comment_count").notNull().default(0),
 		pageViewCount: integer("page_view_count").notNull().default(0),

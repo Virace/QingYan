@@ -4,14 +4,14 @@
 
 ## 为什么不放进 OpenAPI
 
-当前 `/api/dev/*` **不会出现在** `docs/openapi.yaml`、`/openapi.json` 和 `/docs` 中。
+当前 `${server.publicPath}/api/dev/*` **不会出现在** `docs/openapi.yaml`、`${server.publicPath}/openapi.json` 和 `${server.publicPath}/docs` 中。
 
 原因不是“接口不重要”，而是边界不同：
 
 - OpenAPI 只描述正式对外的业务契约
-- `/api/dev/*` 只在 dev mode 下存在
-- 生产环境不会暴露 `/api/dev/*`
-- `/api/dev/*` 的职责是“控制真实后端状态”，不是正式产品功能
+- `${server.publicPath}/api/dev/*` 只在 dev mode 下存在
+- 生产环境不会暴露 `${server.publicPath}/api/dev/*`
+- `${server.publicPath}/api/dev/*` 的职责是“控制真实后端状态”，不是正式产品功能
 
 所以它更适合作为一份专门的联调 / 自动化文档保留，而不是和正式 API 混在一起。
 
@@ -20,13 +20,15 @@
 dev mode 的核心原则只有两条：
 
 1. **业务 API 不变**
-   - 仍然使用 `/api/*` 和 `/admin`
+   - 仍然使用 `${server.publicPath}/api/*` 和 `${server.publicPath}/admin`
    - 下游不要切换到另一套 “mock 业务路由”
 
 2. **控制面单独存在**
-   - 只新增 `/api/dev/*`
-   - `/api/dev/*` 用来把真实系统推到指定状态
+   - 只新增 `${server.publicPath}/api/dev/*`
+   - `${server.publicPath}/api/dev/*` 用来把真实系统推到指定状态
    - 真正的数据读取、评论创建、点赞、验证码验证，仍然走正式业务 API
+
+为便于阅读，下文接口示例继续使用 Admin Console 源码中的内部相对写法 `/api/...` 和 `/admin`。默认部署的完整路径是 `/qingyan/api/...` 和 `/qingyan/admin`；如果修改了 `server.publicPath`，需要替换成对应前缀。
 
 ## 启动条件
 
@@ -68,7 +70,7 @@ QINGYAN_DEV_MODE=true pnpm dev:api
 QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 ```
 
-无数据库模式会自动启用 dev mode，不连接 SQLite，也不要求先执行迁移。它仍然提供 `/api/dev/*` 控制面、`/api/*` 前台业务接口，以及用于自动化联调的最小后台会话接口。mock 状态只保存在运行时内存中，进程重启后会重置。
+无数据库模式会自动启用 dev mode，不连接 SQLite，也不要求先执行迁移。它仍然提供 `${server.publicPath}/api/dev/*` 控制面、`${server.publicPath}/api/*` 前台业务接口，以及用于自动化联调的最小后台会话接口。mock 状态只保存在运行时内存中，进程重启后会重置。
 
 ### dev mode 的固定语义
 
@@ -78,11 +80,11 @@ QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 - `default` 来自 dev seed，不从 startup config 的 `sites[]` 派生
 - DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite
 - 后台登录临时使用 dev 管理员账号，默认 `admin / admin`
-- 后台入口保留已安装的配置路径，同时额外开放 `/admin/` 作为 dev-only 别名
+- 后台入口保留已安装的配置路径，同时额外开放 `${server.publicPath}/admin/` 作为 dev-only 别名
 - 前端仍然必须显式传 `siteKey: "default"`
 - 页面维度继续使用真实 `pageKey`
 - 真实业务 API 路径保持不变
-- 只额外挂载 `/api/dev/*`
+- 只额外挂载 `${server.publicPath}/api/dev/*`
 
 ## 接口总览
 
@@ -92,9 +94,9 @@ QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 
 它会创建正常的 `qingyan_admin` cookie。后续：
 
-- `/api/dev/*`
-- `/api/admin/*`
-- `/admin`
+- `${server.publicPath}/api/dev/*`
+- `${server.publicPath}/api/admin/*`
+- `${server.publicPath}/admin`
 
 都走同一套后台权限边界。
 
@@ -254,8 +256,8 @@ GET /api/dev/state?siteKey=default&pageKey=post:threshold-demo&visitorKey=visito
 
 以及：
 
-- `GET /admin`
-- `/api/admin/*`
+- `GET ${server.publicPath}/admin`
+- `${server.publicPath}/api/admin/*`
 
 ## 下游接入流程
 
@@ -430,7 +432,7 @@ GET /api/comments/bootstrap
   - 当前 `visitorKey`
   - 当前 `qingyan_admin` 是否就绪
 
-不要把 `/api/dev/*` 结果和正式业务数据结构揉成一个 model。
+不要把 `${server.publicPath}/api/dev/*` 结果和正式业务数据结构揉成一个 model。
 
 ### 2. 始终保留 draft
 
@@ -468,12 +470,13 @@ GET /api/comments/bootstrap
   - `/api/dev/session` 的 token 不对
 
 - `401 ADMIN_AUTH_REQUIRED`
-  - 调用了 `/api/dev/state`、`/api/dev/reset`、`/api/dev/scenario`
+  - 调用了 `${server.publicPath}/api/dev/state`、`${server.publicPath}/api/dev/reset`、`${server.publicPath}/api/dev/scenario`
   - 但没有先建立 `qingyan_admin` session
 
 - `404`
   - 当前不是 dev mode
-  - 或生产环境中调用了 `/api/dev/*`
+  - 或生产环境中调用了 `${server.publicPath}/api/dev/*`
+  - 或请求没有带当前 `server.publicPath` 前缀
 
 ### 正式业务面
 
@@ -536,18 +539,18 @@ GET  /api/comments/bootstrap
 
 以下行为已经在本地真实 dev server 上跑通过：
 
-- `/api/dev/session` 可创建正常后台会话
-- `/api/admin/session/me` 与 `/api/admin/sites` 在 dev mode 下只返回 `default`
+- `${server.publicPath}/api/dev/session` 可创建正常后台会话
+- `${server.publicPath}/api/admin/session/me` 与 `${server.publicPath}/api/admin/sites` 在 dev mode 下只返回 `default`
 - `comments-captcha-always` 能通过真实 `bootstrap.data.comments.captcha.challenge` 返回 challenge
 - `comments-threshold-next-write` 在“先 bootstrap 拿 visitor cookie”后，会在第一次写操作时报 `COMMENT_CAPTCHA_REQUIRED`
-- `visitorKey` 传给 `/api/dev/state` 后，能观察目标 public visitor 的真实验证码状态
+- `visitorKey` 传给 `${server.publicPath}/api/dev/state` 后，能观察目标 public visitor 的真实验证码状态
 - `comments-seeded-thread` 能通过真实 `bootstrap.data.comments.items` 读到 seeded 评论树，并通过 `bootstrap.data.pageLikes` 读到页面点赞状态
 
 ## 结论
 
 如果下游要做的是“更好地处理前端 UI”，正确做法不是自己实现一套假的 mock 业务接口，而是：
 
-1. 用 `/api/dev/*` 把真实系统推到指定状态
+1. 用 `${server.publicPath}/api/dev/*` 把真实系统推到指定状态
 2. 用正式业务 API 读取和写入
 3. 按正式错误码驱动 UI 流程
 

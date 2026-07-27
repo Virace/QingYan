@@ -116,6 +116,32 @@ function recipientsPayload(userId: number) {
 }
 
 describe("admin site notification recipients", () => {
+	it("allows a global admin recipient without an explicit site access row", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const recipient = await createScopedUser(fixture, {
+			username: "global-admin-recipient",
+			groupKey: "admin",
+			siteKeys: [],
+		});
+		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+
+		const updateResponse = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth({ adminCookie, csrfToken }),
+			payload: recipientsPayload(recipient.id),
+		});
+
+		expect(updateResponse.statusCode).toBe(200);
+		expect(updateResponse.json().notifications.backend.recipients).toEqual([
+			expect.objectContaining({
+				userId: recipient.id,
+				username: "global-admin-recipient",
+				email: "global-admin-recipient@example.test",
+			}),
+		]);
+	});
 	it("lets admins add active backend users with target-site access", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

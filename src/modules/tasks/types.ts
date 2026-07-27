@@ -108,12 +108,19 @@ export interface NotificationDeliveryRecord {
 	updatedAt: string;
 }
 
+export interface TaskClaimScope {
+	includeCategories?: TaskRunCategory[];
+	excludeCategories?: TaskRunCategory[];
+}
+
+export type TaskClaimOptions = TaskClaimScope & {
+	nowIso?: string;
+	limit?: number;
+};
+
 export interface TaskQueue {
 	enqueue(task: TaskQueuePayload): Promise<TaskRunRecord>;
-	claim(
-		worker: string,
-		options?: { nowIso?: string; limit?: number },
-	): Promise<TaskRunRecord[]>;
+	claim(worker: string, options?: TaskClaimOptions): Promise<TaskRunRecord[]>;
 	ack(taskId: string, result: unknown): Promise<void>;
 	retry(taskId: string, error: unknown, runAfter: string): Promise<void>;
 	fail(taskId: string, error: unknown): Promise<void>;

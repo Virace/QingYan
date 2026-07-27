@@ -77,6 +77,10 @@ async function createUserWithSiteAccess(
 		userId: user.id,
 		siteId: site.id,
 	});
+	await fixture.app.db
+		.update(siteSettings)
+		.set({ backendNotificationsEnabled: true })
+		.where(eq(siteSettings.siteId, site.id));
 
 	return { user, site };
 }
@@ -168,6 +172,48 @@ describe("backend user notification preferences", () => {
 });
 
 describe("backend user notification planner", () => {
+	it("does not plan when backend notifications are disabled for the site", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: "disabled-planner-recipient",
+			siteKey: "fangyuan",
+			email: "disabled-planner@example.test",
+		});
+		const recipients = new BackendUserNotificationRecipientsRepository(
+			fixture.app.db,
+		);
+		await recipients.replaceSiteRecipients({
+			siteId: site.id,
+			recipients: [
+				{
+					userId: user.id,
+					channels: ["email"],
+					events: ["admin_comment_pending"],
+					includeCommentContent: "summary",
+					enabled: true,
+				},
+			],
+		});
+		await fixture.app.db
+			.update(siteSettings)
+			.set({ backendNotificationsEnabled: false })
+			.where(eq(siteSettings.siteId, site.id));
+
+		await expect(
+			new BackendUserNotificationPlanner(fixture.app.db).planForCommentEvent(
+				commentEvent({
+					siteId: site.id,
+					commentId: "comment-disabled-site",
+				}),
+			),
+		).resolves.toMatchObject({
+			tasks: [],
+			deliveries: [],
+			createdCount: 0,
+		});
+	});
+
 	it("plans pending and direct-approved admin notifications for configured site recipients", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -220,6 +266,46 @@ describe("backend user notification planner", () => {
 				recipientUserId: user.id,
 				eventFamily: "admin_comment_approved",
 				event: "admin_comment_approved",
+			}),
+		]);
+	});
+	it("plans notifications for global admins without explicit site access rows", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: "global-admin-planner-recipient",
+			siteKey: "fangyuan",
+			email: "global-admin-planner@example.test",
+			groupKey: "admin",
+		});
+		await fixture.app.db
+			.delete(adminUserSiteAccess)
+			.where(eq(adminUserSiteAccess.userId, user.id));
+		const recipients = new BackendUserNotificationRecipientsRepository(
+			fixture.app.db,
+		);
+		await recipients.replaceSiteRecipients({
+			siteId: site.id,
+			recipients: [
+				{
+					userId: user.id,
+					channels: ["email"],
+					events: ["admin_comment_pending"],
+					includeCommentContent: "summary",
+					enabled: true,
+				},
+			],
+		});
+
+		const planned = await new BackendUserNotificationPlanner(
+			fixture.app.db,
+		).planForCommentEvent(commentEvent({ siteId: site.id }));
+
+		expect(planned.deliveries).toEqual([
+			expect.objectContaining({
+				recipientUserId: user.id,
+				recipientAddressSnapshot: "global-admin-planner@example.test",
+				eventFamily: "admin_comment_pending",
 			}),
 		]);
 	});

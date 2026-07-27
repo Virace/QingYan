@@ -1,4 +1,7 @@
+import { eq } from "drizzle-orm";
+
 import type { AppDatabase } from "../../db/client";
+import { siteSettings } from "../../db/schema";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { NotificationDeliveryRecord, TaskRunRecord } from "../tasks/types";
 import { BackendUserNotificationPreferencesRepository } from "./backend-user-preferences-repository";
@@ -37,6 +40,8 @@ export interface BackendUserNotificationEvent {
 	contentRaw?: string | null;
 	createdAt?: string | null;
 }
+
+export type NotificationChannelFilter = Array<"email" | "webhook" | "wxpusher">;
 
 export interface BackendUserNotificationPlanResult {
 	tasks: TaskRunRecord[];
@@ -112,7 +117,7 @@ export class BackendUserNotificationPlanner {
 	private readonly preferences: BackendUserNotificationPreferencesRepository;
 	private readonly tasks: TaskRunRepository;
 
-	public constructor(db: AppDatabase) {
+	public constructor(private readonly db: AppDatabase) {
 		this.recipients = new BackendUserNotificationRecipientsRepository(db);
 		this.preferences = new BackendUserNotificationPreferencesRepository(db);
 		this.tasks = new TaskRunRepository(db);
@@ -120,7 +125,21 @@ export class BackendUserNotificationPlanner {
 
 	public async planForCommentEvent(
 		event: BackendUserNotificationEvent,
+		options: {
+			channelFilter?: NotificationChannelFilter;
+		} = {},
 	): Promise<BackendUserNotificationPlanResult> {
+		const [settings] = await this.db
+			.select({
+				backendNotificationsEnabled: siteSettings.backendNotificationsEnabled,
+			})
+			.from(siteSettings)
+			.where(eq(siteSettings.siteId, event.siteId))
+			.limit(1);
+		if (!settings?.backendNotificationsEnabled) {
+			return { tasks: [], deliveries: [], createdCount: 0 };
+		}
+
 		const adminEvent = resolveAdminEvent(event);
 		if (!adminEvent) {
 			return { tasks: [], deliveries: [], createdCount: 0 };
@@ -153,6 +172,9 @@ export class BackendUserNotificationPlanner {
 					continue;
 				}
 				const channel = route.channelConfig.type;
+				if (options.channelFilter && !options.channelFilter.includes(channel)) {
+					continue;
+				}
 				if (!route.channelConfig.enabled) {
 					continue;
 				}

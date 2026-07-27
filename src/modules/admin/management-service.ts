@@ -1223,6 +1223,7 @@ export class AdminManagementService {
 			notifications: {
 				commenter: {
 					replyEmailEnabled: settings.commenterReplyEmailEnabled,
+					replyEmailDefaultChecked: settings.commenterReplyEmailDefaultChecked,
 				},
 				backend: {
 					enabled: settings.backendNotificationsEnabled,
@@ -1285,7 +1286,7 @@ export class AdminManagementService {
 					"通知接收人必须是启用状态的后台用户。",
 				);
 			}
-			if (!candidate.siteAccessId) {
+			if (!candidate.siteAccessId && candidate.groupKey !== "admin") {
 				throw new AppError(
 					403,
 					"ADMIN_NOTIFICATION_RECIPIENT_SITE_ACCESS_REQUIRED",
@@ -1383,6 +1384,7 @@ export class AdminManagementService {
 			notifications?: {
 				commenter?: {
 					replyEmailEnabled?: boolean;
+					replyEmailDefaultChecked?: boolean;
 				};
 				backend?: {
 					enabled?: boolean;
@@ -1481,6 +1483,8 @@ export class AdminManagementService {
 				: undefined,
 			commenterReplyEmailEnabled:
 				input.notifications?.commenter?.replyEmailEnabled,
+			commenterReplyEmailDefaultChecked:
+				input.notifications?.commenter?.replyEmailDefaultChecked,
 			backendNotificationsEnabled: input.notifications?.backend?.enabled,
 		});
 		if (input.notifications?.backend?.recipients) {

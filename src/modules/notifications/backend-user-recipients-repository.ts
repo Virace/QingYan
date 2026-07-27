@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import {
+	adminGroups,
+	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
 	siteNotificationRecipientRoutes,
@@ -184,6 +186,18 @@ export class BackendUserNotificationRecipientsRepository {
 		recipients: SiteNotificationRecipientInput[];
 	}) {
 		const nowIso = new Date().toISOString();
+		const existingRecipients = await this.db
+			.select({ id: siteNotificationRecipients.id })
+			.from(siteNotificationRecipients)
+			.where(eq(siteNotificationRecipients.siteId, input.siteId));
+		if (existingRecipients.length > 0) {
+			await this.db.delete(siteNotificationRecipientRoutes).where(
+				inArray(
+					siteNotificationRecipientRoutes.recipientId,
+					existingRecipients.map((recipient) => recipient.id),
+				),
+			);
+		}
 		await this.db
 			.delete(siteNotificationRecipients)
 			.where(eq(siteNotificationRecipients.siteId, input.siteId));
@@ -236,9 +250,12 @@ export class BackendUserNotificationRecipientsRepository {
 				email: adminUsers.email,
 				status: adminUsers.status,
 				deletedAt: adminUsers.deletedAt,
+				groupKey: adminGroups.key,
 				siteAccessId: adminUserSiteAccess.id,
 			})
 			.from(adminUsers)
+			.innerJoin(adminUserGroups, eq(adminUserGroups.userId, adminUsers.id))
+			.innerJoin(adminGroups, eq(adminGroups.id, adminUserGroups.groupId))
 			.leftJoin(
 				adminUserSiteAccess,
 				and(
@@ -267,7 +284,9 @@ export class BackendUserNotificationRecipientsRepository {
 				displayName: adminUsers.displayName,
 			})
 			.from(adminUsers)
-			.innerJoin(
+			.innerJoin(adminUserGroups, eq(adminUserGroups.userId, adminUsers.id))
+			.innerJoin(adminGroups, eq(adminGroups.id, adminUserGroups.groupId))
+			.leftJoin(
 				adminUserSiteAccess,
 				and(
 					eq(adminUserSiteAccess.userId, adminUsers.id),
@@ -279,6 +298,7 @@ export class BackendUserNotificationRecipientsRepository {
 					inArray(adminUsers.id, input.userIds),
 					eq(adminUsers.status, "active"),
 					isNull(adminUsers.deletedAt),
+					or(eq(adminGroups.key, "admin"), isNotNull(adminUserSiteAccess.id)),
 				),
 			);
 	}

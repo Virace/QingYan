@@ -4,12 +4,12 @@ import {
 	commentStatusSchema,
 	siteModerationSettingsSchema,
 } from "../comments/moderation-types";
+import { commentInputLimitHardCaps } from "../shared/site-settings-defaults";
 import { isSafeHttpUrl, normalizeOrigin } from "../shared/url-policy";
 import {
 	avatarSettingsSchema,
 	securitySettingsSchema,
 } from "../system-settings/definitions";
-import { commentInputLimitHardCaps } from "../shared/site-settings-defaults";
 
 const commentIdentityFieldSchema = z.enum(["nickname", "email", "website"]);
 const commentMetadataSchema = z.object({
@@ -716,6 +716,7 @@ export const adminSettingsBodySchema = z
 				commenter: z
 					.object({
 						replyEmailEnabled: z.boolean().optional(),
+						replyEmailDefaultChecked: z.boolean().optional(),
 					})
 					.optional(),
 				backend: z
@@ -865,6 +866,20 @@ export const adminNotificationChannelTestBodySchema = z
 	.refine((value) => value.channelConfigId || value.channel, {
 		message: "必须选择一个通知渠道配置。",
 	});
+
+export const adminNotificationChainTestBodySchema = z
+	.object({
+		commenterEmail: z.string().trim().email(),
+	})
+	.strict();
+
+export const adminNotificationChainTestParamsSchema = z.object({
+	siteKey: z.string().trim().min(1),
+	runId: z
+		.string()
+		.trim()
+		.regex(/^task_[a-z0-9]+$/u),
+});
 
 export const adminMailTestBodySchema = z
 	.object({

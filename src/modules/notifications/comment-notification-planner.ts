@@ -11,12 +11,13 @@ import { isSystemMailUsable } from "../comments/public-contract";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskActorType } from "../tasks/types";
-import { EmailReputationRepository } from "./email-reputation-repository";
+import type { NotificationChannelFilter } from "./backend-user-notification-planner";
 import {
 	hashNotificationEmail,
 	isAcceptableNotificationEmail,
 	normalizeNotificationEmail,
 } from "./email-address-policy";
+import { EmailReputationRepository } from "./email-reputation-repository";
 
 export type CommentNotificationSource =
 	| "public_api"
@@ -53,7 +54,13 @@ export class CommentNotificationPlanner {
 
 	public async planForCommentEvent(
 		input: CommentNotificationPlanInput,
+		options: {
+			channelFilter?: NotificationChannelFilter;
+		} = {},
 	): Promise<CommentNotificationPlanResult> {
+		if (options.channelFilter && !options.channelFilter.includes("email")) {
+			return { createdCount: 0, taskIds: [] };
+		}
 		if (input.source === "import" || input.source === "migration") {
 			return { createdCount: 0, taskIds: [] };
 		}

@@ -1,6 +1,6 @@
 # QingYan 配置说明
 
-QingYan 当前处于未发布阶段，本轮配置模型按 hard cut 收口：配置文件只负责进程启动前必须知道的部署信息；站点、站点设置、系统设置和后台 bootstrap 状态由数据库持久化。首次部署推荐走 install-first 流程，而不是手写完整业务 YAML。
+QingYan 从首个正式版本 `v0.1.0` 起使用当前配置模型：配置文件只负责进程启动前必须知道的部署信息；站点、站点设置、系统设置和后台 bootstrap 状态由数据库持久化。首次部署推荐走 install-first 流程，而不是手写完整业务 YAML。
 
 ## 配置所有权
 
@@ -40,7 +40,7 @@ startup 环境变量会覆盖安装表单中对应字段，并在安装计划中
 | `QINGYAN_SERVER_PORT` | install app 监听 port |
 | `QINGYAN_PUBLIC_PATH` | QingYan 对外挂载路径，默认 `/qingyan`，必须是非根路径 |
 
-首个正式 release 前已移除旧变量 `QINGYAN_INSTALL_RESTART_MODE`。安装切换模式只使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
+旧变量 `QINGYAN_INSTALL_RESTART_MODE` 已在 `v0.1.0` 前移除。安装切换模式只使用 `QINGYAN_INSTALL_TRANSITION_MODE`。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令；Docker Compose 可用 `exit_for_supervisor` 交给 restart policy 拉起，直接部署或托管运行时通常使用默认的 `reload_in_process`。
 
 ## Startup Config
 
@@ -62,7 +62,7 @@ database:
 admin:
   session:
     cookieName: qingyan_admin
-    ttlMinutes: 4320
+    ttlMinutes: 1440
     sameSite: lax
     secure: false
 
@@ -75,10 +75,15 @@ security:
   publicOriginGuard:
     enabled: true
     allowMissingOrigin: false
+  adminOriginGuard:
+    enabled: true
+    allowMissingOrigin: false
+    allowedOrigins: []
   rateLimit:
     adminLogin:
       windowSec: 600
       maxFailures: 5
+      autoBlacklistSec: 1800
     commentCreate:
       windowSec: 300
       maxRequests: 5
@@ -119,9 +124,12 @@ security:
 - `requestIdHeader`: 外部请求链路传入 request id 时使用的 header 名。
 - `globalFloodGuard`: 进程级总请求洪峰保护。
 - `publicOriginGuard`: 公开写接口的浏览器来源保护。
+- `adminOriginGuard`: 后台写接口的浏览器来源保护。
 - `rateLimit`: 评论、投票、验证码和页面点赞限流参数。
 
 `publicOriginGuard` 使用请求体或查询参数中的 `siteKey` 查找数据库站点 `allowedOrigins`。`Origin` / CORS 是浏览器侧来源门禁，不是 API 密钥；公开写接口仍然需要验证码、限流、黑名单和审核策略承受直接调用。
+
+`adminOriginGuard` 使用 `system_settings.security.adminOriginGuard.allowedOrigins` 与当前请求的 `Origin` 校验后台写操作。默认启用且不允许缺失 `Origin`；同域部署通常不需要额外配置，跨域后台入口需要在 Admin Console 系统设置中加入精确 origin。
 
 ## 环境变量白名单
 
@@ -170,7 +178,7 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
 - 页面来源注册设置：`pageRegistry.mode`、权威 sitemap URL 列表、未知页面响应、健康宽限时间和紧急锁定。
-- 评论者回复邮件通知开关和后台用户通知开关。
+- 评论者回复邮件通知开关、公开评论框“回复提醒”默认勾选状态和后台用户通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
 
@@ -242,12 +250,26 @@ Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion�
 
 评论通知配置分为站点级和系统级：
 
+- 系统级 `system_settings.mail.enabled` 与 `mail.smtp.*` 控制整个实例是否具备邮件发送能力。SMTP 未完整配置时，无论站点级开关如何设置，email 都不能投递。
 - 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification.enabled` 计算，不影响后台用户通知。
+- 站点级 `site_settings.commenter_reply_email_default_checked` 对应 Admin API `notifications.commenter.replyEmailDefaultChecked`，只控制公开评论框首次显示时的初始勾选状态。能力不可用时 bootstrap 固定返回 `defaultChecked=false`；评论创建仍必须显式提交 `options.notifyOnReply=true`，不能把默认勾选当作服务端订阅。
 - 站点级 `site_settings.backend_notifications_enabled` 对应 Admin API `notifications.backend.enabled`，只控制是否为后台用户创建站点通知任务，不影响普通评论者回复邮件订阅。
 - 站点级 `site_notification_recipients` 对应 Admin API `notifications.backend.recipients`，引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
 - 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。
 - 系统级 `notification_channel_configs` 维护具体通知渠道配置实例。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点接收人 route 使用 `channelConfigId` 选择具体实例。
 - 通知模板由 `notification_templates` 保存自定义覆盖；没有覆盖时使用内置默认模板。
+
+这三层必须独立排查：系统邮件/SMTP 是 email transport；评论者回复邮件是普通评论者 opt-in
+链路；后台用户通知是站点人员事件和 route 链路。开启其中一层不会自动开启另外两层。
+Admin Console 的“通知”页会按已保存配置静态检查“待审核评论 → 站点人员”“直接发布评论
+→ 站点人员”“站点人员回复 → 原评论者”三条 flow，并返回 blocker 的 canonical setting
+path。未保存的页面草稿不会参与静态检测。
+
+真实评论邮件测试不要求内容站点创建页面或提供前端。QingYan 会使用内置
+`notification_test` 线程和正式 planner/queue/worker/template/email adapter，先创建评论 A
+测试站点人员邮件，再模拟站点人员回复测试评论者邮件。真实测试只选择 email route，不发送
+Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商接受请求，不证明进入
+收件箱；最后仍需人工核对两个收件箱、垃圾邮件和退信。
 
 队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
 
@@ -291,7 +313,7 @@ Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属
 - Cravatar：`baseUrl=https://cravatar.cn/avatar`，`hashAlgorithm=md5`，`query=s=160&d=identicon`。参考 [Cravatar API](https://cravatar.com/developer/api)。
 - WeAvatar：`baseUrl=https://weavatar.com/avatar`，按官方文档选择参数，例如 `d=initials&name=Alice` 或 `d=color`。参考 [WeAvatar 文档](https://weavatar.com/doc)。
 
-当前没有运行时代码兼容旧 `avatar.gravatar.*`。测试部署如需迁移 SQLite 中已有设置，可先备份数据库，再执行类似 SQL：
+当前没有运行时代码兼容旧 `avatar.gravatar.*`。历史测试实例如需迁移 SQLite 中已有设置，可先备份数据库，再执行类似 SQL：
 
 ```sql
 UPDATE system_settings SET key = 'external.enabled' WHERE category = 'avatar' AND key = 'gravatar.enabled';
@@ -366,11 +388,11 @@ WordPress WXR 导入会读取 `wp:author` 和每条评论的 `wp:comment_user_id
 
 WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内容包含 `<a>` 等 HTML-like 片段，QingYan 也会按文本转义输出。导入分析报告会统计疑似 HTML 评论数量，方便管理员后续人工检查；有限 HTML 白名单或 sanitizer 不在当前迁移默认行为中。
 
-## Future Upgrade Lifecycle
+## Upgrade Lifecycle
 
-当前仓库尚无正式 release，所以本轮不提供旧配置、旧 `runtime_settings`、旧管理接口或旧 export v1 的兼容升级。第一次正式 release 后，破坏性配置或数据语义变化必须走 upgrade lifecycle；长期约束由 `AGENTS.project.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
+`v0.1.0` 是当前 upgrade lifecycle 的首个正式基线。后续破坏性配置、settings owner、secret 存储位置、数据语义、schema 或导入导出格式变化必须走 upgrade lifecycle；长期约束由 `AGENTS.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
 
-启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，操作员需要输入启动日志或本机操作命令显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
+启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会同时输出 `${server.publicPath}/upgrade` 地址、升级状态和一次性升级令牌；浏览器访问该页面后，操作员需要输入启动日志显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
 Web Upgrade Mode 暴露最小接口：
 
@@ -403,7 +425,7 @@ qyctl admin repass
 qyctl admin entrance
 qyctl export default ./site.json
 qyctl import default ./site.json --dry-run
-qyctl backup ./qingyan-full-backup
+qyctl backup ./qingyan-full-backup --yes
 qyctl restore ./qingyan-full-backup.qingyan-backup --dry-run
 qyctl upgrade --dry-run
 qyctl update check
@@ -416,11 +438,13 @@ qyctl restart
 
 裸运行 `qyctl` 或 `qingyanctl` 会显示帮助信息。`qyctl status/start/stop/restart` 面向 systemd 直接部署；Docker Compose 部署应使用 `docker compose ps/restart/logs` 管理容器生命周期。
 
-`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；当前仓库尚未发布首个 Release 时会显示“尚未发布 Release”。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；没有 published release 时返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
 
 ### Release 更新规则
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
+- 首个正式 release 为 `v0.1.0`。
+- 当前正式 release 为 `v0.2.0`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 

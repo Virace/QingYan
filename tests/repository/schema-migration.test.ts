@@ -1129,12 +1129,99 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("uses a single unreleased baseline migration", () => {
+	it("keeps the released baseline and one next-release migration", () => {
 		const migrationFiles = readdirSync(path.resolve(process.cwd(), "drizzle"))
 			.filter((fileName) => fileName.endsWith(".sql"))
 			.sort();
 
-		expect(migrationFiles).toEqual(["0000_initial.sql"]);
+		expect(migrationFiles).toEqual([
+			"0000_initial.sql",
+			"0001_notification_reliability.sql",
+		]);
+	});
+
+	it("upgrades a v0.1.0 database with notification reliability defaults", () => {
+		const directory = mkdtempSync(
+			path.join(tmpdir(), "qingyan-schema-v0.1.0-upgrade-"),
+		);
+		const databaseFile = path.join(directory, "schema.db");
+		const sqlite = new Database(databaseFile);
+
+		try {
+			sqlite.exec(
+				readFileSync(
+					path.resolve(process.cwd(), "drizzle", "0000_initial.sql"),
+					"utf-8",
+				),
+			);
+			sqlite.exec(`
+				CREATE TABLE __qingyan_migrations (
+					name text PRIMARY KEY NOT NULL,
+					applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				INSERT INTO __qingyan_migrations (name) VALUES ('0000_initial.sql');
+				INSERT INTO sites (site_key, name, allowed_origins_json)
+				VALUES ('upgrade-site', 'Upgrade Site', '[]');
+				INSERT INTO site_settings (site_id) VALUES (1);
+				INSERT INTO page_threads (site_id, page_key, page_title)
+				VALUES (1, 'post:existing', 'Existing');
+			`);
+
+			applyDatabaseMigrations(sqlite);
+
+			const siteSettingsColumns = sqlite
+				.prepare("PRAGMA table_info(site_settings)")
+				.all() as Array<{
+				name: string;
+				notnull: number;
+				dflt_value: string | null;
+			}>;
+			const pageThreadColumns = sqlite
+				.prepare("PRAGMA table_info(page_threads)")
+				.all() as Array<{
+				name: string;
+				notnull: number;
+				dflt_value: string | null;
+			}>;
+			expect(siteSettingsColumns).toContainEqual(
+				expect.objectContaining({
+					name: "commenter_reply_email_default_checked",
+					notnull: 1,
+					dflt_value: "0",
+				}),
+			);
+			expect(pageThreadColumns).toContainEqual(
+				expect.objectContaining({
+					name: "kind",
+					notnull: 1,
+					dflt_value: "'public'",
+				}),
+			);
+			expect(
+				sqlite
+					.prepare(
+						"SELECT commenter_reply_email_default_checked AS default_checked FROM site_settings WHERE site_id = 1",
+					)
+					.get(),
+			).toMatchObject({ default_checked: 0 });
+			expect(
+				sqlite
+					.prepare(
+						"SELECT kind FROM page_threads WHERE site_id = 1 AND page_key = 'post:existing'",
+					)
+					.get(),
+			).toMatchObject({ kind: "public" });
+			expect(
+				sqlite
+					.prepare(
+						"SELECT name FROM __qingyan_migrations WHERE name = '0001_notification_reliability.sql'",
+					)
+					.get(),
+			).toEqual({ name: "0001_notification_reliability.sql" });
+		} finally {
+			sqlite.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	it("backfills missing comment author user column when multi-user tables already exist", () => {
@@ -1151,6 +1238,15 @@ describe("initial migration", () => {
 					site_key text NOT NULL,
 					name text NOT NULL,
 					allowed_origins_json text NOT NULL
+				);
+				CREATE TABLE site_settings (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_id integer NOT NULL
+				);
+				CREATE TABLE page_threads (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_id integer NOT NULL,
+					page_key text NOT NULL
 				);
 				CREATE TABLE admin_sessions (
 					id text PRIMARY KEY NOT NULL,
@@ -1252,6 +1348,11 @@ describe("initial migration", () => {
 					allow_page_like integer DEFAULT true NOT NULL,
 					created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 					updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
+				);
+				CREATE TABLE page_threads (
+					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+					site_id integer NOT NULL,
+					page_key text NOT NULL
 				);
 				CREATE TABLE site_page_registry (
 					id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
