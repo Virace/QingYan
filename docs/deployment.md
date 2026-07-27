@@ -244,28 +244,28 @@ Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级�
 `v0.2.2` 之前的 checkout 尚无该脚本，第一次更新使用固定版本的远程入口：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.4/scripts/update.sh)
 ```
 
 GitHub 直连困难的地区可使用同一固定 release 的代理入口：
 
 ```bash
-bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh)
+bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.4/scripts/update.sh)
 ```
 
-`v0.2.3` 远程脚本只用于引导旧 checkout，尚不接受 `--network-profile`；引导完成后使用当前 checkout 中的本地脚本。远程入口保留 `bash <(...)` 形式，以避免旧脚本的 `docker compose exec` 继承并消费 `curl | bash` 的标准输入。
+`v0.2.4` 远程脚本支持相同的 `--network-profile` 参数；需要固定网络配置档时，可在脚本路径后追加 `--network-profile official` 或 `--network-profile cn`。远程入口保留 `bash <(...)` 形式，以避免 `docker compose exec` 继承并消费 `curl | bash` 的标准输入。
 
 脚本默认 fetch tags 后选择最高的稳定 `vX.Y.Z` release，也允许指定目标版本：
 
 ```bash
-./scripts/update.sh v0.2.3
+./scripts/update.sh v0.2.4
 ```
 
 默认交互流程只需要确认两次：第一次确认目标版本和整站备份，第二次在脚本显示脱敏
 `UpgradePlan` 后确认数据升级。明确接受全部确认时可以使用：
 
 ```bash
-./scripts/update.sh --yes v0.2.3
+./scripts/update.sh --yes v0.2.4
 ```
 
 脚本内部负责：

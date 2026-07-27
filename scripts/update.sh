@@ -299,7 +299,7 @@ printf '  Node headers：%s\n' "$NODE_DIST_URL"
 printf '  better-sqlite3：%s\n' "$BETTER_SQLITE3_BINARY_HOST"
 
 if [[ -n "$TARGET_TAG" && ! "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-	fail "目标版本必须是稳定 tag，例如 v0.2.3。"
+	fail "目标版本必须是稳定 tag，例如 v0.2.4。"
 fi
 
 PHASE="环境预检"
