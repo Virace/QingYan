@@ -16,7 +16,7 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
-当前正式版本为 [`v0.2.1`](https://github.com/Virace/QingYan/releases/tag/v0.2.1)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+当前正式版本为 [`v0.2.2`](https://github.com/Virace/QingYan/releases/tag/v0.2.2)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
 
 ## 当前能力
 
@@ -155,7 +155,7 @@ qyctl export default ./site.json
 qyctl import default ./site.json --dry-run
 ```
 
-整站备份使用 `qyctl backup`，包含数据库完整备份、配置文件、安装锁和 manifest。恢复计划可用 `qyctl restore <backup> --dry-run` 检查。`qyctl upgrade` 只表示数据升级：当程序文件已通过外部 shell / systemd action 更新后，它使用当前程序内置 migrations 和 application upgrade steps 升级数据库状态。程序下载、解压和替换不放在 `qyctl upgrade` 中。
+整站备份使用 `qyctl backup`，包含数据库完整备份、配置文件、安装锁和 manifest。恢复计划可用 `qyctl restore <backup> --dry-run` 检查。`qyctl upgrade` 只负责数据升级；Docker Compose 的备份、Release 切换、镜像构建、UpgradePlan 确认和健康验收统一由 `scripts/update.sh` 编排。
 
 程序更新检测基于当前仓库的 GitHub Release：
 
@@ -164,7 +164,19 @@ qyctl update check
 qyctl update plan
 ```
 
-`update check` 只检测 `Virace/QingYan` published release，不下载、不停止服务、不覆盖程序。若没有 published release 会返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`，并同时输出当前版本和最新版本。真实程序更新仍由 `qingyan.service` 的 update action 或外部 shell 脚本执行；更新脚本应先创建整站备份，再替换程序，最后执行 `qyctl upgrade`。
+`update check` 只检测 `Virace/QingYan` published release，不修改程序。Docker Compose 部署在仓库根目录运行一个入口即可完成更新：
+
+```bash
+./scripts/update.sh
+```
+
+`v0.2.2` 之前的 checkout 尚无该脚本，可使用固定版本的远程入口完成首次更新：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.2/scripts/update.sh)
+```
+
+脚本默认选择最高的稳定 release tag，依次执行预检、整站备份、镜像构建、UpgradePlan 确认、数据升级和健康验收；可显式传入目标 tag，并用 `--yes` 接受两次确认。
 
 在 `pnpm dev` 下，这里会输出当前开发账号和密码，方便直接登录。即使安装时随机生成过管理员用户名和密码，dev mode 也会临时注入开发账号；非 dev 启动时，管理员入口、用户名和密码 hash 来自数据库 bootstrap 状态，安装完成页会显示一次性初始密码。
 

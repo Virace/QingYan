@@ -2211,7 +2211,7 @@ Query：
   };
   update: {
     supported: boolean;
-    entry: "service-action";
+    entry: "compose-script";
     description: string;
     estimatedRestartSeconds: {
       min: number;
@@ -2251,7 +2251,7 @@ Query：
 ```ts
 {
   kind: "program-update";
-  executor: "qingyan.service";
+  executor: "./scripts/update.sh";
   description: string;
   estimatedRestartSeconds: {
     min: number;

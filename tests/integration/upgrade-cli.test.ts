@@ -120,7 +120,7 @@ describe("upgrade cli", () => {
 
 			expect(exitCode).toBe(0);
 			expect(output).toHaveBeenCalledOnce();
-			expect(output.mock.calls[0]?.[0]).toContain("application-version:0.2.1");
+			expect(output.mock.calls[0]?.[0]).toContain("application-version:0.2.2");
 			expect(readUpgradeRows(workspace.databaseFile)).toEqual([
 				{ name: "application-version:0.0.1", to_version: "0.0.1" },
 			]);
@@ -151,7 +151,7 @@ describe("upgrade cli", () => {
 			expect(exitCode).toBe(0);
 			expect(readUpgradeRows(workspace.databaseFile)).toEqual([
 				{ name: "application-version:0.0.1", to_version: "0.0.1" },
-				{ name: "application-version:0.2.1", to_version: "0.2.1" },
+				{ name: "application-version:0.2.2", to_version: "0.2.2" },
 			]);
 			const result = JSON.parse(output.mock.calls.at(-1)?.[0] ?? "{}") as {
 				backup?: {

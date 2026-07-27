@@ -69,12 +69,19 @@ describe("qingyanctl update commands", () => {
 		expect(result.output.stdout.join("\n")).toContain("状态：发现新版本");
 	});
 
+	it("uses the Docker Compose update script as the default update entry", async () => {
+		const result = await runCli(["update", "plan"]);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.output.stdout).toContain("执行入口：./scripts/update.sh");
+		expect(result.output.stdout).toContain("1. 创建升级前整站备份");
+	});
 	it("prints update plan without applying update", async () => {
 		const result = await runCli(["update", "plan"], {
 			updatePlanService: {
 				getUpdatePlan: () => ({
 					kind: "program-update",
-					executor: "qingyan.service",
+					executor: "./scripts/update.sh",
 					description: "更新脚本会先创建整站备份。",
 					estimatedRestartSeconds: { min: 30, max: 60 },
 					steps: ["创建整站备份", "执行 qyctl upgrade"],

@@ -438,13 +438,13 @@ qyctl restart
 
 裸运行 `qyctl` 或 `qingyanctl` 会显示帮助信息。`qyctl status/start/stop/restart` 面向 systemd 直接部署；Docker Compose 部署应使用 `docker compose ps/restart/logs` 管理容器生命周期。
 
-`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，不停止服务、不覆盖程序；没有 published release 时返回 `no_release`，当前版本等于最新 release 时返回 `current`，发现更高版本时返回 `update_available`，CLI 同时输出当前版本和最新版本。程序更新由外部 shell / systemd action 编排；更新脚本应先用旧版本 `qyctl backup` 创建整站备份，再替换程序文件，随后调用新版本 `qyctl upgrade`。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，并同时输出当前版本和最新版本。Docker Compose 的实际更新统一运行 `./scripts/update.sh`；脚本负责预检、整站备份、Release 切换、镜像构建、UpgradePlan 确认、数据升级和健康验收。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
 
 ### Release 更新规则
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
 - 首个正式 release 为 `v0.1.0`。
-- 当前正式 release 为 `v0.2.1`。
+- 当前正式 release 为 `v0.2.2`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 

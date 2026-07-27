@@ -937,14 +937,14 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 			contentType: "application/json",
 			body: JSON.stringify({
 				kind: "program-update",
-				executor: "qingyan.service",
-				description: "使用服务动作执行程序更新。",
+				executor: "./scripts/update.sh",
+				description: "使用 Docker Compose 更新脚本执行程序更新。",
 				estimatedRestartSeconds: {
 					min: 30,
 					max: 60,
 				},
-				steps: ["创建整站备份", "执行 qyctl upgrade"],
-				manualCommands: ["qyctl status"],
+				steps: ["创建升级前整站备份", "应用数据升级"],
+				manualCommands: ["./scripts/update.sh"],
 			}),
 		});
 	});
@@ -975,7 +975,7 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 	}
 	await expect(page.getByRole("heading", { name: "运维" })).toBeVisible();
 	await expect(page.getByText("qingyan.full-backup / sqlite")).toBeVisible();
-	await expect(page.getByText("service-action")).toBeVisible();
+	await expect(page.getByText("compose-script")).toBeVisible();
 	await expect(page.getByText("更新检测")).toBeVisible();
 	await expect(page.getByText("GitHub Release / Virace/QingYan")).toBeVisible();
 
@@ -986,8 +986,8 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 	await expect(
 		page.getByRole("heading", { name: "更新执行计划" }),
 	).toBeVisible();
-	await expect(page.getByText("创建整站备份")).toBeVisible();
-	await expect(page.getByText("执行 qyctl upgrade")).toBeVisible();
+	await expect(page.getByText("创建升级前整站备份")).toBeVisible();
+	await expect(page.getByText("应用数据升级")).toBeVisible();
 
 	await page.getByRole("button", { name: "数据升级预检" }).click();
 	await expect(

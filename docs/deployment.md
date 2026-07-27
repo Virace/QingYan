@@ -7,7 +7,7 @@
 - QingYan 是有状态后端，部署时必须保护 `config/`、`data/` 和 `logs/`。
 - `config/qingyan.yml`、`qingyan.installed.lock`、SQLite 数据库和日志不应打进镜像，也不应提交到仓库。
 - 当前推荐先手动部署并验证真实链路；自动化发布、拉取和替换程序文件应在备份与升级流程固定后再接入。
-- `v0.2.1` 的 Docker 依赖构建阶段暂时将 Debian 主仓库固定为 TUNA，并保留 Debian 官方 security 源；同时启用 3 次重试、30 秒 HTTP/HTTPS 超时和 IPv4。该调整只影响镜像构建，不改变 QingYan GitHub Release 更新源。镜像参数化留待本次远端构建验证后处理。
+- `v0.2.2` 的 Docker 依赖构建阶段将 Debian 主仓库固定为 TUNA HTTP，并保留基础镜像默认的 Debian security 源；仓库元数据继续由 Debian keyring 验签，同时启用 3 次重试、30 秒 HTTP 超时和 IPv4。使用 HTTP 是因为 `node:24-bookworm-slim` 在安装依赖前没有 CA 证书；直接切换 TUNA HTTPS 会导致证书校验失败和 APT exit 100。
 - 程序更新前必须先备份当前实例；`qyctl upgrade` 只做数据升级，不负责下载或替换程序文件。
 - Web 安装流程不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令重启服务；安装完成后的切换行为由 `QINGYAN_INSTALL_TRANSITION_MODE` 决定。
 
@@ -228,52 +228,46 @@ docker compose exec qingyan qyctl restore /app/data/backups/<backup-dir> --dry-r
 
 ## 更新流程
 
-当前仓库没有自动替换程序的 GitHub Actions 或容器更新器。`qyctl update check`
-只负责发现已发布的新版本；生产环境需要先用旧版本创建整站备份，再把工作树切换到目标
-release tag 并重建容器。以从 `v0.1.0` 或 `v0.2.0` 更新到 `v0.2.1` 为例：
+Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级和检查命令。在 QingYan
+仓库根目录运行一个入口：
 
 ```bash
-cd /opt/1panel/apps/qingyan
-docker compose exec qingyan qyctl update check
-docker compose exec qingyan qyctl backup /app/data/backups/pre-update-$(date +%Y%m%d%H%M%S) --yes
-git fetch --tags origin
-git switch --detach v0.2.1
-docker compose build --pull qingyan
-docker compose up -d qingyan
-docker compose logs --tail=200 qingyan
+./scripts/update.sh
 ```
 
-生产目录应保持为未修改的 Git checkout；如果 `git switch` 报告本地改动，先停止更新并核对，
-不要覆盖 `config/`、`data/` 或 `logs/`。这三个目录承载实例状态，并由仓库的 `.gitignore`
-排除。
-
-如果新版本启动进入 Web Upgrade Mode，日志会输出：
-
-```text
-upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
-upgrade.state=upgrade_required
-upgrade.token=qy_upgrade_<一次性随机值>
-```
-
-此时访问反代后的 `/qingyan/upgrade`，输入同一段日志中的升级 token，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
+`v0.2.2` 之前的 checkout 尚无该脚本，第一次更新使用固定版本的远程入口：
 
 ```bash
-docker compose exec qingyan qyctl upgrade --dry-run
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.2/scripts/update.sh)
 ```
 
-只有确认备份和计划无误后再 apply。Docker Compose 环境使用：
+脚本默认 fetch tags 后选择最高的稳定 `vX.Y.Z` release，也允许指定目标版本：
 
 ```bash
-docker compose exec qingyan qyctl upgrade --yes
-docker compose restart qingyan
-docker compose exec qingyan qyctl --version
-docker compose exec qingyan qyctl update check
-docker compose ps
-docker compose logs --tail=200 qingyan
+./scripts/update.sh v0.2.2
 ```
 
-升级完成后，`qyctl --version` 应输出目标版本，`qyctl update check` 应返回当前已是最新版本，
-容器应为 healthy。再访问 `/qingyan/healthz`、Admin Console，并执行一次评论邮件双链路测试。
+默认交互流程只需要确认两次：第一次确认目标版本和整站备份，第二次在脚本显示脱敏
+`UpgradePlan` 后确认数据升级。明确接受全部确认时可以使用：
+
+```bash
+./scripts/update.sh --yes v0.2.2
+```
+
+脚本内部负责：
+
+1. 校验 Git、Docker、Compose、运行中的 `qingyan` 容器和 clean worktree。
+2. 用旧容器的 `qyctl backup` 创建升级前整站备份。
+3. 获取并切换目标 release tag，以 plain progress 构建新镜像。
+4. 启动新容器并确认进程运行，显示 `qyctl upgrade --dry-run` 的 UpgradePlan。
+5. 确认后应用数据升级，重启并校验容器版本、更新状态和健康状态。
+
+在新容器激活前发生失败，脚本会自动恢复原 Git revision；运行中的旧容器不会被构建失败替换。
+新容器已经开始激活或数据升级后发生失败时，脚本不会擅自覆盖数据库或配置，而会输出失败
+阶段、原 revision、整站备份路径和最近 200 行容器日志。
+
+生产目录必须保持为未修改的 Git checkout；`config/`、`data/` 和 `logs/` 由 `.gitignore`
+排除，不会触发 clean worktree 拒绝。更新成功后仍应完成评论邮件双链路的真实收件箱验收。
 
 ## 回滚
 
@@ -285,15 +279,8 @@ docker compose logs --tail=200 qingyan
 
 不要只恢复 SQLite 文件而忽略 `config/qingyan.yml` 和 `qingyan.installed.lock`；这三者属于同一个实例状态。
 
-## 后续自动化建议
+## 后续扩展
 
-手动部署跑通后，再补 GitHub Actions 或服务器脚本。自动化应至少包含：
-
-- 构建镜像或程序包。
-- 上传到服务器的受限路径。
-- 更新前执行 `qyctl backup`。
-- 替换程序或镜像。
-- 启动服务并检查 `/qingyan/healthz`。
-- 如果进入 `upgrade_required`，停止自动流程并要求人工确认 UpgradePlan。
-
-在备份、升级确认、健康检查和回滚条件未固定前，不建议把 QingYan 绑定到 x-item 的静态站部署 workflow。
+后续如果接入 GitHub Actions、镜像 registry 或服务器面板任务，应复用 `scripts/update.sh` 的
+备份、UpgradePlan 和健康验收边界，不再另写一套需要用户逐条执行的更新步骤。当前生产唯一
+支持的更新入口是 Docker Compose 脚本；systemd 不在本版本范围内。

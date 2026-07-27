@@ -158,7 +158,7 @@ export class UpdateCheckService {
 			autoUpdatable,
 			message: autoUpdatable
 				? "发现新版本，可由服务更新脚本处理。"
-				: "发现新版本，但 release 未提供 QingYan 自动更新 manifest，需要手动处理。",
+				: "发现新版本，但 release 未提供 QingYan 自动更新 manifest；Docker Compose 部署请运行 ./scripts/update.sh。",
 		};
 	}
 }

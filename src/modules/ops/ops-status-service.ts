@@ -11,7 +11,7 @@ export interface OpsStatus {
 	};
 	update: {
 		supported: boolean;
-		entry: "service-action";
+		entry: "compose-script";
 		description: string;
 		estimatedRestartSeconds: {
 			min: 30;
@@ -34,7 +34,7 @@ export interface OpsStatus {
 
 export interface UpdatePlan {
 	kind: "program-update";
-	executor: "qingyan.service";
+	executor: "./scripts/update.sh";
 	description: string;
 	estimatedRestartSeconds: {
 		min: 30;
@@ -61,9 +61,9 @@ export class OpsStatusService {
 			},
 			update: {
 				supported: true,
-				entry: "service-action",
+				entry: "compose-script",
 				description:
-					"程序更新由 qingyan.service 相关 update action 或外部 shell 脚本执行，更新完成后调用 qyctl upgrade 升级数据。",
+					"Docker Compose 部署使用 scripts/update.sh 完成备份、Release 切换、镜像构建、数据升级和健康检查。",
 				estimatedRestartSeconds: {
 					min: 30,
 					max: 60,
@@ -82,7 +82,7 @@ export class OpsStatusService {
 				provider: "sqlite",
 			},
 			recovery: {
-				manualCommands: manualRecoveryCommands(),
+				manualCommands: dockerRecoveryCommands(),
 			},
 		};
 	}
@@ -98,31 +98,27 @@ export class OpsStatusService {
 	public static defaultUpdatePlan(): UpdatePlan {
 		return {
 			kind: "program-update",
-			executor: "qingyan.service",
+			executor: "./scripts/update.sh",
 			description:
-				"更新脚本会先创建整站备份，再下载并替换程序文件，随后执行 qyctl upgrade 并重启服务。",
+				"Docker Compose 更新由 scripts/update.sh 统一编排；脚本会在写入前显示 UpgradePlan，并在失败时报告备份与恢复信息。",
 			estimatedRestartSeconds: {
 				min: 30,
 				max: 60,
 			},
 			steps: [
-				"创建整站备份",
-				"下载并校验新程序",
-				"停止 qingyan.service",
-				"替换程序文件",
-				"执行 qyctl upgrade",
-				"启动 qingyan.service",
-				"检查服务状态",
+				"创建升级前整站备份",
+				"获取并切换目标 Release tag",
+				"构建 Docker Compose 镜像",
+				"启动新容器并确认进程运行",
+				"展示并确认 UpgradePlan",
+				"应用数据升级",
+				"重启并校验版本与健康状态",
 			],
-			manualCommands: manualRecoveryCommands(),
+			manualCommands: ["./scripts/update.sh"],
 		};
 	}
 }
 
-function manualRecoveryCommands(): string[] {
-	return [
-		"systemctl status qingyan.service",
-		"journalctl -u qingyan.service -n 120 --no-pager",
-		"qyctl status",
-	];
+function dockerRecoveryCommands(): string[] {
+	return ["docker compose ps", "docker compose logs --tail=200 qingyan"];
 }

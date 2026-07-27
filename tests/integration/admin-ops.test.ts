@@ -95,18 +95,18 @@ describe("admin ops routes", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			version: {
-				current: "0.2.1",
+				current: "0.2.2",
 			},
 			update: {
 				supported: true,
-				entry: "service-action",
+				entry: "compose-script",
 				estimatedRestartSeconds: {
 					min: 30,
 					max: 60,
 				},
 				check: {
 					state: "not_checked",
-					currentVersion: "0.2.1",
+					currentVersion: "0.2.2",
 					autoUpdatable: false,
 					source: {
 						provider: "github-releases",
@@ -125,9 +125,8 @@ describe("admin ops routes", () => {
 			},
 			recovery: {
 				manualCommands: [
-					"systemctl status qingyan.service",
-					"journalctl -u qingyan.service -n 120 --no-pager",
-					"qyctl status",
+					"docker compose ps",
+					"docker compose logs --tail=200 qingyan",
 				],
 			},
 		});
@@ -148,12 +147,12 @@ describe("admin ops routes", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			kind: "program-update",
-			executor: "qingyan.service",
+			executor: "./scripts/update.sh",
 			estimatedRestartSeconds: {
 				min: 30,
 				max: 60,
 			},
-			manualCommands: expect.arrayContaining(["qyctl status"]),
+			manualCommands: ["./scripts/update.sh"],
 		});
 	});
 

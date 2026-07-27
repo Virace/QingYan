@@ -67,6 +67,7 @@ describe("update check service", () => {
 		expect(result.latestVersion).toBe("0.2.0");
 		expect(result.autoUpdatable).toBe(false);
 		expect(result.message).toContain("未提供 QingYan 自动更新 manifest");
+		expect(result.message).toContain("./scripts/update.sh");
 	});
 
 	it("marks newer releases with required assets as auto-updatable", async () => {
