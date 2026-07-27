@@ -11,12 +11,16 @@ PREVIOUS_REF=""
 BACKUP_DIRECTORY=""
 SWITCHED_REVISION=false
 ACTIVATION_STARTED=false
+LOCAL_CHANGES_PRESENT=false
+LOCAL_CHANGES_STASH=""
+LOCAL_CHANGES_APPLY_ATTEMPTED=false
+LOCAL_CHANGES_APPLIED=false
 
 usage() {
 	cat <<'USAGE'
 用法：
   ./scripts/update.sh [--yes] [vX.Y.Z]
-  bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.2/scripts/update.sh) [--yes] [vX.Y.Z]
+  curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s -- [--yes] [vX.Y.Z]
 
 不指定版本时，脚本会 fetch tags 并选择最高的稳定 vX.Y.Z tag。
 默认会在切换版本和应用数据升级前请求确认；--yes 表示接受两次确认。
@@ -54,6 +58,52 @@ restore_previous_revision() {
 	fi
 }
 
+drop_stash_commit() {
+	local expected_commit="$1"
+	local stash_commit
+	local stash_ref
+
+	while IFS=' ' read -r stash_commit stash_ref; do
+		if [[ "$stash_commit" == "$expected_commit" ]]; then
+			git stash drop "$stash_ref" > /dev/null
+			return 0
+		fi
+	done < <(git stash list --format='%H %gd')
+	return 1
+}
+
+apply_local_deployment_files() {
+	[[ -n "$LOCAL_CHANGES_STASH" ]] || return 0
+	LOCAL_CHANGES_APPLY_ATTEMPTED=true
+	git stash apply --index "$LOCAL_CHANGES_STASH"
+	LOCAL_CHANGES_APPLIED=true
+}
+
+restore_pre_activation_state() {
+	local rollback_stash=""
+
+	if [[ "$LOCAL_CHANGES_APPLIED" == "true" ]]; then
+		git stash push --include-untracked --message "qingyan-update-rollback" > /dev/null
+		rollback_stash="$(git rev-parse refs/stash)"
+		LOCAL_CHANGES_APPLIED=false
+	elif [[ "$LOCAL_CHANGES_APPLY_ATTEMPTED" == "true" ]]; then
+		git reset --hard HEAD > /dev/null
+		git clean -fd > /dev/null
+	fi
+
+	restore_previous_revision || return 1
+
+	if [[ -n "$LOCAL_CHANGES_STASH" ]]; then
+		git stash apply --index "$LOCAL_CHANGES_STASH" || return 1
+		LOCAL_CHANGES_APPLIED=true
+		drop_stash_commit "$LOCAL_CHANGES_STASH" || true
+		if [[ -n "$rollback_stash" ]]; then
+			drop_stash_commit "$rollback_stash" || true
+		fi
+		LOCAL_CHANGES_STASH=""
+	fi
+}
+
 on_error() {
 	local exit_code=$?
 	trap - ERR
@@ -66,15 +116,22 @@ on_error() {
 		printf '升级前整站备份：%s\n' "$BACKUP_DIRECTORY" >&2
 	fi
 
-	if [[ "$SWITCHED_REVISION" == "true" && "$ACTIVATION_STARTED" == "false" ]]; then
-		if restore_previous_revision; then
-			printf '已恢复原 Git revision；运行中的旧容器未被替换。\n' >&2
+	if [[ "$ACTIVATION_STARTED" == "false" && ( "$SWITCHED_REVISION" == "true" || -n "$LOCAL_CHANGES_STASH" ) ]]; then
+		if restore_pre_activation_state; then
+			if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
+				printf '已恢复原 Git revision 和本地部署文件；运行中的旧容器未被替换。\n' >&2
+			else
+				printf '已恢复原 Git revision；运行中的旧容器未被替换。\n' >&2
+			fi
 		else
-			printf '无法自动恢复 Git revision，请保留现场并人工检查。\n' >&2
+			printf '无法自动恢复 Git revision 或本地部署文件，请保留现场并人工检查。\n' >&2
 		fi
 	fi
 
 	if [[ "$ACTIVATION_STARTED" == "true" ]]; then
+		if [[ -n "$LOCAL_CHANGES_STASH" ]]; then
+			printf '本地部署文件的安全 stash：%s\n' "$LOCAL_CHANGES_STASH" >&2
+		fi
 		printf '\n新容器已经开始激活，脚本不会自动覆盖数据库或配置。最近日志如下：\n' >&2
 		docker compose logs --tail=200 "$SERVICE_NAME" >&2 || true
 	fi
@@ -152,7 +209,7 @@ while (( $# > 0 )); do
 done
 
 if [[ -n "$TARGET_TAG" && ! "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-	fail "目标版本必须是稳定 tag，例如 v0.2.2。"
+	fail "目标版本必须是稳定 tag，例如 v0.2.3。"
 fi
 
 PHASE="环境预检"
@@ -170,8 +227,16 @@ cd "$REPOSITORY_ROOT"
 REPOSITORY_ROOT="$(pwd)"
 [[ -f compose.yml ]] || fail "$REPOSITORY_ROOT 不是 QingYan Docker Compose 仓库根目录。"
 
-if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
-	fail "工作区存在未提交改动；为避免覆盖现场，更新已停止。"
+worktree_status="$(git status --porcelain=v1 --untracked-files=normal)"
+tracked_changes="$(git diff --name-only HEAD --)"
+while IFS= read -r tracked_path; do
+	[[ -n "$tracked_path" ]] || continue
+	if [[ "$tracked_path" != "compose.yml" ]]; then
+		fail "检测到 compose.yml 之外的已跟踪改动（$tracked_path）；为避免把源码现场带入新镜像，更新已停止。"
+	fi
+done <<< "$tracked_changes"
+if [[ -n "$worktree_status" ]]; then
+	LOCAL_CHANGES_PRESENT=true
 fi
 
 PREVIOUS_COMMIT="$(git rev-parse HEAD)"
@@ -213,9 +278,18 @@ log "创建升级前整站备份"
 docker compose exec -T "$SERVICE_NAME" qyctl backup "$BACKUP_DIRECTORY" --yes
 
 PHASE="切换 Release"
+if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
+	log "安全暂存本地部署文件"
+	git stash push --include-untracked --message "qingyan-update-${PREVIOUS_COMMIT}" > /dev/null
+	LOCAL_CHANGES_STASH="$(git rev-parse refs/stash)"
+fi
 log "切换到 $TARGET_TAG"
 git switch --detach "$TARGET_TAG"
 SWITCHED_REVISION=true
+if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
+	apply_local_deployment_files
+	printf '已保留并恢复本地部署文件，将按当前 compose.yml 构建。\n'
+fi
 
 PHASE="构建镜像"
 log "构建 $TARGET_TAG 镜像"
@@ -253,6 +327,14 @@ if ! docker compose exec -T "$SERVICE_NAME" qyctl update check; then
 	printf '警告：最终 GitHub Release 检测失败，请稍后重试；容器版本和健康状态已验证。\n' >&2
 fi
 docker compose ps
+
+if [[ -n "$LOCAL_CHANGES_STASH" ]]; then
+	if drop_stash_commit "$LOCAL_CHANGES_STASH"; then
+		LOCAL_CHANGES_STASH=""
+	else
+		printf '警告：本地部署文件已恢复，但未能清理安全 stash：%s\n' "$LOCAL_CHANGES_STASH" >&2
+	fi
+fi
 
 trap - ERR
 printf '\n更新完成：%s\n' "$TARGET_TAG"
