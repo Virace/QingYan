@@ -7,12 +7,12 @@ import {
 	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
+	notificationChannelConfigs,
 	notificationDeliveries,
 	sites,
 	taskEventLogs,
 	taskRuns,
 } from "../../src/db/schema";
-import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
 import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
 import { TaskFailureNotificationService } from "../../src/modules/tasks/task-failure-notification-service";
@@ -31,7 +31,6 @@ interface Fixture {
 	scheduledTasks: ScheduledTaskRepository;
 	taskRuns: TaskRunRepository;
 	eventLogs: TaskEventLogRepository;
-	recipients: BackendUserNotificationRecipientsRepository;
 	failureNotifications: TaskFailureNotificationService;
 	siteId: number;
 	adminUserId: number;
@@ -84,7 +83,6 @@ async function createFixture(): Promise<Fixture> {
 		scheduledTasks: new ScheduledTaskRepository(clients.db),
 		taskRuns: new TaskRunRepository(clients.db),
 		eventLogs: new TaskEventLogRepository(clients.db),
-		recipients: new BackendUserNotificationRecipientsRepository(clients.db),
 		failureNotifications: new TaskFailureNotificationService(clients.db),
 		siteId: site.id,
 		adminUserId: adminUser.id,
@@ -169,29 +167,12 @@ describe("TaskFailureNotificationService", () => {
 
 	it("enqueues notification task and delivery for configured channel and recipient", async () => {
 		const fixture = await createFixture();
-		const [recipient] = await fixture.recipients.replaceSiteRecipients({
-			siteId: fixture.siteId,
-			recipients: [
-				{
-					userId: fixture.adminUserId,
-					routes: [
-						{
-							eventType: "admin_comment_pending",
-							channelConfigId: "email:default",
-							enabled: true,
-						},
-					],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
-		});
 		const failedRun = await createFailedRun(fixture, {
 			policy: {
 				failureNotification: {
 					enabled: true,
 					channelConfigIds: ["email:default"],
-					recipientIds: [recipient.id],
+					recipientIds: [`user:${fixture.adminUserId}`],
 				},
 			},
 		});
@@ -238,6 +219,51 @@ describe("TaskFailureNotificationService", () => {
 			expect.objectContaining({
 				eventType: "task_failure_notification_enqueued",
 				visibleToSiteAdmin: false,
+			}),
+		]);
+	});
+
+	it("sends an external failure notification without requiring a person", async () => {
+		const fixture = await createFixture();
+		await fixture.db.insert(notificationChannelConfigs).values({
+			id: "webhook:ops",
+			type: "webhook",
+			name: "运维 Webhook",
+			enabled: true,
+			configJson: JSON.stringify({
+				url: "https://hooks.example.test/qingyan",
+			}),
+			secretConfigJson: "{}",
+		});
+		const failedRun = await createFailedRun(fixture, {
+			policy: {
+				failureNotification: {
+					enabled: true,
+					channelConfigIds: ["webhook:ops"],
+					recipientIds: [],
+				},
+			},
+		});
+
+		const result =
+			await fixture.failureNotifications.planForFailedRun(failedRun);
+
+		expect(result).toMatchObject({ createdCount: 1 });
+		const [notificationRun] = await notificationRunsForSubject(
+			fixture,
+			failedRun.id,
+		);
+		const deliveries = await fixture.db
+			.select()
+			.from(notificationDeliveries)
+			.where(eq(notificationDeliveries.taskRunId, notificationRun.id));
+		expect(deliveries).toEqual([
+			expect.objectContaining({
+				channel: "webhook",
+				channelConfigRef: "webhook:ops",
+				recipientType: "external_target",
+				recipientUserId: null,
+				status: "queued",
 			}),
 		]);
 	});

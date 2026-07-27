@@ -8,7 +8,6 @@ import {
 	getSettings,
 	listAdminUsers,
 	patchAdminSiteSettingsSection,
-	type SiteNotificationRecipient,
 } from "@/api/admin";
 import { adminUiErrorMessage } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +20,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-	contentPolicyLabels,
-	eligibleNotificationRecipientUsers,
-	siteNotificationEventLabels,
-} from "../content/notification-ui-model";
+import { eligibleNotificationRecipientUsers } from "../content/notification-ui-model";
 import {
 	BooleanField,
 	EmptyState,
@@ -36,10 +31,7 @@ import {
 	textareaClass,
 } from "../shared/admin-ui";
 import { useAdminConfirmDialog } from "../shared/confirm-dialog";
-import {
-	NotificationDiagnosticsPanel,
-	SiteNotificationRecipientDialog,
-} from "./notification-settings-panels";
+import { NotificationDiagnosticsPanel } from "./notification-settings-panels";
 import {
 	buildSettingsErrorModel,
 	firstFieldError,
@@ -49,14 +41,19 @@ import {
 	initialSettingsTab,
 	isSameSettingsPayload,
 	parseSitemapUrlList,
-	replaceRecipient,
 	replaceSettingsTabQuery,
 	SettingsSaveError,
 	type SiteSettingsTab,
 	siteSectionSaveLabels,
 	siteSettingsTabs,
-	updateRecipient,
 } from "./settings-shared";
+import {
+	countSiteNotificationChanges,
+	normalizeSiteNotificationEvents,
+	updateEventExternalTargets,
+	updateEventRecipients,
+} from "./site-notification-events-model";
+import { SiteNotificationEventPanel } from "./site-notification-events-panel";
 import {
 	showCaptchaThresholdDetails,
 	showLowTrustCounterHint,
@@ -76,10 +73,6 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		enabled: Boolean(resolvedSiteKey),
 	});
 	const [draft, setDraft] = useState<AdminSettings | null>(null);
-	const [recipientDialog, setRecipientDialog] = useState<{
-		mode: "create" | "edit";
-		draft: SiteNotificationRecipient | null;
-	} | null>(null);
 	const [siteTab, setSiteTab] = useState<SiteSettingsTab>(() =>
 		initialSettingsTab("siteTab", siteSettingsTabs, "comments"),
 	);
@@ -114,13 +107,25 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			setDraft(query.data);
 		}
 	}, [query.data]);
-	const setControlledSiteTab = (nextTab: string) => {
-		const normalized = siteSettingsTabs.includes(nextTab as SiteSettingsTab)
-			? (nextTab as SiteSettingsTab)
-			: "comments";
-		setSiteTab(normalized);
-		replaceSettingsTabQuery("siteTab", normalized);
-	};
+	const notificationChangeCount =
+		query.data && draft
+			? countSiteNotificationChanges(
+					query.data.notifications,
+					draft.notifications,
+				)
+			: 0;
+	const notificationDraftDirty = notificationChangeCount > 0;
+	useEffect(() => {
+		if (!notificationDraftDirty) {
+			return;
+		}
+		const guardUnsavedChanges = (event: BeforeUnloadEvent) => {
+			event.preventDefault();
+		};
+		window.addEventListener("beforeunload", guardUnsavedChanges);
+		return () =>
+			window.removeEventListener("beforeunload", guardUnsavedChanges);
+	}, [notificationDraftDirty]);
 
 	if (!draft) {
 		if (!resolvedSiteKey) {
@@ -178,19 +183,12 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		mutation.error,
 		"站点设置保存失败。",
 	);
-	const notificationDraftDirty = query.data
-		? !isSameSettingsPayload(
-				buildSiteSettingsSectionPayload("notifications", query.data),
-				buildSiteSettingsSectionPayload("notifications", draft),
-			)
-		: false;
-	const notificationRecipients = draft.notifications.backend.recipients ?? [];
+	const notificationEvents = normalizeSiteNotificationEvents(
+		draft.notifications.backend.events,
+	);
 	const notificationCandidateUsers = eligibleNotificationRecipientUsers(
 		usersQuery.data?.users ?? [],
 		draft.siteKey,
-	).filter(
-		(user) =>
-			!notificationRecipients.some((recipient) => recipient.userId === user.id),
 	);
 	const staffCandidateUsers = eligibleNotificationRecipientUsers(
 		usersQuery.data?.users ?? [],
@@ -199,8 +197,8 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	const selectedStaffCandidate = staffCandidateUsers.find(
 		(user) => user.email === draft.comments.verifiedAuthor.email,
 	);
-	const setNotificationRecipients = (
-		recipients: SiteNotificationRecipient[],
+	const setNotificationEvents = (
+		events: AdminSettings["notifications"]["backend"]["events"],
 	) => {
 		setDraft({
 			...draft,
@@ -208,28 +206,65 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 				...draft.notifications,
 				backend: {
 					...draft.notifications.backend,
-					recipients,
+					events,
 				},
 			},
 		});
 	};
-	const openRecipientCreateDialog = () =>
-		setRecipientDialog({ mode: "create", draft: null });
-	const openRecipientEditDialog = (recipient: SiteNotificationRecipient) =>
-		setRecipientDialog({
-			mode: "edit",
-			draft: structuredClone(recipient),
+	const setEventRecipientUserIds = (
+		eventType: AdminSettings["notifications"]["backend"]["events"][number]["eventType"],
+		userIds: number[],
+	) => {
+		const currentEvent = notificationEvents.find(
+			(event) => event.eventType === eventType,
+		);
+		const nextRecipients = userIds.flatMap((userId) => {
+			const existing = currentEvent?.recipients.find(
+				(recipient) => recipient.userId === userId,
+			);
+			if (existing) {
+				return [existing];
+			}
+			const user = notificationCandidateUsers.find(
+				(candidate) => candidate.id === userId,
+			);
+			return user
+				? [
+						{
+							userId: user.id,
+							username: user.username,
+							email: user.email,
+							displayName: user.displayName,
+							includeCommentContent: "summary" as const,
+						},
+					]
+				: [];
 		});
-	const submitRecipientDialog = () => {
-		if (!recipientDialog?.draft) {
-			return;
+		setNotificationEvents(
+			updateEventRecipients(notificationEvents, eventType, nextRecipients),
+		);
+	};
+	const setControlledSiteTab = (nextTab: string) => {
+		const normalized = siteSettingsTabs.includes(nextTab as SiteSettingsTab)
+			? (nextTab as SiteSettingsTab)
+			: "comments";
+		if (
+			siteTab === "notifications" &&
+			normalized !== "notifications" &&
+			notificationDraftDirty
+		) {
+			if (!window.confirm("通知设置尚未应用。要放弃这些更改并离开吗？")) {
+				return;
+			}
+			if (query.data) {
+				setDraft({
+					...draft,
+					notifications: structuredClone(query.data.notifications),
+				});
+			}
 		}
-		const nextRecipients =
-			recipientDialog.mode === "create"
-				? [...notificationRecipients, recipientDialog.draft]
-				: replaceRecipient(notificationRecipients, recipientDialog.draft);
-		setNotificationRecipients(nextRecipients);
-		setRecipientDialog(null);
+		setSiteTab(normalized);
+		replaceSettingsTabQuery("siteTab", normalized);
 	};
 	const saveSiteSettingsSection = async () => {
 		const nextPayload = buildSiteSettingsSectionPayload(siteTab, draft);
@@ -1154,14 +1189,76 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 								</div>
 							</Tabs.Content>
 							<Tabs.Content value="notifications">
-								<div className="grid gap-4 md:grid-cols-2">
+								<div className="grid gap-4">
+									<SettingsSection
+										title="发送能力"
+										description="这里仅展示系统已经准备好的发送方式。需要调整时，可直接进入对应的系统设置。"
+									>
+										<div className="grid gap-3 md:grid-cols-2">
+											<div className="flex items-center justify-between gap-3 rounded-md border bg-background p-3">
+												<div>
+													<p className="text-sm font-medium">邮件</p>
+													<p className="mt-1 text-xs text-muted-foreground">
+														{draft.notifications.capabilities.mailReady
+															? "邮件服务器已经可以使用。"
+															: "还需要完成邮件服务器设置。"}
+													</p>
+												</div>
+												<div className="flex shrink-0 items-center gap-2">
+													<Badge
+														variant={
+															draft.notifications.capabilities.mailReady
+																? "secondary"
+																: "outline"
+														}
+													>
+														{draft.notifications.capabilities.mailReady
+															? "可用"
+															: "待设置"}
+													</Badge>
+													<a
+														className="text-sm font-medium underline-offset-4 hover:underline"
+														href="?view=system&systemTab=mail"
+													>
+														前往设置
+													</a>
+												</div>
+											</div>
+											<div className="flex items-center justify-between gap-3 rounded-md border bg-background p-3">
+												<div>
+													<p className="text-sm font-medium">其他发送方式</p>
+													<p className="mt-1 text-xs text-muted-foreground">
+														{draft.notifications.capabilities
+															.externalTargetCount > 0
+															? `已有 ${draft.notifications.capabilities.externalTargetCount} 个可用目标。`
+															: "当前没有可用的 Webhook 或 WxPusher 目标。"}
+													</p>
+												</div>
+												<div className="flex shrink-0 items-center gap-2">
+													<Badge variant="outline">
+														{
+															draft.notifications.capabilities
+																.externalTargetCount
+														}
+														个
+													</Badge>
+													<a
+														className="text-sm font-medium underline-offset-4 hover:underline"
+														href="?view=system&systemTab=notifications"
+													>
+														前往设置
+													</a>
+												</div>
+											</div>
+										</div>
+									</SettingsSection>
 									<SettingsSection
 										title="评论者回复邮件通知"
 										description="控制公开评论表单是否显示“有人回复时邮件通知我”。只影响普通评论者，不影响后台用户通知。"
 									>
 										<BooleanField
 											label="允许评论者订阅回复邮件"
-											description="系统邮件可用时，公开 bootstrap 会返回 replyEmailNotification.enabled=true，内容站点可显示订阅 checkbox。"
+											description="开启后，内容站点可以在评论框中显示回复提醒选项。"
 											checked={draft.notifications.commenter.replyEmailEnabled}
 											error={firstFieldError(
 												saveError,
@@ -1182,7 +1279,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 										/>
 										<BooleanField
 											label="回复提醒默认勾选"
-											description="控制公开评论框首次显示时是否默认勾选“回复提醒”；评论者仍可自行取消。订阅能力关闭时，公开接口会强制返回未勾选。"
+											description="控制评论框首次显示时是否默认勾选；评论者仍可自行取消。"
 											checked={
 												draft.notifications.commenter.replyEmailDefaultChecked
 											}
@@ -1208,13 +1305,13 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 										/>
 									</SettingsSection>
 									<SettingsSection
-										title="后台用户通知"
-										description="控制哪些后台用户接收当前站点的通知，以及分别使用哪种发送方式。"
+										title="评论通知"
+										description="每种评论通知各自选择站点人员和其他发送目标。没有选择任何目标时，该类型保持可用，但不会发送。"
 									>
-										<div className="grid gap-3">
+										<div className="grid gap-4">
 											<BooleanField
-												label="启用后台用户通知"
-												description="关闭后不再向后台用户发送当前站点的通知；不影响普通评论者订阅回复邮件。"
+												label="启用评论通知"
+												description="关闭后暂停下面两类通知；已选择的人员和目标会保留。"
 												checked={draft.notifications.backend.enabled}
 												error={firstFieldError(
 													saveError,
@@ -1233,109 +1330,32 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 													})
 												}
 											/>
-											<div>
-												<Button
-													type="button"
-													variant="outline"
-													disabled={notificationCandidateUsers.length === 0}
-													onClick={openRecipientCreateDialog}
-												>
-													添加接收人
-												</Button>
-											</div>
-											{notificationRecipients.map((recipient) => (
-												<div
-													key={recipient.userId}
-													className="grid gap-3 rounded-md border bg-background p-3"
-												>
-													<div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-														<div>
-															<p className="font-medium">
-																{recipient.displayName || recipient.username}
-															</p>
-															<p className="text-xs text-muted-foreground">
-																{recipient.username} / {recipient.email}
-															</p>
-															<p className="mt-1 text-xs text-muted-foreground">
-																{recipient.routes
-																	.map(
-																		(route) =>
-																			`${siteNotificationEventLabels[route.eventType]}：${
-																				route.channelName ??
-																				route.channelConfigId
-																			}`,
-																	)
-																	.join("；")}
-															</p>
-															<p className="mt-1 text-xs text-muted-foreground">
-																{
-																	contentPolicyLabels[
-																		recipient.includeCommentContent
-																	]
-																}
-																{recipient.rateLimitProfile
-																	? ` / ${recipient.rateLimitProfile}`
-																	: ""}
-															</p>
-														</div>
-														<div className="flex flex-wrap gap-2">
-															<Badge
-																variant={
-																	recipient.enabled ? "secondary" : "outline"
-																}
-															>
-																{recipient.enabled ? "启用" : "停用"}
-															</Badge>
-															<Button
-																type="button"
-																size="sm"
-																variant={
-																	recipient.enabled ? "outline" : "secondary"
-																}
-																onClick={() =>
-																	setNotificationRecipients(
-																		updateRecipient(
-																			notificationRecipients,
-																			recipient.userId,
-																			{ enabled: !recipient.enabled },
-																		),
-																	)
-																}
-															>
-																{recipient.enabled ? "停用" : "启用"}
-															</Button>
-															<Button
-																type="button"
-																size="sm"
-																variant="outline"
-																onClick={() =>
-																	openRecipientEditDialog(recipient)
-																}
-															>
-																编辑
-															</Button>
-															<Button
-																type="button"
-																size="sm"
-																variant="destructive"
-																onClick={() =>
-																	setNotificationRecipients(
-																		notificationRecipients.filter(
-																			(item) =>
-																				item.userId !== recipient.userId,
-																		),
-																	)
-																}
-															>
-																移除
-															</Button>
-														</div>
-													</div>
-												</div>
+											{notificationEvents.map((event) => (
+												<SiteNotificationEventPanel
+													key={event.eventType}
+													event={event}
+													eligibleUsers={notificationCandidateUsers}
+													externalChannelConfigs={draft.notifications.channelConfigs.filter(
+														(config) => config.type !== "email",
+													)}
+													disabled={
+														!draft.notifications.backend.enabled ||
+														mutation.isPending
+													}
+													onRecipientUserIdsChange={(userIds) =>
+														setEventRecipientUserIds(event.eventType, userIds)
+													}
+													onExternalChannelConfigIdsChange={(configIds) =>
+														setNotificationEvents(
+															updateEventExternalTargets(
+																notificationEvents,
+																event.eventType,
+																configIds,
+															),
+														)
+													}
+												/>
 											))}
-											{notificationRecipients.length === 0 ? (
-												<EmptyState text="暂无后台通知接收人" />
-											) : null}
 										</div>
 									</SettingsSection>
 									<NotificationDiagnosticsPanel
@@ -1500,12 +1520,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 												</div>
 												{draft.pageRegistry.mode === "authoritative" ? (
 													<div className="mt-3 grid gap-2 text-xs text-muted-foreground">
-														<p>
-															保障刷新任务由任务中心系统托管，系统键：
-															<code className="rounded bg-muted px-1 py-0.5">
-																{`page_registry:authoritative_source_refresh:${draft.siteKey}`}
-															</code>
-														</p>
+														<p>保障刷新任务由任务中心自动管理。</p>
 														<a
 															className="font-medium text-primary underline-offset-4 hover:underline"
 															href="?view=tasks"
@@ -1525,30 +1540,39 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							</Tabs.Content>
 						</div>
 					</Tabs.Root>
-					<div className="md:col-span-2">
-						<Button type="submit" disabled={mutation.isPending}>
-							{siteSectionSaveLabels[siteTab]}
-						</Button>
-					</div>
+					{siteTab === "notifications" ? (
+						notificationDraftDirty ? (
+							<div className="sticky bottom-4 z-20 flex min-w-0 flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur md:col-span-2 md:flex-row md:items-center md:justify-between">
+								<p className="min-w-0 text-sm font-medium">
+									有 {notificationChangeCount} 项通知设置尚未应用
+								</p>
+								<div className="flex shrink-0 flex-wrap gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										disabled={mutation.isPending}
+										onClick={() => {
+											if (query.data) {
+												setDraft(structuredClone(query.data));
+											}
+										}}
+									>
+										放弃更改
+									</Button>
+									<Button type="submit" disabled={mutation.isPending}>
+										{mutation.isPending ? "正在应用" : "应用全部更改"}
+									</Button>
+								</div>
+							</div>
+						) : null
+					) : (
+						<div className="md:col-span-2">
+							<Button type="submit" disabled={mutation.isPending}>
+								{siteSectionSaveLabels[siteTab]}
+							</Button>
+						</div>
+					)}
 				</form>
-				<SiteNotificationRecipientDialog
-					open={Boolean(recipientDialog)}
-					mode={recipientDialog?.mode ?? "create"}
-					draft={recipientDialog?.draft ?? null}
-					candidateUsers={notificationCandidateUsers}
-					channelConfigs={draft.notifications.channelConfigs}
-					onOpenChange={(open) => {
-						if (!open) {
-							setRecipientDialog(null);
-						}
-					}}
-					onDraftChange={(nextDraft) =>
-						setRecipientDialog((current) =>
-							current ? { ...current, draft: nextDraft } : current,
-						)
-					}
-					onSubmit={submitRecipientDialog}
-				/>
 			</CardContent>
 		</Card>
 	);

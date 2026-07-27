@@ -107,6 +107,7 @@ describe("notification reliability post-release migration", () => {
 			).toEqual([
 				{ name: "0000_initial.sql" },
 				{ name: "0001_notification_reliability.sql" },
+				{ name: "0002_site_notification_events.sql" },
 			]);
 			expect(
 				migrated

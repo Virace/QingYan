@@ -196,8 +196,8 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 		const confirmed = await confirm({
 			title: "删除通知渠道",
 			description:
-				"确认删除这个通知渠道配置？如果站点通知接收人仍引用它，后端会阻止保存。",
-			confirmText: "删除渠道",
+				"确认删除这个发送目标？如果仍有评论通知正在使用它，请先到对应站点取消选择。",
+			confirmText: "删除目标",
 			destructive: true,
 		});
 		if (!confirmed) {
@@ -267,7 +267,7 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 							<Tabs.Trigger value="security">后台与安全</Tabs.Trigger>
 							<Tabs.Trigger value="rate-limit">限流</Tabs.Trigger>
 							<Tabs.Trigger value="mail">邮件</Tabs.Trigger>
-							<Tabs.Trigger value="notifications">通知</Tabs.Trigger>
+							<Tabs.Trigger value="notifications">发送服务</Tabs.Trigger>
 							<Tabs.Trigger value="captcha">验证码</Tabs.Trigger>
 							<Tabs.Trigger value="avatar">头像与公开接口</Tabs.Trigger>
 							<Tabs.Trigger value="ip-region">IP 地域</Tabs.Trigger>
@@ -1133,11 +1133,32 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 										fallback="通知通道测试失败"
 									/>
 									<SettingsSection
-										title="通知队列与限速"
-										description="控制通知任务入队和投递节流；具体投递仍由任务中心展示状态和重试结果。"
+										title="其他发送方式"
+										description="邮件在“邮件”页设置；这里管理可被各类通知直接使用的 Webhook 和 WxPusher 目标。密钥字段留空时保留已有配置。"
 									>
-										<div className="grid gap-4 md:grid-cols-2">
-											<Field label="队列后端">
+										<NotificationChannelConfigList
+											configs={draft.notifications.channelConfigs}
+											onAdd={openChannelCreateDialog}
+											onEdit={openChannelEditDialog}
+											onRemove={(config) => void removeChannelConfig(config)}
+											onTest={setChannelTestConfig}
+										/>
+									</SettingsSection>
+									{channelTestMutation.data ? (
+										<div className="md:col-span-2 rounded-md border bg-background p-3 text-sm text-muted-foreground">
+											{notificationTestResultSummary(channelTestMutation.data)}
+										</div>
+									) : null}
+									<NotificationTemplatesPanel />
+									<details className="md:col-span-2 rounded-md border bg-background px-4 py-3">
+										<summary className="cursor-pointer font-medium">
+											高级发送设置
+										</summary>
+										<p className="mt-2 text-sm leading-6 text-muted-foreground">
+											这些选项用于调整后台处理方式和发送频率。通常保持默认值即可。
+										</p>
+										<div className="mt-4 grid gap-4 md:grid-cols-2">
+											<Field label="发送任务处理方式">
 												<select
 													className={inputClass}
 													value={draft.notifications.delivery.queueBackend}
@@ -1156,8 +1177,10 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 														})
 													}
 												>
-													<option value="database">Database</option>
-													<option value="bullmq">BullMQ</option>
+													<option value="database">内置处理（推荐）</option>
+													<option value="bullmq">
+														独立处理服务（需额外部署）
+													</option>
 												</select>
 											</Field>
 											<Field label="全局每分钟上限">
@@ -1296,25 +1319,7 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 												/>
 											</Field>
 										</div>
-									</SettingsSection>
-									<SettingsSection
-										title="通知渠道配置"
-										description="邮件、Webhook、WxPusher 都按配置实例保存；Webhook 和 WxPusher 可添加多个实例，站点接收人再选择具体实例。密钥字段留空时保留已有配置。"
-									>
-										<NotificationChannelConfigList
-											configs={draft.notifications.channelConfigs}
-											onAdd={openChannelCreateDialog}
-											onEdit={openChannelEditDialog}
-											onRemove={(config) => void removeChannelConfig(config)}
-											onTest={setChannelTestConfig}
-										/>
-									</SettingsSection>
-									{channelTestMutation.data ? (
-										<div className="md:col-span-2 rounded-md border bg-background p-3 text-sm text-muted-foreground">
-											{notificationTestResultSummary(channelTestMutation.data)}
-										</div>
-									) : null}
-									<NotificationTemplatesPanel />
+									</details>
 								</div>
 							</Tabs.Content>
 							<Tabs.Content value="captcha">

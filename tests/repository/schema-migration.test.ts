@@ -1129,7 +1129,7 @@ describe("initial migration", () => {
 		}
 	});
 
-	it("keeps the released baseline and one next-release migration", () => {
+	it("keeps released migrations and the next migration in order", () => {
 		const migrationFiles = readdirSync(path.resolve(process.cwd(), "drizzle"))
 			.filter((fileName) => fileName.endsWith(".sql"))
 			.sort();
@@ -1137,7 +1137,98 @@ describe("initial migration", () => {
 		expect(migrationFiles).toEqual([
 			"0000_initial.sql",
 			"0001_notification_reliability.sql",
+			"0002_site_notification_events.sql",
 		]);
+	});
+
+	it("upgrades saved recipient routes into event-owned notification settings", () => {
+		const directory = mkdtempSync(
+			path.join(tmpdir(), "qingyan-schema-notification-events-"),
+		);
+		const databaseFile = path.join(directory, "schema.db");
+		const sqlite = new Database(databaseFile);
+
+		try {
+			sqlite.exec(
+				readFileSync(
+					path.resolve(process.cwd(), "drizzle", "0000_initial.sql"),
+					"utf-8",
+				),
+			);
+			sqlite.exec(`
+				INSERT INTO sites (id, site_key, name, allowed_origins_json)
+				VALUES (1, 'fangyuan', 'FangYuan', '[]');
+				INSERT INTO admin_users (
+					id, username, email, password_hash, display_name
+				) VALUES (
+					1, 'admin', 'admin@example.test', 'hash', 'Admin'
+				);
+				INSERT INTO notification_channel_configs (
+					id, type, name, enabled, config_json, secret_config_json
+				) VALUES (
+					'webhook:ops',
+					'webhook',
+					'Ops',
+					1,
+					'{"url":"https://example.test/hook"}',
+					'{}'
+				);
+				INSERT INTO site_notification_recipients (
+					id, site_id, user_id, include_comment_content, enabled
+				) VALUES (
+					'recipient-1', 1, 1, 'summary', 1
+				);
+				INSERT INTO site_notification_recipient_routes (
+					id, recipient_id, event_type, channel_config_id, enabled
+				) VALUES
+					(
+						'route-email',
+						'recipient-1',
+						'admin_comment_pending',
+						'email:default',
+						1
+					),
+					(
+						'route-webhook',
+						'recipient-1',
+						'admin_comment_approved',
+						'webhook:ops',
+						1
+					);
+			`);
+
+			applyDatabaseMigrations(sqlite);
+
+			expect(
+				sqlite
+					.prepare(
+						`SELECT event_type, user_id
+						FROM site_notification_event_recipients`,
+					)
+					.all(),
+			).toEqual([
+				{
+					event_type: "admin_comment_pending",
+					user_id: 1,
+				},
+			]);
+			expect(
+				sqlite
+					.prepare(
+						`SELECT event_type, channel_config_id
+						FROM site_notification_event_channels`,
+					)
+					.all(),
+			).toEqual([
+				{
+					event_type: "admin_comment_approved",
+					channel_config_id: "webhook:ops",
+				},
+			]);
+		} finally {
+			sqlite.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	it("upgrades a v0.1.0 database with notification reliability defaults", () => {

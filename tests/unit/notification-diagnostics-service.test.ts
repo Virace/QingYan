@@ -11,9 +11,9 @@ import {
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { BackendUserNotificationPreferencesRepository } from "../../src/modules/notifications/backend-user-preferences-repository";
 import {
-	type BackendUserNotificationEventType,
-	BackendUserNotificationRecipientsRepository,
-} from "../../src/modules/notifications/backend-user-recipients-repository";
+	type SiteBackendNotificationEventType,
+	SiteNotificationEventsRepository,
+} from "../../src/modules/notifications/site-notification-events-repository";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { EmailReputationRepository } from "../../src/modules/notifications/email-reputation-repository";
 import {
@@ -40,7 +40,7 @@ type ReadyContext = {
 	userId: number;
 	runtimeState: NotificationRuntimeState;
 	systemSettings: AdminSystemSettingsRepository;
-	recipients: BackendUserNotificationRecipientsRepository;
+	events: SiteNotificationEventsRepository;
 	preferences: BackendUserNotificationPreferencesRepository;
 	service: NotificationDiagnosticsService;
 };
@@ -54,25 +54,26 @@ const readyRuntimeState = (): NotificationRuntimeState => ({
 
 async function replaceEmailRoutes(
 	context: ReadyContext,
-	events: BackendUserNotificationEventType[],
+	eventTypes: SiteBackendNotificationEventType[],
 	channelConfigId = "email:default",
 ) {
-	await context.recipients.replaceSiteRecipients({
+	await context.events.replaceSiteEvents({
 		siteId: context.siteId,
-		recipients: [
-			{
-				userId: context.userId,
-				routes: events.map((eventType) => ({
-					eventType,
-					channelConfigId,
-					enabled: true,
-				})),
-				includeCommentContent: "summary",
-				enabled: true,
-			},
-		],
+		events: siteNotificationEventTypes.map((eventType) => ({
+			eventType,
+			recipientUserIds: eventTypes.includes(eventType) ? [context.userId] : [],
+			externalChannelConfigIds:
+				eventTypes.includes(eventType) && channelConfigId !== "email:default"
+					? [channelConfigId]
+					: [],
+		})),
 	});
 }
+
+const siteNotificationEventTypes: SiteBackendNotificationEventType[] = [
+	"admin_comment_pending",
+	"admin_comment_approved",
+];
 
 async function createReadyContext(): Promise<ReadyContext> {
 	const fixture = await createTestApp();
@@ -110,9 +111,7 @@ async function createReadyContext(): Promise<ReadyContext> {
 		"database",
 	);
 
-	const recipients = new BackendUserNotificationRecipientsRepository(
-		fixture.app.db,
-	);
+	const events = new SiteNotificationEventsRepository(fixture.app.db);
 	const preferences = new BackendUserNotificationPreferencesRepository(
 		fixture.app.db,
 	);
@@ -123,7 +122,7 @@ async function createReadyContext(): Promise<ReadyContext> {
 		userId: user.id,
 		runtimeState,
 		systemSettings,
-		recipients,
+		events,
 		preferences,
 		service: new NotificationDiagnosticsService(fixture.app.db, {
 			notificationRuntimeState: () => runtimeState,
@@ -214,28 +213,9 @@ describe("notification diagnostics service", () => {
 			},
 		},
 		{
-			name: "backend notification switch is off",
-			flow: "admin_comment_pending_email",
-			code: "backend_notifications_disabled",
-			mutate: async ({ fixture, siteId }) => {
-				await fixture.app.db
-					.update(siteSettings)
-					.set({ backendNotificationsEnabled: false })
-					.where(eq(siteSettings.siteId, siteId));
-			},
-		},
-		{
-			name: "there is no enabled recipient",
-			flow: "admin_comment_pending_email",
-			code: "no_enabled_backend_recipient",
-			mutate: async ({ recipients, siteId }) => {
-				await recipients.replaceSiteRecipients({ siteId, recipients: [] });
-			},
-		},
-		{
 			name: "recipient user is inactive",
 			flow: "admin_comment_pending_email",
-			code: "recipient_user_inactive",
+			code: "event_email_recipient_inactive",
 			mutate: async ({ fixture, userId }) => {
 				await fixture.app.db
 					.update(adminUsers)
@@ -244,39 +224,24 @@ describe("notification diagnostics service", () => {
 			},
 		},
 		{
-			name: "pending route is missing",
+			name: "external target is disabled",
 			flow: "admin_comment_pending_email",
-			code: "email_event_route_missing",
-			mutate: async (context) => {
-				await replaceEmailRoutes(context, ["admin_comment_approved"]);
-			},
-		},
-		{
-			name: "approved route is missing",
-			flow: "admin_comment_approved_email",
-			code: "email_event_route_missing",
-			mutate: async (context) => {
-				await replaceEmailRoutes(context, ["admin_comment_pending"]);
-			},
-		},
-		{
-			name: "email channel config is disabled",
-			flow: "admin_comment_pending_email",
-			code: "email_channel_config_disabled",
+			code: "event_external_target_unavailable",
+			status: "conditional",
 			mutate: async (context) => {
 				await context.fixture.app.db.insert(notificationChannelConfigs).values({
-					id: "email:disabled",
-					type: "email",
-					name: "Disabled email",
+					id: "webhook:disabled",
+					type: "webhook",
+					name: "Disabled webhook",
 					description: null,
 					enabled: false,
-					configJson: "{}",
+					configJson: '{"url":"https://example.test/hook"}',
 					secretConfigJson: "{}",
 				});
 				await replaceEmailRoutes(
 					context,
 					["admin_comment_pending", "admin_comment_approved"],
-					"email:disabled",
+					"webhook:disabled",
 				);
 			},
 		},
@@ -284,6 +249,7 @@ describe("notification diagnostics service", () => {
 			name: "personal email preference is disabled",
 			flow: "admin_comment_pending_email",
 			code: "recipient_email_preference_disabled",
+			status: "conditional",
 			mutate: async ({ preferences, userId }) => {
 				await preferences.updatePreference({
 					userId,
@@ -351,6 +317,28 @@ describe("notification diagnostics service", () => {
 		expect(diagnostic.overall).toBe(status);
 		const issues = status === "blocked" ? result.blockers : result.warnings;
 		expect(issues.map((issue) => issue.code)).toContain(code);
+	});
+
+	it("treats an empty event or the master switch being off as intentionally not sending", async () => {
+		const context = await createReadyContext();
+		await replaceEmailRoutes(context, ["admin_comment_approved"]);
+
+		const emptyEvent = await context.service.diagnose("fangyuan");
+		const pending = flowFor(emptyEvent, "admin_comment_pending_email");
+		expect(pending.status).toBe("not_sending");
+		expect(pending.blockers).toEqual([]);
+		expect(pending.warnings.map((warning) => warning.code)).toContain(
+			"event_has_no_targets",
+		);
+
+		await context.fixture.app.db
+			.update(siteSettings)
+			.set({ backendNotificationsEnabled: false })
+			.where(eq(siteSettings.siteId, context.siteId));
+		const disabled = await context.service.diagnose("fangyuan");
+		expect(flowFor(disabled, "admin_comment_approved_email").status).toBe(
+			"not_sending",
+		);
 	});
 
 	it("resolves commenter opt-in, unsubscribe, and reputation for a specific email", async () => {

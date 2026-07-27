@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { getSettings } from "@/api/admin";
+import { getSettings, listAdminUsers } from "@/api/admin";
 import {
 	cancelTaskRun,
 	createScheduledTask,
@@ -41,7 +41,10 @@ import { PaginationControls } from "../shared/admin-pagination";
 import { EmptyState, inputClass } from "../shared/admin-ui";
 import { useAdminConfirmDialog } from "../shared/confirm-dialog";
 import { TaskDefinitionTable } from "./task-definition-table";
-import { TaskEditorDialog } from "./task-editor-dialog";
+import {
+	TaskEditorDialog,
+	type TaskNotificationRecipient,
+} from "./task-editor-dialog";
 import { TaskRunDetailDialog } from "./task-run-detail-dialog";
 import { TaskRunTable } from "./task-run-table";
 import { taskTypeLabel } from "./task-status-badge";
@@ -136,6 +139,28 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		queryFn: () => getSettings(siteKey),
 		enabled: Boolean(siteKey),
 	});
+	const notificationUsersQuery = useQuery({
+		queryKey: ["admin", "users", "task-notification-candidates", siteKey],
+		queryFn: () => listAdminUsers({ siteKey, limit: 100 }),
+		enabled: Boolean(siteKey),
+	});
+	const taskNotificationRecipients = useMemo<TaskNotificationRecipient[]>(
+		() =>
+			(notificationUsersQuery.data?.users ?? [])
+				.filter(
+					(user) =>
+						user.status === "active" &&
+						!user.deletedAt &&
+						(user.groupKey === "admin" || user.siteKeys.includes(siteKey)),
+				)
+				.map((user) => ({
+					id: `user:${user.id}`,
+					username: user.username,
+					displayName: user.displayName,
+					email: user.email,
+				})),
+		[notificationUsersQuery.data?.users, siteKey],
+	);
 	const auditQuery = useQuery({
 		queryKey: ["admin", "task-audit"],
 		queryFn: listTaskAudit,
@@ -963,9 +988,7 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 				notificationChannelConfigs={
 					settingsQuery.data?.notifications.channelConfigs ?? []
 				}
-				notificationRecipients={
-					settingsQuery.data?.notifications.backend.recipients ?? []
-				}
+				notificationRecipients={taskNotificationRecipients}
 				isSaving={createMutation.isPending || updateMutation.isPending}
 				saveError={createMutation.error ?? updateMutation.error}
 				onOpenChange={(open) => {

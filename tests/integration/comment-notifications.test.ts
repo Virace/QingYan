@@ -17,9 +17,12 @@ import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-se
 import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
-import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
 import { BackendUserNotificationPlanner } from "../../src/modules/notifications/backend-user-notification-planner";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
+import {
+	SiteNotificationEventsRepository,
+	siteBackendNotificationEventTypes,
+} from "../../src/modules/notifications/site-notification-events-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
 import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
@@ -109,19 +112,13 @@ async function configureBackendCommentRecipient(
 			siteId,
 		})
 		.onConflictDoNothing();
-	await new BackendUserNotificationRecipientsRepository(
-		fixture.app.db,
-	).replaceSiteRecipients({
+	await new SiteNotificationEventsRepository(fixture.app.db).replaceSiteEvents({
 		siteId,
-		recipients: [
-			{
-				userId: admin.id,
-				channels: ["email"],
-				events,
-				includeCommentContent: "summary",
-				enabled: true,
-			},
-		],
+		events: siteBackendNotificationEventTypes.map((eventType) => ({
+			eventType,
+			recipientUserIds: events.includes(eventType) ? [admin.id] : [],
+			externalChannelConfigIds: [],
+		})),
 	});
 	return admin;
 }

@@ -497,7 +497,7 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 		defineTaskType<DailySiteDigestPayload>({
 			type: "daily_site_digest",
 			label: "每日站点摘要",
-			description: "复用后台用户通知收件人和通知任务模型创建每日摘要投递任务。",
+			description: "向评论通知中已选择的站点人员和其他目标发送每日摘要。",
 			category: "notification",
 			scope: "site",
 			permissions: {
@@ -515,9 +515,9 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 			schedule,
 			dangerous: false,
 			reuse: {
-				service: "BackendUserNotificationRecipientsRepository",
-				method: "listSiteRecipients",
-				file: "src/modules/notifications/backend-user-recipients-repository.ts",
+				service: "SiteNotificationEventsRepository",
+				method: "listSiteEvents",
+				file: "src/modules/notifications/site-notification-events-repository.ts",
 			},
 			run(payload, context) {
 				return runWithEvents(payload, context, runDailySiteDigestTask);

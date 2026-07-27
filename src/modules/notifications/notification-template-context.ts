@@ -68,7 +68,8 @@ export class NotificationTemplateContextBuilder {
 
 	public async build(input: NotificationTemplateContextBuilderInput) {
 		if (
-			input.delivery.recipientType === "backend_user" &&
+			(input.delivery.recipientType === "backend_user" ||
+				input.delivery.recipientType === "external_target") &&
 			(input.delivery.templateKey === "backend_user.comment.pending" ||
 				input.delivery.templateKey === "backend_user.comment.approved")
 		) {

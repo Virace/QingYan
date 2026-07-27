@@ -39,16 +39,15 @@ const diagnostics: NotificationDiagnostic = {
 		},
 		{
 			key: "admin_comment_approved_email",
-			status: "blocked",
+			status: "not_sending",
 			recipients: [],
-			blockers: [
+			blockers: [],
+			warnings: [
 				{
-					code: "no_enabled_backend_recipient",
-					path: "notifications.backend.recipients",
-					message: "没有可接收已发布评论邮件的站点人员。",
+					code: "event_has_no_targets",
+					message: "当前通知类型没有选择接收人，因此不会发送。",
 				},
 			],
-			warnings: [],
 		},
 		{
 			key: "commenter_reply_email",
@@ -138,12 +137,11 @@ describe("notification diagnostics model", () => {
 				key: "admin_comment_approved_email",
 				title: "直接发布评论通知",
 				description: "评论直接发布时，向站点人员发送邮件",
-				badge: { label: "需要设置", variant: "destructive" },
-				blockerMessages: [
-					"请在当前站点的“后台用户通知”中添加并启用至少一名接收人，然后保存设置。",
-				],
-				warningMessages: [],
+				badge: { label: "不会发送", variant: "outline" },
+				blockerMessages: [],
+				warningMessages: ["当前没有选择接收人，因此不会发送这类通知。"],
 				recipientEmptyText: "还没有可接收这类邮件的站点人员",
+				recipients: [],
 			}),
 			expect.objectContaining({
 				key: "commenter_reply_email",
@@ -159,13 +157,14 @@ describe("notification diagnostics model", () => {
 		]);
 	});
 
-	it("turns route diagnostics into actionable guidance without exposing internal details", () => {
-		const routeDiagnostic: NotificationDiagnostic = {
+	it("turns recipient availability diagnostics into actionable guidance without exposing internal details", () => {
+		const recipientDiagnostic: NotificationDiagnostic = {
 			...diagnostics,
 			flows: diagnostics.flows.map((flow) =>
 				flow.key === "admin_comment_approved_email"
 					? {
 							...flow,
+							status: "blocked" as const,
 							recipients: [
 								{
 									userId: 7,
@@ -177,22 +176,22 @@ describe("notification diagnostics model", () => {
 							],
 							blockers: [
 								{
-									code: "email_event_route_missing",
-									path: "notifications.backend.recipients[userId=7].routes[eventType=admin_comment_approved]",
-									message: "接收人缺少 admin_comment_approved 的邮件 route。",
+									code: "event_email_recipient_inactive",
+									message: "选择的接收人当前不可用。",
 								},
 							],
+							warnings: [],
 						}
 					: flow,
 			),
 		};
 
-		const approved = diagnosticFlowRows(routeDiagnostic).find(
+		const approved = diagnosticFlowRows(recipientDiagnostic).find(
 			(row) => row.key === "admin_comment_approved_email",
 		);
 
 		expect(approved?.blockerMessages).toEqual([
-			"请在当前站点的“后台用户通知”中编辑对应接收人，为“评论通过”添加邮件通知，然后保存设置。",
+			"请在当前站点的“评论通知”中更换为已启用的后台用户，然后保存设置。",
 		]);
 		expect(JSON.stringify(approved?.blockerMessages)).not.toContain("route");
 		expect(JSON.stringify(approved?.blockerMessages)).not.toContain(
@@ -356,9 +355,23 @@ describe("notification diagnostics model", () => {
 		expect(notificationChainTestBlockers(diagnostics, "pending")).toEqual([]);
 		expect(notificationChainTestBlockers(diagnostics, "approved")).toEqual([
 			{
-				code: "no_enabled_backend_recipient",
-				path: "notifications.backend.recipients",
-				message: "没有可接收已发布评论邮件的站点人员。",
+				code: "event_email_recipient_required",
+				message: "请先为“直接发布评论”选择至少一名站点人员并应用更改。",
+			},
+		]);
+
+		const externalOnly: NotificationDiagnostic = {
+			...diagnostics,
+			flows: diagnostics.flows.map((flow) =>
+				flow.key === "admin_comment_pending_email"
+					? { ...flow, status: "ready", recipients: [] }
+					: flow,
+			),
+		};
+		expect(notificationChainTestBlockers(externalOnly, "pending")).toEqual([
+			{
+				code: "event_email_recipient_required",
+				message: "请先为“新待审评论”选择至少一名站点人员并应用更改。",
 			},
 		]);
 	});

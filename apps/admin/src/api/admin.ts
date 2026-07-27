@@ -214,27 +214,25 @@ export interface NotificationChannelConfig {
 	updatedAt?: string | null;
 }
 
-export interface SiteNotificationRoute {
-	id?: string;
-	eventType: SiteNotificationEvent;
-	channelConfigId: string;
-	channelType?: NotificationChannel;
-	channelName?: string;
-	enabled: boolean;
-}
-
-export interface SiteNotificationRecipient {
-	id?: string;
+export interface SiteNotificationEventRecipient {
+	assignmentId?: string;
 	userId: number;
 	username: string;
 	email: string;
 	displayName: string;
-	channels: NotificationChannel[];
-	events: SiteNotificationEvent[];
-	routes: SiteNotificationRoute[];
 	includeCommentContent: NotificationContentPolicy;
-	rateLimitProfile: string | null;
-	enabled: boolean;
+}
+
+export interface SiteNotificationEventSettings {
+	eventType: SiteNotificationEvent;
+	recipients: SiteNotificationEventRecipient[];
+	externalChannelConfigIds: string[];
+}
+
+export interface SiteNotificationEventInput {
+	eventType: SiteNotificationEvent;
+	recipientUserIds: number[];
+	externalChannelConfigIds: string[];
 }
 
 export interface NotificationTemplate {
@@ -373,7 +371,7 @@ export interface AdminSite {
 		};
 		backend: {
 			enabled: boolean;
-			recipients?: SiteNotificationRecipient[];
+			events: SiteNotificationEventSettings[];
 		};
 		channelConfigs: NotificationChannelConfig[];
 	};
@@ -489,19 +487,27 @@ export interface AdminSettings {
 		emergencyLockdown: boolean;
 	};
 	notifications: {
+		capabilities: {
+			mailReady: boolean;
+			externalTargetCount: number;
+		};
 		commenter: {
 			replyEmailEnabled: boolean;
 			replyEmailDefaultChecked: boolean;
 		};
 		backend: {
 			enabled: boolean;
-			recipients?: SiteNotificationRecipient[];
+			events: SiteNotificationEventSettings[];
 		};
 		channelConfigs: NotificationChannelConfig[];
 	};
 }
 
-export type NotificationDiagnosticStatus = "ready" | "conditional" | "blocked";
+export type NotificationDiagnosticStatus =
+	| "ready"
+	| "not_sending"
+	| "conditional"
+	| "blocked";
 
 export type NotificationDiagnosticFlowKey =
 	| "admin_comment_pending_email"

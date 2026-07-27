@@ -18,6 +18,7 @@ import {
 } from "../comments/verified-author";
 import { CommentsWriteRepository } from "../comments/write-repository";
 import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
+import type { SiteNotificationEventInput } from "../notifications/site-notification-events-repository";
 import {
 	AppError,
 	InvalidRequestError,
@@ -66,20 +67,6 @@ type CommentMetadataPatch = {
 			enabled?: boolean | 0 | 1;
 		};
 	};
-};
-
-type NotificationRecipientInput = {
-	userId: number;
-	channels?: Array<"email" | "webhook" | "wxpusher">;
-	events?: Array<"admin_comment_pending" | "admin_comment_approved">;
-	routes?: Array<{
-		eventType: "admin_comment_pending" | "admin_comment_approved";
-		channelConfigId: string;
-		enabled: boolean;
-	}>;
-	includeCommentContent: "none" | "summary" | "full";
-	rateLimitProfile?: string | null;
-	enabled: boolean;
 };
 
 function mergeCommentMetadata(
@@ -1170,11 +1157,18 @@ export class AdminManagementService {
 		if (!settings) {
 			throw new ResourceNotFoundError("SETTINGS_NOT_FOUND", "站点设置不存在。");
 		}
-		const recipients = await this.repository.listSiteNotificationRecipients(
+		const events = await this.repository.listSiteNotificationEvents(
 			registeredSite.id,
 		);
 		const channelConfigs =
 			await this.repository.listNotificationChannelConfigs();
+		const systemSettings = await new RuntimeSystemSettingsService(
+			this.repository.database,
+		).getSettings();
+		const mailReady =
+			systemSettings.mail.enabled &&
+			Boolean(systemSettings.mail.smtp.host.trim()) &&
+			Boolean(systemSettings.mail.smtp.from.trim());
 
 		return {
 			siteKey,
@@ -1221,79 +1215,34 @@ export class AdminManagementService {
 			engagement: mergeEngagementSettings(settings.engagementJson),
 			pageRegistry: mergePageRegistrySettings(settings.pageRegistryJson),
 			notifications: {
+				capabilities: {
+					mailReady,
+					externalTargetCount: channelConfigs.filter(
+						(config) => config.enabled && config.type !== "email",
+					).length,
+				},
 				commenter: {
 					replyEmailEnabled: settings.commenterReplyEmailEnabled,
 					replyEmailDefaultChecked: settings.commenterReplyEmailDefaultChecked,
 				},
 				backend: {
 					enabled: settings.backendNotificationsEnabled,
-					recipients: recipients.map((recipient) => ({
-						id: recipient.id,
-						userId: recipient.userId,
-						username: recipient.username,
-						email: recipient.email,
-						displayName: recipient.displayName,
-						channels: recipient.channels,
-						events: recipient.events,
-						routes: recipient.routes.map((route) => ({
-							id: route.id,
-							eventType: route.eventType,
-							channelConfigId: route.channelConfigId,
-							channelType: route.channelType,
-							channelName: route.channelName,
-							enabled: route.enabled,
+					events: events.map((event) => ({
+						eventType: event.eventType,
+						recipients: event.recipients.map((recipient) => ({
+							assignmentId: recipient.assignmentId,
+							userId: recipient.userId,
+							username: recipient.username,
+							email: recipient.email,
+							displayName: recipient.displayName,
+							includeCommentContent: recipient.includeCommentContent,
 						})),
-						includeCommentContent: recipient.includeCommentContent,
-						rateLimitProfile: recipient.rateLimitProfile,
-						enabled: recipient.enabled,
+						externalChannelConfigIds: event.externalChannelConfigIds,
 					})),
 				},
 				channelConfigs,
 			},
 		};
-	}
-
-	private async validateNotificationRecipients(input: {
-		siteId: number;
-		recipients?: NotificationRecipientInput[];
-	}) {
-		if (!input.recipients) {
-			return;
-		}
-		const seenUserIds = new Set<number>();
-		for (const recipient of input.recipients) {
-			if (seenUserIds.has(recipient.userId)) {
-				throw new AppError(
-					400,
-					"ADMIN_NOTIFICATION_RECIPIENT_DUPLICATE",
-					"通知接收人不能重复。",
-				);
-			}
-			seenUserIds.add(recipient.userId);
-			const candidate = await this.repository.getNotificationRecipientCandidate(
-				{
-					siteId: input.siteId,
-					userId: recipient.userId,
-				},
-			);
-			if (!candidate) {
-				throw new ResourceNotFoundError("ADMIN_USER_NOT_FOUND", "用户不存在。");
-			}
-			if (candidate.status !== "active" || candidate.deletedAt) {
-				throw new AppError(
-					400,
-					"ADMIN_NOTIFICATION_RECIPIENT_INACTIVE",
-					"通知接收人必须是启用状态的后台用户。",
-				);
-			}
-			if (!candidate.siteAccessId && candidate.groupKey !== "admin") {
-				throw new AppError(
-					403,
-					"ADMIN_NOTIFICATION_RECIPIENT_SITE_ACCESS_REQUIRED",
-					"通知接收人必须拥有目标站点权限。",
-				);
-			}
-		}
 	}
 
 	private async validateAuthoritativePageRegistrySettings(input: {
@@ -1388,7 +1337,7 @@ export class AdminManagementService {
 				};
 				backend?: {
 					enabled?: boolean;
-					recipients?: NotificationRecipientInput[];
+					events?: SiteNotificationEventInput[];
 				};
 			};
 			pageRegistry?: PageRegistrySettingsPatch;
@@ -1421,10 +1370,6 @@ export class AdminManagementService {
 					...input.comments.inputLimits,
 				})
 			: undefined;
-		await this.validateNotificationRecipients({
-			siteId: registeredSite.id,
-			recipients: input.notifications?.backend?.recipients,
-		});
 		if (nextPageRegistry) {
 			await this.validateAuthoritativePageRegistrySettings({
 				siteId: registeredSite.id,
@@ -1433,7 +1378,6 @@ export class AdminManagementService {
 				settings: nextPageRegistry,
 			});
 		}
-
 		await this.repository.updateSiteSettings(registeredSite.id, {
 			commentsEnabled: input.comments?.enabled,
 			defaultStatus: input.comments?.defaultStatus,
@@ -1486,13 +1430,8 @@ export class AdminManagementService {
 			commenterReplyEmailDefaultChecked:
 				input.notifications?.commenter?.replyEmailDefaultChecked,
 			backendNotificationsEnabled: input.notifications?.backend?.enabled,
+			notificationEvents: input.notifications?.backend?.events,
 		});
-		if (input.notifications?.backend?.recipients) {
-			await this.repository.replaceSiteNotificationRecipients({
-				siteId: registeredSite.id,
-				recipients: input.notifications.backend.recipients,
-			});
-		}
 
 		await this.security.writeAudit({
 			requestId: input.requestId,

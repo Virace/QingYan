@@ -87,6 +87,63 @@ export const siteNotificationRecipientRoutes = sqliteTable(
 	],
 );
 
+export const siteNotificationEventRecipients = sqliteTable(
+	"site_notification_event_recipients",
+	{
+		id: text("id").primaryKey(),
+		siteId: integer("site_id")
+			.notNull()
+			.references(() => sites.id),
+		eventType: text("event_type").notNull(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => adminUsers.id),
+		includeCommentContent: text("include_comment_content")
+			.notNull()
+			.default("summary"),
+		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+	},
+	(table) => [
+		uniqueIndex("site_notification_event_recipients_unique_idx").on(
+			table.siteId,
+			table.eventType,
+			table.userId,
+		),
+		index("site_notification_event_recipients_site_idx").on(table.siteId),
+		index("site_notification_event_recipients_event_idx").on(table.eventType),
+		index("site_notification_event_recipients_user_idx").on(table.userId),
+	],
+);
+
+export const siteNotificationEventChannels = sqliteTable(
+	"site_notification_event_channels",
+	{
+		id: text("id").primaryKey(),
+		siteId: integer("site_id")
+			.notNull()
+			.references(() => sites.id),
+		eventType: text("event_type").notNull(),
+		channelConfigId: text("channel_config_id")
+			.notNull()
+			.references(() => notificationChannelConfigs.id),
+		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+	},
+	(table) => [
+		uniqueIndex("site_notification_event_channels_unique_idx").on(
+			table.siteId,
+			table.eventType,
+			table.channelConfigId,
+		),
+		index("site_notification_event_channels_site_idx").on(table.siteId),
+		index("site_notification_event_channels_event_idx").on(table.eventType),
+		index("site_notification_event_channels_config_idx").on(
+			table.channelConfigId,
+		),
+	],
+);
+
 export const adminUserNotificationPreferences = sqliteTable(
 	"admin_user_notification_preferences",
 	{

@@ -12,10 +12,6 @@ export type NotificationStatusBadge = {
 	variant: "secondary" | "outline" | "destructive";
 };
 
-type DiagnosticIssueContext = {
-	flowKey: NotificationDiagnosticFlowKey;
-};
-
 const diagnosticFlowTitles: Record<NotificationDiagnosticFlowKey, string> = {
 	admin_comment_pending_email: "待审核评论通知",
 	admin_comment_approved_email: "直接发布评论通知",
@@ -55,6 +51,8 @@ export function notificationStatusBadge(
 	switch (status) {
 		case "ready":
 			return { label: "可以发送", variant: "secondary" };
+		case "not_sending":
+			return { label: "不会发送", variant: "outline" };
 		case "conditional":
 			return { label: "发送时确认", variant: "outline" };
 		case "blocked":
@@ -83,15 +81,8 @@ function recipientLabel(recipient: {
 		: recipient.email;
 }
 
-function adminEventLabel(flowKey: NotificationDiagnosticFlowKey): string {
-	return flowKey === "admin_comment_pending_email" ? "待审核评论" : "评论通过";
-}
-
-function diagnosticIssueText(
-	issue: NotificationDiagnosticIssue,
-	context: DiagnosticIssueContext,
-): string {
-	const backendNotificationLocation = "当前站点的“后台用户通知”";
+function diagnosticIssueText(issue: NotificationDiagnosticIssue): string {
+	const backendNotificationLocation = "当前站点的“评论通知”";
 
 	if (commenterDeliveryConditionCodes.has(issue.code)) {
 		return "评论者填写有效邮箱并勾选“有人回复时邮件通知我”后，系统才会发送回复提醒。";
@@ -100,11 +91,11 @@ function diagnosticIssueText(
 	switch (issue.code) {
 		case "system_mail_disabled":
 		case "mail_disabled":
-			return "请到“系统设置 > 系统邮件”开启系统邮件，然后保存设置。";
+			return "请到“系统设置 > 邮件”开启邮件发送，然后保存设置。";
 		case "smtp_host_missing":
-			return "请到“系统设置 > 系统邮件”填写邮件服务器地址，然后保存设置。";
+			return "请到“系统设置 > 邮件”填写邮件服务器地址，然后保存设置。";
 		case "smtp_from_missing":
-			return "请到“系统设置 > 系统邮件”填写发件人地址，然后保存设置。";
+			return "请到“系统设置 > 邮件”填写发件人地址，然后保存设置。";
 		case "queue_backend_unavailable":
 		case "notification_worker_not_started":
 		case "notification_worker_no_tick":
@@ -112,22 +103,20 @@ function diagnosticIssueText(
 		case "notification_worker_last_error":
 			return "邮件发送服务最近出现异常，建议联系系统管理员确认后再测试。";
 		case "backend_notifications_disabled":
-			return `请在${backendNotificationLocation}中开启“启用后台用户通知”，然后保存设置。`;
-		case "no_enabled_backend_recipient":
-			return `请在${backendNotificationLocation}中添加并启用至少一名接收人，然后保存设置。`;
-		case "recipient_user_inactive":
+			return `请在${backendNotificationLocation}中开启通知，然后应用更改。`;
+		case "event_has_no_targets":
+			return "当前没有选择接收人，因此不会发送这类通知。";
+		case "event_email_recipient_required":
+			return `请在${backendNotificationLocation}中为对应通知类型选择至少一名接收人，然后应用更改。`;
+		case "event_email_recipient_inactive":
 			return `请在${backendNotificationLocation}中更换为已启用的后台用户，然后保存设置。`;
-		case "recipient_site_access_missing":
-			return "请先为对应接收人开通当前站点的访问权限，或在“后台用户通知”中更换接收人。";
-		case "email_event_route_missing":
-		case "email_event_route_disabled":
-			return `请在${backendNotificationLocation}中编辑对应接收人，为“${adminEventLabel(context.flowKey)}”添加邮件通知，然后保存设置。`;
-		case "email_channel_config_missing":
-		case "email_channel_config_disabled":
-			return `请在${backendNotificationLocation}中编辑对应接收人，重新选择可用的邮件通知方式，然后保存设置。`;
+		case "event_email_recipient_site_access_missing":
+			return `请先为对应接收人开通当前站点的访问权限，或在${backendNotificationLocation}中更换接收人。`;
+		case "event_external_target_unavailable":
+			return "请重新选择可用的其他接收目标，或到“系统设置 > 发送服务”启用对应目标。";
 		case "recipient_email_preference_disabled":
 		case "recipient_email_preference_paused":
-			return "请联系对应接收人开启个人邮件通知，或在“后台用户通知”中更换接收人。";
+			return "请联系对应接收人开启个人邮件通知，或在当前站点的“评论通知”中更换接收人。";
 		case "recipient_email_digest_delayed":
 			return "对应接收人启用了邮件汇总，这封邮件会稍后发送。";
 		case "comments_disabled":
@@ -155,25 +144,19 @@ function diagnosticIssueText(
 	}
 }
 
-function uniqueIssueMessages(
-	issues: NotificationDiagnosticIssue[],
-	context: DiagnosticIssueContext,
-): string[] {
-	return [
-		...new Set(issues.map((issue) => diagnosticIssueText(issue, context))),
-	];
+function uniqueIssueMessages(issues: NotificationDiagnosticIssue[]): string[] {
+	return [...new Set(issues.map(diagnosticIssueText))];
 }
 
 export function diagnosticFlowRows(diagnostic: NotificationDiagnostic) {
 	return diagnostic.flows.map((flow) => {
-		const context = { flowKey: flow.key };
 		return {
 			key: flow.key,
 			title: diagnosticFlowTitles[flow.key],
 			description: diagnosticFlowDescriptions[flow.key],
 			badge: notificationStatusBadge(flow.status),
-			blockerMessages: uniqueIssueMessages(flow.blockers, context),
-			warningMessages: uniqueIssueMessages(flow.warnings, context),
+			blockerMessages: uniqueIssueMessages(flow.blockers),
+			warningMessages: uniqueIssueMessages(flow.warnings),
 			recipients: flow.recipients.map(recipientLabel),
 			recipientEmptyText: diagnosticRecipientEmptyText[flow.key],
 		};
@@ -194,9 +177,29 @@ export function notificationChainTestBlockers(
 	];
 
 	const seen = new Set<string>();
-	return diagnostic.flows
+	const selectedFlows = diagnostic.flows.filter((flow) =>
+		selectedKeys.includes(flow.key),
+	);
+	const syntheticIssues: NotificationDiagnosticIssue[] = selectedFlows
+		.filter((flow) => flow.key === adminFlowKey && flow.recipients.length === 0)
+		.map(() => ({
+			code: "event_email_recipient_required",
+			message:
+				defaultCommentStatus === "pending"
+					? "请先为“新待审评论”选择至少一名站点人员并应用更改。"
+					: "请先为“直接发布评论”选择至少一名站点人员并应用更改。",
+		}));
+	return selectedFlows
 		.filter((flow) => selectedKeys.includes(flow.key))
 		.flatMap((flow) => flow.blockers)
+		.concat(
+			selectedFlows.flatMap((flow) =>
+				flow.warnings.filter(
+					(warning) => warning.code === "backend_notifications_disabled",
+				),
+			),
+		)
+		.concat(syntheticIssues)
 		.filter((blocker) => {
 			const key = `${blocker.code}:${blocker.path ?? ""}`;
 			if (seen.has(key)) {
@@ -254,7 +257,7 @@ function deliveryErrorMessage(kind: string): string {
 	switch (kind) {
 		case "authentication":
 		case "configuration":
-			return "邮件服务设置有误，请到“系统设置 > 系统邮件”检查账号、密码和发件人信息。";
+			return "邮件服务设置有误，请到“系统设置 > 邮件”检查账号、密码和发件人信息。";
 		case "network":
 		case "tls":
 			return "暂时无法连接邮件服务，请稍后重试；如果持续失败，请联系系统管理员。";
