@@ -16,7 +16,7 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
-当前首个正式版本为 [`v0.1.0`](https://github.com/Virace/QingYan/releases/tag/v0.1.0)。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+当前正式版本为 [`v0.2.0`](https://github.com/Virace/QingYan/releases/tag/v0.2.0)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
 
 ## 当前能力
 
@@ -186,9 +186,11 @@ qyctl update plan
 
 ```text
 upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
+upgrade.state=upgrade_required
+upgrade.token=qy_upgrade_<一次性随机值>
 ```
 
-浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
+浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，输入同一段启动日志中的升级 token，并在确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
 
 CLI 仍是底层运维入口，适合服务器、Docker、CI 或 Web 无法启动的场景：
 

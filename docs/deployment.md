@@ -212,7 +212,7 @@ docker compose exec qingyan qingyanctl --version
 更新程序、调整数据库或大批量导入前，先做整站备份：
 
 ```bash
-docker compose exec qingyan qyctl backup /app/data/backups/full-$(date +%Y%m%d%H%M%S)
+docker compose exec qingyan qyctl backup /app/data/backups/full-$(date +%Y%m%d%H%M%S) --yes
 ```
 
 备份完成后可以用 dry-run 检查恢复计划：
@@ -227,29 +227,52 @@ docker compose exec qingyan qyctl restore /app/data/backups/<backup-dir> --dry-r
 
 ## 更新流程
 
-更新建议先手动执行：
+当前仓库没有自动替换程序的 GitHub Actions 或容器更新器。`qyctl update check`
+只负责发现已发布的新版本；生产环境需要先用旧版本创建整站备份，再把工作树切换到目标
+release tag 并重建容器。以从 `v0.1.0` 更新到 `v0.2.0` 为例：
 
 ```bash
 cd /opt/1panel/apps/qingyan
-docker compose exec qingyan qyctl backup /app/data/backups/pre-update-$(date +%Y%m%d%H%M%S)
+docker compose exec qingyan qyctl update check
+docker compose exec qingyan qyctl backup /app/data/backups/pre-update-$(date +%Y%m%d%H%M%S) --yes
+git fetch --tags origin
+git switch --detach v0.2.0
 docker compose build --pull qingyan
 docker compose up -d qingyan
 docker compose logs --tail=200 qingyan
 ```
 
+生产目录应保持为未修改的 Git checkout；如果 `git switch` 报告本地改动，先停止更新并核对，
+不要覆盖 `config/`、`data/` 或 `logs/`。这三个目录承载实例状态，并由仓库的 `.gitignore`
+排除。
+
 如果新版本启动进入 Web Upgrade Mode，日志会输出：
 
 ```text
 upgrade.url=http://127.0.0.1:4401/qingyan/upgrade
+upgrade.state=upgrade_required
+upgrade.token=qy_upgrade_<一次性随机值>
 ```
 
-此时访问反代后的 `/qingyan/upgrade`，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
+此时访问反代后的 `/qingyan/upgrade`，输入同一段日志中的升级 token，确认脱敏 `UpgradePlan` 后执行升级。也可以用 CLI 先 dry-run：
 
 ```bash
 docker compose exec qingyan qyctl upgrade --dry-run
 ```
 
-只有确认备份和计划无误后再 apply。
+只有确认备份和计划无误后再 apply。Docker Compose 环境使用：
+
+```bash
+docker compose exec qingyan qyctl upgrade --yes
+docker compose restart qingyan
+docker compose exec qingyan qyctl --version
+docker compose exec qingyan qyctl update check
+docker compose ps
+docker compose logs --tail=200 qingyan
+```
+
+升级完成后，`qyctl --version` 应输出目标版本，`qyctl update check` 应返回当前已是最新版本，
+容器应为 healthy。再访问 `/qingyan/healthz`、Admin Console，并执行一次评论邮件双链路测试。
 
 ## 回滚
 

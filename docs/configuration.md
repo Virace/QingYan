@@ -392,7 +392,7 @@ WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内�
 
 `v0.1.0` 是当前 upgrade lifecycle 的首个正式基线。后续破坏性配置、settings owner、secret 存储位置、数据语义、schema 或导入导出格式变化必须走 upgrade lifecycle；长期约束由 `AGENTS.md` 维护，开发过程设计 / 计划文档按全局 Agent 规则保存在仓库外。
 
-启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会输出 `${server.publicPath}/upgrade` 地址；浏览器访问该页面后，操作员需要输入启动日志或本机操作命令显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
+启动时如果检测到 `upgrade_required`，QingYan 会进入 Web Upgrade Mode，而不是注册正常评论 API、Admin data API 或 Admin Console。服务端会同时输出 `${server.publicPath}/upgrade` 地址、升级状态和一次性升级令牌；浏览器访问该页面后，操作员需要输入启动日志显示的升级令牌，页面会把令牌随 apply 请求提交；服务端不会通过公开升级页面下发令牌 cookie。Web Upgrade Mode 只处理已有实例升级，和首次安装的 install mode 是不同生命周期，不能复用 `${server.publicPath}/admin/install` 语义。
 
 Web Upgrade Mode 暴露最小接口：
 
@@ -425,7 +425,7 @@ qyctl admin repass
 qyctl admin entrance
 qyctl export default ./site.json
 qyctl import default ./site.json --dry-run
-qyctl backup ./qingyan-full-backup
+qyctl backup ./qingyan-full-backup --yes
 qyctl restore ./qingyan-full-backup.qingyan-backup --dry-run
 qyctl upgrade --dry-run
 qyctl update check
@@ -444,6 +444,7 @@ qyctl restart
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
 - 首个正式 release 为 `v0.1.0`。
+- 当前正式 release 为 `v0.2.0`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 

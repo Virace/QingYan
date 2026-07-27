@@ -16,7 +16,7 @@ import {
 	type MinimalInstallConfig,
 } from "./modules/install/minimal-config";
 import { resolveInstallState } from "./modules/install/state";
-import { createUpgradeApp } from "./modules/upgrade/upgrade-app";
+import { createUpgradeAppLaunch } from "./modules/upgrade/upgrade-app";
 import { resolveStartupMode } from "./startup-mode";
 
 function readPackageVersion(): string {
@@ -153,7 +153,7 @@ export async function main(): Promise<void> {
 					`Expected upgrade startup mode, got ${startupMode.mode}.`,
 				);
 			}
-			const upgradeApp = createUpgradeApp({
+			const upgradeLaunch = createUpgradeAppLaunch({
 				configPath: minimalInstallConfig.configPath,
 				loadedConfig: startupMode.config,
 				configError: startupMode.configError,
@@ -164,9 +164,9 @@ export async function main(): Promise<void> {
 				),
 				createSqliteClient: (file) => new Database(file),
 			});
-			activeApp = upgradeApp;
+			activeApp = upgradeLaunch.app;
 			const listenConfig = startupMode.config?.server ?? minimalInstallConfig;
-			await upgradeApp.listen({
+			await upgradeLaunch.app.listen({
 				host: listenConfig.host,
 				port: listenConfig.port,
 			});
@@ -174,14 +174,14 @@ export async function main(): Promise<void> {
 				listenConfig.host === "0.0.0.0" || listenConfig.host === "::"
 					? "localhost"
 					: listenConfig.host;
-			console.log(
-				`upgrade.url=${buildPublicUrl(
+			upgradeLaunch.announce({
+				url: buildPublicUrl(
 					`http://${host}:${listenConfig.port}`,
 					listenConfig.publicPath,
 					"/upgrade",
-				)}`,
-			);
-			console.log(`upgrade.state=${startupMode.state.state}`);
+				),
+				state: startupMode.state.state,
+			});
 		},
 		startNormal: async () => {
 			const startupMode = await resolveCurrentStartupMode(minimalInstallConfig);

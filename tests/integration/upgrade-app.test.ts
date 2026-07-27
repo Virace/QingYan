@@ -5,7 +5,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 
-import { createUpgradeApp } from "../../src/modules/upgrade/upgrade-app";
+import {
+	createUpgradeApp,
+	createUpgradeAppLaunch,
+} from "../../src/modules/upgrade/upgrade-app";
 import {
 	applyV010BaselineMigration,
 	createTestConfig,
@@ -145,6 +148,53 @@ describe("upgrade app", () => {
 			expect(admin.statusCode).toBe(404);
 		} finally {
 			await fixture.cleanup();
+		}
+	});
+
+	it("announces a token that can authorize the web upgrade", async () => {
+		const workspace = createWorkspace();
+		const loadedConfig = writeConfig(
+			workspace.configPath,
+			workspace.databaseFile,
+		);
+		seedOldDatabase(workspace.databaseFile);
+		const launch = createUpgradeAppLaunch({
+			configPath: workspace.configPath,
+			loadedConfig,
+			databaseFile: workspace.databaseFile,
+			currentApplicationVersion: "0.1.0",
+			partialUpgradeMarkerPath: workspace.partialUpgradeMarkerPath,
+			createSqliteClient: (file) => new Database(file),
+			tokenFactory: () => "qy_upgrade_operator_token",
+			now: () => new Date("2026-05-07T00:00:00.000Z"),
+		});
+		const output: string[] = [];
+		try {
+			launch.announce({
+				url: "http://localhost:4401/qingyan/upgrade",
+				state: "upgrade_required",
+				output: (line) => output.push(line),
+			});
+
+			expect(output).toEqual([
+				"upgrade.url=http://localhost:4401/qingyan/upgrade",
+				"upgrade.state=upgrade_required",
+				"upgrade.token=qy_upgrade_operator_token",
+			]);
+
+			const response = await launch.app.inject({
+				method: "POST",
+				url: "/qingyan/api/upgrade/apply",
+				payload: {
+					token: output[2]?.slice("upgrade.token=".length),
+					confirm: "UPGRADE QINGYAN",
+				},
+			});
+			expect(response.statusCode).toBe(200);
+			expect(response.json()).toMatchObject({ state: "applied" });
+		} finally {
+			await launch.app.close();
+			workspace.cleanup();
 		}
 	});
 
