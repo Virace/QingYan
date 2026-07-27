@@ -4,6 +4,12 @@ set -Eeuo pipefail
 SERVICE_NAME="qingyan"
 AUTO_YES=false
 TARGET_TAG=""
+NETWORK_PROFILE="auto"
+APT_MAIN_MIRROR=""
+COREPACK_NPM_REGISTRY=""
+PNPM_REGISTRY=""
+NODE_DIST_URL=""
+BETTER_SQLITE3_BINARY_HOST=""
 PHASE="初始化"
 REPOSITORY_ROOT=""
 PREVIOUS_COMMIT=""
@@ -19,11 +25,13 @@ LOCAL_CHANGES_APPLIED=false
 usage() {
 	cat <<'USAGE'
 用法：
-  ./scripts/update.sh [--yes] [vX.Y.Z]
-  curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s -- [--yes] [vX.Y.Z]
+  ./scripts/update.sh [--yes] [--network-profile auto|official|cn] [vX.Y.Z]
+  bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/<release-tag>/scripts/update.sh) [选项]
 
 不指定版本时，脚本会 fetch tags 并选择最高的稳定 vX.Y.Z tag。
 默认会在切换版本和应用数据升级前请求确认；--yes 表示接受两次确认。
+--network-profile 默认使用 auto，在 official 和 cn 之间探测并选择更快的构建依赖源。
+显式选择配置档时不会在构建期间自动回退，便于复现和排错。
 USAGE
 }
 
@@ -190,6 +198,11 @@ while (( $# > 0 )); do
 			AUTO_YES=true
 			shift
 			;;
+		--network-profile)
+			[[ $# -ge 2 ]] || fail "--network-profile 缺少参数。"
+			NETWORK_PROFILE="$2"
+			shift 2
+			;;
 		--help|-h)
 			usage
 			exit 0
@@ -207,6 +220,83 @@ while (( $# > 0 )); do
 			;;
 	esac
 done
+
+apply_network_profile() {
+	case "$1" in
+		official)
+			APT_MAIN_MIRROR="http://deb.debian.org/debian"
+			COREPACK_NPM_REGISTRY="https://registry.npmjs.org"
+			PNPM_REGISTRY="https://registry.npmjs.org"
+			NODE_DIST_URL="https://nodejs.org/download/release"
+			BETTER_SQLITE3_BINARY_HOST="https://github.com/WiseLibs/better-sqlite3/releases/download"
+			;;
+		cn)
+			APT_MAIN_MIRROR="http://mirrors.tuna.tsinghua.edu.cn/debian"
+			COREPACK_NPM_REGISTRY="https://registry.npmmirror.com"
+			PNPM_REGISTRY="https://registry.npmmirror.com"
+			NODE_DIST_URL="https://npmmirror.com/mirrors/node"
+			BETTER_SQLITE3_BINARY_HOST="https://registry.npmmirror.com/-/binary/better-sqlite3"
+			;;
+	esac
+}
+
+probe_network_route() {
+	local duration
+	local total="0"
+	local url
+	for url in "$@"; do
+		if ! duration="$(curl -fsSL -o /dev/null \
+			--connect-timeout "${QINGYAN_NETWORK_PROBE_CONNECT_TIMEOUT:-2}" \
+			--max-time "${QINGYAN_NETWORK_PROBE_TIMEOUT:-4}" \
+			-w '%{time_total}' "$url" 2>/dev/null)"; then
+			return 1
+		fi
+		[[ "$duration" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 1
+		total="$(awk -v total="$total" -v duration="$duration" 'BEGIN { printf "%.6f", total + duration }')"
+	done
+	printf '%s' "$total"
+}
+
+case "$NETWORK_PROFILE" in
+	auto)
+		command -v curl > /dev/null || fail "auto 网络配置档需要 curl；也可以显式使用 --network-profile official 或 cn。"
+		command -v awk > /dev/null || fail "auto 网络配置档需要 awk；也可以显式使用 --network-profile official 或 cn。"
+		official_latency="$(probe_network_route \
+			"http://deb.debian.org/debian/dists/bookworm/InRelease" \
+			"https://registry.npmjs.org/-/ping" \
+			"https://nodejs.org/download/release/latest-v24.x/SHASUMS256.txt" || true)"
+		cn_latency="$(probe_network_route \
+			"http://mirrors.tuna.tsinghua.edu.cn/debian/dists/bookworm/InRelease" \
+			"https://registry.npmmirror.com/-/ping" \
+			"https://npmmirror.com/mirrors/node/latest-v24.x/SHASUMS256.txt" || true)"
+		if [[ -z "$official_latency" && -z "$cn_latency" ]]; then
+			fail "official 和 cn 网络配置档均不可用；请检查网络或显式选择配置档后重试。"
+		elif [[ -z "$official_latency" ]]; then
+			RESOLVED_NETWORK_PROFILE="cn"
+		elif [[ -z "$cn_latency" ]]; then
+			RESOLVED_NETWORK_PROFILE="official"
+		elif awk -v official="$official_latency" -v cn="$cn_latency" 'BEGIN { exit !(cn < official) }'; then
+			RESOLVED_NETWORK_PROFILE="cn"
+		else
+			RESOLVED_NETWORK_PROFILE="official"
+		fi
+		apply_network_profile "$RESOLVED_NETWORK_PROFILE"
+		printf '网络配置档：auto -> %s（official=%s，cn=%s）\n' \
+			"$RESOLVED_NETWORK_PROFILE" "${official_latency:-不可用}" "${cn_latency:-不可用}"
+		;;
+	official|cn)
+		apply_network_profile "$NETWORK_PROFILE"
+		;;
+	*)
+		fail "未知网络配置档：$NETWORK_PROFILE；可选值为 auto、official、cn。"
+		;;
+esac
+[[ "$NETWORK_PROFILE" == "auto" ]] || printf '网络配置档：%s\n' "$NETWORK_PROFILE"
+printf '  APT 主仓库：%s\n' "$APT_MAIN_MIRROR"
+printf '  Corepack/npm registry：%s\n' "$COREPACK_NPM_REGISTRY"
+printf '  pnpm registry：%s\n' "$PNPM_REGISTRY"
+printf '  Node headers：%s\n' "$NODE_DIST_URL"
+printf '  better-sqlite3：%s\n' "$BETTER_SQLITE3_BINARY_HOST"
 
 if [[ -n "$TARGET_TAG" && ! "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 	fail "目标版本必须是稳定 tag，例如 v0.2.3。"
@@ -261,8 +351,8 @@ fi
 git rev-parse --verify "refs/tags/${TARGET_TAG}^{commit}" > /dev/null
 
 log "当前实例"
-docker compose exec -T "$SERVICE_NAME" qyctl --version
-if ! docker compose exec -T "$SERVICE_NAME" qyctl update check; then
+docker compose exec -T "$SERVICE_NAME" qyctl --version </dev/null
+if ! docker compose exec -T "$SERVICE_NAME" qyctl update check </dev/null; then
 	printf '警告：旧版本更新检测失败，但目标 tag 已由 Git 验证，继续执行。\n' >&2
 fi
 printf '目标版本：%s\n' "$TARGET_TAG"
@@ -275,7 +365,7 @@ fi
 PHASE="整站备份"
 BACKUP_DIRECTORY="/app/data/backups/pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
 log "创建升级前整站备份"
-docker compose exec -T "$SERVICE_NAME" qyctl backup "$BACKUP_DIRECTORY" --yes
+docker compose exec -T "$SERVICE_NAME" qyctl backup "$BACKUP_DIRECTORY" --yes </dev/null
 
 PHASE="切换 Release"
 if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
@@ -293,7 +383,13 @@ fi
 
 PHASE="构建镜像"
 log "构建 $TARGET_TAG 镜像"
-docker compose --progress plain build --pull "$SERVICE_NAME"
+docker compose --progress plain build --pull \
+	--build-arg "QINGYAN_APT_MAIN_MIRROR=$APT_MAIN_MIRROR" \
+	--build-arg "QINGYAN_COREPACK_NPM_REGISTRY=$COREPACK_NPM_REGISTRY" \
+	--build-arg "QINGYAN_PNPM_REGISTRY=$PNPM_REGISTRY" \
+	--build-arg "QINGYAN_NODE_DIST_URL=$NODE_DIST_URL" \
+	--build-arg "QINGYAN_BETTER_SQLITE3_BINARY_HOST=$BETTER_SQLITE3_BINARY_HOST" \
+	"$SERVICE_NAME"
 
 PHASE="启动新容器"
 ACTIVATION_STARTED=true
@@ -303,7 +399,7 @@ wait_for_container_running
 
 PHASE="检查升级计划"
 log "UpgradePlan"
-docker compose exec -T "$SERVICE_NAME" qyctl upgrade --dry-run
+docker compose exec -T "$SERVICE_NAME" qyctl upgrade --dry-run </dev/null
 
 if ! confirm "确认上述 UpgradePlan 和备份后，应用数据升级？"; then
 	fail "用户未确认数据升级；新容器保持当前状态，未写入升级数据。"
@@ -311,19 +407,19 @@ fi
 
 PHASE="应用数据升级"
 log "应用数据升级"
-docker compose exec -T "$SERVICE_NAME" qyctl upgrade --yes
+docker compose exec -T "$SERVICE_NAME" qyctl upgrade --yes </dev/null
 
 PHASE="重启并验收"
 log "重启并等待健康状态"
 docker compose restart "$SERVICE_NAME"
 wait_for_health
 
-installed_version="$(docker compose exec -T "$SERVICE_NAME" qyctl --version)"
+installed_version="$(docker compose exec -T "$SERVICE_NAME" qyctl --version </dev/null)"
 printf '%s\n' "$installed_version"
 expected_version="${TARGET_TAG#v}"
 [[ "$installed_version" == "QingYan $expected_version" ]] || fail "容器版本与目标 tag 不一致：$installed_version。"
 
-if ! docker compose exec -T "$SERVICE_NAME" qyctl update check; then
+if ! docker compose exec -T "$SERVICE_NAME" qyctl update check </dev/null; then
 	printf '警告：最终 GitHub Release 检测失败，请稍后重试；容器版本和健康状态已验证。\n' >&2
 fi
 docker compose ps

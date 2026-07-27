@@ -232,14 +232,28 @@ Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级�
 仓库根目录运行一个入口：
 
 ```bash
-./scripts/update.sh
+./scripts/update.sh                             # auto，默认优选
+./scripts/update.sh --network-profile cn        # 中国大陆镜像
+./scripts/update.sh --network-profile official  # 官方源
 ```
+
+`auto` 会在备份和切换 release 前分别探测官方组与中国大陆镜像组的 APT、npm registry 和 Node headers，选择总耗时较低且可用的一组。配置档同时固定本次构建的 Corepack、pnpm、Node headers 与 better-sqlite3 下载地址；不会改写 Git origin，也不负责 Docker 基础镜像加速。
+
+显式选择 `official` 或 `cn` 时不做中途回退，脚本会打印所有实际使用的地址，便于复现构建与定位网络问题。
 
 `v0.2.2` 之前的 checkout 尚无该脚本，第一次更新使用固定版本的远程入口：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s --
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh)
 ```
+
+GitHub 直连困难的地区可使用同一固定 release 的代理入口：
+
+```bash
+bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh)
+```
+
+`v0.2.3` 远程脚本只用于引导旧 checkout，尚不接受 `--network-profile`；引导完成后使用当前 checkout 中的本地脚本。远程入口保留 `bash <(...)` 形式，以避免旧脚本的 `docker compose exec` 继承并消费 `curl | bash` 的标准输入。
 
 脚本默认 fetch tags 后选择最高的稳定 `vX.Y.Z` release，也允许指定目标版本：
 

@@ -438,7 +438,9 @@ qyctl restart
 
 裸运行 `qyctl` 或 `qingyanctl` 会显示帮助信息。`qyctl status/start/stop/restart` 面向 systemd 直接部署；Docker Compose 部署应使用 `docker compose ps/restart/logs` 管理容器生命周期。
 
-`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，并同时输出当前版本和最新版本。Docker Compose 的实际更新统一运行 `./scripts/update.sh`；脚本负责预检、整站备份、Release 切换、镜像构建、UpgradePlan 确认、数据升级和健康验收。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，并同时输出当前版本和最新版本。Docker Compose 的实际更新统一运行 `./scripts/update.sh`；脚本负责预检、整站备份、Release 切换、镜像构建、UpgradePlan 确认、数据升级和健康验收。
+
+更新器的 `--network-profile auto|official|cn` 只控制镜像构建阶段的 APT、Corepack、pnpm、Node headers 和 better-sqlite3 下载地址，不改写 Git origin 或 Docker 基础镜像来源。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
 
 ### Release 更新规则
 
