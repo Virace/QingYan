@@ -50,7 +50,6 @@ import {
 import { useAdminConfirmDialog } from "../shared/confirm-dialog";
 import {
 	diagnosticFlowRows,
-	issueText,
 	notificationChainTestBlockers,
 	notificationChainTestPollInterval,
 	notificationStatusBadge,
@@ -1328,10 +1327,10 @@ export function NotificationDiagnosticsPanel({
 		onSuccess: (result) => {
 			setRunId(result.runId);
 			setTestDialogOpen(false);
-			toast.success("真实评论邮件测试已创建");
+			toast.success("测试邮件已开始发送");
 		},
 		onError: (error) => {
-			toast.error(adminUiErrorMessage(error, "真实评论邮件测试创建失败。"));
+			toast.error(adminUiErrorMessage(error, "测试邮件发送失败。"));
 		},
 	});
 	const resultQuery = useQuery({
@@ -1343,7 +1342,7 @@ export function NotificationDiagnosticsPanel({
 	});
 
 	const diagnosticRows = diagnosticsQuery.data
-		? diagnosticFlowRows(diagnosticsQuery.data)
+		? diagnosticFlowRows(diagnosticsQuery.data, siteKey)
 		: [];
 	const selectedBlockers = diagnosticsQuery.data
 		? notificationChainTestBlockers(diagnosticsQuery.data, defaultCommentStatus)
@@ -1358,28 +1357,29 @@ export function NotificationDiagnosticsPanel({
 	const testDisabledReason = hasUnsavedNotificationChanges
 		? "通知设置有未保存改动，请先保存后再测试。"
 		: diagnosticsQuery.isPending
-			? "正在读取已保存配置。"
+			? "正在读取已保存的通知设置。"
 			: diagnosticsQuery.isError
-				? "静态检测加载失败，请刷新后重试。"
+				? "检查结果读取失败，请刷新后重试。"
 				: selectedBlockers.length > 0
-					? selectedBlockers.map(issueText).join("；")
+					? "请先完成上方“发送前检查”中的设置，再发送测试邮件。"
 					: resultIsActive
-						? "已有真实评论邮件测试正在执行。"
+						? "当前已有邮件测试正在进行。"
 						: "";
 
 	return (
 		<SettingsSection
-			title="评论邮件链路检测"
-			description="先按已保存配置静态判断阻断项；真实测试使用 QingYan 内置测试页和正式通知队列，不依赖内容站点。"
+			title="评论邮件检查与测试"
+			description={`检查“${siteKey}”站点已保存的通知设置，并告诉你需要完成哪些操作。`}
 		>
-			<div className="grid gap-4">
-				<div className="rounded-md border bg-background p-4">
-					<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-						<div>
-							<div className="flex flex-wrap items-center gap-2">
-								<p className="font-medium">静态配置检测</p>
+			<div className="grid min-w-0 gap-4">
+				<div className="min-w-0 rounded-md border bg-background p-4">
+					<div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between">
+						<div className="min-w-0">
+							<div className="flex min-w-0 flex-wrap items-center gap-2">
+								<p className="font-medium">发送前检查</p>
 								{diagnosticsQuery.data ? (
 									<Badge
+										className="shrink-0 whitespace-nowrap"
 										variant={
 											notificationStatusBadge(diagnosticsQuery.data.overall)
 												.variant
@@ -1392,133 +1392,128 @@ export function NotificationDiagnosticsPanel({
 									</Badge>
 								) : null}
 							</div>
-							<p className="mt-1 text-sm text-muted-foreground">
-								检测系统邮件、SMTP、通知
-								worker、站点人员接收路由和评论者订阅能力。
+							<p className="mt-1 max-w-[70ch] text-sm leading-6 text-muted-foreground">
+								根据已保存的设置，检查三种评论邮件是否可以发送。
 							</p>
 						</div>
 						<Button
 							type="button"
+							className="shrink-0"
 							variant="outline"
 							disabled={diagnosticsQuery.isFetching}
 							onClick={() => void diagnosticsQuery.refetch()}
 						>
-							{diagnosticsQuery.isFetching ? "检测中" : "重新检测"}
+							{diagnosticsQuery.isFetching ? "检查中" : "重新检查"}
 						</Button>
 					</div>
 
 					{diagnosticsQuery.isPending ? (
-						<p className="mt-4 text-sm text-muted-foreground">检测中……</p>
+						<p className="mt-4 text-sm text-muted-foreground">正在检查……</p>
 					) : null}
 					{diagnosticsQuery.isError ? (
-						<p className="mt-4 text-sm text-destructive">
+						<p className="mt-4 break-words text-sm text-destructive [overflow-wrap:anywhere]">
 							{adminUiErrorMessage(
 								diagnosticsQuery.error,
-								"通知配置检测失败。",
+								"通知设置检查失败。",
 							)}
 						</p>
 					) : null}
 					{diagnosticsQuery.data ? (
-						<>
-							<div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-								<Badge
-									variant={
-										notificationStatusBadge(
-											diagnosticsQuery.data.runtime.notificationWorker,
-										).variant
-									}
+						<div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
+							{diagnosticRows.map((row) => (
+								<div
+									key={row.key}
+									className="grid min-w-0 content-start gap-3 rounded-md border p-3 text-sm"
 								>
-									通知 worker：
-									{
-										notificationStatusBadge(
-											diagnosticsQuery.data.runtime.notificationWorker,
-										).label
-									}
-								</Badge>
-								<span>队列：{diagnosticsQuery.data.runtime.queueBackend}</span>
-								<span>
-									最近执行：
-									{diagnosticsQuery.data.runtime.lastTickAt ?? "暂无记录"}
-								</span>
-							</div>
-							<div className="mt-4 grid gap-3 lg:grid-cols-3">
-								{diagnosticRows.map((row) => (
-									<div
-										key={row.key}
-										className="grid content-start gap-2 rounded-md border p-3 text-sm"
-									>
-										<div className="flex items-start justify-between gap-2">
-											<p className="font-medium">{row.title}</p>
-											<Badge variant={row.badge.variant}>
-												{row.badge.label}
-											</Badge>
+									<div className="flex min-w-0 items-start justify-between gap-3">
+										<div className="min-w-0">
+											<p className="font-medium leading-5">{row.title}</p>
+											<p className="mt-1 text-xs leading-5 text-muted-foreground">
+												{row.description}
+											</p>
 										</div>
-										{row.recipients.length > 0 ? (
-											<p className="text-xs text-muted-foreground">
-												接收人：{row.recipients.join("；")}
-											</p>
-										) : (
-											<p className="text-xs text-muted-foreground">
-												当前没有已解析接收人
-											</p>
-										)}
-										{row.blockers.map((issue) => (
-											<p
-												key={`${row.key}:blocker:${issue.code}:${issue.path ?? ""}`}
-												className="text-xs text-destructive"
-											>
-												阻断：{issueText(issue)}
-											</p>
-										))}
-										{row.warnings.map((issue) => (
-											<p
-												key={`${row.key}:warning:${issue.code}:${issue.path ?? ""}`}
-												className="text-xs text-amber-700 dark:text-amber-300"
-											>
-												提醒：{issueText(issue)}
-											</p>
-										))}
+										<Badge
+											className="shrink-0 whitespace-nowrap"
+											variant={row.badge.variant}
+										>
+											{row.badge.label}
+										</Badge>
 									</div>
-								))}
-							</div>
-						</>
+									<p className="min-w-0 break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
+										{row.recipients.length > 0
+											? `接收人：${row.recipients.join("；")}`
+											: row.recipientEmptyText}
+									</p>
+									{row.blockerMessages.length > 0 ? (
+										<div className="min-w-0 text-xs leading-5 text-destructive">
+											<p className="font-medium">需要完成</p>
+											<ul className="mt-1 grid list-disc gap-1 pl-4">
+												{row.blockerMessages.map((message) => (
+													<li
+														key={message}
+														className="min-w-0 break-words [overflow-wrap:anywhere]"
+													>
+														{message}
+													</li>
+												))}
+											</ul>
+										</div>
+									) : null}
+									{row.warningMessages.length > 0 ? (
+										<div className="min-w-0 text-xs leading-5 text-amber-700 dark:text-amber-300">
+											<p className="font-medium">说明</p>
+											<ul className="mt-1 grid list-disc gap-1 pl-4">
+												{row.warningMessages.map((message) => (
+													<li
+														key={message}
+														className="min-w-0 break-words [overflow-wrap:anywhere]"
+													>
+														{message}
+													</li>
+												))}
+											</ul>
+										</div>
+									) : null}
+								</div>
+							))}
+						</div>
 					) : null}
 				</div>
 
-				<div className="rounded-md border bg-background p-4">
-					<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-						<div>
-							<p className="font-medium">真实评论邮件测试</p>
-							<p className="mt-1 text-sm text-muted-foreground">
-								链路一：评论 A → 站点人员；链路二：站点人员回复 → 评论 A
-								的用户。
+				<div className="min-w-0 rounded-md border bg-background p-4">
+					<div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between">
+						<div className="min-w-0">
+							<p className="font-medium">发送测试邮件</p>
+							<p className="mt-1 max-w-[70ch] text-sm leading-6 text-muted-foreground">
+								先向站点人员发送评论通知，再向你填写的邮箱发送回复提醒。
 							</p>
 							{testDisabledReason ? (
-								<p className="mt-2 text-xs text-destructive">
+								<p className="mt-2 max-w-[70ch] break-words text-xs leading-5 text-destructive [overflow-wrap:anywhere]">
 									{testDisabledReason}
 								</p>
 							) : null}
 						</div>
 						<Button
 							type="button"
+							className="shrink-0"
 							disabled={Boolean(testDisabledReason) || startMutation.isPending}
 							onClick={() => setTestDialogOpen(true)}
 						>
-							发送真实测试通知
+							开始邮件测试
 						</Button>
 					</div>
 
 					{runId && !resultQuery.data && !resultQuery.isError ? (
 						<p className="mt-4 text-sm text-muted-foreground">
-							已创建测试 {runId}，正在等待通知队列结果……
+							测试邮件正在发送，请稍候……
 						</p>
 					) : null}
 					{resultQuery.isError ? (
-						<div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-							<p className="text-destructive">
+						<div className="mt-4 flex min-w-0 flex-wrap items-center gap-3 text-sm">
+							<p className="min-w-0 break-words text-destructive [overflow-wrap:anywhere]">
 								{adminUiErrorMessage(
 									resultQuery.error,
-									"真实评论邮件测试结果读取失败。",
+									"邮件测试结果读取失败。",
 								)}
 							</p>
 							<Button
@@ -1527,68 +1522,67 @@ export function NotificationDiagnosticsPanel({
 								variant="outline"
 								onClick={() => void resultQuery.refetch()}
 							>
-								重试
+								重新读取
 							</Button>
 						</div>
 					) : null}
-					{testSummary && resultQuery.data ? (
-						<div className="mt-4 grid gap-3" aria-live="polite">
-							<div className="flex flex-wrap items-center gap-2">
-								<Badge variant={testSummary.badge.variant}>
+					{testSummary ? (
+						<div className="mt-4 grid min-w-0 gap-3" aria-live="polite">
+							<div className="flex min-w-0 flex-wrap items-center gap-2">
+								<Badge
+									className="shrink-0 whitespace-nowrap"
+									variant={testSummary.badge.variant}
+								>
 									{testSummary.badge.label}
 								</Badge>
-								<p className="text-sm">{testSummary.summary}</p>
+								<p className="min-w-0 break-words text-sm leading-6 [overflow-wrap:anywhere]">
+									{testSummary.summary}
+								</p>
 							</div>
-							<p className="text-xs text-muted-foreground">
-								{resultQuery.data.message}
-							</p>
-							<div className="grid gap-3 lg:grid-cols-2">
+							<div className="grid min-w-0 gap-3 lg:grid-cols-2">
 								{testSummary.legs.map((leg) => (
-									<div key={leg.key} className="rounded-md border p-3">
-										<div className="flex items-start justify-between gap-2">
-											<p className="font-medium">{leg.title}</p>
-											<Badge variant={leg.badge.variant}>
+									<div key={leg.key} className="min-w-0 rounded-md border p-3">
+										<div className="flex min-w-0 items-start justify-between gap-3">
+											<p className="min-w-0 font-medium leading-5">
+												{leg.title}
+											</p>
+											<Badge
+												className="shrink-0 whitespace-nowrap"
+												variant={leg.badge.variant}
+											>
 												{leg.badge.label}
 											</Badge>
 										</div>
 										<p className="mt-2 text-xs text-muted-foreground">
-											邮件服务商已接受：{leg.sentCount} 封
+											已交给邮件服务商：{leg.sentCount} 封
 										</p>
-										<details className="mt-3 text-xs">
-											<summary className="cursor-pointer font-medium">
-												投递详情
-											</summary>
-											<div className="mt-2 grid gap-2 text-muted-foreground">
-												<p>
-													任务 ID：
-													{leg.taskIds.length > 0
-														? leg.taskIds.join("；")
-														: "尚未创建"}
-												</p>
-												{leg.deliveries.map((delivery) => (
-													<div
-														key={delivery.deliveryId}
-														className="rounded border p-2"
-													>
-														<p>
-															{delivery.recipient} / {delivery.status}
-														</p>
-														<p>投递 ID：{delivery.deliveryId}</p>
-														{delivery.providerMessageId ? (
-															<p>
-																服务商消息 ID：
-																{delivery.providerMessageId}
+										{leg.deliveries.length > 0 ? (
+											<details className="mt-3 min-w-0 text-xs">
+												<summary className="cursor-pointer font-medium">
+													查看收件人状态
+												</summary>
+												<div className="mt-2 grid min-w-0 gap-2 text-muted-foreground">
+													{leg.deliveries.map((delivery, index) => (
+														<div
+															key={[leg.key, delivery.recipient, index].join(
+																":",
+															)}
+															className="grid min-w-0 gap-1 rounded border p-2"
+														>
+															<p className="break-words font-medium text-foreground [overflow-wrap:anywhere]">
+																{delivery.recipient}
 															</p>
-														) : null}
-														{delivery.error ? (
-															<p className="text-destructive">
-																{delivery.error.kind}：{delivery.error.message}
-															</p>
-														) : null}
-													</div>
-												))}
-											</div>
-										</details>
+															<p>{delivery.statusLabel}</p>
+															{delivery.errorMessage ? (
+																<p className="break-words text-destructive [overflow-wrap:anywhere]">
+																	{delivery.errorMessage}
+																</p>
+															) : null}
+														</div>
+													))}
+												</div>
+											</details>
+										) : null}
 									</div>
 								))}
 							</div>
@@ -1599,21 +1593,20 @@ export function NotificationDiagnosticsPanel({
 
 			<Dialog.Root open={testDialogOpen} onOpenChange={setTestDialogOpen}>
 				<Dialog.Content maxWidth="560px">
-					<Dialog.Title>确认发送真实评论邮件</Dialog.Title>
+					<Dialog.Title>发送评论邮件测试</Dialog.Title>
 					<Dialog.Description size="2">
-						这不是模拟预览。QingYan 会在内置测试页创建评论
-						A，并通过正式通知队列向当前配置匹配的站点人员发送邮件；随后模拟站点人员回复，将另一封邮件发送到下方地址。
+						{`系统会使用“${siteKey}”站点当前已保存的设置，先向站点人员发送评论通知，再向下方邮箱发送回复提醒。`}
 					</Dialog.Description>
 					<div className="mt-4 grid gap-4">
 						<div className="rounded-md border bg-muted/30 p-3 text-sm">
 							<p className="font-medium">发送范围</p>
-							<p className="mt-1 text-muted-foreground">
-								站点人员可能有多个匹配邮件接收人，因此实际邮件数量可能超过两封。
+							<p className="mt-1 leading-6 text-muted-foreground">
+								如果当前站点配置了多名邮件接收人，站点人员可能会收到多封测试邮件。
 							</p>
 						</div>
 						<Field
-							label="评论 A 的用户邮箱"
-							description="第二条链路会把真实回复提醒发送到此邮箱。"
+							label="接收回复提醒的邮箱"
+							description="第二封测试邮件会发送到这个邮箱。"
 						>
 							<Input
 								type="email"
@@ -1623,11 +1616,8 @@ export function NotificationDiagnosticsPanel({
 							/>
 						</Field>
 						{startMutation.isError ? (
-							<p className="text-sm text-destructive">
-								{adminUiErrorMessage(
-									startMutation.error,
-									"真实评论邮件测试创建失败。",
-								)}
+							<p className="break-words text-sm text-destructive [overflow-wrap:anywhere]">
+								{adminUiErrorMessage(startMutation.error, "测试邮件发送失败。")}
 							</p>
 						) : null}
 						<div className="flex justify-end gap-2">
@@ -1641,7 +1631,7 @@ export function NotificationDiagnosticsPanel({
 								disabled={!commenterEmail.trim() || startMutation.isPending}
 								onClick={() => startMutation.mutate()}
 							>
-								{startMutation.isPending ? "正在创建" : "确认并发送"}
+								{startMutation.isPending ? "发送中" : "发送测试邮件"}
 							</Button>
 						</div>
 					</div>
