@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 import {
@@ -18,6 +18,7 @@ import { serializeSiteModerationSettings } from "../../src/modules/comments/mode
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
+import { BackendUserNotificationPlanner } from "../../src/modules/notifications/backend-user-notification-planner";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
@@ -31,6 +32,7 @@ import { createTestApp } from "../support/test-fixtures";
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
 	}
@@ -227,6 +229,34 @@ describe("comment notifications", () => {
 				eventFamily,
 			}),
 		]);
+	});
+
+	it("keeps the public comment successful when backend notification planning fails", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "post:backend-planner-failure");
+		const planner = vi
+			.spyOn(BackendUserNotificationPlanner.prototype, "planForCommentEvent")
+			.mockRejectedValueOnce(new Error("planner unavailable"));
+
+		const response = await postComment(fixture, {
+			pageKey: "post:backend-planner-failure",
+			parentCommentId: null,
+			email: "planner-failure@example.com",
+			content: "comment survives notification planner failure",
+			notifyOnReply: false,
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(planner).toHaveBeenCalledOnce();
+		expect(
+			await fixture.app.db
+				.select({ id: comments.id, contentRaw: comments.contentRaw })
+				.from(comments),
+		).toContainEqual({
+			id: response.json().comment.id,
+			contentRaw: "comment survives notification planner failure",
+		});
 	});
 
 	it("does not create a backend new-comment delivery for a staff reply", async () => {

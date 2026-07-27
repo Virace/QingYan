@@ -11,7 +11,7 @@ import { TaskRunWorker } from "../../src/modules/tasks/task-run-worker";
 import { TaskRunner } from "../../src/modules/tasks/task-runner";
 import { TaskTypeRegistry } from "../../src/modules/tasks/task-type-registry";
 import {
-	applyInitialMigration,
+	applyCurrentMigrations,
 	createTestConfig,
 	createTestWorkspace,
 	type TestWorkspace,
@@ -42,7 +42,7 @@ afterEach(async () => {
 
 async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-run-worker-");
-	applyInitialMigration(workspace.databaseFile);
+	applyCurrentMigrations(workspace.databaseFile);
 	const clients = createDatabaseClients(workspace.databaseFile);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
@@ -263,7 +263,7 @@ describe("TaskRunWorker", () => {
 
 	it("starts with the application and consumes queued scheduled task runs", async () => {
 		const workspace = createTestWorkspace("qingyan-task-worker-startup-");
-		applyInitialMigration(workspace.databaseFile);
+		applyCurrentMigrations(workspace.databaseFile);
 		const clients = createDatabaseClients(workspace.databaseFile);
 		let runId = "";
 		try {
