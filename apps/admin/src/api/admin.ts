@@ -540,6 +540,44 @@ export interface NotificationDiagnostic {
 	}>;
 }
 
+export type NotificationChainTestStatus =
+	| "checking"
+	| "blocked"
+	| "queued"
+	| "running"
+	| "passed"
+	| "failed"
+	| "timed_out";
+
+export interface NotificationChainTestDelivery {
+	deliveryId: string;
+	recipient: string;
+	status: string;
+	providerMessageId?: string;
+	error?: {
+		kind: string;
+		message: string;
+	};
+}
+
+export interface NotificationChainTestFlow {
+	status: NotificationChainTestStatus;
+	taskIds: string[];
+	deliveries: NotificationChainTestDelivery[];
+}
+
+export interface NotificationChainTestResult {
+	runId: string;
+	status: NotificationChainTestStatus;
+	createdAt: string;
+	finishedAt: string | null;
+	flows: {
+		adminComment: NotificationChainTestFlow;
+		commenterReply: NotificationChainTestFlow;
+	};
+	message: string;
+}
+
 export interface AdminSystemSettings {
 	admin: {
 		session: {
@@ -1121,6 +1159,27 @@ export function getSettings(siteKey: string) {
 export function getNotificationDiagnostics(siteKey: string) {
 	return requestJson<NotificationDiagnostic>(
 		`/api/admin/sites/${encodeURIComponent(siteKey)}/notification-diagnostics`,
+	);
+}
+
+export function startNotificationChainTest(
+	siteKey: string,
+	commenterEmail: string,
+) {
+	return requestJson<{ runId: string; status: "queued" }>(
+		`/api/admin/sites/${encodeURIComponent(siteKey)}/notification-chain-tests`,
+		{
+			method: "POST",
+			body: JSON.stringify({ commenterEmail }),
+		},
+	);
+}
+
+export function getNotificationChainTest(siteKey: string, runId: string) {
+	return requestJson<NotificationChainTestResult>(
+		`/api/admin/sites/${encodeURIComponent(
+			siteKey,
+		)}/notification-chain-tests/${encodeURIComponent(runId)}`,
 	);
 }
 

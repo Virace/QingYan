@@ -1286,7 +1286,7 @@ export class AdminManagementService {
 					"通知接收人必须是启用状态的后台用户。",
 				);
 			}
-			if (!candidate.siteAccessId) {
+			if (!candidate.siteAccessId && candidate.groupKey !== "admin") {
 				throw new AppError(
 					403,
 					"ADMIN_NOTIFICATION_RECIPIENT_SITE_ACCESS_REQUIRED",

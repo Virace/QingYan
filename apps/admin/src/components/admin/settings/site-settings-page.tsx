@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
 import { Tabs } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import {
+	type AdminSettings,
 	getSettings,
 	listAdminUsers,
 	patchAdminSiteSettingsSection,
-	type AdminSettings,
 	type SiteNotificationRecipient,
 } from "@/api/admin";
 import { adminUiErrorMessage } from "@/api/client";
@@ -21,44 +21,46 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-
-import {
-	BooleanField,
-	EmptyState,
-	Field,
-	SettingsSection,
-	SettingsToggleGroup,
-	inputClass,
-	textareaClass,
-} from "../shared/admin-ui";
-import { useAdminConfirmDialog } from "../shared/confirm-dialog";
 import {
 	contentPolicyLabels,
 	eligibleNotificationRecipientUsers,
 	siteNotificationEventLabels,
 } from "../content/notification-ui-model";
-import { SiteNotificationRecipientDialog } from "./notification-settings-panels";
+import {
+	BooleanField,
+	EmptyState,
+	Field,
+	inputClass,
+	SettingsSection,
+	SettingsToggleGroup,
+	textareaClass,
+} from "../shared/admin-ui";
+import { useAdminConfirmDialog } from "../shared/confirm-dialog";
+import {
+	NotificationDiagnosticsPanel,
+	SiteNotificationRecipientDialog,
+} from "./notification-settings-panels";
 import {
 	buildSettingsErrorModel,
 	firstFieldError,
 } from "./settings-error-model";
 import {
-	showCaptchaThresholdDetails,
-	showLowTrustCounterHint,
-} from "./settings-visibility";
-import {
-	SettingsSaveError,
 	buildSiteSettingsSectionPayload,
 	initialSettingsTab,
 	isSameSettingsPayload,
 	parseSitemapUrlList,
 	replaceRecipient,
 	replaceSettingsTabQuery,
+	SettingsSaveError,
+	type SiteSettingsTab,
 	siteSectionSaveLabels,
 	siteSettingsTabs,
-	type SiteSettingsTab,
 	updateRecipient,
 } from "./settings-shared";
+import {
+	showCaptchaThresholdDetails,
+	showLowTrustCounterHint,
+} from "./settings-visibility";
 export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
@@ -89,12 +91,17 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 				input.payload,
 			),
 		meta: { suppressGlobalToast: true },
-		onSuccess: (settings) => {
+		onSuccess: (settings, input) => {
 			setDraft(settings);
 			queryClient.setQueryData(
 				["admin", "settings", resolvedSiteKey],
 				settings,
 			);
+			if (input.section === "notifications") {
+				void queryClient.invalidateQueries({
+					queryKey: ["admin", "notification-diagnostics", resolvedSiteKey],
+				});
+			}
 			toast.success("站点设置已保存");
 		},
 		onError: (error) => {
@@ -171,6 +178,12 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		mutation.error,
 		"站点设置保存失败。",
 	);
+	const notificationDraftDirty = query.data
+		? !isSameSettingsPayload(
+				buildSiteSettingsSectionPayload("notifications", query.data),
+				buildSiteSettingsSectionPayload("notifications", draft),
+			)
+		: false;
 	const notificationRecipients = draft.notifications.backend.recipients ?? [];
 	const notificationCandidateUsers = eligibleNotificationRecipientUsers(
 		usersQuery.data?.users ?? [],
@@ -1177,6 +1190,9 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 												saveError,
 												"notifications.commenter.replyEmailDefaultChecked",
 											)}
+											disabled={
+												!draft.notifications.commenter.replyEmailEnabled
+											}
 											onCheckedChange={(replyEmailDefaultChecked) =>
 												setDraft({
 													...draft,
@@ -1322,6 +1338,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 											) : null}
 										</div>
 									</SettingsSection>
+									<NotificationDiagnosticsPanel
+										siteKey={draft.siteKey}
+										defaultCommentStatus={draft.comments.defaultStatus}
+										hasUnsavedNotificationChanges={notificationDraftDirty}
+									/>
 								</div>
 							</Tabs.Content>
 							<Tabs.Content value="pageRegistry">

@@ -23,10 +23,11 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 - 评论首屏 bootstrap：`GET /qingyan/api/comments/bootstrap`
 - 评论线程分页：`GET /qingyan/api/comments/thread`
 - 评论创建、投票、验证码验证
-- bootstrap 返回 `features` 能力开关和 `data.comments.form.allow / require / limits`，前端可先按能力判断再动态渲染 `nickname | email | website` 必填项与输入长度
+- bootstrap 返回 `features` 能力开关、回复提醒 `defaultChecked` 和 `data.comments.form.allow / require / limits`，前端可先按能力判断再动态渲染 `nickname | email | website` 必填项与输入长度
 - 页面点赞
 - 后台登录（管理员登录验证码 + 5 次失败永久封禁 IP）
 - 后台评论审核、黑名单、白名单、页面管理、用户管理、访客管理、站点总览、站点设置、系统设置
+- 后台通知页提供三条评论邮件静态诊断和 QingYan 内置双链路真实邮件测试
 - 本地 `logs/access` 与 `logs/app` 双通道日志
 - 文本 `.log` + 结构化 `.jsonl` 双格式落盘
 - 后台可动态调整日志等级和保留天数
@@ -206,6 +207,23 @@ pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backu
 - 文档页：`GET /qingyan/docs`
 
 公开 OpenAPI 只覆盖内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口。Admin Console Web 使用的 `/api/admin/*` 管理接口不进入公开 OpenAPI；开发者调试或扩展内置后台时可参考 [`docs/admin-console-api.md`](docs/admin-console-api.md)。
+
+## 评论邮件排障
+
+评论邮件不是一个总开关，至少有三层独立配置：系统邮件与 SMTP、普通评论者回复邮件、
+后台用户通知与站点人员 route。只打开其中一层，不代表另外两条链路已经可发送。
+
+在 Admin Console 的“站点设置 → 通知”中可以：
+
+- 查看待审核评论、直接发布评论和评论回复三条 email flow 的 saved-config blocker；
+- 设置公开评论框“回复提醒”是否默认勾选；
+- 输入一个评论者邮箱，使用 QingYan 内置测试页走真实
+  planner → queue → worker → template → email adapter 链路。
+
+真实测试第一条线路把评论 A 发送给当前匹配的站点人员 email route，第二条线路模拟站点人员
+回复并通知评论 A 的用户；不要求内容站点创建页面或提供前端。结果中的 `passed` / `sent`
+表示邮件服务商接受了发送请求，不等于邮件已经进入收件箱，最终仍需核对两个收件箱、垃圾邮件
+和服务商退信。
 
 ## Docker / Compose
 

@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
 import {
+	adminGroups,
+	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
 	siteNotificationRecipientRoutes,
@@ -248,9 +250,12 @@ export class BackendUserNotificationRecipientsRepository {
 				email: adminUsers.email,
 				status: adminUsers.status,
 				deletedAt: adminUsers.deletedAt,
+				groupKey: adminGroups.key,
 				siteAccessId: adminUserSiteAccess.id,
 			})
 			.from(adminUsers)
+			.innerJoin(adminUserGroups, eq(adminUserGroups.userId, adminUsers.id))
+			.innerJoin(adminGroups, eq(adminGroups.id, adminUserGroups.groupId))
 			.leftJoin(
 				adminUserSiteAccess,
 				and(
@@ -279,7 +284,9 @@ export class BackendUserNotificationRecipientsRepository {
 				displayName: adminUsers.displayName,
 			})
 			.from(adminUsers)
-			.innerJoin(
+			.innerJoin(adminUserGroups, eq(adminUserGroups.userId, adminUsers.id))
+			.innerJoin(adminGroups, eq(adminGroups.id, adminUserGroups.groupId))
+			.leftJoin(
 				adminUserSiteAccess,
 				and(
 					eq(adminUserSiteAccess.userId, adminUsers.id),
@@ -291,6 +298,7 @@ export class BackendUserNotificationRecipientsRepository {
 					inArray(adminUsers.id, input.userIds),
 					eq(adminUsers.status, "active"),
 					isNull(adminUsers.deletedAt),
+					or(eq(adminGroups.key, "admin"), isNotNull(adminUserSiteAccess.id)),
 				),
 			);
 	}

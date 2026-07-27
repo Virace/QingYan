@@ -269,6 +269,46 @@ describe("backend user notification planner", () => {
 			}),
 		]);
 	});
+	it("plans notifications for global admins without explicit site access rows", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: "global-admin-planner-recipient",
+			siteKey: "fangyuan",
+			email: "global-admin-planner@example.test",
+			groupKey: "admin",
+		});
+		await fixture.app.db
+			.delete(adminUserSiteAccess)
+			.where(eq(adminUserSiteAccess.userId, user.id));
+		const recipients = new BackendUserNotificationRecipientsRepository(
+			fixture.app.db,
+		);
+		await recipients.replaceSiteRecipients({
+			siteId: site.id,
+			recipients: [
+				{
+					userId: user.id,
+					channels: ["email"],
+					events: ["admin_comment_pending"],
+					includeCommentContent: "summary",
+					enabled: true,
+				},
+			],
+		});
+
+		const planned = await new BackendUserNotificationPlanner(
+			fixture.app.db,
+		).planForCommentEvent(commentEvent({ siteId: site.id }));
+
+		expect(planned.deliveries).toEqual([
+			expect.objectContaining({
+				recipientUserId: user.id,
+				recipientAddressSnapshot: "global-admin-planner@example.test",
+				eventFamily: "admin_comment_pending",
+			}),
+		]);
+	});
 
 	it("does not use verifiedAuthor.email and does not plan spam, imports, or pending-to-approved duplicates", async () => {
 		const fixture = await createTestApp();

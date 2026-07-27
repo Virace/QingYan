@@ -178,7 +178,7 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 - 评论请求元数据采集：IP、User-Agent、是否启用 IP 属地、属地显示精度、设备解析。
 - 页面点赞开关。
 - 页面来源注册设置：`pageRegistry.mode`、权威 sitemap URL 列表、未知页面响应、健康宽限时间和紧急锁定。
-- 评论者回复邮件通知开关和后台用户通知开关。
+- 评论者回复邮件通知开关、公开评论框“回复提醒”默认勾选状态和后台用户通知开关。
 
 这些字段不再从 YAML 读取，也不存在 `runtime_settings` fallback。
 
@@ -250,12 +250,26 @@ Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion�
 
 评论通知配置分为站点级和系统级：
 
+- 系统级 `system_settings.mail.enabled` 与 `mail.smtp.*` 控制整个实例是否具备邮件发送能力。SMTP 未完整配置时，无论站点级开关如何设置，email 都不能投递。
 - 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification.enabled` 计算，不影响后台用户通知。
+- 站点级 `site_settings.commenter_reply_email_default_checked` 对应 Admin API `notifications.commenter.replyEmailDefaultChecked`，只控制公开评论框首次显示时的初始勾选状态。能力不可用时 bootstrap 固定返回 `defaultChecked=false`；评论创建仍必须显式提交 `options.notifyOnReply=true`，不能把默认勾选当作服务端订阅。
 - 站点级 `site_settings.backend_notifications_enabled` 对应 Admin API `notifications.backend.enabled`，只控制是否为后台用户创建站点通知任务，不影响普通评论者回复邮件订阅。
 - 站点级 `site_notification_recipients` 对应 Admin API `notifications.backend.recipients`，引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
 - 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。
 - 系统级 `notification_channel_configs` 维护具体通知渠道配置实例。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点接收人 route 使用 `channelConfigId` 选择具体实例。
 - 通知模板由 `notification_templates` 保存自定义覆盖；没有覆盖时使用内置默认模板。
+
+这三层必须独立排查：系统邮件/SMTP 是 email transport；评论者回复邮件是普通评论者 opt-in
+链路；后台用户通知是站点人员事件和 route 链路。开启其中一层不会自动开启另外两层。
+Admin Console 的“通知”页会按已保存配置静态检查“待审核评论 → 站点人员”“直接发布评论
+→ 站点人员”“站点人员回复 → 原评论者”三条 flow，并返回 blocker 的 canonical setting
+path。未保存的页面草稿不会参与静态检测。
+
+真实评论邮件测试不要求内容站点创建页面或提供前端。QingYan 会使用内置
+`notification_test` 线程和正式 planner/queue/worker/template/email adapter，先创建评论 A
+测试站点人员邮件，再模拟站点人员回复测试评论者邮件。真实测试只选择 email route，不发送
+Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商接受请求，不证明进入
+收件箱；最后仍需人工核对两个收件箱、垃圾邮件和退信。
 
 队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
 
