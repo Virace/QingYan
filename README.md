@@ -164,39 +164,17 @@ qyctl update check
 qyctl update plan
 ```
 
-`update check` 只检测 `Virace/QingYan` published release，不修改程序。Docker Compose 部署在仓库根目录运行更新器，并可选择构建依赖的网络配置档：
+`update check` 只检测 `Virace/QingYan` published release，不修改程序。Docker Compose 部署在仓库根目录运行一个入口即可完成更新：
 
 ```bash
-./scripts/update.sh                             # 自动优选
-./scripts/update.sh --network-profile cn        # 中国大陆镜像
-./scripts/update.sh --network-profile official  # 官方源
+./scripts/update.sh
 ```
 
-`--network-profile` 控制一次构建中的 APT、Corepack、pnpm、Node headers 和 better-sqlite3 预编译包来源：
-
-- `auto`（默认）：分别探测 `official` 和 `cn` 的 APT、npm registry、Node headers，以总耗时较低且可用的一组完成本次构建。
-- `official`：使用 Debian、npm、Node.js 和 GitHub 官方地址。
-- `cn`：APT 主仓库使用 TUNA，Corepack/pnpm、Node headers 与 better-sqlite3 预编译包使用 npmmirror；Debian security 仍使用官方安全源。
-
-`auto` 会在备份和切换 release 前完成探测，并打印最终选择及全部实际地址；选定后不会在构建中途混用或静默回退。配置档不改写 Git origin，也不负责 Docker 基础镜像加速。
-
-`v0.2.2` 之前的 checkout 尚无该脚本，可使用固定版本的远程入口完成首次更新。GitHub
-直连正常时优先使用原始地址：
+`v0.2.2` 之前的 checkout 尚无该脚本，可使用固定版本的远程入口完成首次更新：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh)
+curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s --
 ```
-
-GitHub 直连困难的地区可以使用代理入口：
-
-```bash
-bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh)
-```
-
-两个入口执行的是同一份固定 release 脚本。`v0.2.3` 只承担旧 checkout 的首次引导，尚不接受
-`--network-profile`；完成引导后使用当前 checkout 中的 `./scripts/update.sh`。`v0.2.3` 的
-`docker compose exec` 还可能继承 `curl | bash` 的标准输入并提前消费脚本，因此远程入口必须使用
-上述 `bash <(...)` 形式；新版更新器已隔离该输入，这种写法仍兼容新旧版本。
 
 脚本默认选择最高的稳定 release tag，依次执行预检、整站备份、镜像构建、UpgradePlan 确认、数据升级和健康验收；可显式传入目标 tag，并用 `--yes` 接受两次确认。生产侧修改过的 `compose.yml` 和未跟踪运维文件会被安全暂存并在新 tag 上恢复，其他已跟踪源码改动仍会阻止更新。
 
