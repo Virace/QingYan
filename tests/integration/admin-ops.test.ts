@@ -95,7 +95,7 @@ describe("admin ops routes", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			version: {
-				current: "0.2.2",
+				current: "0.2.3",
 			},
 			update: {
 				supported: true,
@@ -106,7 +106,7 @@ describe("admin ops routes", () => {
 				},
 				check: {
 					state: "not_checked",
-					currentVersion: "0.2.2",
+					currentVersion: "0.2.3",
 					autoUpdatable: false,
 					source: {
 						provider: "github-releases",

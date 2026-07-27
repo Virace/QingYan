@@ -238,36 +238,36 @@ Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级�
 `v0.2.2` 之前的 checkout 尚无该脚本，第一次更新使用固定版本的远程入口：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.2/scripts/update.sh)
+curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s --
 ```
 
 脚本默认 fetch tags 后选择最高的稳定 `vX.Y.Z` release，也允许指定目标版本：
 
 ```bash
-./scripts/update.sh v0.2.2
+./scripts/update.sh v0.2.3
 ```
 
 默认交互流程只需要确认两次：第一次确认目标版本和整站备份，第二次在脚本显示脱敏
 `UpgradePlan` 后确认数据升级。明确接受全部确认时可以使用：
 
 ```bash
-./scripts/update.sh --yes v0.2.2
+./scripts/update.sh --yes v0.2.3
 ```
 
 脚本内部负责：
 
-1. 校验 Git、Docker、Compose、运行中的 `qingyan` 容器和 clean worktree。
+1. 校验 Git、Docker、Compose 和运行中的 `qingyan` 容器；仅允许已跟踪的 `compose.yml` 存在本地修改。
 2. 用旧容器的 `qyctl backup` 创建升级前整站备份。
-3. 获取并切换目标 release tag，以 plain progress 构建新镜像。
+3. 安全暂存 `compose.yml` 与未跟踪部署文件，切换目标 release tag 后原样恢复，并以 plain progress 构建新镜像。
 4. 启动新容器并确认进程运行，显示 `qyctl upgrade --dry-run` 的 UpgradePlan。
 5. 确认后应用数据升级，重启并校验容器版本、更新状态和健康状态。
 
-在新容器激活前发生失败，脚本会自动恢复原 Git revision；运行中的旧容器不会被构建失败替换。
+在新容器激活前发生失败，脚本会自动恢复原 Git revision 和原本的本地部署文件；运行中的旧容器不会被构建失败替换。
 新容器已经开始激活或数据升级后发生失败时，脚本不会擅自覆盖数据库或配置，而会输出失败
 阶段、原 revision、整站备份路径和最近 200 行容器日志。
 
-生产目录必须保持为未修改的 Git checkout；`config/`、`data/` 和 `logs/` 由 `.gitignore`
-排除，不会触发 clean worktree 拒绝。更新成功后仍应完成评论邮件双链路的真实收件箱验收。
+生产目录可以保留本地 `compose.yml` 定制和未跟踪运维文件；更新器会在切换 tag 前安全暂存、在新 tag 上恢复，并在成功后保持原 Git 状态。其他已跟踪源码改动仍会在备份前阻断更新。`config/`、`data/` 和 `logs/` 由 `.gitignore`
+排除，不参与这次暂存。更新成功后仍应完成评论邮件双链路的真实收件箱验收。
 
 ## 回滚
 
