@@ -443,7 +443,7 @@ qyctl restart
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
 - 首个正式 release 为 `v0.1.0`。
-- 当前正式 release 为 `v0.2.3`。
+- 当前正式 release 为 `v0.2.4`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 
