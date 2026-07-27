@@ -5,9 +5,7 @@ import type {
 	NotificationChannel,
 	NotificationChannelConfig,
 	NotificationContentPolicy,
-	SiteNotificationRoute,
 	SiteNotificationEvent,
-	SiteNotificationRecipient,
 } from "../../../api/admin";
 import type { AdminTaskCenterItem } from "../../../api/ops";
 
@@ -129,7 +127,7 @@ export function mailChannelTestState(input: {
 		missing.push("系统邮件未启用");
 	}
 	if (!input.settings.mail.smtp.host.trim()) {
-		missing.push("SMTP Host 不能为空");
+		missing.push("邮件服务器地址不能为空");
 	}
 	if (!input.settings.mail.smtp.from.trim()) {
 		missing.push("发件人不能为空");
@@ -153,13 +151,7 @@ export function notificationTestResultSummary(result: {
 	const channel =
 		result.channelName ??
 		(result.channel ? notificationChannelLabels[result.channel] : "通知通道");
-	return `已创建测试任务 ${result.taskId}，投递记录 ${result.deliveryId}，通道 ${channel}，收件人 ${result.recipient}。`;
-}
-
-export function availableNotificationChannelConfigs(
-	configs: NotificationChannelConfig[],
-) {
-	return configs.filter((config) => config.enabled);
+	return `测试通知已交给${channel}发送，接收目标：${result.recipient}。可在任务中心查看结果。`;
 }
 
 export function toggleListValue<T extends string>(
@@ -199,54 +191,6 @@ export function writeSettingsTabToSearch(
 	return nextSearch ? `?${nextSearch}` : "";
 }
 
-export function buildRecipientInput(
-	recipient: SiteNotificationRecipient,
-): Omit<SiteNotificationRecipient, "username" | "email" | "displayName"> {
-	return {
-		userId: recipient.userId,
-		channels: recipient.channels,
-		events: recipient.events,
-		routes: recipient.routes,
-		includeCommentContent: recipient.includeCommentContent,
-		rateLimitProfile: recipient.rateLimitProfile,
-		enabled: recipient.enabled,
-	};
-}
-
-export function addRecipientRoute(
-	recipient: SiteNotificationRecipient,
-	route: SiteNotificationRoute,
-): SiteNotificationRecipient {
-	const exists = recipient.routes.some(
-		(item) =>
-			item.eventType === route.eventType &&
-			item.channelConfigId === route.channelConfigId,
-	);
-	return exists
-		? recipient
-		: {
-				...recipient,
-				routes: [...recipient.routes, route],
-			};
-}
-
-export function removeRecipientRoute(
-	recipient: SiteNotificationRecipient,
-	route: Pick<SiteNotificationRoute, "eventType" | "channelConfigId">,
-): SiteNotificationRecipient {
-	const nextRoutes = recipient.routes.filter(
-		(item) =>
-			item.eventType !== route.eventType ||
-			item.channelConfigId !== route.channelConfigId,
-	);
-	return nextRoutes.length === 0
-		? recipient
-		: {
-				...recipient,
-				routes: nextRoutes,
-			};
-}
-
 export function eligibleNotificationRecipientUsers(
 	users: AdminUser[],
 	siteKey: string,
@@ -257,31 +201,6 @@ export function eligibleNotificationRecipientUsers(
 			!user.deletedAt &&
 			(user.groupKey === "admin" || user.siteKeys.includes(siteKey)),
 	);
-}
-
-export function makeRecipientFromUser(
-	user: AdminUser,
-): SiteNotificationRecipient {
-	return {
-		userId: user.id,
-		username: user.username,
-		email: user.email,
-		displayName: user.displayName,
-		channels: ["email"],
-		events: ["admin_comment_pending"],
-		routes: [
-			{
-				eventType: "admin_comment_pending",
-				channelConfigId: "email:default",
-				channelType: "email",
-				channelName: "默认邮件",
-				enabled: true,
-			},
-		],
-		includeCommentContent: "summary",
-		rateLimitProfile: null,
-		enabled: true,
-	};
 }
 
 export type CommenterNotificationView =

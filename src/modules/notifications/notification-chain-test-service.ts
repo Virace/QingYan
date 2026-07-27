@@ -229,7 +229,19 @@ export class NotificationChainTestService {
 		const blockers = uniqueIssues([
 			...(adminFlow?.blockers ?? []),
 			...(commenterFlow?.blockers ?? []),
+			...(adminFlow?.warnings.filter(
+				(warning) => warning.code === "backend_notifications_disabled",
+			) ?? []),
 		]);
+		if (adminFlow && adminFlow.recipients.length === 0) {
+			blockers.push({
+				code: "event_email_recipient_required",
+				message:
+					defaultStatus === "pending"
+						? "请先为“新待审评论”选择至少一名站点人员并应用更改。"
+						: "请先为“直接发布评论”选择至少一名站点人员并应用更改。",
+			});
+		}
 		if (!defaultStatus || !adminFlow) {
 			blockers.push({
 				code: "unsupported_default_comment_status",

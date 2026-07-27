@@ -31,11 +31,11 @@ import {
 } from "../../db/schema";
 import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { CommentStatus } from "../comments/moderation-types";
-import {
-	BackendUserNotificationRecipientsRepository,
-	type SiteNotificationRecipientInput,
-} from "../notifications/backend-user-recipients-repository";
 import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
+import {
+	type SiteNotificationEventInput,
+	SiteNotificationEventsRepository,
+} from "../notifications/site-notification-events-repository";
 import { matchBlacklistRule } from "../shared/blacklist-match";
 import { hashCommentEmail, renderCommentHtml } from "../shared/comment-content";
 import { resolvePublicPageUrl } from "../shared/page-url";
@@ -2213,32 +2213,12 @@ export class AdminRepository {
 		return settings;
 	}
 
-	public async listSiteNotificationRecipients(siteId: number) {
-		return new BackendUserNotificationRecipientsRepository(
-			this.db,
-		).listSiteRecipients(siteId);
+	public async listSiteNotificationEvents(siteId: number) {
+		return new SiteNotificationEventsRepository(this.db).listSiteEvents(siteId);
 	}
 
 	public async listNotificationChannelConfigs() {
 		return new NotificationChannelConfigsRepository(this.db).list();
-	}
-
-	public async replaceSiteNotificationRecipients(input: {
-		siteId: number;
-		recipients: SiteNotificationRecipientInput[];
-	}) {
-		return new BackendUserNotificationRecipientsRepository(
-			this.db,
-		).replaceSiteRecipients(input);
-	}
-
-	public async getNotificationRecipientCandidate(input: {
-		siteId: number;
-		userId: number;
-	}) {
-		return new BackendUserNotificationRecipientsRepository(
-			this.db,
-		).getUserForRecipientValidation(input);
 	}
 
 	public async updateSiteSettings(
@@ -2270,41 +2250,62 @@ export class AdminRepository {
 			commenterReplyEmailEnabled?: boolean;
 			commenterReplyEmailDefaultChecked?: boolean;
 			backendNotificationsEnabled?: boolean;
+			notificationEvents?: SiteNotificationEventInput[];
 		},
 	) {
-		await this.db
-			.update(siteSettings)
-			.set({
-				commentsEnabled: input.commentsEnabled,
-				defaultStatus: input.defaultStatus,
-				maxDepth: input.maxDepth,
-				rootLimit: input.rootLimit,
-				commentRequireJson: input.commentRequireJson,
-				allowWebsite: input.allowWebsite,
-				allowPageLike: input.allowPageLike,
-				captchaMode: input.captchaMode,
-				captchaThresholdWindowSec: input.captchaThresholdWindowSec,
-				captchaThresholdMaxActions: input.captchaThresholdMaxActions,
-				abuseGuardEnabled: input.abuseGuardEnabled,
-				abuseGuardWindowSec: input.abuseGuardWindowSec,
-				abuseGuardMaxWriteActions: input.abuseGuardMaxWriteActions,
-				autoBlacklistEnabled: input.autoBlacklistEnabled,
-				autoBlacklistScope: input.autoBlacklistScope,
-				autoBlacklistTtlSec: input.autoBlacklistTtlSec,
-				commentInputLimitsJson: input.commentInputLimitsJson,
-				commentMetadataJson: input.commentMetadataJson,
-				verifiedAuthorJson: input.verifiedAuthorJson,
-				staffDisplayJson: input.staffDisplayJson,
-				moderationJson: input.moderationJson,
-				pageRegistryJson: input.pageRegistryJson,
-				engagementJson: input.engagementJson,
-				commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
-				commenterReplyEmailDefaultChecked:
-					input.commenterReplyEmailDefaultChecked,
-				backendNotificationsEnabled: input.backendNotificationsEnabled,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(siteSettings.siteId, siteId));
+		const values = {
+			commentsEnabled: input.commentsEnabled,
+			defaultStatus: input.defaultStatus,
+			maxDepth: input.maxDepth,
+			rootLimit: input.rootLimit,
+			commentRequireJson: input.commentRequireJson,
+			allowWebsite: input.allowWebsite,
+			allowPageLike: input.allowPageLike,
+			captchaMode: input.captchaMode,
+			captchaThresholdWindowSec: input.captchaThresholdWindowSec,
+			captchaThresholdMaxActions: input.captchaThresholdMaxActions,
+			abuseGuardEnabled: input.abuseGuardEnabled,
+			abuseGuardWindowSec: input.abuseGuardWindowSec,
+			abuseGuardMaxWriteActions: input.abuseGuardMaxWriteActions,
+			autoBlacklistEnabled: input.autoBlacklistEnabled,
+			autoBlacklistScope: input.autoBlacklistScope,
+			autoBlacklistTtlSec: input.autoBlacklistTtlSec,
+			commentInputLimitsJson: input.commentInputLimitsJson,
+			commentMetadataJson: input.commentMetadataJson,
+			verifiedAuthorJson: input.verifiedAuthorJson,
+			staffDisplayJson: input.staffDisplayJson,
+			moderationJson: input.moderationJson,
+			pageRegistryJson: input.pageRegistryJson,
+			engagementJson: input.engagementJson,
+			commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
+			commenterReplyEmailDefaultChecked:
+				input.commenterReplyEmailDefaultChecked,
+			backendNotificationsEnabled: input.backendNotificationsEnabled,
+			updatedAt: new Date().toISOString(),
+		};
+		const notificationEvents = input.notificationEvents;
+		if (notificationEvents) {
+			await new SiteNotificationEventsRepository(this.db).replaceSiteEvents(
+				{
+					siteId,
+					events: notificationEvents,
+				},
+				{
+					beforeReplace: (transaction) => {
+						transaction
+							.update(siteSettings)
+							.set(values)
+							.where(eq(siteSettings.siteId, siteId))
+							.run();
+					},
+				},
+			);
+		} else {
+			await this.db
+				.update(siteSettings)
+				.set(values)
+				.where(eq(siteSettings.siteId, siteId));
+		}
 
 		return this.getSiteSettings(siteId);
 	}

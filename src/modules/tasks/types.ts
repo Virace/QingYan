@@ -95,7 +95,7 @@ export interface NotificationDeliveryRecord {
 	channel: string;
 	channelConfigRef: string | null;
 	channelConfigNameSnapshot: string | null;
-	recipientType: "backend_user" | "commenter" | "test";
+	recipientType: "backend_user" | "external_target" | "commenter" | "test";
 	recipientUserId: number | null;
 	recipientAddressSnapshot: string;
 	recipientIdentityKey: string;

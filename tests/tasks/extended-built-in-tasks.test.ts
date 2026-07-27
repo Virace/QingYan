@@ -11,6 +11,7 @@ import {
 	adminUserGroups,
 	adminUsers,
 	adminUserSiteAccess,
+	notificationChannelConfigs,
 	notificationDeliveries,
 	sites,
 	taskRuns,
@@ -28,7 +29,10 @@ import { DefaultDailySiteDigestTaskService } from "../../src/modules/tasks/built
 import { DefaultSiteSettingsActionTaskService } from "../../src/modules/tasks/built-in/site-settings-action-task";
 import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
-import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
+import {
+	SiteNotificationEventsRepository,
+	siteBackendNotificationEventTypes,
+} from "../../src/modules/notifications/site-notification-events-repository";
 import {
 	applyInitialMigration,
 	createTestWorkspace,
@@ -160,8 +164,8 @@ describe("extended built-in task types", () => {
 			category: "notification",
 			dangerous: false,
 			reuse: {
-				service: "BackendUserNotificationRecipientsRepository",
-				method: "listSiteRecipients",
+				service: "SiteNotificationEventsRepository",
+				method: "listSiteEvents",
 			},
 		});
 		expect(
@@ -449,25 +453,14 @@ describe("extended built-in task types", () => {
 
 	it("creates notification task runs and deliveries for daily digest recipients", async () => {
 		const fixture = await createDbFixture();
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.db,
-		);
-		await recipients.replaceSiteRecipients({
+		const events = new SiteNotificationEventsRepository(fixture.db);
+		await events.replaceSiteEvents({
 			siteId: fixture.siteId,
-			recipients: [
-				{
-					userId: fixture.adminUserId,
-					routes: [
-						{
-							eventType: "admin_comment_pending",
-							channelConfigId: "email:default",
-							enabled: true,
-						},
-					],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			events: siteBackendNotificationEventTypes.map((eventType) => ({
+				eventType,
+				recipientUserIds: [fixture.adminUserId],
+				externalChannelConfigIds: [],
+			})),
 		});
 		const service = new DefaultDailySiteDigestTaskService({
 			db: fixture.db,
@@ -515,6 +508,51 @@ describe("extended built-in task types", () => {
 				recipientUserId: fixture.adminUserId,
 				eventFamily: "daily_site_digest",
 				templateKey: "daily_site_digest",
+			}),
+		]);
+	});
+
+	it("sends one daily digest to an external target selected by both comment events", async () => {
+		const fixture = await createDbFixture();
+		await fixture.db.insert(notificationChannelConfigs).values({
+			id: "webhook:digest",
+			type: "webhook",
+			name: "摘要 Webhook",
+			enabled: true,
+			configJson: '{"url":"https://hooks.example.test/digest"}',
+			secretConfigJson: "{}",
+		});
+		await new SiteNotificationEventsRepository(fixture.db).replaceSiteEvents({
+			siteId: fixture.siteId,
+			events: siteBackendNotificationEventTypes.map((eventType) => ({
+				eventType,
+				recipientUserIds: [],
+				externalChannelConfigIds: ["webhook:digest"],
+			})),
+		});
+		const service = new DefaultDailySiteDigestTaskService({
+			db: fixture.db,
+			taskRuns: new TaskRunRepository(fixture.db),
+		});
+
+		const result = await service.planDigest({
+			runId: "run_external_digest",
+			now: new Date("2026-06-04T10:00:00.000Z"),
+			siteKey: "fangyuan",
+			sendIfNoActivity: true,
+		});
+
+		expect(result).toMatchObject({
+			status: "planned",
+			notificationRunIds: [expect.any(String)],
+		});
+		expect(await fixture.db.select().from(notificationDeliveries)).toEqual([
+			expect.objectContaining({
+				channel: "webhook",
+				channelConfigRef: "webhook:digest",
+				recipientType: "external_target",
+				recipientUserId: null,
+				eventFamily: "daily_site_digest",
 			}),
 		]);
 	});

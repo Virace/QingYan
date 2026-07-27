@@ -90,10 +90,52 @@ export class QingYanExportService {
 	}
 
 	private exportSiteSettings(siteId: number) {
-		return (
-			this.sqlite
-				.prepare("SELECT * FROM site_settings WHERE site_id = ?")
-				.get(siteId) ?? null
+		const settings = this.sqlite
+			.prepare("SELECT * FROM site_settings WHERE site_id = ?")
+			.get(siteId) as Record<string, unknown> | undefined;
+		if (!settings) {
+			return null;
+		}
+		return {
+			...settings,
+			notifications: {
+				backend: {
+					events: this.exportSiteNotificationEvents(siteId),
+				},
+			},
+		};
+	}
+
+	private exportSiteNotificationEvents(siteId: number) {
+		const recipientRows = this.sqlite
+			.prepare(
+				`SELECT event_type, user_id
+				FROM site_notification_event_recipients
+				WHERE site_id = ?
+				ORDER BY event_type, user_id`,
+			)
+			.all(siteId) as Array<{ event_type: string; user_id: number }>;
+		const channelRows = this.sqlite
+			.prepare(
+				`SELECT event_type, channel_config_id
+				FROM site_notification_event_channels
+				WHERE site_id = ?
+				ORDER BY event_type, channel_config_id`,
+			)
+			.all(siteId) as Array<{
+			event_type: string;
+			channel_config_id: string;
+		}>;
+		return ["admin_comment_pending", "admin_comment_approved"].map(
+			(eventType) => ({
+				eventType,
+				recipientUserIds: recipientRows
+					.filter((row) => row.event_type === eventType)
+					.map((row) => row.user_id),
+				externalChannelConfigIds: channelRows
+					.filter((row) => row.event_type === eventType)
+					.map((row) => row.channel_config_id),
+			}),
 		);
 	}
 

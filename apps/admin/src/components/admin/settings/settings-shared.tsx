@@ -4,7 +4,6 @@ import type {
 	AdminSettings,
 	AdminSystemSettings,
 	NotificationChannelConfig,
-	SiteNotificationRecipient,
 } from "@/api/admin";
 
 import {
@@ -12,6 +11,7 @@ import {
 	writeSettingsTabToSearch,
 } from "../content/notification-ui-model";
 import type { buildSettingsErrorModel } from "./settings-error-model";
+import { buildSiteNotificationPayload } from "./site-notification-events-model";
 export const siteSettingsTabs = [
 	"comments",
 	"engagement",
@@ -56,7 +56,7 @@ export function buildSiteSettingsSectionPayload(
 	if (section === "pageRegistry") {
 		return draft.pageRegistry;
 	}
-	return draft.notifications;
+	return buildSiteNotificationPayload(draft.notifications);
 }
 
 export function buildSystemSettingsSectionPayload(
@@ -106,7 +106,7 @@ export const systemSectionSaveLabels: Record<SystemSettingsTab, string> = {
 	security: "保存后台与安全设置",
 	"rate-limit": "保存限流设置",
 	mail: "保存邮件设置",
-	notifications: "保存通知设置",
+	notifications: "保存发送服务设置",
 	captcha: "保存验证码设置",
 	avatar: "保存头像与公开接口设置",
 	"ip-region": "保存 IP 地域设置",
@@ -147,44 +147,23 @@ export function SettingsSaveError({
 	if (!model) {
 		return null;
 	}
+	const fieldMessages = Array.from(
+		new Set(model.fields.map((field) => field.message.trim()).filter(Boolean)),
+	);
 	return (
 		<Alert variant="destructive" className="md:col-span-2">
 			<AlertTitle>{fallback}</AlertTitle>
 			<AlertDescription>
-				<p>
-					{model.message}
-					{model.requestId ? ` requestId: ${model.requestId}` : ""}
-				</p>
-				{model.fields.length > 0 ? (
+				<p>{model.message}</p>
+				{fieldMessages.length > 0 ? (
 					<ul className="mt-2 list-disc pl-5">
-						{model.fields.map((field) => (
-							<li key={`${field.path}:${field.message}`}>
-								{field.path}: {field.message}
-							</li>
+						{fieldMessages.map((message) => (
+							<li key={message}>{message}</li>
 						))}
 					</ul>
 				) : null}
 			</AlertDescription>
 		</Alert>
-	);
-}
-
-export function updateRecipient(
-	recipients: SiteNotificationRecipient[],
-	userId: number,
-	patch: Partial<SiteNotificationRecipient>,
-) {
-	return recipients.map((recipient) =>
-		recipient.userId === userId ? { ...recipient, ...patch } : recipient,
-	);
-}
-
-export function replaceRecipient(
-	recipients: SiteNotificationRecipient[],
-	nextRecipient: SiteNotificationRecipient,
-) {
-	return recipients.map((recipient) =>
-		recipient.userId === nextRecipient.userId ? nextRecipient : recipient,
 	);
 }
 

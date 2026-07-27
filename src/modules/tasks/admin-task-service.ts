@@ -23,6 +23,7 @@ import {
 	calculateNextRunAt,
 	validateScheduleDefinition,
 } from "./schedule-calculator";
+import { parseTaskFailureRecipientUserId } from "./task-failure-notification-targets";
 import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
 import type { AnyTaskTypeDefinition } from "./task-type-registry";
 import {
@@ -1133,14 +1134,6 @@ export class AdminTaskService {
 				),
 			);
 		}
-		if (recipientIds.length === 0) {
-			fields.push(
-				validationField(
-					"policy.failureNotification.recipientIds",
-					"失败通知需要选择至少一个接收人。",
-				),
-			);
-		}
 		const channelConfigs =
 			await this.channelConfigs.listByIds(channelConfigIds);
 		const channelConfigById = new Map(
@@ -1158,19 +1151,50 @@ export class AdminTaskService {
 				break;
 			}
 		}
-		if (siteId) {
-			const recipients =
-				await this.notificationRecipients.listSiteRecipients(siteId);
-			const recipientById = new Map(
-				recipients.map((recipient) => [recipient.id, recipient]),
+		const requiresEmailRecipient = channelConfigs.some(
+			(config) => config.enabled && config.type === "email",
+		);
+		if (requiresEmailRecipient && recipientIds.length === 0) {
+			fields.push(
+				validationField(
+					"policy.failureNotification.recipientIds",
+					"选择邮件发送时，请至少选择一位站点人员。",
+				),
+			);
+		}
+		if (requiresEmailRecipient && siteId && recipientIds.length > 0) {
+			const directUserIds = recipientIds.flatMap((recipientId) => {
+				const userId = parseTaskFailureRecipientUserId(recipientId);
+				return userId ? [userId] : [];
+			});
+			const directUsers =
+				await this.notificationRecipients.listActiveSiteRecipientUsers({
+					siteId,
+					userIds: directUserIds,
+				});
+			const directUserIdSet = new Set(directUsers.map((user) => user.id));
+			const legacyRecipientIds = recipientIds.filter(
+				(recipientId) => parseTaskFailureRecipientUserId(recipientId) === null,
+			);
+			const legacyRecipients =
+				legacyRecipientIds.length > 0
+					? await this.notificationRecipients.listSiteRecipients(siteId)
+					: [];
+			const enabledLegacyRecipientIds = new Set(
+				legacyRecipients
+					.filter((recipient) => recipient.enabled)
+					.map((recipient) => recipient.id),
 			);
 			for (const recipientId of recipientIds) {
-				const recipient = recipientById.get(recipientId);
-				if (!recipient?.enabled) {
+				const userId = parseTaskFailureRecipientUserId(recipientId);
+				if (
+					(userId !== null && !directUserIdSet.has(userId)) ||
+					(userId === null && !enabledLegacyRecipientIds.has(recipientId))
+				) {
 					fields.push(
 						validationField(
 							"policy.failureNotification.recipientIds",
-							"通知接收人不存在或未启用。",
+							"所选站点人员已不可用，请重新选择。",
 						),
 					);
 					break;

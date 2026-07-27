@@ -4,20 +4,16 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import {
-	type AdminUser,
 	getNotificationChainTest,
 	getNotificationDiagnostics,
 	listNotificationTemplates,
 	type NotificationChannel,
 	type NotificationChannelConfig,
-	type NotificationContentPolicy,
 	type NotificationTemplate,
 	type NotificationTemplateFormat,
 	previewNotificationTemplate,
 	type RenderedNotificationTemplate,
 	restoreNotificationTemplateDefault,
-	type SiteNotificationEvent,
-	type SiteNotificationRecipient,
 	startNotificationChainTest,
 	testNotificationTemplate,
 	updateNotificationTemplate,
@@ -27,17 +23,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-	addRecipientRoute,
-	availableNotificationChannelConfigs,
-	contentPolicies,
-	contentPolicyLabels,
-	makeRecipientFromUser,
 	notificationChannelConfigLabel,
 	notificationChannelLabels,
 	notificationChannelTargetSummary,
-	removeRecipientRoute,
-	siteNotificationEventLabels,
-	siteNotificationEvents,
 } from "../content/notification-ui-model";
 import {
 	BooleanField,
@@ -63,267 +51,6 @@ import {
 	secretStringValue,
 } from "./settings-shared";
 
-function RecipientRoutesEditor({
-	recipient,
-	channelConfigs,
-	onChange,
-}: {
-	recipient: SiteNotificationRecipient;
-	channelConfigs: NotificationChannelConfig[];
-	onChange: (recipient: SiteNotificationRecipient) => void;
-}) {
-	const availableConfigs = availableNotificationChannelConfigs(channelConfigs);
-	const [eventType, setEventType] = useState<SiteNotificationEvent>(
-		siteNotificationEvents[0],
-	);
-	const [channelConfigId, setChannelConfigId] = useState(
-		availableConfigs[0]?.id ?? "",
-	);
-
-	useEffect(() => {
-		if (
-			availableConfigs.length > 0 &&
-			!availableConfigs.some((config) => config.id === channelConfigId)
-		) {
-			setChannelConfigId(availableConfigs[0].id);
-		}
-	}, [availableConfigs, channelConfigId]);
-
-	const selectedConfig = availableConfigs.find(
-		(config) => config.id === channelConfigId,
-	);
-
-	return (
-		<Field label="接收设置">
-			<div className="grid gap-3 rounded-md border px-3 py-2">
-				{recipient.routes.map((route) => (
-					<div
-						key={`${route.eventType}:${route.channelConfigId}`}
-						className="flex flex-col gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm md:flex-row md:items-center md:justify-between"
-					>
-						<div>
-							<p className="font-medium">
-								{siteNotificationEventLabels[route.eventType]}
-							</p>
-							<p className="text-xs text-muted-foreground">
-								{route.channelName ??
-									channelConfigs.find(
-										(config) => config.id === route.channelConfigId,
-									)?.name ??
-									route.channelConfigId}
-								{" / "}
-								{route.channelType
-									? notificationChannelLabels[route.channelType]
-									: route.channelConfigId}
-							</p>
-						</div>
-						<Button
-							type="button"
-							size="sm"
-							variant="outline"
-							disabled={recipient.routes.length <= 1}
-							onClick={() =>
-								onChange(
-									removeRecipientRoute(recipient, {
-										eventType: route.eventType,
-										channelConfigId: route.channelConfigId,
-									}),
-								)
-							}
-						>
-							移除
-						</Button>
-					</div>
-				))}
-				<div className="grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
-					<Field label="通知类型">
-						<select
-							className={inputClass}
-							value={eventType}
-							onChange={(event) =>
-								setEventType(event.target.value as SiteNotificationEvent)
-							}
-						>
-							{siteNotificationEvents.map((item) => (
-								<option key={item} value={item}>
-									{siteNotificationEventLabels[item]}
-								</option>
-							))}
-						</select>
-					</Field>
-					<Field label="发送方式">
-						<select
-							className={inputClass}
-							value={channelConfigId}
-							disabled={availableConfigs.length === 0}
-							onChange={(event) => setChannelConfigId(event.target.value)}
-						>
-							{availableConfigs.map((config) => (
-								<option key={config.id} value={config.id}>
-									{notificationChannelConfigLabel(config)}
-								</option>
-							))}
-						</select>
-					</Field>
-					<Button
-						type="button"
-						variant="outline"
-						disabled={!selectedConfig}
-						onClick={() => {
-							if (!selectedConfig) {
-								return;
-							}
-							onChange(
-								addRecipientRoute(recipient, {
-									eventType,
-									channelConfigId: selectedConfig.id,
-									channelType: selectedConfig.type,
-									channelName: selectedConfig.name,
-									enabled: true,
-								}),
-							);
-						}}
-					>
-						添加接收设置
-					</Button>
-				</div>
-			</div>
-		</Field>
-	);
-}
-
-export function SiteNotificationRecipientDialog({
-	open,
-	mode,
-	draft,
-	candidateUsers,
-	channelConfigs,
-	onOpenChange,
-	onDraftChange,
-	onSubmit,
-}: {
-	open: boolean;
-	mode: "create" | "edit";
-	draft: SiteNotificationRecipient | null;
-	candidateUsers: AdminUser[];
-	channelConfigs: NotificationChannelConfig[];
-	onOpenChange: (open: boolean) => void;
-	onDraftChange: (draft: SiteNotificationRecipient) => void;
-	onSubmit: () => void;
-}) {
-	return (
-		<Dialog.Root open={open} onOpenChange={onOpenChange}>
-			<Dialog.Content maxWidth="720px">
-				<Dialog.Title>
-					{mode === "create" ? "添加通知接收人" : "编辑通知接收人"}
-				</Dialog.Title>
-				<Dialog.Description size="2">
-					确认后才会保存到接收人列表；取消不会保留本次更改。
-				</Dialog.Description>
-				<div className="mt-4 grid gap-3">
-					{mode === "create" ? (
-						<Field label="后台用户">
-							<select
-								className={inputClass}
-								value={draft?.userId ?? ""}
-								disabled={candidateUsers.length === 0}
-								onChange={(event) => {
-									const userId = Number(event.target.value);
-									const user = candidateUsers.find(
-										(item) => item.id === userId,
-									);
-									if (user) {
-										onDraftChange(makeRecipientFromUser(user));
-									}
-								}}
-							>
-								<option value="">
-									{candidateUsers.length > 0 ? "选择接收人" : "暂无可添加用户"}
-								</option>
-								{candidateUsers.map((user) => (
-									<option key={user.id} value={user.id}>
-										{user.displayName || user.username} / {user.email}
-									</option>
-								))}
-							</select>
-						</Field>
-					) : null}
-					{draft ? (
-						<>
-							<div className="rounded-md border bg-muted/30 p-3 text-sm">
-								<p className="font-medium">
-									{draft.displayName || draft.username}
-								</p>
-								<p className="text-xs text-muted-foreground">
-									{draft.username} / {draft.email}
-								</p>
-							</div>
-							<BooleanField
-								label="启用接收人"
-								checked={draft.enabled}
-								onCheckedChange={(enabled) =>
-									onDraftChange({ ...draft, enabled })
-								}
-							/>
-							<RecipientRoutesEditor
-								recipient={draft}
-								channelConfigs={channelConfigs}
-								onChange={onDraftChange}
-							/>
-							<Field label="内容策略">
-								<select
-									className={inputClass}
-									value={draft.includeCommentContent}
-									onChange={(event) =>
-										onDraftChange({
-											...draft,
-											includeCommentContent: event.target
-												.value as NotificationContentPolicy,
-										})
-									}
-								>
-									{contentPolicies.map((policy) => (
-										<option key={policy} value={policy}>
-											{contentPolicyLabels[policy]}
-										</option>
-									))}
-								</select>
-							</Field>
-							<Field
-								label="发送频率规则"
-								description="通常留空，使用系统默认设置。"
-							>
-								<Input
-									value={draft.rateLimitProfile ?? ""}
-									placeholder="使用系统默认设置"
-									onChange={(event) =>
-										onDraftChange({
-											...draft,
-											rateLimitProfile: event.target.value.trim() || null,
-										})
-									}
-								/>
-							</Field>
-						</>
-					) : (
-						<EmptyState text="请选择接收人" />
-					)}
-					<div className="flex justify-end gap-2">
-						<Dialog.Close>
-							<Button type="button" variant="outline">
-								取消
-							</Button>
-						</Dialog.Close>
-						<Button type="button" disabled={!draft} onClick={onSubmit}>
-							确认
-						</Button>
-					</div>
-				</div>
-			</Dialog.Content>
-		</Dialog.Root>
-	);
-}
-
 function NotificationChannelConfigEditor({
 	config,
 	onChange,
@@ -342,7 +69,6 @@ function NotificationChannelConfigEditor({
 					<p className="font-medium">
 						{notificationChannelConfigLabel(config)}
 					</p>
-					<p className="text-xs text-muted-foreground">配置 ID：{config.id}</p>
 				</div>
 				<div className="flex flex-wrap gap-2">
 					<BooleanField
@@ -505,7 +231,7 @@ export function NotificationChannelTestDialog({
 			<Dialog.Content maxWidth="520px">
 				<Dialog.Title>测试通知通道</Dialog.Title>
 				<Dialog.Description size="2">
-					测试发送会创建 channel_test 通知任务，真实投递结果在任务中心查看。
+					发送一条真实测试通知，结果可在任务中心查看。
 				</Dialog.Description>
 				<div className="mt-4 grid gap-3">
 					<div className="rounded-md border bg-muted/30 p-3 text-sm">
@@ -539,7 +265,7 @@ export function NotificationChannelTestDialog({
 								})
 							}
 						>
-							创建测试任务
+							发送测试通知
 						</Button>
 					</div>
 				</div>
@@ -563,7 +289,7 @@ export function MailTestPanel({
 				<div>
 					<p className="font-medium">邮件测试</p>
 					<p className="text-sm text-muted-foreground">
-						创建邮件通道测试任务，投递结果在任务中心查看。
+						发送一封真实测试邮件，结果可在任务中心查看。
 					</p>
 					{reason ? (
 						<p className="mt-1 text-xs text-muted-foreground">{reason}</p>
@@ -630,7 +356,6 @@ export function NotificationChannelConfigList({
 							<tr key={config.id} className="border-t">
 								<td className="p-3">
 									<p className="font-medium">{config.name}</p>
-									<p className="text-xs text-muted-foreground">{config.id}</p>
 								</td>
 								<td className="p-3">
 									{notificationChannelLabels[config.type]}
@@ -772,9 +497,9 @@ function notificationTemplateResultSummary(result: {
 	channel: NotificationChannel;
 	recipient: string;
 }) {
-	return `已创建测试任务 ${result.taskId}，投递记录 ${result.deliveryId}，通道 ${
+	return `测试通知已交给${
 		notificationChannelLabels[result.channel]
-	}，收件人 ${result.recipient}。`;
+	}发送，接收目标：${result.recipient}。可在任务中心查看结果。`;
 }
 
 function NotificationTemplatePreview({
@@ -860,7 +585,7 @@ function NotificationTemplateTestDialog({
 			<Dialog.Content maxWidth="520px">
 				<Dialog.Title>测试发送模板</Dialog.Title>
 				<Dialog.Description size="2">
-					测试发送会创建 template_test 通知任务，真实投递结果在任务中心查看。
+					发送一条真实测试通知，结果可在任务中心查看。
 				</Dialog.Description>
 				<div className="mt-4 grid gap-3">
 					{template ? (
@@ -889,7 +614,7 @@ function NotificationTemplateTestDialog({
 							disabled={!template || pending}
 							onClick={onSubmit}
 						>
-							创建测试任务
+							发送测试通知
 						</Button>
 					</div>
 				</div>
@@ -1085,7 +810,7 @@ export function NotificationTemplatesPanel() {
 	return (
 		<SettingsSection
 			title="模板管理"
-			description="按事件和格式编辑通知模板；预览走服务端 renderer，测试发送只创建 template_test 任务。"
+			description="按通知类型和内容格式编辑模板；保存前可先预览或发送测试通知。"
 		>
 			<div className="grid gap-4">
 				<SettingsSaveError model={previewError} fallback="模板预览失败" />
@@ -1154,7 +879,6 @@ export function NotificationTemplatesPanel() {
 										{selectedTemplate.isCustomized ? "已自定义" : "默认"}
 									</Badge>
 									{isDirty ? <Badge variant="outline">未保存</Badge> : null}
-									<Badge variant="outline">{selectedTemplate.key}</Badge>
 								</div>
 							</div>
 							<div className="grid gap-3 rounded-md border bg-background p-3">

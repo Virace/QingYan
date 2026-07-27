@@ -91,23 +91,17 @@ function recipientsPayload(userId: number) {
 	return {
 		notifications: {
 			backend: {
-				recipients: [
+				enabled: false,
+				events: [
 					{
-						userId,
-						routes: [
-							{
-								eventType: "admin_comment_pending",
-								channelConfigId: "email:default",
-								enabled: true,
-							},
-							{
-								eventType: "admin_comment_approved",
-								channelConfigId: "email:default",
-								enabled: true,
-							},
-						],
-						includeCommentContent: "summary",
-						enabled: true,
+						eventType: "admin_comment_pending",
+						recipientUserIds: [userId],
+						externalChannelConfigIds: [],
+					},
+					{
+						eventType: "admin_comment_approved",
+						recipientUserIds: [userId],
+						externalChannelConfigIds: [],
 					},
 				],
 			},
@@ -134,11 +128,25 @@ describe("admin site notification recipients", () => {
 		});
 
 		expect(updateResponse.statusCode).toBe(200);
-		expect(updateResponse.json().notifications.backend.recipients).toEqual([
+		expect(updateResponse.json().notifications.backend.events).toEqual([
 			expect.objectContaining({
-				userId: recipient.id,
-				username: "global-admin-recipient",
-				email: "global-admin-recipient@example.test",
+				eventType: "admin_comment_pending",
+				recipients: [
+					expect.objectContaining({
+						userId: recipient.id,
+						username: "global-admin-recipient",
+						email: "global-admin-recipient@example.test",
+					}),
+				],
+			}),
+			expect.objectContaining({
+				eventType: "admin_comment_approved",
+				recipients: [
+					expect.objectContaining({
+						userId: recipient.id,
+						username: "global-admin-recipient",
+					}),
+				],
 			}),
 		]);
 	});
@@ -161,29 +169,30 @@ describe("admin site notification recipients", () => {
 
 		expect(updateResponse.statusCode).toBe(200);
 		expect(updateResponse.json().notifications.backend).toMatchObject({
-			recipients: [
+			events: [
 				{
-					userId: recipient.id,
-					username: "recipient-admin-target",
-					email: "recipient-admin-target@example.test",
-					routes: [
-						expect.objectContaining({
-							eventType: "admin_comment_pending",
-							channelConfigId: "email:default",
-							channelType: "email",
-							channelName: "默认邮件",
-							enabled: true,
-						}),
-						expect.objectContaining({
-							eventType: "admin_comment_approved",
-							channelConfigId: "email:default",
-							channelType: "email",
-							channelName: "默认邮件",
-							enabled: true,
-						}),
+					eventType: "admin_comment_pending",
+					externalChannelConfigIds: [],
+					recipients: [
+						{
+							userId: recipient.id,
+							username: "recipient-admin-target",
+							email: "recipient-admin-target@example.test",
+							includeCommentContent: "summary",
+						},
 					],
-					includeCommentContent: "summary",
-					enabled: true,
+				},
+				{
+					eventType: "admin_comment_approved",
+					externalChannelConfigIds: [],
+					recipients: [
+						{
+							userId: recipient.id,
+							username: "recipient-admin-target",
+							email: "recipient-admin-target@example.test",
+							includeCommentContent: "summary",
+						},
+					],
 				},
 			],
 		});
@@ -196,9 +205,7 @@ describe("admin site notification recipients", () => {
 			},
 		});
 		expect(readResponse.statusCode).toBe(200);
-		expect(readResponse.json().notifications.backend.recipients).toHaveLength(
-			1,
-		);
+		expect(readResponse.json().notifications.backend.events).toHaveLength(2);
 	});
 
 	it("lets site admins add same-site users but rejects users without target-site access", async () => {
@@ -286,11 +293,13 @@ describe("admin site notification recipients", () => {
 		});
 
 		const adminAuth = await loginAsAdmin(fixture.app);
+		const invalidPayload = recipientsPayload(disabledRecipient.id);
+		invalidPayload.notifications.backend.enabled = true;
 		const disabledDenied = await fixture.app.inject({
 			method: "PUT",
 			url: "/qingyan/api/admin/sites/fangyuan/settings",
 			...withAdminWriteAuth(adminAuth),
-			payload: recipientsPayload(disabledRecipient.id),
+			payload: invalidPayload,
 		});
 		expect(disabledDenied.statusCode).toBe(400);
 		expect(disabledDenied.json()).toMatchObject({
@@ -298,5 +307,63 @@ describe("admin site notification recipients", () => {
 				code: "ADMIN_NOTIFICATION_RECIPIENT_INACTIVE",
 			},
 		});
+		const settingsAfterDeniedUpdate = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminAuth.adminCookie.value,
+			},
+		});
+		expect(settingsAfterDeniedUpdate.statusCode).toBe(200);
+		expect(settingsAfterDeniedUpdate.json().notifications.backend.enabled).toBe(
+			false,
+		);
+	});
+
+	it("rolls back the page settings when saving notification people fails", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const recipient = await createScopedUser(fixture, {
+			username: "transaction-recipient",
+			groupKey: "site_moderator",
+			siteKeys: ["fangyuan"],
+		});
+		const adminAuth = await loginAsAdmin(fixture.app);
+		fixture.app.sqlite.exec(`
+			CREATE TRIGGER fail_site_notification_people_insert
+			BEFORE INSERT ON site_notification_event_recipients
+			BEGIN
+				SELECT RAISE(ABORT, 'forced notification people failure');
+			END;
+		`);
+
+		const payload = recipientsPayload(recipient.id);
+		payload.notifications.backend.enabled = true;
+		const failedUpdate = await fixture.app.inject({
+			method: "PUT",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			...withAdminWriteAuth(adminAuth),
+			payload,
+		});
+		expect(failedUpdate.statusCode).toBe(500);
+
+		const settingsAfterFailure = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/sites/fangyuan/settings",
+			cookies: {
+				qingyan_admin: adminAuth.adminCookie.value,
+			},
+		});
+		expect(settingsAfterFailure.statusCode).toBe(200);
+		expect(settingsAfterFailure.json().notifications.backend.enabled).toBe(
+			false,
+		);
+		expect(
+			settingsAfterFailure
+				.json()
+				.notifications.backend.events.every(
+					(event: { recipients: unknown[] }) => event.recipients.length === 0,
+				),
+		).toBe(true);
 	});
 });

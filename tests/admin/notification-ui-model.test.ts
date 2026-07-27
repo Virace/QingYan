@@ -8,19 +8,15 @@ import type {
 } from "../../apps/admin/src/api/admin";
 import type { TaskRunCenterItem } from "../../apps/admin/src/api/ops";
 import {
-	addRecipientRoute,
-	availableNotificationChannelConfigs,
 	cloneNotificationChannelConfigDraft,
 	createNotificationChannelConfigDraft,
 	eligibleNotificationRecipientUsers,
 	mailChannelTestState,
-	makeRecipientFromUser,
 	notificationChannelConfigLabel,
 	notificationChannelTargetSummary,
 	notificationTaskDetails,
 	notificationTestResultSummary,
 	readSettingsTabFromSearch,
-	removeRecipientRoute,
 	summarizeCommenterNotifications,
 	toggleListValue,
 	writeSettingsTabToSearch,
@@ -186,81 +182,15 @@ describe("notification UI model", () => {
 		const candidates = eligibleNotificationRecipientUsers(users, "default");
 
 		expect(candidates.map((item) => item.username)).toEqual(["root", "mod"]);
-		expect(makeRecipientFromUser(users[1])).toMatchObject({
-			userId: 2,
-			channels: ["email"],
-			events: ["admin_comment_pending"],
-			routes: [
-				expect.objectContaining({
-					eventType: "admin_comment_pending",
-					channelConfigId: "email:default",
-					channelType: "email",
-					channelName: "默认邮件",
-				}),
-			],
-			includeCommentContent: "summary",
-			enabled: true,
-		});
 	});
 
-	it("builds recipient routes from concrete channel configs", () => {
-		const recipient = makeRecipientFromUser(user({ id: 2, username: "mod" }));
-		const withWebhook = addRecipientRoute(recipient, {
-			eventType: "admin_comment_pending",
-			channelConfigId: "webhook:ops",
-			channelType: "webhook",
-			channelName: "运维 Webhook",
-			enabled: true,
-		});
-
-		expect(withWebhook.routes).toHaveLength(2);
-		expect(
-			addRecipientRoute(withWebhook, {
-				eventType: "admin_comment_pending",
-				channelConfigId: "webhook:ops",
-				channelType: "webhook",
-				channelName: "运维 Webhook",
-				enabled: true,
-			}).routes,
-		).toHaveLength(2);
-		expect(
-			removeRecipientRoute(withWebhook, {
-				eventType: "admin_comment_pending",
-				channelConfigId: "webhook:ops",
-			}).routes,
-		).toHaveLength(1);
-		expect(
-			removeRecipientRoute(recipient, {
-				eventType: "admin_comment_pending",
-				channelConfigId: "email:default",
-			}).routes,
-		).toHaveLength(1);
+	it("labels notification channel configs with user-facing names", () => {
 		expect(
 			notificationChannelConfigLabel({
 				name: "内容审核 WxPusher",
 				type: "wxpusher",
 			}),
 		).toBe("内容审核 WxPusher（WxPusher）");
-		expect(
-			availableNotificationChannelConfigs([
-				{
-					id: "email:default",
-					type: "email",
-					name: "默认邮件",
-					description: null,
-					enabled: true,
-					config: {},
-				},
-				{
-					id: "webhook:off",
-					type: "webhook",
-					name: "停用 Webhook",
-					description: null,
-					enabled: false,
-					config: {},
-				},
-			]).map((config) => config.id),
-		).toEqual(["email:default"]);
 	});
 
 	it("creates and applies channel config dialog drafts without mutating the source list", () => {
@@ -312,7 +242,7 @@ describe("notification UI model", () => {
 			}),
 		).toEqual({
 			testable: false,
-			reason: "系统邮件未启用；SMTP Host 不能为空；发件人不能为空",
+			reason: "系统邮件未启用；邮件服务器地址不能为空；发件人不能为空",
 		});
 		expect(
 			mailChannelTestState({
@@ -345,7 +275,7 @@ describe("notification UI model", () => {
 				recipient: "admin@example.test",
 			}),
 		).toBe(
-			"已创建测试任务 task_1，投递记录 delivery_1，通道 默认邮件，收件人 admin@example.test。",
+			"测试通知已交给默认邮件发送，接收目标：admin@example.test。可在任务中心查看结果。",
 		);
 	});
 

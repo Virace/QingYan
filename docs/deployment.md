@@ -276,6 +276,8 @@ bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/
 4. 启动新容器并确认进程运行，显示 `qyctl upgrade --dry-run` 的 UpgradePlan。
 5. 确认后应用数据升级，重启并校验容器版本、更新状态和健康状态。
 
+`0.2.4` 会应用 `0002_site_notification_events.sql`，把已保存的评论通知从“人员再绑定发送路径”迁移为“事件分别选择人员和其他发送目标”。升级前必须保留更新脚本生成的整站备份；旧通知表在这个版本中继续保留作为回滚证据，但运行时和 Admin Console 以新的事件表为准。
+
 在新容器激活前发生失败，脚本会自动恢复原 Git revision 和原本的本地部署文件；运行中的旧容器不会被构建失败替换。
 新容器已经开始激活或数据升级后发生失败时，脚本不会擅自覆盖数据库或配置，而会输出失败
 阶段、原 revision、整站备份路径和最近 200 行容器日志。
