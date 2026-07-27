@@ -232,26 +232,40 @@ Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级�
 仓库根目录运行一个入口：
 
 ```bash
-./scripts/update.sh
+./scripts/update.sh                             # auto，默认优选
+./scripts/update.sh --network-profile cn        # 中国大陆镜像
+./scripts/update.sh --network-profile official  # 官方源
 ```
+
+`auto` 会在备份和切换 release 前分别探测官方组与中国大陆镜像组的 APT、npm registry 和 Node headers，选择总耗时较低且可用的一组。配置档同时固定本次构建的 Corepack、pnpm、Node headers 与 better-sqlite3 下载地址；不会改写 Git origin，也不负责 Docker 基础镜像加速。
+
+显式选择 `official` 或 `cn` 时不做中途回退，脚本会打印所有实际使用的地址，便于复现构建与定位网络问题。
 
 `v0.2.2` 之前的 checkout 尚无该脚本，第一次更新使用固定版本的远程入口：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s --
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.4/scripts/update.sh)
 ```
+
+GitHub 直连困难的地区可使用同一固定 release 的代理入口：
+
+```bash
+bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.4/scripts/update.sh)
+```
+
+`v0.2.4` 远程脚本支持相同的 `--network-profile` 参数；需要固定网络配置档时，可在脚本路径后追加 `--network-profile official` 或 `--network-profile cn`。远程入口保留 `bash <(...)` 形式，以避免 `docker compose exec` 继承并消费 `curl | bash` 的标准输入。
 
 脚本默认 fetch tags 后选择最高的稳定 `vX.Y.Z` release，也允许指定目标版本：
 
 ```bash
-./scripts/update.sh v0.2.3
+./scripts/update.sh v0.2.4
 ```
 
 默认交互流程只需要确认两次：第一次确认目标版本和整站备份，第二次在脚本显示脱敏
 `UpgradePlan` 后确认数据升级。明确接受全部确认时可以使用：
 
 ```bash
-./scripts/update.sh --yes v0.2.3
+./scripts/update.sh --yes v0.2.4
 ```
 
 脚本内部负责：
@@ -261,6 +275,8 @@ curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/updat
 3. 安全暂存 `compose.yml` 与未跟踪部署文件，切换目标 release tag 后原样恢复，并以 plain progress 构建新镜像。
 4. 启动新容器并确认进程运行，显示 `qyctl upgrade --dry-run` 的 UpgradePlan。
 5. 确认后应用数据升级，重启并校验容器版本、更新状态和健康状态。
+
+`0.2.4` 会应用 `0002_site_notification_events.sql`，把已保存的评论通知从“人员再绑定发送路径”迁移为“事件分别选择人员和其他发送目标”。升级前必须保留更新脚本生成的整站备份；旧通知表在这个版本中继续保留作为回滚证据，但运行时和 Admin Console 以新的事件表为准。
 
 在新容器激活前发生失败，脚本会自动恢复原 Git revision 和原本的本地部署文件；运行中的旧容器不会被构建失败替换。
 新容器已经开始激活或数据升级后发生失败时，脚本不会擅自覆盖数据库或配置，而会输出失败

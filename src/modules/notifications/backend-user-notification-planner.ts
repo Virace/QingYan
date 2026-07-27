@@ -5,11 +5,11 @@ import { siteSettings } from "../../db/schema";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { NotificationDeliveryRecord, TaskRunRecord } from "../tasks/types";
 import { BackendUserNotificationPreferencesRepository } from "./backend-user-preferences-repository";
-import {
-	type BackendUserNotificationEventType,
-	BackendUserNotificationRecipientsRepository,
-} from "./backend-user-recipients-repository";
 import { channelTargetSnapshot } from "./channel-configs-repository";
+import {
+	type SiteBackendNotificationEventType,
+	SiteNotificationEventsRepository,
+} from "./site-notification-events-repository";
 
 export type CommentNotificationSource =
 	| "public_api"
@@ -47,7 +47,7 @@ export interface BackendUserNotificationPlanResult {
 	tasks: TaskRunRecord[];
 	deliveries: Array<
 		NotificationDeliveryRecord & {
-			event: BackendUserNotificationEventType;
+			event: SiteBackendNotificationEventType;
 		}
 	>;
 	createdCount: number;
@@ -55,7 +55,7 @@ export interface BackendUserNotificationPlanResult {
 
 function resolveAdminEvent(
 	event: BackendUserNotificationEvent,
-): BackendUserNotificationEventType | null {
+): SiteBackendNotificationEventType | null {
 	if (event.source === "import" || event.source === "migration") {
 		return null;
 	}
@@ -78,13 +78,13 @@ function resolveAdminEvent(
 	return null;
 }
 
-function taskTypeForEvent(event: BackendUserNotificationEventType) {
+function taskTypeForEvent(event: SiteBackendNotificationEventType) {
 	return event === "admin_comment_pending"
 		? "backend_user_comment_pending"
 		: "backend_user_comment_approved";
 }
 
-function templateKeyForEvent(event: BackendUserNotificationEventType) {
+function templateKeyForEvent(event: SiteBackendNotificationEventType) {
 	return event === "admin_comment_pending"
 		? "backend_user.comment.pending"
 		: "backend_user.comment.approved";
@@ -92,14 +92,14 @@ function templateKeyForEvent(event: BackendUserNotificationEventType) {
 
 function idempotencyKey(input: {
 	commentId: string;
-	userId: number;
+	targetIdentity: string;
 	channelConfigId: string;
-	event: BackendUserNotificationEventType;
+	event: SiteBackendNotificationEventType;
 }) {
 	return [
 		"backend_user_comment",
 		input.commentId,
-		input.userId,
+		input.targetIdentity,
 		input.channelConfigId,
 		input.event,
 	].join(":");
@@ -113,12 +113,12 @@ function digestRunAfter(minutes: number | null, now = new Date()) {
 }
 
 export class BackendUserNotificationPlanner {
-	private readonly recipients: BackendUserNotificationRecipientsRepository;
+	private readonly events: SiteNotificationEventsRepository;
 	private readonly preferences: BackendUserNotificationPreferencesRepository;
 	private readonly tasks: TaskRunRepository;
 
 	public constructor(private readonly db: AppDatabase) {
-		this.recipients = new BackendUserNotificationRecipientsRepository(db);
+		this.events = new SiteNotificationEventsRepository(db);
 		this.preferences = new BackendUserNotificationPreferencesRepository(db);
 		this.tasks = new TaskRunRepository(db);
 	}
@@ -145,49 +145,30 @@ export class BackendUserNotificationPlanner {
 			return { tasks: [], deliveries: [], createdCount: 0 };
 		}
 
-		const recipients = await this.recipients.listSiteRecipients(event.siteId);
-		const activeUsers = await this.recipients.listActiveSiteRecipientUsers({
+		const recipients = await this.events.listActiveEmailRecipients({
 			siteId: event.siteId,
-			userIds: recipients.map((recipient) => recipient.userId),
+			eventType: adminEvent,
 		});
-		const activeUserById = new Map(activeUsers.map((user) => [user.id, user]));
+		const externalChannels = await this.events.listExternalChannels({
+			siteId: event.siteId,
+			eventType: adminEvent,
+		});
 		const tasks: TaskRunRecord[] = [];
 		const deliveries: BackendUserNotificationPlanResult["deliveries"] = [];
 
-		for (const recipient of recipients) {
-			if (!recipient.enabled) {
-				continue;
-			}
-			const user = activeUserById.get(recipient.userId);
-			if (!user) {
-				continue;
-			}
-
-			for (const route of recipient.routes) {
-				if (
-					!route.enabled ||
-					route.eventType !== adminEvent ||
-					!route.channelConfig
-				) {
-					continue;
-				}
-				const channel = route.channelConfig.type;
-				if (options.channelFilter && !options.channelFilter.includes(channel)) {
-					continue;
-				}
-				if (!route.channelConfig.enabled) {
-					continue;
-				}
+		if (!options.channelFilter || options.channelFilter.includes("email")) {
+			for (const recipient of recipients) {
+				const channelConfigId = "email:default";
 				const preference = await this.preferences.getPreference({
 					userId: recipient.userId,
-					channel,
-					channelConfigRef: route.channelConfigId,
+					channel: "email",
+					channelConfigRef: channelConfigId,
 				});
 				if (
 					!(await this.preferences.isChannelAllowedForUser({
 						userId: recipient.userId,
-						channel,
-						channelConfigRef: route.channelConfigId,
+						channel: "email",
+						channelConfigRef: channelConfigId,
 					}))
 				) {
 					continue;
@@ -195,8 +176,8 @@ export class BackendUserNotificationPlanner {
 
 				const key = idempotencyKey({
 					commentId: event.commentId,
-					userId: recipient.userId,
-					channelConfigId: route.channelConfigId,
+					targetIdentity: `user:${recipient.userId}`,
+					channelConfigId,
 					event: adminEvent,
 				});
 				if (preference.digestMode !== "off") {
@@ -216,9 +197,9 @@ export class BackendUserNotificationPlanner {
 							event: adminEvent,
 							siteId: event.siteId,
 							userId: recipient.userId,
-							channel,
-							channelConfigId: route.channelConfigId,
-							channelConfigName: route.channelName,
+							channel: "email",
+							channelConfigId,
+							channelConfigName: "默认邮件",
 							eventCount: 1,
 						},
 						payload: {
@@ -226,9 +207,9 @@ export class BackendUserNotificationPlanner {
 							siteId: event.siteId,
 							siteKey: event.siteKey,
 							userId: recipient.userId,
-							channel,
-							channelConfigId: route.channelConfigId,
-							channelConfigName: route.channelName,
+							channel: "email",
+							channelConfigId,
+							channelConfigName: "默认邮件",
 							eventCount: 1,
 							eventIds: [event.commentId],
 						},
@@ -249,9 +230,9 @@ export class BackendUserNotificationPlanner {
 						event: adminEvent,
 						siteId: event.siteId,
 						userId: recipient.userId,
-						channel,
-						channelConfigId: route.channelConfigId,
-						channelConfigName: route.channelName,
+						channel: "email",
+						channelConfigId,
+						channelConfigName: "默认邮件",
 					},
 					payload: {
 						event: adminEvent,
@@ -260,9 +241,9 @@ export class BackendUserNotificationPlanner {
 						pageKey: event.pageKey,
 						commentId: event.commentId,
 						userId: recipient.userId,
-						channel,
-						channelConfigId: route.channelConfigId,
-						channelConfigName: route.channelName,
+						channel: "email",
+						channelConfigId,
+						channelConfigName: "默认邮件",
 						includeCommentContent: recipient.includeCommentContent,
 						contentRaw:
 							recipient.includeCommentContent === "none"
@@ -273,24 +254,78 @@ export class BackendUserNotificationPlanner {
 				tasks.push(task);
 				const delivery = await this.tasks.createDelivery({
 					taskRunId: task.id,
-					channel,
-					channelConfigRef: route.channelConfigId,
-					channelConfigNameSnapshot: route.channelName,
+					channel: "email",
+					channelConfigRef: channelConfigId,
+					channelConfigNameSnapshot: "默认邮件",
 					recipientType: "backend_user",
 					recipientUserId: recipient.userId,
-					recipientAddressSnapshot: channelTargetSnapshot(
-						route.channelConfig,
-						user.email,
-					),
-					recipientIdentityKey: `backend_user:${recipient.userId}:${route.channelConfigId}`,
+					recipientAddressSnapshot: recipient.email,
+					recipientIdentityKey: `backend_user:${recipient.userId}:${channelConfigId}`,
 					eventFamily: adminEvent,
 					templateKey: templateKeyForEvent(adminEvent),
 				});
-				deliveries.push({
-					...delivery,
-					event: adminEvent,
-				});
+				deliveries.push({ ...delivery, event: adminEvent });
 			}
+		}
+
+		for (const config of externalChannels) {
+			if (!config.enabled || config.type === "email") {
+				continue;
+			}
+			if (
+				options.channelFilter &&
+				!options.channelFilter.includes(config.type)
+			) {
+				continue;
+			}
+			const key = idempotencyKey({
+				commentId: event.commentId,
+				targetIdentity: `external:${config.id}`,
+				channelConfigId: config.id,
+				event: adminEvent,
+			});
+			const task = await this.tasks.create({
+				type: taskTypeForEvent(adminEvent),
+				category: "notification",
+				siteId: event.siteId,
+				siteKey: event.siteKey,
+				subjectType: "comment",
+				subjectId: event.commentId,
+				idempotencyKey: key,
+				payloadSummary: {
+					event: adminEvent,
+					siteId: event.siteId,
+					channel: config.type,
+					channelConfigId: config.id,
+					channelConfigName: config.name,
+				},
+				payload: {
+					event: adminEvent,
+					siteId: event.siteId,
+					siteKey: event.siteKey,
+					pageKey: event.pageKey,
+					commentId: event.commentId,
+					channel: config.type,
+					channelConfigId: config.id,
+					channelConfigName: config.name,
+					includeCommentContent: "summary",
+					contentRaw: event.contentRaw,
+				},
+			});
+			tasks.push(task);
+			const delivery = await this.tasks.createDelivery({
+				taskRunId: task.id,
+				channel: config.type,
+				channelConfigRef: config.id,
+				channelConfigNameSnapshot: config.name,
+				recipientType: "external_target",
+				recipientUserId: null,
+				recipientAddressSnapshot: channelTargetSnapshot(config),
+				recipientIdentityKey: `external_target:${config.id}`,
+				eventFamily: adminEvent,
+				templateKey: templateKeyForEvent(adminEvent),
+			});
+			deliveries.push({ ...delivery, event: adminEvent });
 		}
 
 		return {

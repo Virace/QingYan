@@ -158,11 +158,10 @@ test("site settings page renders editable controls", async ({ page }) => {
 	await selectSettingsTab(page, "访客与计数");
 	await expect(page.getByRole("switch", { name: "访客记录" })).toBeVisible();
 	await selectSettingsTab(page, "通知");
+	await expect(page.getByRole("heading", { name: "评论通知" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "新待审评论" })).toBeVisible();
 	await expect(
-		page.getByRole("heading", { name: "后台用户通知" }),
-	).toBeVisible();
-	await expect(
-		page.getByRole("button", { name: "保存站点通知设置" }),
+		page.getByRole("heading", { name: "直接发布评论" }),
 	).toBeVisible();
 });
 
@@ -190,9 +189,7 @@ test("settings tabs sync to query without changing the active settings view", as
 	await expect(page).toHaveURL(/siteTab=notifications/);
 	await page.reload();
 	await expect(page.getByRole("heading", { name: "站点设置" })).toBeVisible();
-	await expect(
-		page.getByRole("heading", { name: "后台用户通知" }),
-	).toBeVisible();
+	await expect(page.getByRole("heading", { name: "评论通知" })).toBeVisible();
 
 	await page.getByRole("button", { name: "系统设置" }).click();
 	await expect(page).toHaveURL(/view=system/);
@@ -728,9 +725,8 @@ test("notification channel workflow uses dialogs and shows created test task", a
 	await testDialog
 		.locator('[data-field-label="测试收件人 / 目标"] input')
 		.fill("webhook-target@example.test");
-	await testDialog.getByRole("button", { name: "创建测试任务" }).click();
-	await expect(page.getByText("已创建测试任务")).toBeVisible();
-	await expect(page.getByText("投递记录")).toBeVisible();
+	await testDialog.getByRole("button", { name: "发送测试通知" }).click();
+	await expect(page.getByText("测试通知已交给")).toBeVisible();
 });
 
 test("site notification recipients use an add dialog", async ({ page }) => {

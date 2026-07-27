@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { adminUsers, comments, siteSettings } from "../../src/db/schema";
+import {
+	adminUsers,
+	comments,
+	siteNotificationEventRecipients,
+	siteSettings,
+} from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -49,6 +54,22 @@ function qingyanExportPayload() {
 				comment_metadata_json: null,
 				commenter_reply_email_enabled: 1,
 				backend_notifications_enabled: 1,
+				notifications: {
+					backend: {
+						events: [
+							{
+								eventType: "admin_comment_pending",
+								recipientUserIds: [1],
+								externalChannelConfigIds: [],
+							},
+							{
+								eventType: "admin_comment_approved",
+								recipientUserIds: [],
+								externalChannelConfigIds: [],
+							},
+						],
+					},
+				},
 			},
 			systemSettings: [],
 			pageThreads: [
@@ -348,6 +369,22 @@ describe("admin import/export QingYan routes", () => {
 					default_status: "pending",
 					commenter_reply_email_enabled: 0,
 					backend_notifications_enabled: 0,
+					notifications: {
+						backend: {
+							events: [
+								{
+									eventType: "admin_comment_pending",
+									recipientUserIds: [],
+									externalChannelConfigIds: [],
+								},
+								{
+									eventType: "admin_comment_approved",
+									recipientUserIds: [],
+									externalChannelConfigIds: [],
+								},
+							],
+						},
+					},
 				},
 				systemSettings: [],
 				pageThreads: [
@@ -672,6 +709,15 @@ describe("admin import/export QingYan routes", () => {
 			commenterReplyEmailEnabled: true,
 			backendNotificationsEnabled: true,
 		});
+		expect(
+			await fixture.app.db.select().from(siteNotificationEventRecipients),
+		).toEqual([
+			expect.objectContaining({
+				siteId: 1,
+				eventType: "admin_comment_pending",
+				userId: 1,
+			}),
+		]);
 	});
 
 	it("uses import records to block or skip repeated QingYan comments", async () => {

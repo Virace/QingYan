@@ -41,6 +41,71 @@ function inferAppliedMigrations(sqlite: SqliteClient): string[] {
 	return ["0000_initial.sql"];
 }
 
+function backfillSiteNotificationEvents(sqlite: SqliteClient): void {
+	const requiredTables = [
+		"admin_users",
+		"notification_channel_configs",
+		"site_notification_recipients",
+		"site_notification_recipient_routes",
+		"site_notification_event_recipients",
+		"site_notification_event_channels",
+	];
+	if (!requiredTables.every((tableName) => tableExists(sqlite, tableName))) {
+		return;
+	}
+	sqlite.exec(`
+		INSERT OR IGNORE INTO site_notification_event_recipients (
+			id, site_id, event_type, user_id, include_comment_content,
+			created_at, updated_at
+		)
+		SELECT
+			'sner_' || lower(hex(randomblob(16))),
+			recipient.site_id,
+			route.event_type,
+			recipient.user_id,
+			recipient.include_comment_content,
+			COALESCE(route.created_at, recipient.created_at, CURRENT_TIMESTAMP),
+			COALESCE(route.updated_at, recipient.updated_at, CURRENT_TIMESTAMP)
+		FROM site_notification_recipients AS recipient
+		INNER JOIN site_notification_recipient_routes AS route
+			ON route.recipient_id = recipient.id
+		INNER JOIN admin_users AS admin_user
+			ON admin_user.id = recipient.user_id
+		WHERE
+			recipient.enabled = 1
+			AND route.enabled = 1
+			AND route.channel_config_id = 'email:default'
+			AND route.event_type IN (
+				'admin_comment_pending',
+				'admin_comment_approved'
+			);
+
+		INSERT OR IGNORE INTO site_notification_event_channels (
+			id, site_id, event_type, channel_config_id, created_at, updated_at
+		)
+		SELECT
+			'snec_' || lower(hex(randomblob(16))),
+			recipient.site_id,
+			route.event_type,
+			route.channel_config_id,
+			COALESCE(route.created_at, recipient.created_at, CURRENT_TIMESTAMP),
+			COALESCE(route.updated_at, recipient.updated_at, CURRENT_TIMESTAMP)
+		FROM site_notification_recipients AS recipient
+		INNER JOIN site_notification_recipient_routes AS route
+			ON route.recipient_id = recipient.id
+		INNER JOIN notification_channel_configs AS channel_config
+			ON channel_config.id = route.channel_config_id
+		WHERE
+			recipient.enabled = 1
+			AND route.enabled = 1
+			AND route.event_type IN (
+				'admin_comment_pending',
+				'admin_comment_approved'
+			)
+			AND channel_config.type IN ('webhook', 'wxpusher');
+	`);
+}
+
 function applyUnreleasedMultiUserAdminBackfill(sqlite: SqliteClient): void {
 	const applyBackfill = sqlite.transaction(() => {
 		sqlite.exec(`
@@ -913,6 +978,16 @@ export function applyDatabaseMigrations(
 		}
 	}
 
+	if (tableExists(sqlite, "sites") && tableExists(sqlite, "admin_sessions")) {
+		applyUnreleasedBaselineBackfill(sqlite);
+		if (
+			!tableExists(sqlite, "admin_groups") ||
+			!columnExists(sqlite, "admin_sessions", "user_id")
+		) {
+			applyUnreleasedMultiUserAdminBackfill(sqlite);
+		}
+	}
+
 	for (const fileName of files) {
 		const existing = selectApplied.get(fileName);
 		if (existing) {
@@ -930,13 +1005,5 @@ export function applyDatabaseMigrations(
 		applyOne();
 	}
 
-	if (tableExists(sqlite, "sites") && tableExists(sqlite, "admin_sessions")) {
-		applyUnreleasedBaselineBackfill(sqlite);
-		if (
-			!tableExists(sqlite, "admin_groups") ||
-			!columnExists(sqlite, "admin_sessions", "user_id")
-		) {
-			applyUnreleasedMultiUserAdminBackfill(sqlite);
-		}
-	}
+	backfillSiteNotificationEvents(sqlite);
 }

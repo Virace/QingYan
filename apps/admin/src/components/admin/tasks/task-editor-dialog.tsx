@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "@radix-ui/themes";
 
-import type {
-	NotificationChannelConfig,
-	SiteNotificationRecipient,
-} from "@/api/admin";
+import type { NotificationChannelConfig } from "@/api/admin";
 import type {
 	ScheduledTaskProjection,
 	ScheduledTaskWriteInput,
@@ -30,6 +27,13 @@ const scheduleKinds: TaskScheduleKind[] = [
 	"monthly",
 	"cron",
 ];
+
+export interface TaskNotificationRecipient {
+	id: string;
+	username: string;
+	displayName: string;
+	email: string;
+}
 
 interface TaskDraft extends ScheduledTaskWriteInput {
 	type: string;
@@ -172,7 +176,7 @@ export function TaskEditorDialog({
 	definitions: TaskTypeDefinition[];
 	siteKey: string;
 	notificationChannelConfigs: NotificationChannelConfig[];
-	notificationRecipients: SiteNotificationRecipient[];
+	notificationRecipients: TaskNotificationRecipient[];
 	isSaving: boolean;
 	saveError: unknown;
 	onOpenChange: (open: boolean) => void;
@@ -197,10 +201,7 @@ export function TaskEditorDialog({
 		[notificationChannelConfigs],
 	);
 	const enabledRecipients = useMemo(
-		() =>
-			notificationRecipients.filter(
-				(recipient) => recipient.enabled && recipient.id,
-			),
+		() => notificationRecipients.filter((recipient) => recipient.id),
 		[notificationRecipients],
 	);
 	const failureNotification = draft.policy.failureNotification ?? {
@@ -568,7 +569,7 @@ export function TaskEditorDialog({
 								<div className="grid gap-1">
 									<h4 className="text-sm font-semibold">失败通知</h4>
 									<p className="text-xs leading-5 text-muted-foreground">
-										默认关闭。开启后仅使用已配置的站点通知接收人和系统通知通道。
+										默认关闭。开启后可选择邮件接收人和其他发送方式。
 									</p>
 								</div>
 								<label className="flex items-center gap-2 text-sm">
@@ -623,7 +624,11 @@ export function TaskEditorDialog({
 														<span>
 															{config.name}
 															<span className="ml-2 text-xs text-muted-foreground">
-																{config.id}
+																{config.type === "email"
+																	? "邮件"
+																	: config.type === "webhook"
+																		? "Webhook"
+																		: "WxPusher"}
 															</span>
 														</span>
 														<input
@@ -648,11 +653,11 @@ export function TaskEditorDialog({
 									</div>
 									<div className="grid gap-2">
 										<span className="text-xs font-semibold text-muted-foreground">
-											接收人
+											邮件接收人
 										</span>
 										{enabledRecipients.length === 0 ? (
 											<p className="rounded-md border p-3 text-xs text-muted-foreground">
-												当前站点暂无启用的通知接收人。
+												当前站点暂无可选择的人员。
 											</p>
 										) : (
 											<div className="grid gap-2">
@@ -692,6 +697,10 @@ export function TaskEditorDialog({
 												))}
 											</div>
 										)}
+										<p className="text-xs text-muted-foreground">
+											仅在选择邮件通道时使用；Webhook 和 WxPusher
+											会直接发送到对应目标。
+										</p>
 									</div>
 								</div>
 							) : null}
@@ -725,10 +734,14 @@ export function TaskEditorDialog({
 							<p>{saveError.message}</p>
 							{saveError.fields.length > 0 ? (
 								<ul className="mt-2 list-disc pl-5">
-									{saveError.fields.map((item) => (
-										<li key={`${item.path}:${item.message}`}>
-											{item.path}: {item.message}
-										</li>
+									{Array.from(
+										new Set(
+											saveError.fields
+												.map((item) => item.message.trim())
+												.filter(Boolean),
+										),
+									).map((message) => (
+										<li key={message}>{message}</li>
 									))}
 								</ul>
 							) : null}

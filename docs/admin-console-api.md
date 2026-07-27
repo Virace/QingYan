@@ -864,7 +864,7 @@ Query：
     };
     backend: {
       enabled: boolean;
-      recipients?: SiteNotificationRecipient[];
+      events: SiteNotificationEventSettings[];
     };
     channelConfigs: NotificationChannelConfig[];
   };
@@ -947,7 +947,7 @@ Admin Settings API 的 canonical 开关路径：
 - 评论者回复邮件通知：`notifications.commenter.replyEmailEnabled`
 - 评论框“回复提醒”初始勾选：`notifications.commenter.replyEmailDefaultChecked`
 - 后台用户通知：`notifications.backend.enabled`
-- 当前站点后台用户通知接收人：`notifications.backend.recipients`
+- 当前站点两类评论通知：`notifications.backend.events`
 
 `pageFeedback.allowLike` 是过渡同步字段；新 UI 和新调用代码应以 `engagement.pageLikes.enabled` 为页面点赞 canonical 开关。
 
@@ -1070,32 +1070,26 @@ AdminSettings
     emergencyLockdown: boolean;
   };
   notifications: {
+    capabilities: {
+      mailReady: boolean;
+      externalTargetCount: number;
+    };
     commenter: {
       replyEmailEnabled: boolean;
       replyEmailDefaultChecked: boolean;
     };
     backend: {
       enabled: boolean;
-      recipients?: Array<{
-        userId: number;
-        username: string;
-        email: string;
-        displayName: string;
-        // compatibility projection, derived from routes
-        channels: Array<"email" | "webhook" | "wxpusher">;
-        // compatibility projection, derived from routes
-        events: Array<"admin_comment_pending" | "admin_comment_approved">;
-        routes: Array<{
-          id?: string;
-          eventType: "admin_comment_pending" | "admin_comment_approved";
-          channelConfigId: string;
-          channelType?: "email" | "webhook" | "wxpusher";
-          channelName?: string;
-          enabled: boolean;
+      events: Array<{
+        eventType: "admin_comment_pending" | "admin_comment_approved";
+        recipients: Array<{
+          userId: number;
+          username: string;
+          email: string;
+          displayName: string;
+          includeCommentContent: "none" | "summary" | "full";
         }>;
-        includeCommentContent: "none" | "summary" | "full";
-        rateLimitProfile: string | null;
-        enabled: boolean;
+        externalChannelConfigIds: string[];
       }>;
     };
     channelConfigs: NotificationChannelConfig[];
@@ -1124,9 +1118,31 @@ AdminSettings
 
 `comments.abuseGuard.enabled=false` 会关闭 QingYan 应用层的公开写入滥用计数和自动黑名单触发，适用于实例前方已有更强 WAF、反向代理限流或边缘安全策略的部署。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态或输入校验。`maxWriteActions` 统计评论创建、评论投票和页面点赞等公开写入动作。
 
-后台用户通知接收人引用 `admin_users.id`，不使用可信评论作者邮箱或任意手写邮箱作为长期接收人。管理员和初始管理员可配置任意站点；全局 `admin` 组用户视为拥有所有站点访问权，可直接成为接收人。其他候选接收人必须显式拥有目标站点权限；站点管理员只能配置自己有访问权的站点，站点评论管理员不可管理接收人。
+评论通知的 canonical 模型是 `notifications.backend.events[]`，并且请求必须同时提交 `admin_comment_pending` 与 `admin_comment_approved` 两个固定事件。PATCH/PUT 输入中的每个事件使用独立的 `recipientUserIds[]` 与 `externalChannelConfigIds[]`；GET 会把人员解析为 `recipients[]`，同时保留已选的其他发送目标编号。示例：
 
-接收人配置的 canonical 模型是 `notifications.backend.recipients[].routes[]`。每条 route 绑定一个事件和一个具体渠道配置实例，例如 `email:default`、`wxpusher:ops` 或 `webhook:feishu`。`channels` 和 `events` 仍作为兼容投影返回，旧请求也可用它们生成默认 route；新 Admin UI 和新调用代码应提交 `routes`。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核只保留审核语义，不追加第二条后台用户通知。
+```json
+{
+  "notifications": {
+    "backend": {
+      "enabled": true,
+      "events": [
+        {
+          "eventType": "admin_comment_pending",
+          "recipientUserIds": [1, 7],
+          "externalChannelConfigIds": ["webhook:ops"]
+        },
+        {
+          "eventType": "admin_comment_approved",
+          "recipientUserIds": [],
+          "externalChannelConfigIds": []
+        }
+      ]
+    }
+  }
+}
+```
+
+人员引用 `admin_users.id`，不使用评论作者邮箱或任意手写邮箱作为长期接收人。全局 `admin` 组用户视为拥有所有站点访问权；其他候选人员必须显式拥有目标站点权限。空的人员和目标数组是有效配置，表示该事件当前不发送，不表示链路损坏。`admin_comment_pending` 在评论进入待审核时创建；直接通过审核的评论创建 `admin_comment_approved`；待审核评论后续通过审核不再追加第二条站点通知。
 
 Engagement 语义：
 
@@ -1159,7 +1175,9 @@ Settings API 的双状态字段必须使用 JSON boolean。GET 会归一化历�
 
 公开 bootstrap 会把这些开关映射到 `features`：`comments.enabled=false` 时返回 `features.comments.enabled=false` 并省略 `data.comments`；`engagement.pageViews.enabled=false` 时省略 `data.pageViews`；`engagement.pageLikes.enabled=false` 时省略 `data.pageLikes`；`engagement.commentVotes.enabled=false` 时评论项不输出 `vote`。
 
-Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错误的 `path` 使用 Admin Settings API canonical path，不使用公开 bootstrap 的 `features.*` path。
+Admin Settings API 的错误响应仍保留 `requestId`、`fields[]` 和 canonical `path`
+供日志关联与开发调试；Admin Console 不直接展示这些内部字段，而是把已知场景转换成当前
+控件旁的操作提示，未知场景使用不包含内部细节的恢复说明。
 
 ### `GET /api/admin/sites/{siteKey}/notification-diagnostics`
 
@@ -1172,7 +1190,7 @@ Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错
 ```ts
 {
   generatedAt: string;
-  overall: "ready" | "conditional" | "blocked";
+  overall: "ready" | "not_sending" | "conditional" | "blocked";
   savedConfigOnly: true;
   runtime: {
     notificationWorker: "ready" | "conditional" | "blocked";
@@ -1184,12 +1202,12 @@ Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错
       | "admin_comment_pending_email"
       | "admin_comment_approved_email"
       | "commenter_reply_email";
-    status: "ready" | "conditional" | "blocked";
+    status: "ready" | "not_sending" | "conditional" | "blocked";
     recipients: Array<{
       userId?: number;
       displayName?: string;
       email: string;
-      status: "ready" | "conditional" | "blocked";
+      status: "ready" | "not_sending" | "conditional" | "blocked";
       notes: string[];
     }>;
     blockers: Array<{
@@ -1208,9 +1226,10 @@ Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错
 
 三条 flow 分别表示“待审核评论 → 站点人员”“直接发布评论 → 站点人员”和
 “站点人员回复 → 原评论者”。检测会同时检查系统邮件和 SMTP、通知 worker/队列、站点后台
-通知总开关、站点人员及其事件/邮件 route、后台用户状态/个人偏好，以及评论者回复能力。
-`blocked` 表示当前已保存配置一定阻断；`conditional` 表示仍需具体评论者邮箱、订阅状态或
-真实投递结果才能确认。`path` 使用 Admin Settings canonical 路径，便于操作员定位设置。
+通知总开关、每个事件选择的站点人员和其他目标、后台用户状态/个人偏好，以及评论者回复能力。
+`not_sending` 表示该事件没有目标或总开关已关闭，是有效但不会发送的状态；`blocked`
+表示已选择发送但当前配置一定阻断；`conditional` 表示仍需具体评论者邮箱、订阅状态或真实
+投递结果才能确认。`path` 仅用于 API 调试，Admin Console 会把它转换为用户可执行的中文提示。
 
 ### `POST /api/admin/sites/{siteKey}/notification-chain-tests`
 
@@ -1238,10 +1257,10 @@ Admin Console 保存失败时会展示 `requestId` 和 `fields[]`。字段级错
 也不依赖评论前端。它通过生产 planner、数据库任务、通知 worker、模板渲染器和 email
 adapter 执行：
 
-1. 创建评论 A，并按当前站点默认评论状态向所有匹配的站点人员 email route 发送真实邮件。
+1. 创建评论 A，并按当前站点默认评论状态向该事件选择的站点人员发送真实邮件。
 2. 模拟站点人员回复评论 A，并把真实回复提醒发送到 `commenterEmail`。
 
-真实测试只发送 email，不会误触发同一接收人的 Webhook 或 WxPusher route。测试数据在终态
+真实测试只发送 email，不会触发该事件选择的 Webhook 或 WxPusher 目标。测试数据在终态
 清理，普通公开/后台评论、页面和统计接口不会显示内部线程；任务和投递证据会保留供排障。
 测试可临时准备评论者 opt-in，但不会绕过明确退订或 reputation suppression，终态会恢复原
 偏好。每个站点同一时间只允许一个 active run，终态后还有短 cooldown。
@@ -1325,7 +1344,7 @@ AdminSystemSettings
 
 `notifications.delivery.queueBackend` 默认是 `database`。选择 `bullmq` 时需要部署 Redis 并配置相应运行环境；BullMQ 只影响队列后端，不改变 planner、delivery projection、worker 状态模型或任务中心展示。
 
-Webhook 和 WxPusher 的 canonical 配置模型是 `notifications.channelConfigs[]`。每个元素是一条具体渠道配置实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`；站点接收人再通过 route 的 `channelConfigId` 选择具体实例。`email:default` 是只读默认邮件实例，GET 会返回，PUT 可原样带回但不会作为可编辑实例落库。Webhook/WxPusher 的 `secretConfig.secret`、`secretConfig.appToken` 是 secret 字段，GET 响应只返回 `secretConfigured` 状态；PUT 省略或提交空 `secretConfig` 会保留已有密钥。
+Webhook 和 WxPusher 的 canonical 配置模型是 `notifications.channelConfigs[]`。每个元素是一条实例级发送目标，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`；站点设置再通过事件的 `externalChannelConfigIds[]` 选择目标。`email:default` 是只读默认邮件实例，GET 会返回，PUT 可原样带回但不会作为可编辑实例落库。Webhook/WxPusher 的 `secretConfig.secret`、`secretConfig.appToken` 是 secret 字段，GET 响应只返回 `secretConfigured` 状态；PUT 省略或提交空 `secretConfig` 会保留已有密钥。
 
 `avatar.external.enabled` 控制外部头像 URL 生成。`avatar.display.*` 和 `publicApi.advisoryFields.enabled` 控制可选公开展示建议字段，不能简单视为 `avatar.external.enabled` 的子设置。
 

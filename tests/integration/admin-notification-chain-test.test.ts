@@ -19,7 +19,7 @@ import {
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
-import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
+import { SiteNotificationEventsRepository } from "../../src/modules/notifications/site-notification-events-repository";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { NotificationChainTestService } from "../../src/modules/notifications/notification-chain-test-service";
 import { NotificationDiagnosticsService } from "../../src/modules/notifications/notification-diagnostics-service";
@@ -133,32 +133,18 @@ async function createReadyContext(options?: {
 		configJson: JSON.stringify({ url: "https://hooks.example.test/qingyan" }),
 		secretConfigJson: "{}",
 	});
-	await new BackendUserNotificationRecipientsRepository(
-		fixture.app.db,
-	).replaceSiteRecipients({
+	await new SiteNotificationEventsRepository(fixture.app.db).replaceSiteEvents({
 		siteId: site.id,
-		recipients: [
+		events: [
 			{
-				userId: admin.id,
-				routes: [
-					{
-						eventType: "admin_comment_pending",
-						channelConfigId: "email:notification-chain-test",
-						enabled: true,
-					},
-					{
-						eventType: "admin_comment_approved",
-						channelConfigId: "email:notification-chain-test",
-						enabled: true,
-					},
-					{
-						eventType: "admin_comment_pending",
-						channelConfigId: "webhook:must-not-run-in-chain-test",
-						enabled: true,
-					},
-				],
-				includeCommentContent: "summary",
-				enabled: true,
+				eventType: "admin_comment_pending",
+				recipientUserIds: [admin.id],
+				externalChannelConfigIds: ["webhook:must-not-run-in-chain-test"],
+			},
+			{
+				eventType: "admin_comment_approved",
+				recipientUserIds: [admin.id],
+				externalChannelConfigIds: [],
 			},
 		],
 	});
@@ -342,6 +328,45 @@ describe("notification chain test orchestration", () => {
 		expect(await fixture.app.db.select().from(taskRuns)).toEqual([]);
 		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
 		expect(await fixture.app.db.select().from(comments)).toEqual([]);
+	});
+
+	it("requires an email recipient even when the selected event has an external target", async () => {
+		const { fixture, site, admin, service } = await createReadyContext();
+		await new SiteNotificationEventsRepository(
+			fixture.app.db,
+		).replaceSiteEvents({
+			siteId: site.id,
+			events: [
+				{
+					eventType: "admin_comment_pending",
+					recipientUserIds: [],
+					externalChannelConfigIds: ["webhook:must-not-run-in-chain-test"],
+				},
+				{
+					eventType: "admin_comment_approved",
+					recipientUserIds: [admin.id],
+					externalChannelConfigIds: [],
+				},
+			],
+		});
+
+		await expect(
+			service.start({
+				siteKey: site.siteKey,
+				commenterEmail: "external-only@example.com",
+				actorUserId: admin.id,
+			}),
+		).rejects.toMatchObject({
+			code: "NOTIFICATION_CHAIN_TEST_BLOCKED",
+			details: {
+				blockers: expect.arrayContaining([
+					expect.objectContaining({
+						code: "event_email_recipient_required",
+					}),
+				]),
+			},
+		});
+		expect(await fixture.app.db.select().from(taskRuns)).toEqual([]);
 	});
 
 	it("rejects a second active run and enforces cooldown after completion", async () => {

@@ -254,26 +254,22 @@ Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion�
 - 站点级 `site_settings.commenter_reply_email_enabled` 对应 Admin API `notifications.commenter.replyEmailEnabled`，只控制普通评论者是否可订阅已审核回复邮件。它会参与公开 bootstrap 的 `features.replyEmailNotification.enabled` 计算，不影响后台用户通知。
 - 站点级 `site_settings.commenter_reply_email_default_checked` 对应 Admin API `notifications.commenter.replyEmailDefaultChecked`，只控制公开评论框首次显示时的初始勾选状态。能力不可用时 bootstrap 固定返回 `defaultChecked=false`；评论创建仍必须显式提交 `options.notifyOnReply=true`，不能把默认勾选当作服务端订阅。
 - 站点级 `site_settings.backend_notifications_enabled` 对应 Admin API `notifications.backend.enabled`，只控制是否为后台用户创建站点通知任务，不影响普通评论者回复邮件订阅。
-- 站点级 `site_notification_recipients` 对应 Admin API `notifications.backend.recipients`，引用后台用户 `admin_users.id`，用于维护后台用户接收人、内容策略和启用状态；具体事件和接收渠道由 `site_notification_recipient_routes` 绑定。
+- 站点级 `site_notification_event_recipients` 与 `site_notification_event_channels` 对应 Admin API `notifications.backend.events`。两个固定事件分别拥有自己的站点人员和其他发送目标；空目标表示该事件当前不发送，是有效配置。
 - 系统级 `system_settings.notifications.delivery.*` 控制全局通知限速、低优先级延迟和队列后端。
-- 系统级 `notification_channel_configs` 维护具体通知渠道配置实例。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点接收人 route 使用 `channelConfigId` 选择具体实例。
+- 系统级 `notification_channel_configs` 维护具体发送目标。`email:default` 是只读默认邮件实例；Webhook 和 WxPusher 可配置多个实例，例如 `webhook:feishu`、`webhook:ops`、`wxpusher:audit`。站点事件使用 `externalChannelConfigIds` 选择具体目标。
 - 通知模板由 `notification_templates` 保存自定义覆盖；没有覆盖时使用内置默认模板。
 
-这三层必须独立排查：系统邮件/SMTP 是 email transport；评论者回复邮件是普通评论者 opt-in
-链路；后台用户通知是站点人员事件和 route 链路。开启其中一层不会自动开启另外两层。
-Admin Console 的“通知”页会按已保存配置静态检查“待审核评论 → 站点人员”“直接发布评论
-→ 站点人员”“站点人员回复 → 原评论者”三条 flow，并返回 blocker 的 canonical setting
-path。未保存的页面草稿不会参与静态检测。
+配置所有权分为三层：系统设置的“邮件”和“发送服务”维护实例级发送能力；站点设置的“评论通知”决定每个站点事件发给谁或发到哪里；后台用户个人偏好可以暂停自己的邮件或改用摘要。开启其中一层不会自动开启另外两层。Admin Console 会按已保存配置检查“待审核评论 → 站点人员”“直接发布评论 → 站点人员”“站点人员回复 → 原评论者”三条流程；没有目标时显示“不会发送”，不会把它误报为配置损坏。未保存的页面草稿不会参与静态检测。
 
 真实评论邮件测试不要求内容站点创建页面或提供前端。QingYan 会使用内置
 `notification_test` 线程和正式 planner/queue/worker/template/email adapter，先创建评论 A
-测试站点人员邮件，再模拟站点人员回复测试评论者邮件。真实测试只选择 email route，不发送
+测试站点人员邮件，再模拟站点人员回复测试评论者邮件。真实测试只选择邮件，不发送
 Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商接受请求，不证明进入
 收件箱；最后仍需人工核对两个收件箱、垃圾邮件和退信。
 
 队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
 
-通知任务状态固定为 `queued`、`delayed`、`running`、`retrying`、`succeeded`、`failed`、`suppressed`、`cancelled`。通知接收人类型固定为 `backend_user`、`commenter`、`test`。普通评论者只支持 email；后台用户可使用 email、webhook、wxpusher，具体发送还要同时满足系统渠道配置实例、站点接收人 route 和个人偏好。任务和投递会记录 `channelConfigId` / `channelConfigName` 快照，用于区分多个同类型通道实例。
+通知任务状态固定为 `queued`、`delayed`、`running`、`retrying`、`succeeded`、`failed`、`suppressed`、`cancelled`。通知接收目标类型包含 `backend_user`、`commenter`、`external_target`、`test`。邮件按事件选择的站点人员创建一人一份投递；Webhook/WxPusher 按事件选择的目标各创建一份投递，不再与人员做笛卡尔组合。任务和投递会记录 `channelConfigId` / `channelConfigName` 快照，用于区分多个同类型发送目标。
 
 评论者回复通知的公开写入语义：
 
@@ -286,6 +282,7 @@ Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商
 后台用户通知语义：
 
 - 接收人引用后台用户，不从 `comments.verifiedAuthor.email` 或评论作者邮箱派生长期接收人。
+- 每个固定事件独立保存人员和其他发送目标；没有接收目标时保持链路完整，只是不创建发送任务。
 - 待审核评论创建 `admin_comment_pending`；直接通过审核的评论创建 `admin_comment_approved`；pending 评论后续通过审核不再追加第二条后台用户通知。
 - 通知 planner、队列、worker、SMTP、Webhook 或 WxPusher 失败都不应阻断评论创建、审核、后台回复、导入、迁移或任务中心读取。
 
@@ -438,13 +435,15 @@ qyctl restart
 
 裸运行 `qyctl` 或 `qingyanctl` 会显示帮助信息。`qyctl status/start/stop/restart` 面向 systemd 直接部署；Docker Compose 部署应使用 `docker compose ps/restart/logs` 管理容器生命周期。
 
-`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，并同时输出当前版本和最新版本。Docker Compose 的实际更新统一运行 `./scripts/update.sh`；脚本负责预检、整站备份、Release 切换、镜像构建、UpgradePlan 确认、数据升级和健康验收。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+`qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，并同时输出当前版本和最新版本。Docker Compose 的实际更新统一运行 `./scripts/update.sh`；脚本负责预检、整站备份、Release 切换、镜像构建、UpgradePlan 确认、数据升级和健康验收。
+
+更新器的 `--network-profile auto|official|cn` 只控制镜像构建阶段的 APT、Corepack、pnpm、Node headers 和 better-sqlite3 下载地址，不改写 Git origin 或 Docker 基础镜像来源。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
 
 ### Release 更新规则
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
 - 首个正式 release 为 `v0.1.0`。
-- 当前正式 release 为 `v0.2.3`。
+- 当前正式 release 为 `v0.2.4`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 

@@ -109,10 +109,35 @@ exit 90
 FAKE_GIT
 chmod +x "$FAKE_BIN/git"
 
+cat > "$FAKE_BIN/curl" <<'FAKE_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'curl %s\n' "$*" >> "$CALL_LOG"
+url="${*: -1}"
+case "$url" in
+	*deb.debian.org*|*registry.npmjs.org*|*nodejs.org*)
+		[[ "${FAKE_OFFICIAL_NETWORK_FAIL:-0}" != "1" ]] || exit 22
+		printf '%s' "${FAKE_OFFICIAL_NETWORK_TIME:-0.300}"
+		;;
+	*mirrors.tuna.tsinghua.edu.cn*|*registry.npmmirror.com*|*npmmirror.com*)
+		[[ "${FAKE_CN_NETWORK_FAIL:-0}" != "1" ]] || exit 22
+		printf '%s' "${FAKE_CN_NETWORK_TIME:-0.100}"
+		;;
+	*)
+		exit 90
+		;;
+esac
+FAKE_CURL
+chmod +x "$FAKE_BIN/curl"
+
 cat > "$FAKE_BIN/docker" <<'FAKE_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'docker %s\n' "$*" >> "$CALL_LOG"
+if [[ "${REQUIRE_NULL_STDIN:-0}" == "1" && "$*" == compose\ exec\ -T\ * && "$(readlink /proc/$$/fd/0)" != "/dev/null" ]]; then
+	printf 'compose exec inherited updater stdin\n' >&2
+	exit 92
+fi
 
 if [[ "$*" == "info" || "$*" == "compose version" ]]; then
 	exit 0
@@ -143,7 +168,7 @@ if [[ "$*" == *"qyctl backup"* ]]; then
 	printf 'backup-created\n'
 	exit 0
 fi
-if [[ "$*" == *" build --pull qingyan"* ]]; then
+if [[ "$*" == *" build --pull "* && "$*" == *" qingyan" ]]; then
 	if [[ "${FAKE_BUILD_FAIL:-0}" == "1" ]]; then
 		printf 'simulated build failure\n' >&2
 		exit 42
@@ -210,13 +235,94 @@ run_update() {
 		bash "$UPDATE_SCRIPT" --yes
 }
 
+run_update_args() {
+	env \
+		PATH="$FAKE_BIN:$PATH" \
+		QINGYAN_ROOT="$FAKE_REPO" \
+		CALL_LOG="$CALL_LOG" \
+		FAKE_STATE_DIR="$FAKE_STATE_DIR" \
+		bash "$UPDATE_SCRIPT" --yes "$@"
+}
+
+run_update_with_piped_input() {
+	printf 'pipeline-sentinel\n' | env \
+		PATH="$FAKE_BIN:$PATH" \
+		QINGYAN_ROOT="$FAKE_REPO" \
+		CALL_LOG="$CALL_LOG" \
+		FAKE_STATE_DIR="$FAKE_STATE_DIR" \
+		REQUIRE_NULL_STDIN=1 \
+		bash "$UPDATE_SCRIPT" --yes --network-profile cn
+}
+
+reset_case
+if ! run_update_args --network-profile cn > "$OUTPUT_LOG" 2>&1; then
+	cat "$OUTPUT_LOG" >&2
+	exit 1
+fi
+grep -F "网络配置档：cn" "$OUTPUT_LOG" > /dev/null
+grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_NODE_DIST_URL=https://npmmirror.com/mirrors/node --build-arg QINGYAN_BETTER_SQLITE3_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3 qingyan" "$CALL_LOG" > /dev/null
+
+reset_case
+if ! run_update_args --network-profile official > "$OUTPUT_LOG" 2>&1; then
+	cat "$OUTPUT_LOG" >&2
+	exit 1
+fi
+grep -F "网络配置档：official" "$OUTPUT_LOG" > /dev/null
+grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://deb.debian.org/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmjs.org --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmjs.org --build-arg QINGYAN_NODE_DIST_URL=https://nodejs.org/download/release --build-arg QINGYAN_BETTER_SQLITE3_BINARY_HOST=https://github.com/WiseLibs/better-sqlite3/releases/download qingyan" "$CALL_LOG" > /dev/null
+
+reset_case
+if ! run_update FAKE_CN_NETWORK_FAIL=1 > "$OUTPUT_LOG" 2>&1; then
+	cat "$OUTPUT_LOG" >&2
+	exit 1
+fi
+grep -F "网络配置档：auto -> official" "$OUTPUT_LOG" > /dev/null
+grep -F "QINGYAN_APT_MAIN_MIRROR=http://deb.debian.org/debian" "$CALL_LOG" > /dev/null
+
+reset_case
+if run_update_args --network-profile invalid > "$OUTPUT_LOG" 2>&1; then
+	printf 'unknown network profile should fail\n' >&2
+	exit 1
+fi
+grep -F "可选值为 auto、official、cn" "$OUTPUT_LOG" > /dev/null
+if grep -F "docker " "$CALL_LOG" > /dev/null; then
+	printf 'invalid network profile must fail before Docker commands\n' >&2
+	exit 1
+fi
+
+reset_case
+if run_update_args --network-profile > "$OUTPUT_LOG" 2>&1; then
+	printf 'missing network profile value should fail\n' >&2
+	exit 1
+fi
+grep -F -- "--network-profile 缺少参数" "$OUTPUT_LOG" > /dev/null
+
+reset_case
+if run_update FAKE_OFFICIAL_NETWORK_FAIL=1 FAKE_CN_NETWORK_FAIL=1 > "$OUTPUT_LOG" 2>&1; then
+	printf 'unreachable network profiles should fail\n' >&2
+	exit 1
+fi
+grep -F "official 和 cn 网络配置档均不可用" "$OUTPUT_LOG" > /dev/null
+if grep -F "docker " "$CALL_LOG" > /dev/null; then
+	printf 'network probing failure must happen before Docker commands\n' >&2
+	exit 1
+fi
+
+reset_case
+if ! run_update_with_piped_input > "$OUTPUT_LOG" 2>&1; then
+	cat "$OUTPUT_LOG" >&2
+	exit 1
+fi
+grep -F "更新完成" "$OUTPUT_LOG" > /dev/null
+
 reset_case
 if ! run_update > "$OUTPUT_LOG" 2>&1; then
 	cat "$OUTPUT_LOG" >&2
 	exit 1
 fi
+grep -F "网络配置档：auto -> cn" "$OUTPUT_LOG" > /dev/null
+grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_NODE_DIST_URL=https://npmmirror.com/mirrors/node --build-arg QINGYAN_BETTER_SQLITE3_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3 qingyan" "$CALL_LOG" > /dev/null
 assert_before "docker compose exec -T qingyan qyctl backup" "git switch --detach v0.2.3"
-assert_before "git switch --detach v0.2.3" "docker compose --progress plain build --pull qingyan"
+assert_before "git switch --detach v0.2.3" "docker compose --progress plain build --pull"
 assert_before "docker compose exec -T qingyan qyctl upgrade --dry-run" "docker compose exec -T qingyan qyctl upgrade --yes"
 assert_before "docker compose exec -T qingyan qyctl upgrade --yes" "docker compose restart qingyan"
 grep -F "更新完成" "$OUTPUT_LOG" > /dev/null
@@ -235,7 +341,7 @@ if ! run_update FAKE_DEPLOYMENT_DIRTY=1 > "$OUTPUT_LOG" 2>&1; then
 fi
 assert_before "git stash push --include-untracked" "git switch --detach v0.2.3"
 assert_before "git switch --detach v0.2.3" "git stash apply --index localstash"
-assert_before "git stash apply --index localstash" "docker compose --progress plain build --pull qingyan"
+assert_before "git stash apply --index localstash" "docker compose --progress plain build --pull"
 grep -F "已保留并恢复本地部署文件" "$OUTPUT_LOG" > /dev/null
 
 reset_case

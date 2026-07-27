@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { AppDatabase } from "../../db/client";
 import {
 	notificationChannelConfigs,
+	siteNotificationEventChannels,
 	siteNotificationRecipientRoutes,
 } from "../../db/schema";
 import { AppError } from "../shared/errors";
@@ -175,16 +176,33 @@ export class NotificationChannelConfigsRepository {
 					id !== defaultEmailChannelConfig.id && !nextPersistedIds.has(id),
 			);
 		if (deletedIds.length > 0) {
-			const referencedRows = await this.db
-				.select({
-					channelConfigId: siteNotificationRecipientRoutes.channelConfigId,
-				})
-				.from(siteNotificationRecipientRoutes)
-				.where(
-					inArray(siteNotificationRecipientRoutes.channelConfigId, deletedIds),
-				);
+			const [legacyReferencedRows, eventReferencedRows] = await Promise.all([
+				this.db
+					.select({
+						channelConfigId: siteNotificationRecipientRoutes.channelConfigId,
+					})
+					.from(siteNotificationRecipientRoutes)
+					.where(
+						inArray(
+							siteNotificationRecipientRoutes.channelConfigId,
+							deletedIds,
+						),
+					),
+				this.db
+					.select({
+						channelConfigId: siteNotificationEventChannels.channelConfigId,
+					})
+					.from(siteNotificationEventChannels)
+					.where(
+						inArray(siteNotificationEventChannels.channelConfigId, deletedIds),
+					),
+			]);
 			const referencedIds = Array.from(
-				new Set(referencedRows.map((row) => row.channelConfigId)),
+				new Set(
+					[...legacyReferencedRows, ...eventReferencedRows].map(
+						(row) => row.channelConfigId,
+					),
+				),
 			);
 			if (referencedIds.length > 0) {
 				throw new AppError(

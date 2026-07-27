@@ -171,7 +171,167 @@ function normalizeSiteSettingsForImport(
 			normalized.email_notifications_enabled;
 	}
 	delete normalized.email_notifications_enabled;
+	delete normalized.notifications;
 	return normalized;
+}
+
+const siteNotificationEventTypes = [
+	"admin_comment_pending",
+	"admin_comment_approved",
+] as const;
+
+type SiteNotificationEventType = (typeof siteNotificationEventTypes)[number];
+
+interface SiteNotificationEventImport {
+	eventType: SiteNotificationEventType;
+	recipientUserIds: number[];
+	externalChannelConfigIds: string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function uniqueValues<T>(values: T[]) {
+	return Array.from(new Set(values));
+}
+
+function readSiteNotificationEvents(
+	settings: QingYanExportSiteSettings | null | undefined,
+): SiteNotificationEventImport[] | null {
+	if (!settings || !isRecord(settings.notifications)) {
+		return null;
+	}
+	const backend = settings.notifications.backend;
+	if (!isRecord(backend)) {
+		return null;
+	}
+	let rawEvents: unknown[] | null = Array.isArray(backend.events)
+		? backend.events
+		: null;
+	if (!rawEvents && Array.isArray(backend.recipients)) {
+		const byEvent = new Map<
+			SiteNotificationEventType,
+			{ recipientUserIds: number[]; externalChannelConfigIds: string[] }
+		>(
+			siteNotificationEventTypes.map((eventType) => [
+				eventType,
+				{ recipientUserIds: [], externalChannelConfigIds: [] },
+			]),
+		);
+		for (const candidate of backend.recipients) {
+			if (!isRecord(candidate) || candidate.enabled === false) {
+				continue;
+			}
+			const userId = Number(candidate.userId);
+			if (!Number.isInteger(userId) || userId <= 0) {
+				continue;
+			}
+			const routes = Array.isArray(candidate.routes) ? candidate.routes : [];
+			for (const route of routes) {
+				if (!isRecord(route) || route.enabled === false) {
+					continue;
+				}
+				const eventType = route.eventType;
+				if (
+					typeof eventType !== "string" ||
+					!siteNotificationEventTypes.includes(
+						eventType as SiteNotificationEventType,
+					)
+				) {
+					continue;
+				}
+				const target = byEvent.get(eventType as SiteNotificationEventType);
+				if (!target) {
+					continue;
+				}
+				const channelConfigId =
+					typeof route.channelConfigId === "string"
+						? route.channelConfigId
+						: "";
+				if (channelConfigId === "email:default") {
+					target.recipientUserIds.push(userId);
+				} else if (channelConfigId) {
+					target.externalChannelConfigIds.push(channelConfigId);
+				}
+			}
+		}
+		rawEvents = siteNotificationEventTypes.map((eventType) => ({
+			eventType,
+			recipientUserIds: uniqueValues(
+				byEvent.get(eventType)?.recipientUserIds ?? [],
+			),
+			externalChannelConfigIds: uniqueValues(
+				byEvent.get(eventType)?.externalChannelConfigIds ?? [],
+			),
+		}));
+	}
+	if (!rawEvents) {
+		return null;
+	}
+	const parsed = rawEvents.map((candidate) => {
+		if (!isRecord(candidate)) {
+			throw new InvalidRequestError({
+				message: "站点通知设置格式不正确。",
+			});
+		}
+		const eventType = candidate.eventType;
+		if (
+			typeof eventType !== "string" ||
+			!siteNotificationEventTypes.includes(
+				eventType as SiteNotificationEventType,
+			)
+		) {
+			throw new InvalidRequestError({
+				message: "站点通知包含不支持的通知类型。",
+			});
+		}
+		const recipientUserIds = Array.isArray(candidate.recipientUserIds)
+			? candidate.recipientUserIds.map(Number)
+			: [];
+		const externalChannelConfigIds = Array.isArray(
+			candidate.externalChannelConfigIds,
+		)
+			? candidate.externalChannelConfigIds.filter(
+					(value): value is string =>
+						typeof value === "string" && value.length > 0,
+				)
+			: [];
+		if (
+			recipientUserIds.some(
+				(userId) => !Number.isInteger(userId) || userId <= 0,
+			) ||
+			uniqueValues(recipientUserIds).length !== recipientUserIds.length ||
+			uniqueValues(externalChannelConfigIds).length !==
+				externalChannelConfigIds.length
+		) {
+			throw new InvalidRequestError({
+				message: "站点通知的接收目标格式不正确。",
+			});
+		}
+		return {
+			eventType: eventType as SiteNotificationEventType,
+			recipientUserIds,
+			externalChannelConfigIds,
+		};
+	});
+	if (
+		parsed.length !== siteNotificationEventTypes.length ||
+		siteNotificationEventTypes.some(
+			(eventType) =>
+				parsed.filter((event) => event.eventType === eventType).length !== 1,
+		)
+	) {
+		throw new InvalidRequestError({
+			message: "站点通知必须同时包含两种评论通知。",
+		});
+	}
+	return siteNotificationEventTypes.map(
+		(eventType) =>
+			parsed.find((event) => event.eventType === eventType) as
+				| SiteNotificationEventImport
+				| never,
+	);
 }
 
 export class QingYanImportService {
@@ -984,6 +1144,22 @@ export class QingYanImportService {
 					});
 				}
 			}
+			const incomingEvents = readSiteNotificationEvents(incomingSettings);
+			if (incomingEvents) {
+				this.validateSiteNotificationEvents(siteId, incomingEvents);
+				const currentEvents = this.getCurrentSiteNotificationEvents(siteId);
+				if (JSON.stringify(currentEvents) !== JSON.stringify(incomingEvents)) {
+					changes.push({
+						path: "siteSettings.notifications.backend.events",
+						current: currentEvents,
+						incoming: incomingEvents,
+						action:
+							options.settingsStrategy === "replace_settings"
+								? "replace"
+								: "conflict",
+					});
+				}
+			}
 		}
 
 		if (changes.length === 0) {
@@ -1106,27 +1282,161 @@ export class QingYanImportService {
 				]),
 		);
 		const columns = Object.keys(updates);
-		if (columns.length === 0) {
-			return;
+		if (columns.length > 0) {
+			const assignments = columns.map((column) => `${column} = ?`).join(", ");
+			this.sqlite
+				.prepare(
+					`UPDATE site_settings
+					SET ${assignments}, updated_at = ?
+					WHERE site_id = ?`,
+				)
+				.run(
+					...columns.map((column) => updates[column]),
+					new Date().toISOString(),
+					siteId,
+				);
 		}
-		const assignments = columns.map((column) => `${column} = ?`).join(", ");
-		this.sqlite
-			.prepare(
-				`UPDATE site_settings
-				SET ${assignments}, updated_at = ?
-				WHERE site_id = ?`,
-			)
-			.run(
-				...columns.map((column) => updates[column]),
-				new Date().toISOString(),
-				siteId,
-			);
+		const events = readSiteNotificationEvents(settings);
+		if (events) {
+			this.replaceSiteNotificationEvents(siteId, events);
+		}
 	}
 
 	private getCurrentSiteSettings(siteId: number) {
 		return this.sqlite
 			.prepare("SELECT * FROM site_settings WHERE site_id = ?")
 			.get(siteId) as Record<string, unknown> | undefined;
+	}
+
+	private getCurrentSiteNotificationEvents(
+		siteId: number,
+	): SiteNotificationEventImport[] {
+		const recipientRows = this.sqlite
+			.prepare(
+				`SELECT event_type, user_id
+				FROM site_notification_event_recipients
+				WHERE site_id = ?
+				ORDER BY event_type, user_id`,
+			)
+			.all(siteId) as Array<{ event_type: string; user_id: number }>;
+		const channelRows = this.sqlite
+			.prepare(
+				`SELECT event_type, channel_config_id
+				FROM site_notification_event_channels
+				WHERE site_id = ?
+				ORDER BY event_type, channel_config_id`,
+			)
+			.all(siteId) as Array<{
+			event_type: string;
+			channel_config_id: string;
+		}>;
+		return siteNotificationEventTypes.map((eventType) => ({
+			eventType,
+			recipientUserIds: recipientRows
+				.filter((row) => row.event_type === eventType)
+				.map((row) => row.user_id),
+			externalChannelConfigIds: channelRows
+				.filter((row) => row.event_type === eventType)
+				.map((row) => row.channel_config_id),
+		}));
+	}
+
+	private validateSiteNotificationEvents(
+		siteId: number,
+		events: SiteNotificationEventImport[],
+	) {
+		const recipientUserIds = uniqueValues(
+			events.flatMap((event) => event.recipientUserIds),
+		);
+		const findAvailableUser = this.sqlite.prepare(
+			`SELECT admin_users.id
+			FROM admin_users
+			INNER JOIN admin_user_groups
+				ON admin_user_groups.user_id = admin_users.id
+			INNER JOIN admin_groups
+				ON admin_groups.id = admin_user_groups.group_id
+			LEFT JOIN admin_user_site_access
+				ON admin_user_site_access.user_id = admin_users.id
+				AND admin_user_site_access.site_id = ?
+			WHERE admin_users.id = ?
+				AND admin_users.status = 'active'
+				AND admin_users.deleted_at IS NULL
+				AND (admin_groups.key = 'admin' OR admin_user_site_access.id IS NOT NULL)
+			LIMIT 1`,
+		);
+		for (const userId of recipientUserIds) {
+			if (!findAvailableUser.get(siteId, userId)) {
+				throw new InvalidRequestError({
+					message: "导入文件中的站点通知人员在当前站点不可用。",
+				});
+			}
+		}
+
+		const externalChannelConfigIds = uniqueValues(
+			events.flatMap((event) => event.externalChannelConfigIds),
+		);
+		const findExternalConfig = this.sqlite.prepare(
+			`SELECT id
+			FROM notification_channel_configs
+			WHERE id = ? AND type IN ('webhook', 'wxpusher')
+			LIMIT 1`,
+		);
+		for (const channelConfigId of externalChannelConfigIds) {
+			if (!findExternalConfig.get(channelConfigId)) {
+				throw new InvalidRequestError({
+					message: "导入文件中的其他发送目标在当前系统中不可用。",
+				});
+			}
+		}
+	}
+
+	private replaceSiteNotificationEvents(
+		siteId: number,
+		events: SiteNotificationEventImport[],
+	) {
+		this.validateSiteNotificationEvents(siteId, events);
+		this.sqlite
+			.prepare(
+				"DELETE FROM site_notification_event_recipients WHERE site_id = ?",
+			)
+			.run(siteId);
+		this.sqlite
+			.prepare("DELETE FROM site_notification_event_channels WHERE site_id = ?")
+			.run(siteId);
+		const nowIso = new Date().toISOString();
+		const insertRecipient = this.sqlite.prepare(
+			`INSERT INTO site_notification_event_recipients (
+				id, site_id, event_type, user_id, include_comment_content,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, 'summary', ?, ?)`,
+		);
+		const insertChannel = this.sqlite.prepare(
+			`INSERT INTO site_notification_event_channels (
+				id, site_id, event_type, channel_config_id, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?)`,
+		);
+		for (const event of events) {
+			for (const userId of event.recipientUserIds) {
+				insertRecipient.run(
+					`sner_${randomUUID().replaceAll("-", "")}`,
+					siteId,
+					event.eventType,
+					userId,
+					nowIso,
+					nowIso,
+				);
+			}
+			for (const channelConfigId of event.externalChannelConfigIds) {
+				insertChannel.run(
+					`snec_${randomUUID().replaceAll("-", "")}`,
+					siteId,
+					event.eventType,
+					channelConfigId,
+					nowIso,
+					nowIso,
+				);
+			}
+		}
 	}
 
 	private readSystemSettingRows(payload: QingYanExport) {

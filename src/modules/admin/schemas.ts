@@ -206,34 +206,28 @@ export const adminNotificationTemplateTestBodySchema = z.object({
 	recipient: z.string().min(1).optional(),
 });
 
-const siteNotificationRecipientChannelSchema = z.enum([
-	"email",
-	"webhook",
-	"wxpusher",
-]);
 const siteNotificationRecipientEventSchema = z.enum([
 	"admin_comment_pending",
 	"admin_comment_approved",
 ]);
-const siteNotificationRecipientRouteSchema = z.object({
+const siteNotificationEventSchema = z.object({
 	eventType: siteNotificationRecipientEventSchema,
-	channelConfigId: z.string().trim().min(1),
-	enabled: z.boolean().default(true),
+	recipientUserIds: z.array(z.number().int().positive()),
+	externalChannelConfigIds: z.array(z.string().trim().min(1)),
 });
-const siteNotificationRecipientSchema = z
-	.object({
-		userId: z.number().int().positive(),
-		channels: z.array(siteNotificationRecipientChannelSchema).min(1).optional(),
-		events: z.array(siteNotificationRecipientEventSchema).min(1).optional(),
-		routes: z.array(siteNotificationRecipientRouteSchema).min(1).optional(),
-		includeCommentContent: z
-			.enum(["none", "summary", "full"])
-			.default("summary"),
-		rateLimitProfile: z.string().trim().min(1).nullable().optional(),
-		enabled: z.boolean().default(true),
-	})
-	.refine((value) => value.routes || (value.channels && value.events), {
-		message: "通知接收人必须配置至少一个事件和接收渠道。",
+const siteNotificationEventsSchema = z
+	.array(siteNotificationEventSchema)
+	.length(2)
+	.superRefine((events, context) => {
+		const eventTypes = events.map((event) => event.eventType);
+		for (const eventType of siteNotificationRecipientEventSchema.options) {
+			if (eventTypes.filter((value) => value === eventType).length !== 1) {
+				context.addIssue({
+					code: "custom",
+					message: "必须且只能提交一次每种站点通知类型。",
+				});
+			}
+		}
 	});
 
 const sectionPatchBodySchema = z
@@ -722,8 +716,9 @@ export const adminSettingsBodySchema = z
 				backend: z
 					.object({
 						enabled: z.boolean().optional(),
-						recipients: z.array(siteNotificationRecipientSchema).optional(),
+						events: siteNotificationEventsSchema.optional(),
 					})
+					.strict()
 					.optional(),
 			})
 			.optional(),

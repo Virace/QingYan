@@ -1,7 +1,12 @@
 import type { AppDatabase } from "../../db/client";
 import { BackendUserNotificationRecipientsRepository } from "../notifications/backend-user-recipients-repository";
-import { channelTargetSnapshot } from "../notifications/channel-configs-repository";
+import {
+	channelTargetSnapshot,
+	NotificationChannelConfigsRepository,
+	type NotificationChannelConfigRecord,
+} from "../notifications/channel-configs-repository";
 import { TaskEventLogRepository } from "./task-event-log-repository";
+import { parseTaskFailureRecipientUserId } from "./task-failure-notification-targets";
 import { TaskRunRepository } from "./task-run-repository";
 import type { TaskRunRecord } from "./types";
 
@@ -43,11 +48,13 @@ function readFailureNotificationPolicy(
 
 export class TaskFailureNotificationService {
 	private readonly recipients: BackendUserNotificationRecipientsRepository;
+	private readonly channelConfigs: NotificationChannelConfigsRepository;
 	private readonly taskRuns: TaskRunRepository;
 	private readonly eventLogs: TaskEventLogRepository;
 
 	public constructor(db: AppDatabase) {
 		this.recipients = new BackendUserNotificationRecipientsRepository(db);
+		this.channelConfigs = new NotificationChannelConfigsRepository(db);
 		this.taskRuns = new TaskRunRepository(db);
 		this.eventLogs = new TaskEventLogRepository(db);
 	}
@@ -64,10 +71,7 @@ export class TaskFailureNotificationService {
 			});
 			return { createdCount: 0, taskRunIds: [], deliveryIds: [] };
 		}
-		if (
-			policy.channelConfigIds.length === 0 ||
-			policy.recipientIds.length === 0
-		) {
+		if (policy.channelConfigIds.length === 0) {
 			await this.writeFailureEvent(run, "empty_failure_notification_targets", {
 				channelConfigIds: policy.channelConfigIds,
 				recipientIds: policy.recipientIds,
@@ -75,104 +79,124 @@ export class TaskFailureNotificationService {
 			return { createdCount: 0, taskRunIds: [], deliveryIds: [] };
 		}
 
-		const recipients = await this.recipients.listSiteRecipients(run.siteId);
-		const selectedRecipients = recipients.filter(
-			(recipient) =>
-				recipient.enabled && policy.recipientIds.includes(recipient.id),
+		const selectedConfigs = (
+			await this.channelConfigs.listByIds(policy.channelConfigIds)
+		).filter((config) => config.enabled);
+		const directUserIds = policy.recipientIds.flatMap((recipientId) => {
+			const userId = parseTaskFailureRecipientUserId(recipientId);
+			return userId ? [userId] : [];
+		});
+		const legacyRecipientIds = policy.recipientIds.filter(
+			(recipientId) => parseTaskFailureRecipientUserId(recipientId) === null,
 		);
+		const legacyRecipients =
+			legacyRecipientIds.length > 0
+				? await this.recipients.listSiteRecipients(run.siteId)
+				: [];
+		const legacyUserIds = legacyRecipients
+			.filter(
+				(recipient) =>
+					recipient.enabled && legacyRecipientIds.includes(recipient.id),
+			)
+			.map((recipient) => recipient.userId);
 		const activeUsers = await this.recipients.listActiveSiteRecipientUsers({
 			siteId: run.siteId,
-			userIds: selectedRecipients.map((recipient) => recipient.userId),
+			userIds: Array.from(new Set([...directUserIds, ...legacyUserIds])),
 		});
-		const activeUserById = new Map(activeUsers.map((user) => [user.id, user]));
 		const taskRunIds: string[] = [];
 		const deliveryIds: string[] = [];
-		const skipped: Array<{ recipientId: string; channelConfigId: string }> = [];
-		const plannedTargets = new Set<string>();
+		const skipped: Array<{ target: string; channelConfigId: string }> = [];
 
-		for (const recipient of selectedRecipients) {
-			const user = activeUserById.get(recipient.userId);
-			if (!user) {
-				continue;
-			}
-			for (const route of recipient.routes) {
-				if (
-					!route.enabled ||
-					!route.channelConfig?.enabled ||
-					!policy.channelConfigIds.includes(route.channelConfigId)
-				) {
-					if (policy.channelConfigIds.includes(route.channelConfigId)) {
-						skipped.push({
-							recipientId: recipient.id,
-							channelConfigId: route.channelConfigId,
-						});
-					}
-					continue;
-				}
-				const targetKey = `${recipient.id}:${route.channelConfigId}`;
-				if (plannedTargets.has(targetKey)) {
-					continue;
-				}
-				plannedTargets.add(targetKey);
-				const notificationRun = await this.taskRuns.create({
-					type: "task_failure_notification",
-					category: "notification",
-					siteId: run.siteId,
-					siteKey: run.siteKey,
-					subjectType: "task_run",
-					subjectId: run.id,
-					idempotencyKey: [
-						"task_failure_notification",
-						run.id,
-						recipient.userId,
-						route.channelConfigId,
-					].join(":"),
-					payloadSummary: {
-						event: "task_run_failed",
-						taskRunId: run.id,
-						scheduledTaskId: run.scheduledTaskId,
-						scheduledTaskName: run.scheduledTaskNameSnapshot,
-						taskType: run.type,
-						userId: recipient.userId,
-						channelConfigId: route.channelConfigId,
-						channelConfigName: route.channelName,
-					},
-					payload: {
-						format: "text",
-						subjectTemplate: "[QingYan] 任务运行失败",
-						bodyTemplate:
-							"任务 {{task.name}} 运行失败。\n类型：{{task.type}}\n运行 ID：{{run.id}}\n状态：{{run.status}}\n错误：{{run.error}}",
-						templateContext: {
-							task: {
-								id: run.scheduledTaskId,
-								name: run.scheduledTaskNameSnapshot ?? run.type,
-								type: run.type,
-							},
-							run: {
-								id: run.id,
-								status: run.status,
-								error: JSON.stringify(run.error ?? {}),
-							},
+		const createTarget = async (input: {
+			config: NotificationChannelConfigRecord;
+			recipientType: "backend_user" | "external_target";
+			recipientUserId: number | null;
+			recipientAddress: string;
+			identityKey: string;
+		}) => {
+			const notificationRun = await this.taskRuns.create({
+				type: "task_failure_notification",
+				category: "notification",
+				siteId: run.siteId,
+				siteKey: run.siteKey,
+				subjectType: "task_run",
+				subjectId: run.id,
+				idempotencyKey: [
+					"task_failure_notification",
+					run.id,
+					input.identityKey,
+				].join(":"),
+				payloadSummary: {
+					event: "task_run_failed",
+					taskRunId: run.id,
+					scheduledTaskId: run.scheduledTaskId,
+					scheduledTaskName: run.scheduledTaskNameSnapshot,
+					taskType: run.type,
+					userId: input.recipientUserId,
+					channelConfigId: input.config.id,
+					channelConfigName: input.config.name,
+				},
+				payload: {
+					format: "text",
+					subjectTemplate: "[QingYan] 任务运行失败",
+					bodyTemplate:
+						"任务 {{task.name}} 运行失败。\n类型：{{task.type}}\n运行 ID：{{run.id}}\n状态：{{run.status}}\n错误：{{run.error}}",
+					templateContext: {
+						task: {
+							id: run.scheduledTaskId,
+							name: run.scheduledTaskNameSnapshot ?? run.type,
+							type: run.type,
+						},
+						run: {
+							id: run.id,
+							status: run.status,
+							error: JSON.stringify(run.error ?? {}),
 						},
 					},
+				},
+			});
+			const delivery = await this.taskRuns.createDelivery({
+				taskRunId: notificationRun.id,
+				channel: input.config.type,
+				channelConfigRef: input.config.id,
+				channelConfigNameSnapshot: input.config.name,
+				recipientType: input.recipientType,
+				recipientUserId: input.recipientUserId,
+				recipientAddressSnapshot: input.recipientAddress,
+				recipientIdentityKey: input.identityKey,
+				eventFamily: "task_run_failed",
+				templateKey: "task.failure",
+			});
+			taskRunIds.push(notificationRun.id);
+			deliveryIds.push(delivery.id);
+		};
+
+		for (const config of selectedConfigs) {
+			if (config.type === "email") {
+				if (activeUsers.length === 0) {
+					skipped.push({
+						target: "email_recipients",
+						channelConfigId: config.id,
+					});
+					continue;
+				}
+				for (const user of activeUsers) {
+					await createTarget({
+						config,
+						recipientType: "backend_user",
+						recipientUserId: user.id,
+						recipientAddress: channelTargetSnapshot(config, user.email),
+						identityKey: `backend_user:${user.id}:${config.id}`,
+					});
+				}
+			} else {
+				await createTarget({
+					config,
+					recipientType: "external_target",
+					recipientUserId: null,
+					recipientAddress: channelTargetSnapshot(config),
+					identityKey: `external_target:${config.id}`,
 				});
-				const delivery = await this.taskRuns.createDelivery({
-					taskRunId: notificationRun.id,
-					channel: route.channelConfig.type,
-					channelConfigRef: route.channelConfigId,
-					channelConfigNameSnapshot: route.channelName,
-					recipientType: "backend_user",
-					recipientUserId: recipient.userId,
-					recipientAddressSnapshot: channelTargetSnapshot(
-						route.channelConfig,
-						user.email,
-					),
-					recipientIdentityKey: `backend_user:${recipient.userId}:${route.channelConfigId}`,
-					eventFamily: "task_run_failed",
-					templateKey: "task.failure",
-				});
-				taskRunIds.push(notificationRun.id);
-				deliveryIds.push(delivery.id);
 			}
 		}
 

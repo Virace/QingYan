@@ -166,25 +166,17 @@ describe("admin notification diagnostics", () => {
 				lastTickAt: null,
 			},
 			flows: [
-				{ key: "admin_comment_pending_email", status: "blocked" },
-				{ key: "admin_comment_approved_email", status: "blocked" },
+				{ key: "admin_comment_pending_email", status: "not_sending" },
+				{ key: "admin_comment_approved_email", status: "not_sending" },
 				{ key: "commenter_reply_email", status: "blocked" },
 			],
 		});
 		expect(body.generatedAt).toEqual(expect.any(String));
-		const pendingCodes = body.flows[0].blockers.map(
-			(blocker: { code: string }) => blocker.code,
+		expect(body.flows[0].blockers).toEqual([]);
+		const pendingCodes = body.flows[0].warnings.map(
+			(warning: { code: string }) => warning.code,
 		);
-		expect(pendingCodes).toEqual(
-			expect.arrayContaining([
-				"system_mail_disabled",
-				"smtp_host_missing",
-				"smtp_from_missing",
-				"notification_worker_not_started",
-				"backend_notifications_disabled",
-				"no_enabled_backend_recipient",
-			]),
-		);
+		expect(pendingCodes).toContain("backend_notifications_disabled");
 		expect(JSON.stringify(body)).not.toContain("smtp.example");
 		expect(JSON.stringify(body)).not.toContain("secret");
 		expect(JSON.stringify(body)).not.toContain("unsubscribeToken");

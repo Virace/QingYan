@@ -7,7 +7,6 @@ import {
 	adminUserSiteAccess,
 	adminUsers,
 	notificationChannelConfigs,
-	siteNotificationRecipientRoutes,
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
@@ -17,7 +16,7 @@ import {
 	BackendUserNotificationPlanner,
 } from "../../src/modules/notifications/backend-user-notification-planner";
 import { BackendUserNotificationPreferencesRepository } from "../../src/modules/notifications/backend-user-preferences-repository";
-import { BackendUserNotificationRecipientsRepository } from "../../src/modules/notifications/backend-user-recipients-repository";
+import { SiteNotificationEventsRepository } from "../../src/modules/notifications/site-notification-events-repository";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -107,6 +106,35 @@ async function createChannelConfig(
 	});
 }
 
+async function replaceEvents(
+	fixture: Fixture,
+	input: {
+		siteId: number;
+		pendingUserIds?: number[];
+		approvedUserIds?: number[];
+		pendingExternalIds?: string[];
+		approvedExternalIds?: string[];
+	},
+) {
+	return new SiteNotificationEventsRepository(fixture.app.db).replaceSiteEvents(
+		{
+			siteId: input.siteId,
+			events: [
+				{
+					eventType: "admin_comment_pending",
+					recipientUserIds: input.pendingUserIds ?? [],
+					externalChannelConfigIds: input.pendingExternalIds ?? [],
+				},
+				{
+					eventType: "admin_comment_approved",
+					recipientUserIds: input.approvedUserIds ?? [],
+					externalChannelConfigIds: input.approvedExternalIds ?? [],
+				},
+			],
+		},
+	);
+}
+
 function commentEvent(
 	override: Partial<BackendUserNotificationEvent> = {},
 ): BackendUserNotificationEvent {
@@ -180,20 +208,9 @@ describe("backend user notification planner", () => {
 			siteKey: "fangyuan",
 			email: "disabled-planner@example.test",
 		});
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.app.db,
-		);
-		await recipients.replaceSiteRecipients({
+		await replaceEvents(fixture, {
 			siteId: site.id,
-			recipients: [
-				{
-					userId: user.id,
-					channels: ["email"],
-					events: ["admin_comment_pending"],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			pendingUserIds: [user.id],
 		});
 		await fixture.app.db
 			.update(siteSettings)
@@ -222,20 +239,10 @@ describe("backend user notification planner", () => {
 			siteKey: "fangyuan",
 			email: "planner-recipient@example.test",
 		});
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.app.db,
-		);
-		await recipients.replaceSiteRecipients({
+		await replaceEvents(fixture, {
 			siteId: site.id,
-			recipients: [
-				{
-					userId: user.id,
-					channels: ["email"],
-					events: ["admin_comment_pending", "admin_comment_approved"],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			pendingUserIds: [user.id],
+			approvedUserIds: [user.id],
 		});
 		const planner = new BackendUserNotificationPlanner(fixture.app.db);
 
@@ -281,20 +288,9 @@ describe("backend user notification planner", () => {
 		await fixture.app.db
 			.delete(adminUserSiteAccess)
 			.where(eq(adminUserSiteAccess.userId, user.id));
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.app.db,
-		);
-		await recipients.replaceSiteRecipients({
+		await replaceEvents(fixture, {
 			siteId: site.id,
-			recipients: [
-				{
-					userId: user.id,
-					channels: ["email"],
-					events: ["admin_comment_pending"],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			pendingUserIds: [user.id],
 		});
 
 		const planned = await new BackendUserNotificationPlanner(
@@ -359,20 +355,9 @@ describe("backend user notification planner", () => {
 			username: "digest-recipient",
 			siteKey: "fangyuan",
 		});
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.app.db,
-		);
-		await recipients.replaceSiteRecipients({
+		await replaceEvents(fixture, {
 			siteId: site.id,
-			recipients: [
-				{
-					userId: user.id,
-					channels: ["email"],
-					events: ["admin_comment_pending"],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			pendingUserIds: [user.id],
 		});
 		const preferences = new BackendUserNotificationPreferencesRepository(
 			fixture.app.db,
@@ -414,7 +399,7 @@ describe("backend user notification planner", () => {
 	it("plans one delivery per selected concrete webhook and WxPusher config", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		const { user, site } = await createUserWithSiteAccess(fixture, {
+		const { site } = await createUserWithSiteAccess(fixture, {
 			username: "multi-config-recipient",
 			siteKey: "fangyuan",
 			email: "multi-config@example.test",
@@ -457,42 +442,9 @@ describe("backend user notification planner", () => {
 				url: "https://disabled.example.test/qingyan",
 			},
 		});
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.app.db,
-		);
-		const [recipient] = await recipients.replaceSiteRecipients({
+		await replaceEvents(fixture, {
 			siteId: site.id,
-			recipients: [
-				{
-					userId: user.id,
-					routes: [
-						{
-							eventType: "admin_comment_pending",
-							channelConfigId: "wxpusher:ops",
-							enabled: true,
-						},
-						{
-							eventType: "admin_comment_pending",
-							channelConfigId: "wxpusher:audit",
-							enabled: true,
-						},
-						{
-							eventType: "admin_comment_pending",
-							channelConfigId: "webhook:feishu",
-							enabled: true,
-						},
-					],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
-		});
-		await fixture.app.db.insert(siteNotificationRecipientRoutes).values({
-			id: "route_disabled_webhook",
-			recipientId: recipient.id,
-			eventType: "admin_comment_pending",
-			channelConfigId: "webhook:disabled",
-			enabled: false,
+			pendingExternalIds: ["wxpusher:ops", "wxpusher:audit", "webhook:feishu"],
 		});
 
 		const planner = new BackendUserNotificationPlanner(fixture.app.db);
@@ -506,15 +458,9 @@ describe("backend user notification planner", () => {
 
 		expect(planned.tasks).toHaveLength(3);
 		expect(planned.tasks.map((task) => task.idempotencyKey).sort()).toEqual([
-			"backend_user_comment:comment-multi-config:" +
-				user.id +
-				":webhook:feishu:admin_comment_pending",
-			"backend_user_comment:comment-multi-config:" +
-				user.id +
-				":wxpusher:audit:admin_comment_pending",
-			"backend_user_comment:comment-multi-config:" +
-				user.id +
-				":wxpusher:ops:admin_comment_pending",
+			"backend_user_comment:comment-multi-config:external:webhook:feishu:webhook:feishu:admin_comment_pending",
+			"backend_user_comment:comment-multi-config:external:wxpusher:audit:wxpusher:audit:admin_comment_pending",
+			"backend_user_comment:comment-multi-config:external:wxpusher:ops:wxpusher:ops:admin_comment_pending",
 		]);
 		expect(
 			planned.deliveries.map((delivery) => ({
@@ -563,20 +509,9 @@ describe("backend user notification planner", () => {
 			.update(siteSettings)
 			.set({ commenterReplyEmailEnabled: false })
 			.where(eq(siteSettings.siteId, site.id));
-		const recipients = new BackendUserNotificationRecipientsRepository(
-			fixture.app.db,
-		);
-		await recipients.replaceSiteRecipients({
+		await replaceEvents(fixture, {
 			siteId: site.id,
-			recipients: [
-				{
-					userId: user.id,
-					channels: ["email"],
-					events: ["admin_comment_pending"],
-					includeCommentContent: "summary",
-					enabled: true,
-				},
-			],
+			pendingUserIds: [user.id],
 		});
 
 		const planner = new BackendUserNotificationPlanner(fixture.app.db);

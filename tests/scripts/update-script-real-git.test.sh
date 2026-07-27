@@ -44,7 +44,7 @@ fi
 if [[ "$*" == *"qyctl --version"* ]]; then printf 'QingYan 0.2.3\n'; exit 0; fi
 if [[ "$*" == *"qyctl update check"* ]]; then printf '状态：当前已是最新版本\n'; exit 0; fi
 if [[ "$*" == *"qyctl backup"* ]]; then printf 'backup-created\n'; exit 0; fi
-if [[ "$*" == *" build --pull qingyan"* ]]; then
+if [[ "$*" == *" build --pull "* && "$*" == *" qingyan" ]]; then
 	if [[ "${FAKE_BUILD_FAIL:-0}" == "1" ]]; then exit 42; fi
 	exit 0
 fi
@@ -82,7 +82,7 @@ SUCCESS_REPO="$TEST_ROOT/success"
 prepare_checkout "$SUCCESS_REPO"
 : > "$CALL_LOG"
 env PATH="$FAKE_BIN:$PATH" QINGYAN_ROOT="$SUCCESS_REPO" CALL_LOG="$CALL_LOG" FAKE_STATE_DIR="$FAKE_STATE_DIR" \
-	bash "$UPDATE_SCRIPT" --yes v0.2.3 > /dev/null
+	bash "$UPDATE_SCRIPT" --yes --network-profile cn v0.2.3 > /dev/null
 [[ "$(git -C "$SUCCESS_REPO" describe --tags --exact-match HEAD)" == "v0.2.3" ]]
 assert_deployment_state "$SUCCESS_REPO"
 
@@ -92,7 +92,7 @@ OLD_COMMIT="$(git -C "$FAIL_REPO" rev-parse HEAD)"
 : > "$CALL_LOG"
 set +e
 env PATH="$FAKE_BIN:$PATH" QINGYAN_ROOT="$FAIL_REPO" CALL_LOG="$CALL_LOG" FAKE_STATE_DIR="$FAKE_STATE_DIR" FAKE_BUILD_FAIL=1 \
-	bash "$UPDATE_SCRIPT" --yes v0.2.3 > /dev/null 2>&1
+	bash "$UPDATE_SCRIPT" --yes --network-profile cn v0.2.3 > /dev/null 2>&1
 exit_code=$?
 set -e
 [[ "$exit_code" -eq 42 ]]
