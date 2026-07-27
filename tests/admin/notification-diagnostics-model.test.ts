@@ -124,7 +124,7 @@ describe("notification diagnostics model", () => {
 	});
 
 	it("builds compact flow rows with user-facing actions", () => {
-		expect(diagnosticFlowRows(diagnostics, "agents")).toEqual([
+		expect(diagnosticFlowRows(diagnostics)).toEqual([
 			expect.objectContaining({
 				key: "admin_comment_pending_email",
 				title: "待审核评论通知",
@@ -140,7 +140,7 @@ describe("notification diagnostics model", () => {
 				description: "评论直接发布时，向站点人员发送邮件",
 				badge: { label: "需要设置", variant: "destructive" },
 				blockerMessages: [
-					"请在“agents”站点的“后台用户通知”中添加并启用至少一名接收人，然后保存设置。",
+					"请在当前站点的“后台用户通知”中添加并启用至少一名接收人，然后保存设置。",
 				],
 				warningMessages: [],
 				recipientEmptyText: "还没有可接收这类邮件的站点人员",
@@ -159,7 +159,7 @@ describe("notification diagnostics model", () => {
 		]);
 	});
 
-	it("turns route diagnostics into site-specific actions without exposing internal details", () => {
+	it("turns route diagnostics into actionable guidance without exposing internal details", () => {
 		const routeDiagnostic: NotificationDiagnostic = {
 			...diagnostics,
 			flows: diagnostics.flows.map((flow) =>
@@ -187,12 +187,12 @@ describe("notification diagnostics model", () => {
 			),
 		};
 
-		const approved = diagnosticFlowRows(routeDiagnostic, "agents").find(
+		const approved = diagnosticFlowRows(routeDiagnostic).find(
 			(row) => row.key === "admin_comment_approved_email",
 		);
 
 		expect(approved?.blockerMessages).toEqual([
-			"请在“agents”站点的“后台用户通知”中编辑对应接收人，为“评论通过”添加邮件通知，然后保存设置。",
+			"请在当前站点的“后台用户通知”中编辑对应接收人，为“评论通过”添加邮件通知，然后保存设置。",
 		]);
 		expect(JSON.stringify(approved?.blockerMessages)).not.toContain("route");
 		expect(JSON.stringify(approved?.blockerMessages)).not.toContain(
@@ -229,7 +229,7 @@ describe("notification diagnostics model", () => {
 			),
 		};
 
-		const commenter = diagnosticFlowRows(repeatedWarnings, "agents").find(
+		const commenter = diagnosticFlowRows(repeatedWarnings).find(
 			(row) => row.key === "commenter_reply_email",
 		);
 
@@ -258,7 +258,7 @@ describe("notification diagnostics model", () => {
 			),
 		};
 
-		const approved = diagnosticFlowRows(unknownDiagnostic, "agents").find(
+		const approved = diagnosticFlowRows(unknownDiagnostic).find(
 			(row) => row.key === "admin_comment_approved_email",
 		);
 

@@ -94,7 +94,7 @@ function RecipientRoutesEditor({
 	);
 
 	return (
-		<Field label="接收路由">
+		<Field label="接收设置">
 			<div className="grid gap-3 rounded-md border px-3 py-2">
 				{recipient.routes.map((route) => (
 					<div
@@ -136,7 +136,7 @@ function RecipientRoutesEditor({
 					</div>
 				))}
 				<div className="grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
-					<Field label="事件">
+					<Field label="通知类型">
 						<select
 							className={inputClass}
 							value={eventType}
@@ -151,7 +151,7 @@ function RecipientRoutesEditor({
 							))}
 						</select>
 					</Field>
-					<Field label="渠道配置">
+					<Field label="发送方式">
 						<select
 							className={inputClass}
 							value={channelConfigId}
@@ -184,7 +184,7 @@ function RecipientRoutesEditor({
 							);
 						}}
 					>
-						添加路由
+						添加接收设置
 					</Button>
 				</div>
 			</div>
@@ -218,7 +218,7 @@ export function SiteNotificationRecipientDialog({
 					{mode === "create" ? "添加通知接收人" : "编辑通知接收人"}
 				</Dialog.Title>
 				<Dialog.Description size="2">
-					确认后才写回接收人列表；取消不会污染当前站点设置草稿。
+					确认后才会保存到接收人列表；取消不会保留本次更改。
 				</Dialog.Description>
 				<div className="mt-4 grid gap-3">
 					{mode === "create" ? (
@@ -289,10 +289,13 @@ export function SiteNotificationRecipientDialog({
 									))}
 								</select>
 							</Field>
-							<Field label="限速 Profile">
+							<Field
+								label="发送频率规则"
+								description="通常留空，使用系统默认设置。"
+							>
 								<Input
 									value={draft.rateLimitProfile ?? ""}
-									placeholder="留空使用系统默认限速"
+									placeholder="使用系统默认设置"
 									onChange={(event) =>
 										onDraftChange({
 											...draft,
@@ -1342,7 +1345,7 @@ export function NotificationDiagnosticsPanel({
 	});
 
 	const diagnosticRows = diagnosticsQuery.data
-		? diagnosticFlowRows(diagnosticsQuery.data, siteKey)
+		? diagnosticFlowRows(diagnosticsQuery.data)
 		: [];
 	const selectedBlockers = diagnosticsQuery.data
 		? notificationChainTestBlockers(diagnosticsQuery.data, defaultCommentStatus)
@@ -1369,7 +1372,7 @@ export function NotificationDiagnosticsPanel({
 	return (
 		<SettingsSection
 			title="评论邮件检查与测试"
-			description={`检查“${siteKey}”站点已保存的通知设置，并告诉你需要完成哪些操作。`}
+			description="检查当前站点已保存的通知设置，并告诉你需要完成哪些操作。"
 		>
 			<div className="grid min-w-0 gap-4">
 				<div className="min-w-0 rounded-md border bg-background p-4">
@@ -1595,7 +1598,7 @@ export function NotificationDiagnosticsPanel({
 				<Dialog.Content maxWidth="560px">
 					<Dialog.Title>发送评论邮件测试</Dialog.Title>
 					<Dialog.Description size="2">
-						{`系统会使用“${siteKey}”站点当前已保存的设置，先向站点人员发送评论通知，再向下方邮箱发送回复提醒。`}
+						系统会使用当前站点已保存的设置，先向站点人员发送评论通知，再向下方邮箱发送回复提醒。
 					</Dialog.Description>
 					<div className="mt-4 grid gap-4">
 						<div className="rounded-md border bg-muted/30 p-3 text-sm">

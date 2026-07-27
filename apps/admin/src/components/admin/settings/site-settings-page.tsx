@@ -1209,12 +1209,12 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 									</SettingsSection>
 									<SettingsSection
 										title="后台用户通知"
-										description="控制 QingYan 后台用户是否接收站点通知。接收人引用后台用户，可使用邮件、Webhook 或 WxPusher。"
+										description="控制哪些后台用户接收当前站点的通知，以及分别使用哪种发送方式。"
 									>
 										<div className="grid gap-3">
 											<BooleanField
 												label="启用后台用户通知"
-												description="关闭后不再为后台用户创建站点通知任务；不影响普通评论者回复邮件订阅。"
+												description="关闭后不再向后台用户发送当前站点的通知；不影响普通评论者订阅回复邮件。"
 												checked={draft.notifications.backend.enabled}
 												error={firstFieldError(
 													saveError,
@@ -1260,7 +1260,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 																{recipient.routes
 																	.map(
 																		(route) =>
-																			`${siteNotificationEventLabels[route.eventType]} -> ${
+																			`${siteNotificationEventLabels[route.eventType]}：${
 																				route.channelName ??
 																				route.channelConfigId
 																			}`,

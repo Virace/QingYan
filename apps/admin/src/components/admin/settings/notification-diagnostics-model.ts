@@ -14,7 +14,6 @@ export type NotificationStatusBadge = {
 
 type DiagnosticIssueContext = {
 	flowKey: NotificationDiagnosticFlowKey;
-	siteKey: string;
 };
 
 const diagnosticFlowTitles: Record<NotificationDiagnosticFlowKey, string> = {
@@ -84,10 +83,6 @@ function recipientLabel(recipient: {
 		: recipient.email;
 }
 
-function siteLabel(siteKey: string): string {
-	return siteKey.trim() ? `“${siteKey.trim()}”站点` : "当前站点";
-}
-
 function adminEventLabel(flowKey: NotificationDiagnosticFlowKey): string {
 	return flowKey === "admin_comment_pending_email" ? "待审核评论" : "评论通过";
 }
@@ -96,8 +91,7 @@ function diagnosticIssueText(
 	issue: NotificationDiagnosticIssue,
 	context: DiagnosticIssueContext,
 ): string {
-	const currentSite = siteLabel(context.siteKey);
-	const backendNotificationLocation = `${currentSite}的“后台用户通知”`;
+	const backendNotificationLocation = "当前站点的“后台用户通知”";
 
 	if (commenterDeliveryConditionCodes.has(issue.code)) {
 		return "评论者填写有效邮箱并勾选“有人回复时邮件通知我”后，系统才会发送回复提醒。";
@@ -124,7 +118,7 @@ function diagnosticIssueText(
 		case "recipient_user_inactive":
 			return `请在${backendNotificationLocation}中更换为已启用的后台用户，然后保存设置。`;
 		case "recipient_site_access_missing":
-			return `请先为对应接收人开通${currentSite}的访问权限，或在“后台用户通知”中更换接收人。`;
+			return "请先为对应接收人开通当前站点的访问权限，或在“后台用户通知”中更换接收人。";
 		case "email_event_route_missing":
 		case "email_event_route_disabled":
 			return `请在${backendNotificationLocation}中编辑对应接收人，为“${adminEventLabel(context.flowKey)}”添加邮件通知，然后保存设置。`;
@@ -170,12 +164,9 @@ function uniqueIssueMessages(
 	];
 }
 
-export function diagnosticFlowRows(
-	diagnostic: NotificationDiagnostic,
-	siteKey: string,
-) {
+export function diagnosticFlowRows(diagnostic: NotificationDiagnostic) {
 	return diagnostic.flows.map((flow) => {
-		const context = { flowKey: flow.key, siteKey };
+		const context = { flowKey: flow.key };
 		return {
 			key: flow.key,
 			title: diagnosticFlowTitles[flow.key],
