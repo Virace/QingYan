@@ -12,8 +12,13 @@ const authStatePath = path.resolve(
 
 async function isLoggedIn(page: Page): Promise<boolean> {
 	await page.goto("/qingyan/admin/");
-	const response = await page.request.get("/qingyan/api/admin/session/me");
-	return response.ok();
+	const logoutButton = page.getByRole("button", { name: "退出", exact: true });
+	const loginButton = page.getByRole("button", {
+		name: "登录后台",
+		exact: true,
+	});
+	await expect(logoutButton.or(loginButton)).toBeVisible();
+	return logoutButton.isVisible();
 }
 
 async function login(page: Page): Promise<void> {
@@ -483,8 +488,9 @@ test("system mail test uses saved SMTP settings and synchronous mail endpoint", 
 	await expect(page.getByText("系统设置保存失败")).toHaveCount(0);
 	await expect(page.getByRole("button", { name: "测试邮件" })).toBeEnabled();
 	await page.getByRole("button", { name: "测试邮件" }).click();
-	await expect(page.getByText("task_mail_e2e")).toBeVisible();
-	await expect(page.getByText("delivery_mail_e2e")).toBeVisible();
+	await expect(page.getByText("测试通知已交给默认邮件发送")).toBeVisible();
+	await expect(page.getByText("task_mail_e2e")).toHaveCount(0);
+	await expect(page.getByText("delivery_mail_e2e")).toHaveCount(0);
 	expect(mailTestCalled).toBe(true);
 });
 
@@ -519,7 +525,7 @@ test("system settings captcha provider shows only matching fields", async ({
 	await expect(page.getByText("reCAPTCHA API Key")).toHaveCount(0);
 });
 
-test("site settings save failure shows request id and field errors", async ({
+test("site settings save failure hides internal ids while retaining diagnostics", async ({
 	page,
 }) => {
 	const apiConsoleErrors: string[] = [];
@@ -586,8 +592,10 @@ test("site settings save failure shows request id and field errors", async ({
 	await ensureSwitchState(page, "评论投票", !commentVotesChecked);
 	await page.getByRole("button", { name: "保存访客与计数设置" }).click();
 	await expect(page.getByText("站点设置保存失败")).toBeVisible();
-	await expect(page.getByText("req_settings_visible")).toBeVisible();
-	await expect(page.getByText("engagement.commentVotes.enabled")).toBeVisible();
+	await expect(page.getByText("req_settings_visible")).toHaveCount(0);
+	await expect(page.getByText("engagement.commentVotes.enabled")).toHaveCount(
+		0,
+	);
 	await expect(
 		page.getByText("必须是 JSON boolean，不能使用 0/1。").first(),
 	).toBeVisible();
@@ -682,14 +690,15 @@ test("system mail disabled hides smtp details without removing site notification
 	await expect(page.locator('[data-field-label="SMTP Host"]')).toHaveCount(0);
 	await expect(page.getByText("已保存的 SMTP 配置会保留")).toBeVisible();
 
-	await selectSettingsTab(page, "通知");
+	await selectSettingsTab(page, "发送服务");
 	await expect(page.getByRole("button", { name: "测试邮件" })).toHaveCount(0);
 	await expect(page.getByText("到邮件页签测试").first()).toBeVisible();
 
 	await page.getByRole("button", { name: "站点设置" }).click();
 	await selectSettingsTab(page, "通知");
+	await expect(page.getByRole("heading", { name: "评论通知" })).toBeVisible();
 	await expect(
-		page.getByRole("heading", { name: "后台用户通知" }),
+		page.getByRole("switch", { name: "启用评论通知" }),
 	).toBeVisible();
 });
 
@@ -697,7 +706,7 @@ test("notification channel workflow uses dialogs and shows created test task", a
 	page,
 }) => {
 	await openSystemSettings(page);
-	await selectSettingsTab(page, "通知");
+	await selectSettingsTab(page, "发送服务");
 
 	const channelName = `E2E Webhook ${Date.now()}`;
 	await page.getByRole("button", { name: "添加 Webhook" }).click();
@@ -713,9 +722,9 @@ test("notification channel workflow uses dialogs and shows created test task", a
 	await expect(channelDialog).toHaveCount(0);
 	await expect(page.getByText(channelName)).toBeVisible();
 
-	await page.getByRole("button", { name: "保存通知设置" }).click();
+	await page.getByRole("button", { name: "保存发送服务设置" }).click();
 	await expect(page.getByText("系统设置保存失败")).toHaveCount(0);
-	await selectSettingsTab(page, "通知");
+	await selectSettingsTab(page, "发送服务");
 
 	const channelRow = page.locator("tr", { hasText: channelName });
 	await expect(channelRow).toBeVisible();
@@ -729,21 +738,26 @@ test("notification channel workflow uses dialogs and shows created test task", a
 	await expect(page.getByText("测试通知已交给")).toBeVisible();
 });
 
-test("site notification recipients use an add dialog", async ({ page }) => {
+test("site notification events use independent recipient selectors", async ({
+	page,
+}) => {
 	await openSiteSettings(page);
 	await selectSettingsTab(page, "通知");
-	await expect(page.getByText("暂无后台通知接收人")).toBeVisible();
+	await expect(page.getByRole("heading", { name: "新待审评论" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "直接发布评论" }),
+	).toBeVisible();
+	await ensureSwitchState(page, "启用评论通知", true);
 
-	const addButton = page.getByRole("button", { name: "添加接收人" });
-	await expect(addButton).toBeVisible();
-	if (await addButton.isEnabled()) {
-		await addButton.click();
-		const dialog = page.getByRole("dialog", { name: "添加通知接收人" });
-		await expect(dialog).toBeVisible();
-		await expect(dialog.getByText("请选择接收人")).toBeVisible();
-		await dialog.getByRole("button", { name: "取消" }).click();
-		await expect(dialog).toHaveCount(0);
-	}
+	const recipientSelectors = page.getByRole("button", {
+		name: "选择站点人员",
+	});
+	await expect(recipientSelectors).toHaveCount(2);
+	await recipientSelectors.first().click();
+	await expect(
+		page.getByRole("textbox", { name: "搜索站点人员" }),
+	).toBeVisible();
+	await page.keyboard.press("Escape");
 });
 
 test("blacklist rules are created from a dialog without leaking cancelled drafts", async ({
@@ -770,7 +784,7 @@ test("notification template editor selects event, shows placeholders and preview
 	page,
 }) => {
 	await openSystemSettings(page);
-	await selectSettingsTab(page, "通知");
+	await selectSettingsTab(page, "发送服务");
 	await expect(page.getByText("模板管理")).toBeVisible();
 
 	await page
@@ -789,8 +803,9 @@ test("notification template editor selects event, shows placeholders and preview
 	const testDialog = page.getByRole("dialog", { name: "测试发送模板" });
 	await expect(testDialog).toBeVisible();
 	await expect(
-		testDialog.getByText("测试发送会创建 template_test 通知任务"),
+		testDialog.getByText("发送一条真实测试通知，结果可在任务中心查看。"),
 	).toBeVisible();
+	await expect(testDialog.getByText("template_test")).toHaveCount(0);
 	await testDialog.getByRole("button", { name: "取消" }).click();
 	await expect(testDialog).toHaveCount(0);
 });
@@ -989,8 +1004,9 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 	await expect(
 		page.getByRole("heading", { name: "数据库升级检查" }),
 	).toBeVisible();
-	await expect(page.getByText('"state": "normal_current"')).toBeVisible();
-	await expect(
-		page.getByText("systemctl status qingyan.service", { exact: true }),
-	).toBeVisible();
+	const upgradeCheck = page
+		.getByRole("heading", { name: "数据库升级检查" })
+		.locator("..");
+	await expect(upgradeCheck).toContainText('"state": "normal_current"');
+	await expect(upgradeCheck).toContainText("systemctl status qingyan.service");
 });

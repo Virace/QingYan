@@ -23,8 +23,13 @@ async function login(page: Page): Promise<void> {
 
 async function ensureLoggedIn(page: Page): Promise<void> {
 	await page.goto("/qingyan/admin/");
-	const response = await page.request.get("/qingyan/api/admin/session/me");
-	if (response.ok()) {
+	const logoutButton = page.getByRole("button", { name: "退出", exact: true });
+	const loginButton = page.getByRole("button", {
+		name: "登录后台",
+		exact: true,
+	});
+	await expect(logoutButton.or(loginButton)).toBeVisible();
+	if (await logoutButton.isVisible()) {
 		return;
 	}
 	await login(page);

@@ -124,16 +124,22 @@ function runAnalyze(options: CliOptions): void {
 		pageKeyStrategy: options.pageKeyStrategy,
 		mapping,
 	});
-	const out = options.out ?? ".temp/wp-comment-migration-report.json";
-	const markdownOut =
+	const reportOutputPath =
+		options.out ?? ".temp/wp-comment-migration-report.json";
+	const markdownOutputPath =
 		options.markdownOut ?? ".temp/wp-comment-migration-report.md";
-	const mappingOut = options.mappingOut ?? ".temp/wp-comment-mapping.json";
-	writeJson(out, report);
-	writeFileSync(markdownOut, renderMigrationReportMarkdown(report), "utf-8");
-	writeJson(mappingOut, buildSuggestedMapping(report));
-	console.log(`Wrote JSON report: ${path.resolve(out)}`);
-	console.log(`Wrote Markdown report: ${path.resolve(markdownOut)}`);
-	console.log(`Wrote suggested mapping: ${path.resolve(mappingOut)}`);
+	const mappingOutputPath =
+		options.mappingOut ?? ".temp/wp-comment-mapping.json";
+	writeJson(reportOutputPath, report);
+	writeFileSync(
+		markdownOutputPath,
+		renderMigrationReportMarkdown(report),
+		"utf-8",
+	);
+	writeJson(mappingOutputPath, buildSuggestedMapping(report));
+	console.log(`Wrote JSON report: ${path.resolve(reportOutputPath)}`);
+	console.log(`Wrote Markdown report: ${path.resolve(markdownOutputPath)}`);
+	console.log(`Wrote suggested mapping: ${path.resolve(mappingOutputPath)}`);
 	console.log("No database writes occurred.");
 }
 
@@ -144,9 +150,10 @@ function runConvert(options: CliOptions): void {
 			reportFile,
 		);
 	const plan = convertReportToImportPlan({ report });
-	const out = options.out ?? ".temp/qingyan-comment-import-plan.json";
-	writeJson(out, plan);
-	console.log(`Wrote import plan: ${path.resolve(out)}`);
+	const importPlanOutputPath =
+		options.out ?? ".temp/qingyan-comment-import-plan.json";
+	writeJson(importPlanOutputPath, plan);
+	console.log(`Wrote import plan: ${path.resolve(importPlanOutputPath)}`);
 	console.log("No database writes occurred.");
 }
 

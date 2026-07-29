@@ -44,19 +44,19 @@ function normalizePathSegments(value: string, fieldName: string): string[] {
 }
 
 export function normalizePublicPath(input: string | undefined): string {
-	const raw = (input ?? "").trim();
-	if (raw === "") {
+	const trimmedInput = (input ?? "").trim();
+	if (trimmedInput === "") {
 		return DEFAULT_PUBLIC_PATH;
 	}
-	return `/${normalizePathSegments(raw, "value").join("/")}`;
+	return `/${normalizePathSegments(trimmedInput, "value").join("/")}`;
 }
 
 function normalizeRoutePath(routePath: string): string[] {
-	const raw = routePath.trim();
-	if (raw === "" || raw === "/") {
+	const trimmedRoutePath = routePath.trim();
+	if (trimmedRoutePath === "" || trimmedRoutePath === "/") {
 		return [];
 	}
-	return normalizePathSegments(raw, "routePath");
+	return normalizePathSegments(trimmedRoutePath, "routePath");
 }
 
 export function joinPublicPath(publicPath: string, routePath: string): string {
