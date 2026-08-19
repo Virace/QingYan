@@ -12,8 +12,13 @@ const authStatePath = path.resolve(
 
 async function isLoggedIn(page: Page): Promise<boolean> {
 	await page.goto("/qingyan/admin/");
-	const response = await page.request.get("/qingyan/api/admin/session/me");
-	return response.ok();
+	const logoutButton = page.getByRole("button", { name: "退出", exact: true });
+	const loginButton = page.getByRole("button", {
+		name: "登录后台",
+		exact: true,
+	});
+	await expect(logoutButton.or(loginButton)).toBeVisible();
+	return logoutButton.isVisible();
 }
 
 async function login(page: Page): Promise<void> {

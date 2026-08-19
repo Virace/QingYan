@@ -1,0 +1,7 @@
+schema = 1
+
+[standards]
+"nodejs-project" = 1
+"typescript-project" = 1
+"api-project" = 1
+"testing-project" = 1

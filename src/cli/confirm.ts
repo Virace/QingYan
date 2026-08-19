@@ -5,13 +5,13 @@ export async function requireConfirmation(
 	expected: string,
 	message: string,
 ): Promise<void> {
-	const rl = createInterface({ input, output });
+	const confirmationPrompt = createInterface({ input, output });
 	try {
-		const answer = await rl.question(message);
+		const answer = await confirmationPrompt.question(message);
 		if (answer.trim() !== expected) {
 			throw new Error("CONFIRMATION_REQUIRED");
 		}
 	} finally {
-		rl.close();
+		confirmationPrompt.close();
 	}
 }

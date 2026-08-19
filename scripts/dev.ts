@@ -77,16 +77,16 @@ function pnpmCommand(): string {
 function createProcessEnv(
 	overrides: Record<string, string> = {},
 ): NodeJS.ProcessEnv {
-	const env: NodeJS.ProcessEnv = {};
+	const environment: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(process.env)) {
 		if (key.startsWith("=") || value === undefined) {
 			continue;
 		}
-		env[key] = value;
+		environment[key] = value;
 	}
 
 	return {
-		...env,
+		...environment,
 		...overrides,
 	};
 }
@@ -94,11 +94,11 @@ function createProcessEnv(
 function startProcess(
 	name: string,
 	args: string[],
-	env: NodeJS.ProcessEnv = createProcessEnv(),
+	environment: NodeJS.ProcessEnv = createProcessEnv(),
 ): ChildProcess {
 	const child = spawn(pnpmCommand(), args, {
 		cwd: process.cwd(),
-		env,
+		env: environment,
 		stdio: "inherit",
 	});
 
