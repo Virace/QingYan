@@ -244,28 +244,28 @@ Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级�
 `v0.2.2` 之前的 checkout 尚无该脚本，第一次更新使用固定版本的远程入口：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.4/scripts/update.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.5/scripts/update.sh)
 ```
 
 GitHub 直连困难的地区可使用同一固定 release 的代理入口：
 
 ```bash
-bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.4/scripts/update.sh)
+bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/v0.2.5/scripts/update.sh)
 ```
 
-`v0.2.4` 远程脚本支持相同的 `--network-profile` 参数；需要固定网络配置档时，可在脚本路径后追加 `--network-profile official` 或 `--network-profile cn`。远程入口保留 `bash <(...)` 形式，以避免 `docker compose exec` 继承并消费 `curl | bash` 的标准输入。
+`v0.2.5` 远程脚本支持相同的 `--network-profile` 参数；需要固定网络配置档时，可在脚本路径后追加 `--network-profile official` 或 `--network-profile cn`。远程入口保留 `bash <(...)` 形式，以避免 `docker compose exec` 继承并消费 `curl | bash` 的标准输入。
 
 脚本默认 fetch tags 后选择最高的稳定 `vX.Y.Z` release，也允许指定目标版本：
 
 ```bash
-./scripts/update.sh v0.2.4
+./scripts/update.sh v0.2.5
 ```
 
 默认交互流程只需要确认两次：第一次确认目标版本和整站备份，第二次在脚本显示脱敏
 `UpgradePlan` 后确认数据升级。明确接受全部确认时可以使用：
 
 ```bash
-./scripts/update.sh --yes v0.2.4
+./scripts/update.sh --yes v0.2.5
 ```
 
 脚本内部负责：
@@ -276,9 +276,7 @@ bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/
 4. 启动新容器并确认进程运行，显示 `qyctl upgrade --dry-run` 的 UpgradePlan。
 5. 确认后应用数据升级，重启并校验容器版本、更新状态和健康状态。
 
-`0.2.4` 会应用 `0002_site_notification_events.sql`，把已保存的评论通知从“人员再绑定发送路径”迁移为“事件分别选择人员和其他发送目标”。升级前必须保留更新脚本生成的整站备份；旧通知表在这个版本中继续保留作为回滚证据，但运行时和 Admin Console 以新的事件表为准。
-
-`0.2.4` 之后的下一版本会应用 `0003_comment_email_delivery_observability.sql`，为评论关联的通知任务增加组合查询索引。该迁移不重写评论、任务或投递数据；既有通知事实会直接按新聚合规则读取，完全没有历史事实的评论保持“未知”。仍应沿用更新脚本的整站备份与 UpgradePlan 门禁。
+`0.2.5` 会应用 `0003_comment_email_delivery_observability.sql`，为评论关联的通知任务增加组合查询索引。该迁移不重写评论、任务或投递数据；既有通知事实会直接按新聚合规则读取，完全没有历史事实的评论保持“未知”。从更早版本升级时，升级流程仍会按顺序应用尚未执行的迁移。升级前必须保留更新脚本生成的整站备份，并确认脱敏 UpgradePlan。
 
 在新容器激活前发生失败，脚本会自动恢复原 Git revision 和原本的本地部署文件；运行中的旧容器不会被构建失败替换。
 新容器已经开始激活或数据升级后发生失败时，脚本不会擅自覆盖数据库或配置，而会输出失败
