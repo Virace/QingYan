@@ -224,8 +224,60 @@ Query：
   pageKey: string;
   pageTitle: string | null;
   pageUrl: string | null;
+  emailDelivery: {
+    state: "accepted" | "failed" | "processing" | "not_sent" | "unknown";
+    deliveryCount: number;
+    acceptedCount: number;
+    failedCount: number;
+    processingCount: number;
+    notSentDecisionCount: number;
+    lastUpdatedAt: string | null;
+  };
 }
 ```
+
+`emailDelivery` 是服务端按评论聚合的业务状态，不是最后一条投递记录的直接映射。只要任一邮件投递失败，聚合状态就是 `failed`；没有失败但仍有排队、执行或重试中的投递时为 `processing`；至少一条被邮件服务商接受且没有失败或处理中投递时为 `accepted`；只记录了明确“不发送”决策时为 `not_sent`；完全没有可审计事实时为 `unknown`。列表对一页评论批量读取任务与投递事实，不为每条评论单独查询。
+
+### `GET /api/admin/comments/{commentId}/email-delivery-status`
+
+读取单条评论的邮件通知业务明细。需要 `comments.read` 和目标站点访问权；响应始终经过服务端脱敏，不返回原始任务 payload、SMTP/Provider 错误、provider message id、secret、明文退订 token 或完整邮箱地址。
+
+响应：
+
+```ts
+{
+  commentId: string;
+  summary: AdminComment["emailDelivery"];
+  groups: Array<{
+    flow: "site_staff_comment" | "commenter_reply";
+    label: string;
+    state: "accepted" | "failed" | "processing" | "not_sent";
+    items: Array<{
+      kind: "delivery" | "decision" | "incomplete";
+      channel: "email";
+      flow: "site_staff_comment" | "commenter_reply";
+      state: "accepted" | "failed" | "processing" | "not_sent";
+      phase: "queued" | "delayed" | "sending" | "retrying" | "accepted" | "failed" | "not_sent" | "incomplete";
+      recipient: {
+        label: string;
+        address: string; // 掩码地址
+      } | null;
+      attemptCount: number;
+      maxAttempts: number;
+      acceptedAt: string | null;
+      updatedAt: string;
+      reasonCode: string | null;
+      errorKind: "config" | "temporary" | "recipient_permanent" | "provider_auth" | "template" | null;
+      message: string | null; // 稳定、安全的产品文案
+    }>;
+  }>;
+  canViewTaskRecords: boolean;
+}
+```
+
+`canViewTaskRecords` 只表示当前会话是否具备 `tasks.read`，供 Admin Console 决定是否展示跳转入口；它不会扩大评论明细接口本身的返回范围。邮件服务商接受请求只记为 `accepted`，不表示邮件已经进入收件箱。
+
+Admin Console 仅在详情打开、页面可见且摘要仍为 `processing` 时有限轮询此端点；进入终态、关闭详情、页面隐藏或达到前端刷新上限后停止。评论回复、审核等可能产生通知任务的操作成功后，应使评论列表摘要和已缓存的评论邮件详情失效并重新读取。
 
 ### `PATCH /api/admin/comments/{commentId}`
 
@@ -2060,6 +2112,10 @@ Query：
 
 列出任务运行记录。
 
+Query 可传 `commentId`，此时只返回 `subject_type=comment` 且 `subject_id` 匹配的运行记录；可见性仍由当前用户的任务权限和站点范围决定。
+
+评论邮件详情中的“查看任务记录”使用该 query 进入任务中心；Admin Console 应明确显示当前处于评论范围过滤，并允许用户清除范围。通知运行在列表和详情中使用 `workflow`、安全 `deliveries` 与业务文案呈现，不把运行 ID 或底层任务类型显示为用户可见名称。
+
 响应：
 ```ts
 {
@@ -2071,6 +2127,8 @@ Query：
 ### `GET /api/admin/tasks/runs/{runId}`
 
 读取单个任务运行记录。非 owner 摘要用户不能看到 raw input/output/error。
+
+通知类运行记录使用专门的安全投影：列表增加业务 `workflow`，兼容字段 `type` 也只返回相同的业务流程文案而非内部任务类型；详情增加脱敏 `deliveries`。两者都不返回内部任务类型、`payload`、`payloadSummary`、`input`、`actionConfigSnapshot`、`result` 或原始 `error`。`deliveries` 与评论邮件明细使用同一服务端状态聚合器，因此状态、重试次数、掩码收件人和安全原因文案保持一致。
 
 ### `GET /api/admin/tasks/runs/{runId}/events`
 
@@ -2437,4 +2495,4 @@ Query：
 }
 ```
 
-通知任务会在 `payloadSummary` / `payload` / `result` 中提供排障用 event、channel、channel config id/name、recipient type、recipient address snapshot、attempt、next retry、error 和 provider message id。`notification_deliveries.channelConfigRef` 与 `notification_deliveries.channelConfigNameSnapshot` 保存任务创建时的渠道配置快照，用于区分多个 Webhook 或 WxPusher 配置实例。拥有 `tasks.read` 的后台用户可以在任务中心查看这些内部排障字段；公开 API 不暴露这些字段。secret 和明文退订 token 不会写入 task payload、日志、导出或 Admin API 响应。
+通知任务的内部 `payloadSummary` / `payload` / `result` 和 `notification_deliveries` 仍保存 adapter 执行所需或内部排障所需的快照，但 `/api/admin/tasks/runs`、`/api/admin/tasks/runs/{runId}` 与兼容的 `/api/admin/ops/tasks` 对通知任务统一返回安全业务投影。管理端不会收到内部任务类型、队列实现、完整 recipient address snapshot、原始错误或 provider message id；任务事件端点也只写稳定分类、安全计数和可理解的结果文案。secret 和明文退订 token 不会写入 task payload、日志、导出或 Admin API 响应。

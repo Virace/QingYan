@@ -13,6 +13,9 @@ const logsQuerySchema = z.object({
 	afterSequence: z.coerce.number().int().min(0).optional(),
 	limit: z.coerce.number().int().min(1).max(500).default(100),
 });
+const runsQuerySchema = z.object({
+	commentId: z.string().min(1).optional(),
+});
 const transferOwnerSchema = z.object({
 	ownerUserId: z.number().int().positive(),
 });
@@ -166,7 +169,8 @@ export const adminTasksRoutes: FastifyPluginAsync = async (fastify) => {
 
 	fastify.get("/runs", async (request) => {
 		const session = await sessionService.requireSession(request);
-		return service.listRuns(session);
+		const query = runsQuerySchema.parse(request.query ?? {});
+		return service.listRuns(session, query);
 	});
 
 	fastify.get("/runs/:id", async (request) => {

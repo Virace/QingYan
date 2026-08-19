@@ -329,7 +329,50 @@ test("site create and visitor filters use dialog-style controls", async ({
 	await expect(page.getByLabel("黑名单状态")).toBeVisible();
 });
 
-test("comments page row displays site key in page column", async ({ page }) => {
+test("comment email status opens safe details and filtered task records", async ({
+	page,
+}) => {
+	const delivery = {
+		kind: "delivery",
+		channel: "email",
+		flow: "site_staff_comment",
+		state: "accepted",
+		phase: "accepted",
+		recipient: { label: "站点人员", address: "a***@example.test" },
+		attemptCount: 1,
+		maxAttempts: 3,
+		acceptedAt: "2026-08-19T00:00:02.000Z",
+		updatedAt: "2026-08-19T00:00:02.000Z",
+		reasonCode: null,
+		errorKind: null,
+		message: null,
+	};
+	const taskRun = {
+		id: "task_e2e",
+		scheduledTaskId: null,
+		scheduledTaskNameSnapshot: null,
+		type: "站点人员评论提醒",
+		category: "notification",
+		status: "succeeded",
+		siteId: 1,
+		siteKey: "fangyuan",
+		scopeKind: null,
+		trigger: "评论事件",
+		ownerUserIdSnapshot: null,
+		createdByUserId: null,
+		skipReason: null,
+		blockReason: null,
+		runAfter: null,
+		createdAt: "2026-08-19T00:00:00.000Z",
+		startedAt: "2026-08-19T00:00:01.000Z",
+		finishedAt: "2026-08-19T00:00:02.000Z",
+		updatedAt: "2026-08-19T00:00:02.000Z",
+		canViewLogs: true,
+		visibility: "run_detail",
+		workflow: "站点人员评论提醒",
+		attempts: 1,
+		maxAttempts: 3,
+	};
 	await page.route("**/api/admin/comments?*", async (route) => {
 		await route.fulfill({
 			contentType: "application/json",
@@ -372,10 +415,66 @@ test("comments page row displays site key in page column", async ({ page }) => {
 						pageKey: "post:e2e",
 						pageTitle: "E2E Page",
 						pageUrl: "https://example.com/posts/e2e/",
+						emailDelivery: {
+							state: "accepted",
+							deliveryCount: 1,
+							acceptedCount: 1,
+							failedCount: 0,
+							processingCount: 0,
+							notSentDecisionCount: 0,
+							lastUpdatedAt: "2026-08-19T00:00:02.000Z",
+						},
 					},
 				],
 				pagination: { limit: 20, offset: 0, totalCount: 1 },
 			}),
+		});
+	});
+	await page.route(
+		"**/api/admin/comments/comment_e2e/email-delivery-status",
+		async (route) => {
+			await route.fulfill({
+				contentType: "application/json",
+				body: JSON.stringify({
+					commentId: "comment_e2e",
+					summary: {
+						state: "accepted",
+						deliveryCount: 1,
+						acceptedCount: 1,
+						failedCount: 0,
+						processingCount: 0,
+						notSentDecisionCount: 0,
+						lastUpdatedAt: "2026-08-19T00:00:02.000Z",
+					},
+					groups: [
+						{
+							flow: "site_staff_comment",
+							label: "站点人员评论提醒",
+							state: "accepted",
+							items: [delivery],
+						},
+					],
+					canViewTaskRecords: true,
+				}),
+			});
+		},
+	);
+	await page.route("**/api/admin/tasks/runs?*", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({ items: [taskRun], totalCount: 1 }),
+		});
+	});
+	await page.route("**/api/admin/tasks/runs/task_e2e/logs*", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({ items: [], nextSequence: 0, hasMore: false }),
+		});
+	});
+	await page.route("**/api/admin/tasks/runs/task_e2e", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({ ...taskRun, deliveries: [delivery] }),
 		});
 	});
 	if (!(await isLoggedIn(page))) {
@@ -384,6 +483,24 @@ test("comments page row displays site key in page column", async ({ page }) => {
 
 	await page.getByRole("button", { name: "评论", exact: true }).click();
 	await expect(page.getByText("站点 fangyuan")).toBeVisible();
+	await page.getByRole("button", { name: "邮件：服务商已接受，1/1" }).click();
+	const deliveryDialog = page.getByRole("dialog", { name: "邮件投递状态" });
+	await expect(deliveryDialog).toBeVisible();
+	await expect(deliveryDialog.getByText("站点人员评论提醒")).toBeVisible();
+	await expect(deliveryDialog.getByText("a***@example.test")).toBeVisible();
+	await deliveryDialog.getByRole("button", { name: "查看任务记录" }).click();
+	await expect(page).toHaveURL(/view=tasks/);
+	await expect(page).toHaveURL(/commentId=comment_e2e/);
+	await expect(
+		page.getByText("正在查看当前评论相关的通知运行记录。"),
+	).toBeVisible();
+	await page.getByRole("button", { name: "详情", exact: true }).click();
+	const taskDialog = page.getByRole("dialog", { name: "运行详情" });
+	await expect(
+		taskDialog.getByRole("heading", { name: "投递结果" }),
+	).toBeVisible();
+	await expect(taskDialog.getByText("a***@example.test")).toBeVisible();
+	await expect(page.getByText("task_e2e")).toHaveCount(0);
 });
 
 test("system settings page renders database-owned install settings", async ({

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
-import { InvalidRequestError } from "../shared/errors";
+import { InvalidRequestError, ResourceNotFoundError } from "../shared/errors";
 import { AdminManagementService } from "../admin/management-service";
 import { AdminRepository } from "../admin/repository";
 import {
@@ -19,6 +19,8 @@ import {
 	adminCommentsQuerySchema,
 } from "../admin/schemas";
 import { AdminSessionService } from "../admin/session-service";
+import { CommentEmailDeliveryRepository } from "../notifications/comment-email-delivery-repository";
+import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 
 export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new AdminRepository(fastify.db);
@@ -153,6 +155,33 @@ export const commentsAdminRoutes: FastifyPluginAsync = async (fastify) => {
 			request.context?.requestId,
 			session.user.id,
 		);
+	});
+
+	fastify.get("/:commentId/email-delivery-status", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const parsedParams = adminCommentParamsSchema.safeParse(request.params);
+		if (!parsedParams.success) {
+			throw new InvalidRequestError({ issues: parsedParams.error.issues });
+		}
+		const comment = await repository.getCommentById(
+			parsedParams.data.commentId,
+		);
+		if (!comment) {
+			throw new ResourceNotFoundError("COMMENT_NOT_FOUND", "评论不存在。");
+		}
+		requireSiteIdAccess({
+			session,
+			siteId: comment.siteId,
+			permission: "comments.read",
+		});
+		const facts = await new CommentEmailDeliveryRepository(
+			fastify.db,
+		).listFactsByCommentIds([comment.id]);
+		return {
+			commentId: comment.id,
+			...projectCommentEmailDelivery(facts.get(comment.id) ?? []),
+			canViewTaskRecords: session.permissions.includes("tasks.read"),
+		};
 	});
 
 	fastify.patch("/:commentId", async (request) => {

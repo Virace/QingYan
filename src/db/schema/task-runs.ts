@@ -73,6 +73,12 @@ export const taskRuns = sqliteTable(
 			table.runAfter,
 		),
 		index("task_runs_category_created_idx").on(table.category, table.createdAt),
+		index("task_runs_comment_subject_created_idx").on(
+			table.category,
+			table.subjectType,
+			table.subjectId,
+			table.createdAt,
+		),
 		index("task_runs_site_idx").on(table.siteId),
 		index("task_runs_site_created_idx").on(table.siteId, table.createdAt),
 		index("task_runs_concurrency_status_idx").on(

@@ -97,6 +97,10 @@ async function configureBackendCommentRecipient(
 	siteId: number,
 	events: Array<"admin_comment_pending" | "admin_comment_approved">,
 ) {
+	const systemSettings = new AdminSystemSettingsRepository(fixture.app.db);
+	await systemSettings.upsert("mail", "enabled", true);
+	await systemSettings.upsert("mail", "smtp.host", "smtp.example.test");
+	await systemSettings.upsert("mail", "smtp.from", "notify@example.test");
 	await fixture.app.db
 		.update(siteSettings)
 		.set({ backendNotificationsEnabled: true })
@@ -487,7 +491,11 @@ describe("comment notifications", () => {
 		});
 		expect(reply.statusCode).toBe(200);
 		const replyId = reply.json().comment.id as string;
-		expect(await fixture.app.db.select().from(taskRuns)).toEqual([]);
+		expect(
+			(await fixture.app.db.select().from(taskRuns)).filter(
+				(task) => task.type === "reply_approved",
+			),
+		).toEqual([]);
 
 		const admin = await loginAsAdmin(fixture.app);
 		const approve = await fixture.app.inject({
@@ -513,7 +521,9 @@ describe("comment notifications", () => {
 		const deliveries = await fixture.app.db
 			.select()
 			.from(notificationDeliveries);
-		expect(tasks).toHaveLength(1);
+		expect(tasks.filter((task) => task.type === "reply_approved")).toHaveLength(
+			1,
+		);
 		expect(deliveries).toHaveLength(1);
 		expect(deliveries[0]).toMatchObject({
 			recipientType: "commenter",

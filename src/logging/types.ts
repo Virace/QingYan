@@ -47,7 +47,9 @@ export type AppEventName =
 	| "notification.chain_test.completed"
 	| "notification.chain_test.failed"
 	| "notification.email.sent"
-	| "notification.email.failed";
+	| "notification.email.failed"
+	| "notification.email.retry_scheduled"
+	| "notification.email.log_write_failed";
 
 export interface LogRuntimeSettings {
 	level: LogLevel;

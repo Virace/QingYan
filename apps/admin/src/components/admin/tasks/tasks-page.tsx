@@ -82,10 +82,18 @@ function paginate<T>(items: T[], page: number, pageSize: number): T[] {
 	return items.slice(page * pageSize, page * pageSize + pageSize);
 }
 
-export function TasksPage({ siteKey }: { siteKey: string }) {
+export function TasksPage({
+	siteKey,
+	commentId,
+	onClearCommentFilter,
+}: {
+	siteKey: string;
+	commentId: string;
+	onClearCommentFilter: () => void;
+}) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
-	const [activeTab, setActiveTab] = useState("scheduled");
+	const [activeTab, setActiveTab] = useState(commentId ? "runs" : "scheduled");
 	const [definitionTypeFilter, setDefinitionTypeFilter] = useState("");
 	const [definitionStatusFilter, setDefinitionStatusFilter] = useState<
 		TaskRunStatus | ""
@@ -125,8 +133,8 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		refetchInterval: 5000,
 	});
 	const runsQuery = useQuery({
-		queryKey: ["admin", "task-runs"],
-		queryFn: listTaskRuns,
+		queryKey: ["admin", "task-runs", commentId],
+		queryFn: () => listTaskRuns({ commentId: commentId || undefined }),
 		refetchInterval: (query) =>
 			query.state.data?.items.some((run) =>
 				["queued", "delayed", "running", "retrying"].includes(run.status),
@@ -439,9 +447,11 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		}
 	};
 	const cancelRun = async (run: TaskRunProjection) => {
+		const name =
+			run.scheduledTaskNameSnapshot ?? run.workflow ?? taskTypeLabel(run.type);
 		const confirmed = await confirm({
 			title: "取消运行",
-			description: `确认取消运行 ${run.id}？正在执行的任务会被标记为取消。`,
+			description: `确认取消“${name}”？正在执行的任务会被标记为取消。`,
 			confirmText: "取消运行",
 			destructive: true,
 		});
@@ -450,9 +460,11 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 		}
 	};
 	const retryRun = async (run: TaskRunProjection) => {
+		const name =
+			run.scheduledTaskNameSnapshot ?? run.workflow ?? taskTypeLabel(run.type);
 		const confirmed = await confirm({
 			title: "重试运行",
-			description: `确认把 ${run.id} 标记为重试？`,
+			description: `确认重试“${name}”？`,
 			confirmText: "重试运行",
 		});
 		if (confirmed) {
@@ -670,13 +682,26 @@ export function TasksPage({ siteKey }: { siteKey: string }) {
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="grid gap-3">
+								{commentId ? (
+									<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+										<span>正在查看当前评论相关的通知运行记录。</span>
+										<Button
+											type="button"
+											size="sm"
+											variant="outline"
+											onClick={onClearCommentFilter}
+										>
+											清除评论范围
+										</Button>
+									</div>
+								) : null}
 								<div className="grid gap-3 md:grid-cols-[1fr_12rem_12rem_12rem_auto]">
 									<label className="grid gap-1 text-sm">
 										<span className="text-muted-foreground">搜索</span>
 										<input
 											className={inputClass}
 											value={runSearch}
-											placeholder="任务名、运行 ID 或原因"
+											placeholder="任务名、类型或原因"
 											onChange={(event) => {
 												setRunSearch(event.target.value);
 												setRunPage(0);

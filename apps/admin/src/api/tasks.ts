@@ -1,4 +1,5 @@
 import { requestJson } from "./client";
+import type { CommentEmailDeliveryItem } from "./email-delivery";
 
 export type TaskScheduleKind =
 	| "manual_only"
@@ -216,6 +217,8 @@ export interface TaskRunProjection {
 	workerId?: string | null;
 	lockConflictWithRunId?: string | null;
 	lockConflictWithTaskName?: string | null;
+	workflow?: string;
+	deliveries?: CommentEmailDeliveryItem[];
 }
 
 export interface TaskRunLogLine {
@@ -324,9 +327,14 @@ export function transferScheduledTaskOwner(id: string, ownerUserId: number) {
 	);
 }
 
-export function listTaskRuns() {
+export function listTaskRuns(input: { commentId?: string } = {}) {
+	const params = new URLSearchParams();
+	if (input.commentId) {
+		params.set("commentId", input.commentId);
+	}
+	const query = params.toString();
 	return requestJson<{ items: TaskRunProjection[]; totalCount: number }>(
-		"/api/admin/tasks/runs",
+		`/api/admin/tasks/runs${query ? `?${query}` : ""}`,
 	);
 }
 

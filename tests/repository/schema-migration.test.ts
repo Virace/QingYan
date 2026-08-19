@@ -907,6 +907,9 @@ describe("initial migration", () => {
 					expect.objectContaining({
 						name: "task_runs_category_created_idx",
 					}),
+					expect.objectContaining({
+						name: "task_runs_comment_subject_created_idx",
+					}),
 					expect.objectContaining({ name: "task_runs_site_idx" }),
 					expect.objectContaining({ name: "task_runs_site_created_idx" }),
 					expect.objectContaining({
@@ -1138,6 +1141,7 @@ describe("initial migration", () => {
 			"0000_initial.sql",
 			"0001_notification_reliability.sql",
 			"0002_site_notification_events.sql",
+			"0003_comment_email_delivery_observability.sql",
 		]);
 	});
 

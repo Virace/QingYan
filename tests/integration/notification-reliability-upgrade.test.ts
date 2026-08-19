@@ -108,6 +108,7 @@ describe("notification reliability post-release migration", () => {
 				{ name: "0000_initial.sql" },
 				{ name: "0001_notification_reliability.sql" },
 				{ name: "0002_site_notification_events.sql" },
+				{ name: "0003_comment_email_delivery_observability.sql" },
 			]);
 			expect(
 				migrated

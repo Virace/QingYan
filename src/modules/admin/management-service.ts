@@ -51,6 +51,8 @@ import {
 	sanitizeOptionalSafeHttpUrl,
 } from "../shared/url-policy";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { CommentEmailDeliveryRepository } from "../notifications/comment-email-delivery-repository";
+import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 import { AdminTaskService } from "../tasks/admin-task-service";
 import type { AdminRepository } from "./repository";
 
@@ -186,8 +188,17 @@ export class AdminManagementService {
 			limit: input.limit,
 			offset: input.offset,
 		});
+		const emailFacts = await new CommentEmailDeliveryRepository(
+			this.repository.database,
+		).listFactsByCommentIds(result.items.map((comment) => comment.id));
+		const items = result.items.map((comment) => ({
+			...comment,
+			emailDelivery: projectCommentEmailDelivery(
+				emailFacts.get(comment.id) ?? [],
+			).summary,
+		}));
 
-		return buildPaginationResult(result.items, {
+		return buildPaginationResult(items, {
 			limit: input.limit,
 			offset: input.offset,
 			totalCount: result.totalCount,

@@ -52,7 +52,7 @@ pnpm typecheck
 
 ```bash
 pnpm test
-pnpm test -- tests/unit/public-path.test.ts
+pnpm exec vitest run --config vitest.config.ts tests/unit/public-path.test.ts
 pnpm test:smoke
 pnpm test:e2e
 pnpm test:system
@@ -64,7 +64,7 @@ pnpm check
 pnpm check:system
 ```
 
-- `pnpm test` 运行 `tests/**/*.test.ts`。Vitest 的额外位置参数用于按路径定向过滤。
+- `pnpm test` 运行 `tests/**/*.test.ts`。定向测试使用上面的 `pnpm exec vitest run --config vitest.config.ts <paths...>`；不要在 `pnpm test` 后加 `--`，当前脚本会把该形式错误地退化为完整测试集。
 - `pnpm test:smoke` 使用临时 SQLite，通过 Fastify 注入完成验证码、评论、审核和读取的核心链路。
 - `pnpm test:e2e` 启动本地 API 与 Admin Vite 服务，运行 Chromium 流程。
 - `pnpm test:system` 串行运行 API/SQLite 冒烟与 Admin E2E。

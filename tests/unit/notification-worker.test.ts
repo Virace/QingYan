@@ -13,6 +13,7 @@ import {
 } from "../../src/db/schema";
 import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
+import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
 import { NotificationChannelError } from "../../src/modules/notifications/channels/error-classifier";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
@@ -251,6 +252,7 @@ describe("notification worker", () => {
 		expect(processed).toBe(1);
 		await expect(repository.getRequired(task.id)).resolves.toMatchObject({
 			status: "succeeded",
+			attempts: 1,
 			result: { sent: 1, failed: 0 },
 		});
 		await expect(
@@ -259,6 +261,115 @@ describe("notification worker", () => {
 			status: "sent",
 			providerMessageId: "smtp-1",
 		});
+		const events = await new TaskEventLogRepository(fixture.app.db).listForRun({
+			taskRunId: task.id,
+			limit: 10,
+			offset: 0,
+			includePrivate: true,
+		});
+		expect(events.items.map((event) => event.eventType)).toEqual([
+			"notification.email.attempt_started",
+			"notification.email.accepted",
+		]);
+		expect(events.items.map((event) => event.sequence)).toEqual([1, 2]);
+	});
+
+	it("writes safe structured email logs with comment and flow context", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		await repository.createNotificationTaskWithDelivery({
+			task: {
+				type: "reply_approved",
+				siteKey: "fangyuan",
+				subjectType: "comment",
+				subjectId: "comment_log_context",
+				payloadSummary: {
+					channel: "email",
+					flow: "commenter_reply",
+				},
+				payload: { bodyTemplate: "safe log test" },
+			},
+			delivery: {
+				channel: "email",
+				recipientType: "commenter",
+				recipientAddressSnapshot: "private-reader@example.test",
+				recipientIdentityKey: "commenter:private-reader",
+				eventFamily: "reply_approved",
+				templateKey: "commenter.reply_approved",
+			},
+		});
+		const logApp = vi.fn(async () => undefined);
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			adapters: {
+				email: {
+					send: async () => ({ providerMessageId: "provider-private" }),
+				},
+			},
+			logApp,
+		});
+
+		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(1);
+		expect(logApp).toHaveBeenCalledWith(
+			expect.objectContaining({
+				event: "notification.email.sent",
+				siteKey: "fangyuan",
+				targetType: "comment",
+				targetId: "comment_log_context",
+				data: expect.objectContaining({
+					flow: "commenter_reply",
+					sentCount: 1,
+					failedCount: 0,
+				}),
+			}),
+		);
+		expect(JSON.stringify(logApp.mock.calls)).not.toContain(
+			"private-reader@example.test",
+		);
+		expect(JSON.stringify(logApp.mock.calls)).not.toContain("provider-private");
+	});
+
+	it("keeps accepted delivery facts when structured application logging fails", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		const { task, delivery } = await createQueuedTask(repository, {
+			recipientAddress: "private-recipient@example.test",
+		});
+		const logApp = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("private logging sink failure"))
+			.mockResolvedValue(undefined);
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			adapters: {
+				email: {
+					send: async () => ({ providerMessageId: "private-provider-id" }),
+				},
+			},
+			logApp,
+		});
+
+		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(1);
+
+		await expect(repository.getRequired(task.id)).resolves.toMatchObject({
+			status: "succeeded",
+		});
+		await expect(
+			repository.getDeliveryRequired(delivery.id),
+		).resolves.toMatchObject({ status: "sent" });
+		expect(logApp).toHaveBeenCalledTimes(2);
+		expect(logApp.mock.calls[1]?.[0]).toMatchObject({
+			event: "notification.email.log_write_failed",
+			level: "error",
+		});
+		const serializedLogs = JSON.stringify(logApp.mock.calls);
+		expect(serializedLogs).not.toContain("private-recipient@example.test");
+		expect(serializedLogs).not.toContain("private-provider-id");
+		expect(serializedLogs).not.toContain("private logging sink failure");
 	});
 
 	it("resolves adapters from each delivery channel config reference", async () => {
@@ -324,6 +435,52 @@ describe("notification worker", () => {
 			attempts: 1,
 			runAfter: "2026-06-02T10:01:00.000Z",
 		});
+		const events = await new TaskEventLogRepository(fixture.app.db).listForRun({
+			taskRunId: task.id,
+			limit: 10,
+			offset: 0,
+			includePrivate: true,
+		});
+		expect(events.items.map((event) => event.eventType)).toEqual([
+			"notification.email.attempt_started",
+			"notification.email.attempt_failed",
+			"notification.email.retry_scheduled",
+		]);
+		expect(JSON.stringify(events.items)).not.toContain("timeout");
+	});
+
+	it("fails a notification task that reaches the worker without a delivery", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		const task = await repository.create({
+			type: "backend_user_comment_digest",
+			category: "notification",
+			payloadSummary: { channel: "email", flow: "site_staff_comment" },
+			payload: {},
+		});
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			adapters: {},
+		});
+
+		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(1);
+
+		await expect(repository.getRequired(task.id)).resolves.toMatchObject({
+			status: "failed",
+			attempts: 1,
+		});
+		const events = await new TaskEventLogRepository(fixture.app.db).listForRun({
+			taskRunId: task.id,
+			limit: 10,
+			offset: 0,
+			includePrivate: true,
+		});
+		expect(events.items.map((event) => event.eventType)).toEqual([
+			"notification.email.delivery_missing",
+			"notification.email.failed",
+		]);
 	});
 
 	it("does not update reputation for config errors or backend-user recipient failures", async () => {

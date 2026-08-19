@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 import { EmptyState } from "../shared/admin-ui";
+import { EmailDeliveryItems } from "../shared/email-delivery-items";
 import { formatAdminDateTime } from "../shared/time-format";
 import { TaskRunConsole } from "./task-run-console";
 import { TaskStatusBadge, taskTypeLabel } from "./task-status-badge";
@@ -47,6 +48,11 @@ export function TaskRunDetailDialog({
 		queryKey: ["admin", "task-run", run?.id],
 		queryFn: () => getTaskRun(run?.id ?? ""),
 		enabled: open && Boolean(run?.id),
+		refetchInterval: (query) =>
+			query.state.data && runningStatuses.has(query.state.data.status)
+				? 1500
+				: false,
+		refetchIntervalInBackground: false,
 	});
 	const detail = runQuery.data ?? run;
 	const [logLines, setLogLines] = useState<TaskRunLogLine[]>([]);
@@ -100,9 +106,11 @@ export function TaskRunDetailDialog({
 		if (!detail) {
 			return "加载运行记录。";
 		}
-		return `${taskTypeLabel(detail.type)} / ${
-			detail.scheduledTaskNameSnapshot ?? detail.id
-		}`;
+		return (
+			detail.scheduledTaskNameSnapshot ??
+			detail.workflow ??
+			taskTypeLabel(detail.type)
+		);
 	}, [detail]);
 
 	return (
@@ -121,7 +129,11 @@ export function TaskRunDetailDialog({
 							</div>
 							<div>
 								<p className="text-xs text-muted-foreground">触发</p>
-								<p className="mt-1 text-sm">{detail.trigger ?? "-"}</p>
+								<p className="mt-1 text-sm">
+									{detail.category === "notification"
+										? "评论事件"
+										: (detail.trigger ?? "-")}
+								</p>
 							</div>
 							<div>
 								<p className="text-xs text-muted-foreground">站点</p>
@@ -163,6 +175,21 @@ export function TaskRunDetailDialog({
 
 						{canViewDetail ? (
 							<>
+								{detail.deliveries ? (
+									<section className="grid gap-2">
+										<div className="flex items-center justify-between gap-2">
+											<h3 className="text-sm font-semibold">投递结果</h3>
+											<Badge variant="outline">
+												{detail.workflow ?? "邮件通知"}
+											</Badge>
+										</div>
+										{detail.deliveries.length > 0 ? (
+											<EmailDeliveryItems items={detail.deliveries} />
+										) : (
+											<EmptyState text="这次通知没有生成实际邮件投递。" />
+										)}
+									</section>
+								) : null}
 								<section className="grid gap-2">
 									<h3 className="text-sm font-semibold">执行输出</h3>
 									{canViewLogs ? (

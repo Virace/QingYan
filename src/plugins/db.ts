@@ -191,6 +191,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		worker: new NotificationWorker({
 			queue: new DatabaseTaskQueue(db),
 			repository: taskRuns,
+			logApp: (record) => fastify.loggerManager.logApp(record),
 			adapterFactory: new RuntimeNotificationChannelAdapterFactory({
 				configs: new NotificationChannelConfigsRepository(db),
 				systemSettings: systemSettingsService,
