@@ -267,7 +267,7 @@ Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion�
 Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商接受请求，不证明进入
 收件箱；最后仍需人工核对两个收件箱、垃圾邮件和退信。
 
-队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
+队列默认后端是 `database`，会把任务写入 `task_runs` 并把投递写入 `notification_deliveries`，任务中心从这两个表展示通知任务状态。通知任务、投递和首条事件原子创建；worker 完成外部发送后，再把投递结果、父任务状态和事件原子提交，网络请求不占用数据库事务。评论邮件明确决定不发送时也会留下终态 decision task，供评论管理和任务中心复用同一业务状态投影。可选后端 `bullmq` 需要单独部署 Redis 并在运行环境中提供 Redis 连接配置；BullMQ 只负责队列传递，业务 planner、worker、delivery projection 和任务中心仍使用相同数据模型。未选择 BullMQ 时，Redis 不是必需依赖。
 
 通知任务状态固定为 `queued`、`delayed`、`running`、`retrying`、`succeeded`、`failed`、`suppressed`、`cancelled`。通知接收目标类型包含 `backend_user`、`commenter`、`external_target`、`test`。邮件按事件选择的站点人员创建一人一份投递；Webhook/WxPusher 按事件选择的目标各创建一份投递，不再与人员做笛卡尔组合。任务和投递会记录 `channelConfigId` / `channelConfigName` 快照，用于区分多个同类型发送目标。
 
@@ -276,15 +276,16 @@ Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商
 - `POST /api/comments` 的 `options.notifyOnReply` 只更新普通评论者在当前站点、当前邮箱的回复邮件偏好。
 - 只有普通评论者邮箱通过通知邮箱策略时才创建偏好；明显占位或无效邮箱不会创建偏好，但评论创建继续成功。
 - 只有最终 `approved` 的回复会触发普通评论者 email 任务；pending 回复在通过审核前不会发送。
-- import、migration 和系统来源不会创建评论者通知任务，也不会创建历史评论者偏好。
+- import、migration 和明确排除的系统来源不会创建评论者实际发送任务，也不会创建历史评论者偏好；相关 planner 被调用时只写入终态邮件决定，说明该事件按来源规则未发送。
 - 全局退订链接使用一次性 token；数据库只保存 token hash，明文 token 只用于邮件链接生成，不写入任务 payload、日志、导出或 Admin API 响应。
 
 后台用户通知语义：
 
 - 接收人引用后台用户，不从 `comments.verifiedAuthor.email` 或评论作者邮箱派生长期接收人。
-- 每个固定事件独立保存人员和其他发送目标；没有接收目标时保持链路完整，只是不创建发送任务。
+- 每个固定事件独立保存人员和其他发送目标；没有邮件接收目标时不创建发送任务，但会写入评论关联的终态邮件决定，保留当时“不发送”的原因。
 - 待审核评论创建 `admin_comment_pending`；直接通过审核的评论创建 `admin_comment_approved`；pending 评论后续通过审核不再追加第二条后台用户通知。
 - 通知 planner、队列、worker、SMTP、Webhook 或 WxPusher 失败都不应阻断评论创建、审核、后台回复、导入、迁移或任务中心读取。
+- 邮件任务事件按顺序记录创建、尝试、服务商接受、计划重试或终止失败；结构化应用日志使用 `notification.email.sent`、`notification.email.failed` 和 `notification.email.retry_scheduled`。这些记录只包含站点、评论关联、业务流程、稳定分类与安全计数，不写完整地址、正文、Provider Message ID 或原始异常。
 
 Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属于敏感信息。它们不会在 Admin API GET 响应、普通 export、任务 payload 或日志中以明文返回；更新时省略 secret 字段或提交空 `secretConfig` 表示保留已有值。Webhook URL 的 query string 也不会写入收件地址快照，避免把 query token 带入任务中心和日志。
 
@@ -443,7 +444,7 @@ qyctl restart
 
 - Release tag 使用 `vX.Y.Z` 或 `X.Y.Z`，并与 `package.json` version 对齐。
 - 首个正式 release 为 `v0.1.0`。
-- 当前正式 release 为 `v0.2.4`。
+- 当前正式 release 为 `v0.2.5`。
 - 可自动更新的 release 需要提供 `qingyan-update-manifest.json`、`qingyan-vX.Y.Z-linux-x64.tar.gz` 和 `qingyan-vX.Y.Z-linux-x64.sha256`。
 - Admin 运维页只做检测和提示，不直接执行程序覆盖。
 
@@ -489,5 +490,5 @@ pnpm config:check:local
 pnpm db:generate
 pnpm db:migrate
 pnpm dev
-pnpm dev:smoke
+pnpm test:smoke
 ```

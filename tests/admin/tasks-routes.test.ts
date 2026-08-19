@@ -13,6 +13,7 @@ import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
 import { AdminTaskService } from "../../src/modules/tasks/admin-task-service";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -103,6 +104,128 @@ function taskPayload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("admin tasks api", () => {
+	it("filters notification runs by comment and returns a safe delivery projection", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site");
+		}
+		const taskRuns = new TaskRunRepository(fixture.app.db);
+		const target = await taskRuns.createNotificationTaskWithDelivery({
+			task: {
+				type: "backend_user_comment_approved",
+				siteId: site.id,
+				siteKey: site.siteKey,
+				subjectType: "comment",
+				subjectId: "comment-task-filter",
+				payloadSummary: {
+					channel: "email",
+					flow: "site_staff_comment",
+				},
+				payload: { body: "private body" },
+				idempotencyKey: "task-filter-target",
+			},
+			delivery: {
+				channel: "email",
+				recipientType: "backend_user",
+				recipientAddressSnapshot: "private-admin@example.test",
+				recipientIdentityKey: "backend_user:private",
+				eventFamily: "admin_comment_approved",
+				templateKey: "backend_user.comment.approved",
+			},
+		});
+		if (!target.delivery) {
+			throw new Error("Expected delivery");
+		}
+		await taskRuns.completeNotificationAttempt({
+			taskId: target.task.id,
+			outcomes: [
+				{
+					deliveryId: target.delivery.id,
+					status: "failed",
+					error: { kind: "temporary", message: "private SMTP response" },
+				},
+			],
+			next: {
+				status: "failed",
+				error: { kind: "temporary", message: "private SMTP response" },
+			},
+			events: [],
+		});
+		await taskRuns.create({
+			type: "reply_approved",
+			category: "notification",
+			siteId: site.id,
+			siteKey: site.siteKey,
+			subjectType: "comment",
+			subjectId: "other-comment",
+			payloadSummary: { channel: "email", flow: "commenter_reply" },
+			payload: {},
+		});
+
+		const listResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/tasks/runs?commentId=comment-task-filter",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(listResponse.statusCode).toBe(200);
+		expect(listResponse.json()).toMatchObject({
+			totalCount: 1,
+			items: [
+				{
+					id: target.task.id,
+					category: "notification",
+					status: "failed",
+					workflow: "站点人员评论提醒",
+				},
+			],
+		});
+		expect(listResponse.json().items[0].type).toBe("站点人员评论提醒");
+		expect(listResponse.json().items[0]).not.toHaveProperty("payload");
+		expect(listResponse.json().items[0]).not.toHaveProperty("error");
+
+		const detailResponse = await fixture.app.inject({
+			method: "GET",
+			url: `/qingyan/api/admin/tasks/runs/${target.task.id}`,
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(detailResponse.statusCode).toBe(200);
+		expect(detailResponse.json()).toMatchObject({
+			id: target.task.id,
+			workflow: "站点人员评论提醒",
+			deliveries: [
+				{
+					kind: "delivery",
+					channel: "email",
+					state: "failed",
+					phase: "failed",
+					errorKind: "temporary",
+					recipient: {
+						label: "站点人员",
+						address: "p***@example.test",
+					},
+				},
+			],
+		});
+		const responseBody = detailResponse.body;
+		expect(responseBody).not.toContain("private-admin@example.test");
+		expect(responseBody).not.toContain("private SMTP response");
+		expect(responseBody).not.toContain("private body");
+		expect(responseBody).not.toContain(target.delivery.id);
+		expect(detailResponse.json().type).toBe("站点人员评论提醒");
+		expect(detailResponse.json()).not.toHaveProperty("payload");
+		expect(detailResponse.json()).not.toHaveProperty("error");
+		expect(detailResponse.json()).not.toHaveProperty("result");
+		expect(detailResponse.json()).not.toHaveProperty("progress");
+		expect(detailResponse.json()).not.toHaveProperty("workerId");
+		expect(detailResponse.json()).not.toHaveProperty("concurrencyKey");
+	});
+
 	it("lists definitions and lets admin create, update, run, view logs, transfer, and delete a scheduled task", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

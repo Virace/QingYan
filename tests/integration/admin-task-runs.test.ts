@@ -137,23 +137,20 @@ describe("admin task run projection", () => {
 			items: [
 				{
 					id: "task_run_notification_visible",
-					source: "task_run",
-					type: "notification.reply_approved",
+					type: "邮件通知",
 					category: "notification",
 					status: "queued",
 					siteKey: "fangyuan",
-					payloadSummary: {
-						eventType: "reply_approved",
-						recipientAddressSnapshot: "reader@example.test",
-					},
-					queueState: {
-						waitingReason: "ready_for_runner",
-						readyAt: expect.any(String),
-					},
+					workflow: "邮件通知",
 					createdAt: "2026-06-02T00:00:00.000Z",
 				},
 			],
 		});
+		expect(response.body).not.toContain("reader@example.test");
+		expect(response.body).not.toContain("notification.reply_approved");
+		expect(response.json().items[0]).not.toHaveProperty("payloadSummary");
+		expect(response.json().items[0]).not.toHaveProperty("payload");
+		expect(response.json().items[0]).not.toHaveProperty("queueBackend");
 	});
 
 	it("rejects site-scoped users because task center requires tasks.read", async () => {
@@ -227,7 +224,6 @@ describe("admin task run projection", () => {
 			items: [
 				{
 					id: "task_run_fangyuan",
-					source: "task_run",
 					siteKey: "fangyuan",
 				},
 			],

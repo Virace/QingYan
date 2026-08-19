@@ -99,7 +99,7 @@ pnpm dev
 - OpenAPI YAML: `http://localhost:4401/qingyan/openapi.yaml`
 - API Docs: `http://localhost:4401/qingyan/docs`
 
-`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按已安装的后台入口生成主入口，并把 `/qingyan/api/*` 代理到后端。dev mode 下 `/qingyan/admin/` 始终作为额外开发入口可用；如果安装时生成或设置了其他后台路径，`/qingyan/admin/` 和该路径会同时可用，`/qingyan/admin/` 不会在非 dev 启动中开放为别名。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm admin:dev`。
+`pnpm dev` 会同时启动后端 API 和 Admin Vite 开发服务。Admin 开发服务会按已安装的后台入口生成主入口，并把 `/qingyan/api/*` 代理到后端。dev mode 下 `/qingyan/admin/` 始终作为额外开发入口可用；如果安装时生成或设置了其他后台路径，`/qingyan/admin/` 和该路径会同时可用，`/qingyan/admin/` 不会在非 dev 启动中开放为别名。只需要单独启动后端时使用 `pnpm dev:api`；只调试 Admin 前端时可使用 `pnpm dev:admin`。
 
 `pnpm dev` 默认启用快速开发模式，Admin 登录固定为：
 
@@ -280,14 +280,19 @@ pnpm db:studio
 ```bash
 pnpm typecheck
 pnpm test
+pnpm test:smoke
+pnpm test:system
 pnpm build
 pnpm check
+pnpm check:system
 pnpm dev:api
-pnpm admin:dev
-pnpm dev:smoke
+pnpm dev:admin
 ```
 
 `pnpm check` 会串行执行格式检查、lint、typecheck、测试、构建和示例配置校验。
+`pnpm test:system` 会运行 API/SQLite 冒烟链路与 Admin Chromium E2E；
+`pnpm check:system` 在完整静态与构建门禁后继续运行该系统测试。
+真实邮件发送使用显式的 `pnpm test:smoke:commenter-email`，不会进入默认门禁。
 
 ## 本地 Dev Mode
 

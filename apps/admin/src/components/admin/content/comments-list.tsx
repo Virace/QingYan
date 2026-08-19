@@ -4,14 +4,15 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { textareaClass } from "../shared/admin-ui";
+import { ExternalLinkText } from "../shared/external-link-text";
+import { formatAdminCommentTime } from "../shared/time-format";
 import {
 	type CommentActionId,
 	commentActionsForStatus,
 } from "./comment-actions";
+import { CommentEmailDeliveryButton } from "./comment-email-delivery-button";
 import { CommentActionButton } from "./comment-row-actions";
-import { ExternalLinkText } from "../shared/external-link-text";
 import { RequestMetaSummary } from "./request-meta-summary";
-import { formatAdminCommentTime } from "../shared/time-format";
 
 function rowTone(status: CommentStatus) {
 	if (status === "pending") {
@@ -63,6 +64,7 @@ export interface CommentsListProps {
 	onToggleEmailBlacklist: (comment: AdminComment) => void;
 	onToggleIpBlacklist: (comment: AdminComment) => void;
 	onFilterPage: (pageKey: string) => void;
+	onOpenEmailDelivery: (commentId: string) => void;
 }
 
 export function CommentsList(props: CommentsListProps) {
@@ -158,9 +160,13 @@ export function CommentsList(props: CommentsListProps) {
 								<p className="mt-1 text-xs text-muted-foreground">
 									赞 {comment.voteUpCount} / 回复 {comment.replyCount}
 								</p>
-								<p className="mt-1 text-xs text-muted-foreground">
-									时间 {formatAdminCommentTime(comment.createdAt)}
-								</p>
+								<div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 text-xs text-muted-foreground">
+									<span>时间 {formatAdminCommentTime(comment.createdAt)}</span>
+									<CommentEmailDeliveryButton
+										summary={comment.emailDelivery}
+										onClick={() => props.onOpenEmailDelivery(comment.id)}
+									/>
+								</div>
 								<div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 opacity-100 xl:opacity-0 xl:transition-opacity xl:group-hover:opacity-100 xl:group-focus-within:opacity-100">
 									{commentActionsForStatus(comment.status).map((action) => (
 										<CommentActionButton

@@ -30,6 +30,7 @@ import type { CommentActionId } from "./comment-actions";
 import { CommentsList } from "./comments-list";
 import { useAdminConfirmDialog } from "../shared/confirm-dialog";
 import { ResourceFilters, usePaginationState } from "./collection-shared";
+import { CommentEmailDeliveryDialog } from "./comment-email-delivery-dialog";
 
 type CommentView = "all" | "pending" | "approved" | "spam" | "trash";
 type BulkCommentAction =
@@ -62,12 +63,14 @@ export function CommentsPage({
 	setSearch,
 	pageKey,
 	setPageKey,
+	openTaskRecords,
 }: {
 	siteKey?: string;
 	search: string;
 	setSearch: (value: string) => void;
 	pageKey: string;
 	setPageKey: (value: string) => void;
+	openTaskRecords: (commentId: string) => void;
 }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
@@ -77,6 +80,9 @@ export function CommentsPage({
 	const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
 	const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
 	const [bulkAction, setBulkAction] = useState<BulkCommentAction>("approve");
+	const [emailDeliveryCommentId, setEmailDeliveryCommentId] = useState<
+		string | null
+	>(null);
 	const currentView =
 		commentViews.find((item) => item.id === view) ?? commentViews[0];
 	const commentsQuery = useQuery({
@@ -496,6 +502,7 @@ export function CommentsPage({
 							setPageKey(nextPageKey);
 							pagination.resetPage();
 						}}
+						onOpenEmailDelivery={setEmailDeliveryCommentId}
 						onRefreshMetadata={(commentId) =>
 							refreshMetadataMutation.mutate(commentId)
 						}
@@ -517,6 +524,16 @@ export function CommentsPage({
 				) : (
 					<EmptyState text={commentsQuery.isLoading ? "加载中" : "暂无评论"} />
 				)}
+				<CommentEmailDeliveryDialog
+					commentId={emailDeliveryCommentId}
+					open={emailDeliveryCommentId !== null}
+					onOpenChange={(open) => {
+						if (!open) {
+							setEmailDeliveryCommentId(null);
+						}
+					}}
+					onOpenTaskRecords={openTaskRecords}
+				/>
 			</CardContent>
 		</Card>
 	);

@@ -114,7 +114,7 @@ function registerAdminUiPath(
 				error: {
 					code: "ADMIN_UI_NOT_BUILT",
 					message:
-						"Admin UI build output is missing. Run pnpm run admin:build before serving the backend.",
+						"Admin UI build output is missing. Run pnpm run build:admin before serving the backend.",
 				},
 			});
 		}

@@ -122,17 +122,17 @@ export class LoggerManager {
 			return;
 		}
 
-		const ts = record.ts ?? new Date().toISOString();
+		const timestamp = record.ts ?? new Date().toISOString();
 		await this.write({
 			channel: "access",
-			ts,
+			ts: timestamp,
 			textLine: formatAccessTextLine({
 				...record,
-				ts,
+				ts: timestamp,
 			}),
 			jsonlLine: formatAccessJsonlLine({
 				...record,
-				ts,
+				ts: timestamp,
 			}),
 		});
 	}
@@ -142,19 +142,19 @@ export class LoggerManager {
 			return;
 		}
 
-		const ts = record.ts ?? new Date().toISOString();
+		const timestamp = record.ts ?? new Date().toISOString();
 		const data = record.data ? sanitizeLogData(record.data) : undefined;
 		await this.write({
 			channel: "app",
-			ts,
+			ts: timestamp,
 			textLine: formatAppTextLine({
 				...record,
-				ts,
+				ts: timestamp,
 				data,
 			}),
 			jsonlLine: formatAppJsonlLine({
 				...record,
-				ts,
+				ts: timestamp,
 				data,
 			}),
 		});

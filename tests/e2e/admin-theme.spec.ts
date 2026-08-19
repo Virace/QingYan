@@ -3,7 +3,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const screenshotDir = path.resolve(
 	process.cwd(),
@@ -23,8 +23,13 @@ async function login(page: Page): Promise<void> {
 
 async function ensureLoggedIn(page: Page): Promise<void> {
 	await page.goto("/qingyan/admin/");
-	const response = await page.request.get("/qingyan/api/admin/session/me");
-	if (response.ok()) {
+	const logoutButton = page.getByRole("button", { name: "退出", exact: true });
+	const loginButton = page.getByRole("button", {
+		name: "登录后台",
+		exact: true,
+	});
+	await expect(logoutButton.or(loginButton)).toBeVisible();
+	if (await logoutButton.isVisible()) {
 		return;
 	}
 	await login(page);
@@ -211,7 +216,11 @@ test("dark theme renders key admin views and overlays without obvious layout bre
 	for (const item of views) {
 		await page.goto(`/qingyan/admin/?view=${item.view}`);
 		await expect(
-			page.getByRole("heading", { name: item.shellHeading }),
+			page.getByRole("heading", {
+				name: item.shellHeading,
+				level: 1,
+				exact: true,
+			}),
 		).toBeVisible();
 		await expect(page.getByText(item.bodyText).first()).toBeVisible();
 		await expectDarkTheme(page);

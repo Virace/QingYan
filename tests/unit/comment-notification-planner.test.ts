@@ -166,7 +166,7 @@ describe("comment notification planner", () => {
 		}
 	});
 
-	it("returns no tasks for skipped sources and non-approved replies", async () => {
+	it("records decisions for skipped sources and non-approved replies", async () => {
 		const fixture = createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
@@ -194,7 +194,29 @@ describe("comment notification planner", () => {
 					source: "public_api",
 				}),
 			).toMatchObject({ createdCount: 0 });
-			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
+			const decisions = await fixture.db.select().from(taskRuns);
+			expect(decisions).toHaveLength(2);
+			expect(
+				decisions.map((decision) => ({
+					status: decision.status,
+					summary: JSON.parse(decision.payloadSummaryJson),
+				})),
+			).toEqual(
+				expect.arrayContaining([
+					{
+						status: "skipped",
+						summary: expect.objectContaining({
+							reasonCode: "source_excluded",
+						}),
+					},
+					{
+						status: "skipped",
+						summary: expect.objectContaining({
+							reasonCode: "comment_not_approved_reply",
+						}),
+					},
+				]),
+			);
 		} finally {
 			fixture.cleanup();
 		}
@@ -219,7 +241,13 @@ describe("comment notification planner", () => {
 			});
 
 			expect(result).toMatchObject({ createdCount: 0, taskIds: [] });
-			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
+			expect(await fixture.db.select().from(taskRuns)).toEqual([
+				expect.objectContaining({
+					type: "notification_email_decision",
+					status: "skipped",
+					skipReason: "site_commenter_email_disabled",
+				}),
+			]);
 		} finally {
 			fixture.cleanup();
 		}
@@ -249,7 +277,13 @@ describe("comment notification planner", () => {
 			});
 
 			expect(result).toMatchObject({ createdCount: 0, taskIds: [] });
-			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
+			expect(await fixture.db.select().from(taskRuns)).toEqual([
+				expect.objectContaining({
+					type: "notification_email_decision",
+					status: "skipped",
+					skipReason: "system_email_unavailable",
+				}),
+			]);
 		} finally {
 			fixture.cleanup();
 		}
@@ -258,6 +292,8 @@ describe("comment notification planner", () => {
 	it.each([
 		{
 			name: "unsubscribed",
+			reasonCode: "commenter_unsubscribed",
+			status: "suppressed",
 			prepare: async (fixture: ReturnType<typeof createFixture>) => {
 				await fixture.db
 					.update(commenterNotificationPreferences)
@@ -269,6 +305,8 @@ describe("comment notification planner", () => {
 		},
 		{
 			name: "staff_parent",
+			reasonCode: "commenter_not_visitor",
+			status: "skipped",
 			prepare: async (fixture: ReturnType<typeof createFixture>) => {
 				await fixture.db
 					.update(comments)
@@ -278,6 +316,8 @@ describe("comment notification planner", () => {
 		},
 		{
 			name: "same_email",
+			reasonCode: "same_recipient",
+			status: "skipped",
 			prepare: async (fixture: ReturnType<typeof createFixture>) => {
 				await fixture.db
 					.update(comments)
@@ -287,6 +327,8 @@ describe("comment notification planner", () => {
 		},
 		{
 			name: "suppressed",
+			reasonCode: "email_reputation_suppressed",
+			status: "suppressed",
 			prepare: async (fixture: ReturnType<typeof createFixture>) => {
 				const reputation = new EmailReputationRepository(fixture.db);
 				const baseTime = Date.now();
@@ -316,7 +358,13 @@ describe("comment notification planner", () => {
 			});
 
 			expect(result, testCase.name).toMatchObject({ createdCount: 0 });
-			expect(await fixture.db.select().from(taskRuns)).toEqual([]);
+			expect(await fixture.db.select().from(taskRuns)).toEqual([
+				expect.objectContaining({
+					type: "notification_email_decision",
+					status: testCase.status,
+					skipReason: testCase.reasonCode,
+				}),
+			]);
 		} finally {
 			fixture.cleanup();
 		}
@@ -347,6 +395,50 @@ describe("comment notification planner", () => {
 			expect(
 				await fixture.db.select().from(notificationDeliveries),
 			).toHaveLength(1);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+	it("keeps an event-level no-send decision terminal when settings later change", async () => {
+		const fixture = createFixture();
+		try {
+			const { site } = await seedApprovedReply(fixture);
+			const planner = new CommentNotificationPlanner(fixture.db);
+			await fixture.db
+				.update(siteSettings)
+				.set({ commenterReplyEmailEnabled: false })
+				.where(eq(siteSettings.siteId, site.id));
+
+			await planner.planForCommentEvent({
+				siteId: site.id,
+				siteKey: "fangyuan",
+				pageKey: "post:reply-notify",
+				commentId: "c_reply",
+				source: "public_api",
+			});
+			await fixture.db
+				.update(siteSettings)
+				.set({ commenterReplyEmailEnabled: true })
+				.where(eq(siteSettings.siteId, site.id));
+			await planner.planForCommentEvent({
+				siteId: site.id,
+				siteKey: "fangyuan",
+				pageKey: "post:reply-notify",
+				commentId: "c_reply",
+				source: "public_api",
+			});
+
+			expect(await fixture.db.select().from(taskRuns)).toEqual([
+				expect.objectContaining({
+					type: "notification_email_decision",
+					status: "skipped",
+					skipReason: "site_commenter_email_disabled",
+				}),
+			]);
+			expect(await fixture.db.select().from(notificationDeliveries)).toEqual(
+				[],
+			);
 		} finally {
 			fixture.cleanup();
 		}

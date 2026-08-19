@@ -79,27 +79,35 @@ export function TaskRunTable({
 				<tbody>
 					{runs.map((run) => {
 						const busy = busyRunId === run.id;
+						const isNotification = run.category === "notification";
+						const typeLabel =
+							run.workflow ?? labels.get(run.type) ?? taskTypeLabel(run.type);
 						return (
 							<tr key={run.id} className="border-b last:border-0">
 								<td className="px-3 py-3 align-top">
 									<div className="grid gap-1">
-										<span className="font-medium">
-											{labels.get(run.type) ?? taskTypeLabel(run.type)}
-										</span>
+										<span className="font-medium">{typeLabel}</span>
 										<span className="text-xs text-muted-foreground">
-											{run.category}
+											{isNotification ? "邮件通知" : run.category}
 										</span>
 									</div>
 								</td>
 								<td className="px-3 py-3 align-top">
 									<div className="grid gap-1">
-										<span>{run.scheduledTaskNameSnapshot ?? "-"}</span>
+										<span>
+											{run.scheduledTaskNameSnapshot ??
+												(isNotification ? "评论通知" : "-")}
+										</span>
 										<span className="text-xs text-muted-foreground">
-											{run.scheduledTaskId ?? "临时运行"}
+											{isNotification
+												? "邮件"
+												: (run.scheduledTaskId ?? "临时运行")}
 										</span>
 									</div>
 								</td>
-								<td className="px-3 py-3 align-top">{run.trigger ?? "-"}</td>
+								<td className="px-3 py-3 align-top">
+									{isNotification ? "评论事件" : (run.trigger ?? "-")}
+								</td>
 								<td className="px-3 py-3 align-top">
 									<TaskStatusBadge status={run.status} />
 								</td>

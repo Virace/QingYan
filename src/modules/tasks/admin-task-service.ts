@@ -45,6 +45,7 @@ import {
 } from "./page-source-refresh-policy";
 import { TaskRunRepository } from "./task-run-repository";
 import type { TaskRunRecord } from "./types";
+import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 import {
 	canManageScheduledTask,
 	canRunScheduledTask,
@@ -56,6 +57,53 @@ import {
 } from "./task-visibility";
 
 const RETENTION_COUNT_MAX = 30;
+
+function notificationWorkflowLabel(run: TaskRunRecord): string {
+	const summary =
+		run.payloadSummary && typeof run.payloadSummary === "object"
+			? (run.payloadSummary as Record<string, unknown>)
+			: {};
+	if (summary.flow === "commenter_reply" || run.type === "reply_approved") {
+		return "评论者回复提醒";
+	}
+	if (
+		summary.flow === "site_staff_comment" ||
+		run.type.startsWith("backend_user_comment")
+	) {
+		return "站点人员评论提醒";
+	}
+	return "邮件通知";
+}
+
+export function projectSafeNotificationRun(
+	run: TaskRunRecord,
+	projected: Record<string, unknown>,
+	input: {
+		workflow?: string;
+		deliveries?: unknown[];
+	} = {},
+) {
+	const workflow = input.workflow ?? notificationWorkflowLabel(run);
+	return {
+		id: run.id,
+		type: workflow,
+		category: run.category,
+		status: run.status,
+		siteId: run.siteId,
+		siteKey: run.siteKey,
+		runAfter: run.runAfter,
+		createdAt: run.createdAt,
+		startedAt: run.startedAt,
+		finishedAt: run.finishedAt,
+		updatedAt: run.updatedAt,
+		canViewLogs: projected.canViewLogs,
+		visibility: projected.visibility,
+		attempts: run.attempts,
+		maxAttempts: run.maxAttempts,
+		workflow,
+		...(input.deliveries ? { deliveries: input.deliveries } : {}),
+	};
+}
 
 function toVisibilitySession(
 	session: AuthenticatedAdminSession,
@@ -683,16 +731,30 @@ export class AdminTaskService {
 		return task;
 	}
 
-	public async listRuns(session: AuthenticatedAdminSession) {
+	public async listRuns(
+		session: AuthenticatedAdminSession,
+		input: { commentId?: string } = {},
+	) {
 		const result = await this.taskRuns.listForTaskCenter({
+			subjectType: input.commentId ? "comment" : undefined,
+			subjectId: input.commentId,
 			limit: 200,
 			offset: 0,
 		});
 		const visibilitySession = toVisibilitySession(session);
 		const items = result.items
-			.map((run) =>
-				projectTaskRunForSession(run, { session: visibilitySession }),
-			)
+			.map((run) => {
+				const projected = projectTaskRunForSession(run, {
+					session: visibilitySession,
+				});
+				return projected && run.category === "notification"
+					? projectSafeNotificationRun(
+							run,
+							projected as unknown as Record<string, unknown>,
+							{ workflow: notificationWorkflowLabel(run) },
+						)
+					: projected;
+			})
 			.filter((item) => item !== null);
 		return { items, totalCount: items.length };
 	}
@@ -708,7 +770,22 @@ export class AdminTaskService {
 		if (!projected) {
 			throw new ResourceNotFoundError("TASK_RUN_NOT_FOUND", "任务运行不存在。");
 		}
-		return projected;
+		if (run.category !== "notification") {
+			return projected;
+		}
+		const deliveries = await this.taskRuns.listDeliveriesForTask(run.id);
+		const deliveryProjection = projectCommentEmailDelivery([
+			{ task: run, deliveries },
+		]);
+		return projectSafeNotificationRun(
+			run,
+			projected as unknown as Record<string, unknown>,
+			{
+				workflow:
+					deliveryProjection.groups[0]?.label ?? notificationWorkflowLabel(run),
+				deliveries: deliveryProjection.groups.flatMap((group) => group.items),
+			},
+		);
 	}
 
 	public async assertCanViewRunLogs(
@@ -736,9 +813,15 @@ export class AdminTaskService {
 		await this.writeRunAudit(session, "task.run.cancel", cancelled, {
 			requestId,
 		});
-		return projectTaskRunForSession(cancelled, {
+		const projected = projectTaskRunForSession(cancelled, {
 			session: toVisibilitySession(session),
 		});
+		return cancelled.category === "notification" && projected
+			? projectSafeNotificationRun(
+					cancelled,
+					projected as unknown as Record<string, unknown>,
+				)
+			: projected;
 	}
 
 	public async retryRun(
@@ -759,9 +842,15 @@ export class AdminTaskService {
 		await this.writeRunAudit(session, "task.run.retry", retrying, {
 			requestId,
 		});
-		return projectTaskRunForSession(retrying, {
+		const projected = projectTaskRunForSession(retrying, {
 			session: toVisibilitySession(session),
 		});
+		return retrying.category === "notification" && projected
+			? projectSafeNotificationRun(
+					retrying,
+					projected as unknown as Record<string, unknown>,
+				)
+			: projected;
 	}
 
 	public async listAudit(session: AuthenticatedAdminSession) {

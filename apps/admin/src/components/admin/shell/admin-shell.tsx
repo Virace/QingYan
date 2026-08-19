@@ -59,6 +59,13 @@ type CommentsPageProps = {
 	setSearch: Dispatch<SetStateAction<string>>;
 	pageKey: string;
 	setPageKey: Dispatch<SetStateAction<string>>;
+	openTaskRecords: (commentId: string) => void;
+};
+
+type TasksPageProps = {
+	siteKey: string;
+	commentId: string;
+	onClearCommentFilter: () => void;
 };
 
 const OverviewPage = lazyAdminPage<object, "OverviewPage">(
@@ -93,7 +100,7 @@ const DataPage = lazyAdminPage<{ site: AdminSiteSummary }, "DataPage">(
 	() => import("../data/data-page"),
 	"DataPage",
 );
-const TasksPage = lazyAdminPage<{ siteKey: string }, "TasksPage">(
+const TasksPage = lazyAdminPage<TasksPageProps, "TasksPage">(
 	() => import("../tasks/tasks-page"),
 	"TasksPage",
 );
@@ -217,12 +224,20 @@ function readInitialView(): AdminView {
 	return "overview";
 }
 
+function readInitialTaskCommentId(): string {
+	if (typeof window === "undefined") {
+		return "";
+	}
+	return new URL(window.location.href).searchParams.get("commentId") ?? "";
+}
+
 export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	const queryClient = useQueryClient();
 	const [view, setViewState] = useState<AdminView>(() => readInitialView());
 	const [selectedSiteKey, setSelectedSiteKey] = useState("");
 	const [commentSearch, setCommentSearch] = useState("");
 	const [commentPageKey, setCommentPageKey] = useState("");
+	const [taskCommentId, setTaskCommentId] = useState(readInitialTaskCommentId);
 	const meQuery = useQuery({
 		queryKey: ["admin", "me"],
 		queryFn: fetchAdminMe,
@@ -241,11 +256,13 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	}, [meQuery.data, selectedSiteKey]);
 	const setView = useCallback((nextView: AdminView) => {
 		setViewState(nextView);
+		setTaskCommentId("");
 		if (typeof window === "undefined") {
 			return;
 		}
 		const url = new URL(window.location.href);
 		url.searchParams.set("view", nextView);
+		url.searchParams.delete("commentId");
 		window.history.replaceState(null, "", url);
 	}, []);
 
@@ -278,6 +295,26 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 		setSelectedSiteKey(siteKey);
 		setView(nextView);
 	};
+	const openTaskRecords = (commentId: string) => {
+		setTaskCommentId(commentId);
+		setViewState("tasks");
+		if (typeof window === "undefined") {
+			return;
+		}
+		const url = new URL(window.location.href);
+		url.searchParams.set("view", "tasks");
+		url.searchParams.set("commentId", commentId);
+		window.history.replaceState(null, "", url);
+	};
+	const clearTaskCommentFilter = () => {
+		setTaskCommentId("");
+		if (typeof window === "undefined") {
+			return;
+		}
+		const url = new URL(window.location.href);
+		url.searchParams.delete("commentId");
+		window.history.replaceState(null, "", url);
+	};
 
 	function renderView() {
 		switch (activeView) {
@@ -291,6 +328,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 						setSearch={setCommentSearch}
 						pageKey={commentPageKey}
 						setPageKey={setCommentPageKey}
+						openTaskRecords={openTaskRecords}
 					/>
 				);
 			case "pages":
@@ -322,7 +360,13 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 					/>
 				);
 			case "tasks":
-				return <TasksPage siteKey={activeSiteKey} />;
+				return (
+					<TasksPage
+						siteKey={activeSiteKey}
+						commentId={taskCommentId}
+						onClearCommentFilter={clearTaskCommentFilter}
+					/>
+				);
 			case "ops":
 				return <OpsPage />;
 			case "users":

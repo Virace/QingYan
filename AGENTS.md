@@ -2,6 +2,12 @@
 
 本文件只保留 `QingYan` 仓库特有约束；通用执行方式、提交边界、验证门禁和 skill 流程遵循全局规则。
 
+## 每轮开发入口
+
+- 修改代码、配置、脚本或测试前，先读取 `PROJECT_STANDARD.md`，并按本轮范围读取 `PROJECT_CONSTRAINTS.md`、`PROJECT_DESIGN.md`。
+- 涉及产品信息架构、Admin UI、设置、用户提示、错误恢复或保存语义时，还必须完整读取 `PRODUCT.md`。
+- 常用验证入口、命名规则和测试分层以 `PROJECT_STANDARD.md` 为准；本文件只保留 QingYan 特有硬门禁。
+
 ## 产品设计门禁
 
 - 仓库根目录 `PRODUCT.md` 是 QingYan 产品信息架构、交互、文案和保存语义的唯一产品设计规范；`AGENTS.md` 只保留开发过程与执行门禁，不重复维护产品规则。
