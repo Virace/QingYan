@@ -3,7 +3,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const screenshotDir = path.resolve(
 	process.cwd(),
@@ -216,7 +216,11 @@ test("dark theme renders key admin views and overlays without obvious layout bre
 	for (const item of views) {
 		await page.goto(`/qingyan/admin/?view=${item.view}`);
 		await expect(
-			page.getByRole("heading", { name: item.shellHeading }),
+			page.getByRole("heading", {
+				name: item.shellHeading,
+				level: 1,
+				exact: true,
+			}),
 		).toBeVisible();
 		await expect(page.getByText(item.bodyText).first()).toBeVisible();
 		await expectDarkTheme(page);

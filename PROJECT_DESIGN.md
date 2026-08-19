@@ -58,9 +58,10 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 
 - SQLite/Drizzle 是当前正式持久化边界；启动时 `applyDatabaseMigrations(...)` 使用 `__qingyan_migrations` ledger 应用版本 SQL。
 - 站点、页面、评论、访问元数据、Admin 身份、settings、任务、通知投递和 upgrade ledger 分属明确 schema 模块。
-- `task_runs` 是可审计任务状态中心；scheduler 创建到期运行，worker 通过锁/lease 认领并写入进度、结果、错误和 event log。
+- `task_runs` 是可审计任务状态中心；scheduler 创建到期运行，worker 通过锁/lease 认领并写入进度、结果、错误和 event log。通知任务创建时，`task_runs`、`notification_deliveries` 与首条 task event 在一个 SQLite 事务内落库；一次外部发送完成后，delivery 结果、父任务终态/重试态与对应 task events 也在一个事务内提交，网络 I/O 不进入数据库事务。
 - 默认 queue backend 为数据库。BullMQ 可传递消息，但 task/delivery 的业务状态仍持久化在 SQLite。
-- 通知 planner 决定事件与接收人，queue 创建工作，worker 选择 channel adapter，delivery/reputation/event log 记录可诊断结果。
+- 通知 planner 决定事件与接收人，queue 创建工作，worker 选择 channel adapter，delivery/reputation/event log 记录可诊断结果。评论邮件即使决定不发送，也会写入终态 decision task 作为业务事实；评论列表、评论邮件明细和任务详情通过同一聚合器把任务与投递映射为 `accepted | failed | processing | not_sent | unknown`，对评论页列表使用固定次数的批量查询。
+- 通知的 Admin 投影只返回业务 workflow、脱敏收件人、尝试次数、安全原因和接受时间；原始 payload、底层异常、provider message id 与 secret 留在受保护的内部持久化/日志边界，不进入评论接口或通知任务视图。
 - 配置 owner 分离：startup config 保存启动必需项；站点/系统设置保存在数据库；secret 通过受控设置或环境 seed 进入持久化边界。
 
 ## 6. Admin Console

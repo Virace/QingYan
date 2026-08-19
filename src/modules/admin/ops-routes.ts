@@ -19,7 +19,10 @@ import { PageRegistryService } from "../page-registry/service";
 import { AppError } from "../shared/errors";
 import { InvalidRequestError } from "../shared/errors";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
-import { AdminTaskService } from "../tasks/admin-task-service";
+import {
+	AdminTaskService,
+	projectSafeNotificationRun,
+} from "../tasks/admin-task-service";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskRunStatus } from "../tasks/types";
 import { UpgradeService } from "../upgrade/upgrade-service";
@@ -400,27 +403,32 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 			limit: parsed.data.limit,
 			offset: parsed.data.offset,
 		});
-		const taskRunItems = taskRunPage.items.map((task) => ({
-			source: "task_run" as const,
-			...task,
-			scope: task.payloadSummary,
-			queueState: {
-				waitingReason:
-					task.status === "delayed"
-						? "delayed_until_run_after"
-						: task.status === "retrying"
-							? "retry_wait"
-							: ["succeeded", "failed", "suppressed", "cancelled"].includes(
-										task.status,
-									)
-								? "terminal"
-								: "ready_for_runner",
-				waitingDescription: task.runAfter
-					? `任务预计 ${task.runAfter} 后可运行。`
-					: "任务已进入统一队列。",
-				readyAt: task.runAfter ?? task.updatedAt,
-			},
-		}));
+		const taskRunItems = taskRunPage.items.map((task) => {
+			const projection = {
+				source: "task_run" as const,
+				...task,
+				scope: task.payloadSummary,
+				queueState: {
+					waitingReason:
+						task.status === "delayed"
+							? "delayed_until_run_after"
+							: task.status === "retrying"
+								? "retry_wait"
+								: ["succeeded", "failed", "suppressed", "cancelled"].includes(
+											task.status,
+										)
+									? "terminal"
+									: "ready_for_runner",
+					waitingDescription: task.runAfter
+						? `任务预计 ${task.runAfter} 后可运行。`
+						: "任务已进入统一队列。",
+					readyAt: task.runAfter ?? task.updatedAt,
+				},
+			};
+			return task.category === "notification"
+				? projectSafeNotificationRun(task, projection)
+				: projection;
+		});
 		const items = taskRunItems
 			.sort((left, right) =>
 				(right.createdAt ?? "").localeCompare(left.createdAt ?? ""),

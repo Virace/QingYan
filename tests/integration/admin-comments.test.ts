@@ -20,6 +20,7 @@ import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -93,6 +94,174 @@ async function createScopedUser(
 }
 
 describe("admin comments", () => {
+	it("returns batched email summaries and a safe comment delivery detail", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { adminCookie } = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) {
+			throw new Error("Expected site to exist");
+		}
+		const [thread] = await fixture.app.db
+			.insert(pageThreads)
+			.values({
+				siteId: site.id,
+				pageKey: "post:email-observability",
+				pageTitle: "Email Observability",
+				pageUrl: "/posts/email-observability/",
+				commentCount: 2,
+				rootCommentCount: 2,
+			})
+			.returning();
+		await fixture.app.db.insert(comments).values([
+			{
+				id: "c_email_accepted",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "approved",
+				authorName: "Accepted",
+				contentRaw: "accepted",
+				contentHtml: "<p>accepted</p>",
+				createdAt: "2026-08-19T10:01:00.000Z",
+				updatedAt: "2026-08-19T10:01:00.000Z",
+			},
+			{
+				id: "c_email_unknown",
+				siteId: site.id,
+				pageThreadId: thread.id,
+				status: "approved",
+				authorName: "Unknown",
+				contentRaw: "unknown",
+				contentHtml: "<p>unknown</p>",
+				createdAt: "2026-08-19T10:00:00.000Z",
+				updatedAt: "2026-08-19T10:00:00.000Z",
+			},
+		]);
+		const taskRuns = new TaskRunRepository(fixture.app.db);
+		const created = await taskRuns.createNotificationTaskWithDelivery({
+			task: {
+				type: "backend_user_comment_approved",
+				siteId: site.id,
+				siteKey: site.siteKey,
+				subjectType: "comment",
+				subjectId: "c_email_accepted",
+				payloadSummary: {
+					channel: "email",
+					flow: "site_staff_comment",
+				},
+				payload: {},
+				idempotencyKey: "email-observability-accepted",
+			},
+			delivery: {
+				channel: "email",
+				recipientType: "backend_user",
+				recipientAddressSnapshot: "operator@example.test",
+				recipientIdentityKey: "backend_user:1",
+				eventFamily: "admin_comment_approved",
+				templateKey: "backend_user.comment.approved",
+			},
+		});
+		if (!created.delivery) {
+			throw new Error("Expected delivery");
+		}
+		await taskRuns.completeNotificationAttempt({
+			taskId: created.task.id,
+			outcomes: [
+				{
+					deliveryId: created.delivery.id,
+					status: "sent",
+					providerMessageId: "private-provider-id",
+					sentAt: "2026-08-19T10:02:00.000Z",
+				},
+			],
+			next: { status: "succeeded", result: { sent: 1, failed: 0 } },
+			events: [],
+			updatedAt: "2026-08-19T10:02:00.000Z",
+		});
+
+		const listResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=fangyuan&limit=20&offset=0",
+			cookies: { qingyan_admin: adminCookie.value },
+		});
+
+		expect(listResponse.statusCode).toBe(200);
+		const summaries = new Map(
+			listResponse
+				.json()
+				.items.map((comment: { id: string; emailDelivery: unknown }) => [
+					comment.id,
+					comment.emailDelivery,
+				]),
+		);
+		expect(summaries.get("c_email_accepted")).toMatchObject({
+			state: "accepted",
+			deliveryCount: 1,
+			acceptedCount: 1,
+		});
+		expect(summaries.get("c_email_unknown")).toMatchObject({
+			state: "unknown",
+			deliveryCount: 0,
+		});
+
+		const detailResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments/c_email_accepted/email-delivery-status",
+			cookies: { qingyan_admin: adminCookie.value },
+		});
+		expect(detailResponse.statusCode).toBe(200);
+		expect(detailResponse.json()).toMatchObject({
+			commentId: "c_email_accepted",
+			canViewTaskRecords: true,
+			summary: { state: "accepted", acceptedCount: 1 },
+			groups: [
+				{
+					flow: "site_staff_comment",
+					state: "accepted",
+					items: [
+						{
+							kind: "delivery",
+							state: "accepted",
+							recipient: {
+								label: "站点人员",
+								address: "o***@example.test",
+							},
+						},
+					],
+				},
+			],
+		});
+		const detailJson = detailResponse.body;
+		expect(detailJson).not.toContain("operator@example.test");
+		expect(detailJson).not.toContain("private-provider-id");
+		expect(detailJson).not.toContain(created.task.id);
+		expect(detailJson).not.toContain(created.delivery.id);
+
+		await createScopedUser(fixture, {
+			username: "email-status-moderator",
+			groupKey: "site_moderator",
+			siteKeys: ["fangyuan"],
+		});
+		const moderator = await loginAsAdmin(fixture.app, {
+			username: "email-status-moderator",
+			password: "replace-me",
+		});
+		const moderatorResponse = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments/c_email_accepted/email-delivery-status",
+			cookies: { qingyan_admin: moderator.adminCookie.value },
+		});
+		expect(moderatorResponse.statusCode).toBe(200);
+		expect(moderatorResponse.json()).toMatchObject({
+			commentId: "c_email_accepted",
+			canViewTaskRecords: false,
+			summary: { state: "accepted" },
+		});
+	});
+
 	it("defaults admin comments to active statuses and keeps spam and trash in explicit views", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

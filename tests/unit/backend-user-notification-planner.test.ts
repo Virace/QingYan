@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
 	adminGroups,
@@ -7,8 +7,11 @@ import {
 	adminUserSiteAccess,
 	adminUsers,
 	notificationChannelConfigs,
+	notificationDeliveries,
 	siteSettings,
 	sites,
+	systemSettings,
+	taskRuns,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import {
@@ -17,11 +20,13 @@ import {
 } from "../../src/modules/notifications/backend-user-notification-planner";
 import { BackendUserNotificationPreferencesRepository } from "../../src/modules/notifications/backend-user-preferences-repository";
 import { SiteNotificationEventsRepository } from "../../src/modules/notifications/site-notification-events-repository";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	for (const cleanup of cleanups.splice(0)) {
 		await cleanup();
 	}
@@ -80,6 +85,23 @@ async function createUserWithSiteAccess(
 		.update(siteSettings)
 		.set({ backendNotificationsEnabled: true })
 		.where(eq(siteSettings.siteId, site.id));
+	for (const setting of [
+		{ key: "enabled", value: true },
+		{ key: "smtp.host", value: "smtp.example.test" },
+		{ key: "smtp.from", value: "notify@example.test" },
+	]) {
+		await fixture.app.db
+			.insert(systemSettings)
+			.values({
+				category: "mail",
+				key: setting.key,
+				valueJson: JSON.stringify(setting.value),
+			})
+			.onConflictDoUpdate({
+				target: [systemSettings.category, systemSettings.key],
+				set: { valueJson: JSON.stringify(setting.value) },
+			});
+	}
 
 	return { user, site };
 }
@@ -229,6 +251,102 @@ describe("backend user notification planner", () => {
 			deliveries: [],
 			createdCount: 0,
 		});
+		expect(await fixture.app.db.select().from(taskRuns)).toEqual([
+			expect.objectContaining({
+				type: "notification_email_decision",
+				status: "skipped",
+				skipReason: "site_backend_notifications_disabled",
+			}),
+		]);
+	});
+
+	it("records one decision when system mail is unavailable", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: "mail-unavailable-recipient",
+			siteKey: "fangyuan",
+		});
+		await replaceEvents(fixture, {
+			siteId: site.id,
+			pendingUserIds: [user.id],
+		});
+		await fixture.app.db
+			.update(systemSettings)
+			.set({ valueJson: JSON.stringify(false) })
+			.where(
+				and(
+					eq(systemSettings.category, "mail"),
+					eq(systemSettings.key, "enabled"),
+				),
+			);
+
+		await new BackendUserNotificationPlanner(
+			fixture.app.db,
+		).planForCommentEvent(commentEvent({ siteId: site.id }));
+
+		expect(await fixture.app.db.select().from(taskRuns)).toEqual([
+			expect.objectContaining({
+				type: "notification_email_decision",
+				status: "skipped",
+				skipReason: "system_email_unavailable",
+			}),
+		]);
+	});
+
+	it.each([
+		{
+			name: "disabled",
+			preference: { enabled: false },
+			reasonCode: "recipient_email_disabled",
+		},
+		{
+			name: "paused",
+			preference: { enabled: true, pausedUntil: "2099-01-01T00:00:00.000Z" },
+			reasonCode: "recipient_email_paused",
+		},
+	])("records an idempotent decision when every recipient is $name", async (testCase) => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: `preference-${testCase.name}`,
+			siteKey: "fangyuan",
+		});
+		await replaceEvents(fixture, {
+			siteId: site.id,
+			pendingUserIds: [user.id],
+		});
+		await new BackendUserNotificationPreferencesRepository(
+			fixture.app.db,
+		).updatePreference({
+			userId: user.id,
+			channel: "email",
+			...testCase.preference,
+		});
+		const planner = new BackendUserNotificationPlanner(fixture.app.db);
+
+		await planner.planForCommentEvent(commentEvent({ siteId: site.id }));
+		await planner.planForCommentEvent(commentEvent({ siteId: site.id }));
+		await new BackendUserNotificationPreferencesRepository(
+			fixture.app.db,
+		).updatePreference({
+			userId: user.id,
+			channel: "email",
+			enabled: true,
+			pausedUntil: null,
+		});
+		await planner.planForCommentEvent(commentEvent({ siteId: site.id }));
+
+		expect(await fixture.app.db.select().from(taskRuns)).toEqual([
+			expect.objectContaining({
+				type: "notification_email_decision",
+				status: "skipped",
+				skipReason: testCase.reasonCode,
+			}),
+		]);
+		expect(await fixture.app.db.select().from(notificationDeliveries)).toEqual(
+			[],
+		);
 	});
 
 	it("plans pending and direct-approved admin notifications for configured site recipients", async () => {
@@ -276,6 +394,48 @@ describe("backend user notification planner", () => {
 			}),
 		]);
 	});
+
+	it("does not record an email failure when later external-channel planning fails", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const { user, site } = await createUserWithSiteAccess(fixture, {
+			username: "external-failure-recipient",
+			siteKey: "fangyuan",
+		});
+		await createChannelConfig(fixture, {
+			id: "webhook:broken",
+			type: "webhook",
+			name: "Broken Webhook",
+			config: { url: "https://hooks.example.test/broken" },
+		});
+		await replaceEvents(fixture, {
+			siteId: site.id,
+			pendingUserIds: [user.id],
+			pendingExternalIds: ["webhook:broken"],
+		});
+		vi.spyOn(
+			TaskRunRepository.prototype,
+			"createDelivery",
+		).mockRejectedValueOnce(new Error("external delivery write failed"));
+
+		await expect(
+			new BackendUserNotificationPlanner(fixture.app.db).planForCommentEvent(
+				commentEvent({ siteId: site.id }),
+			),
+		).rejects.toThrow("external delivery write failed");
+
+		const runs = await fixture.app.db.select().from(taskRuns);
+		expect(
+			runs.filter((run) => run.type === "notification_email_decision"),
+		).toEqual([]);
+		expect(await fixture.app.db.select().from(notificationDeliveries)).toEqual([
+			expect.objectContaining({
+				channel: "email",
+				recipientUserId: user.id,
+			}),
+		]);
+	});
+
 	it("plans notifications for global admins without explicit site access rows", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);

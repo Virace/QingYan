@@ -11,6 +11,7 @@ import {
 	lte,
 	notInArray,
 	or,
+	sql,
 } from "drizzle-orm";
 
 import type { AppDatabase } from "../../db/client";
@@ -39,6 +40,10 @@ function nowIso(): string {
 
 function createTaskRunId() {
 	return `task_${randomUUID().replaceAll("-", "")}`;
+}
+
+function createNotificationDeliveryId() {
+	return `delivery_${randomUUID().replaceAll("-", "")}`;
 }
 
 function serializeTaskRun(row: typeof taskRuns.$inferSelect): TaskRunRecord {
@@ -303,6 +308,118 @@ export class TaskRunRepository {
 		return this.getRequired(id);
 	}
 
+	public async createNotificationTaskWithDelivery(input: {
+		task: Omit<TaskQueuePayload, "category"> & {
+			id?: string;
+			queueBackend?: TaskQueueBackend;
+			category?: "notification";
+			createdAt?: string;
+		};
+		delivery: Omit<
+			Parameters<TaskRunRepository["createNotificationDelivery"]>[0],
+			"taskRunId"
+		>;
+	}) {
+		const timestamp = input.task.createdAt ?? nowIso();
+		const transactionResult = this.db.transaction((tx) => {
+			const existing = input.task.idempotencyKey
+				? tx
+						.select()
+						.from(taskRuns)
+						.where(eq(taskRuns.idempotencyKey, input.task.idempotencyKey))
+						.get()
+				: undefined;
+			if (existing) {
+				const existingDelivery = tx
+					.select()
+					.from(notificationDeliveries)
+					.where(eq(notificationDeliveries.taskRunId, existing.id))
+					.get();
+				return {
+					created: false,
+					task: serializeTaskRun(existing),
+					delivery: existingDelivery
+						? serializeDelivery(existingDelivery)
+						: null,
+				};
+			}
+
+			const runAfter = input.task.runAfter ?? null;
+			const status: TaskRunStatus =
+				runAfter && runAfter > timestamp ? "delayed" : "queued";
+			const taskId = input.task.id ?? createTaskRunId();
+			const taskRow = tx
+				.insert(taskRuns)
+				.values({
+					id: taskId,
+					queueBackend: input.task.queueBackend ?? "database",
+					queueMessageId: input.task.queueMessageId ?? null,
+					type: input.task.type,
+					category: "notification",
+					status,
+					siteId: input.task.siteId ?? null,
+					siteKey: input.task.siteKey ?? null,
+					actorType: input.task.actorType ?? null,
+					actorId: input.task.actorId ?? null,
+					subjectType: input.task.subjectType ?? null,
+					subjectId: input.task.subjectId ?? null,
+					payloadSummaryJson: stringifyJson(input.task.payloadSummary ?? {}),
+					payloadJson: stringifyJson(input.task.payload),
+					idempotencyKey: input.task.idempotencyKey ?? null,
+					runAfter,
+					attempts: 0,
+					maxAttempts: input.task.maxAttempts ?? 1,
+					retryDelaySec: input.task.retryDelaySec ?? 0,
+					priority: input.task.priority ?? 0,
+					concurrencyKey: input.task.concurrencyKey ?? null,
+					createdAt: timestamp,
+					updatedAt: timestamp,
+				})
+				.returning()
+				.get();
+			const deliveryRow = tx
+				.insert(notificationDeliveries)
+				.values({
+					id: createNotificationDeliveryId(),
+					taskRunId: taskId,
+					channel: input.delivery.channel,
+					channelConfigRef: input.delivery.channelConfigRef ?? null,
+					channelConfigNameSnapshot:
+						input.delivery.channelConfigNameSnapshot ?? null,
+					recipientType: input.delivery.recipientType,
+					recipientUserId: input.delivery.recipientUserId ?? null,
+					recipientAddressSnapshot: input.delivery.recipientAddressSnapshot,
+					recipientIdentityKey: input.delivery.recipientIdentityKey,
+					eventFamily: input.delivery.eventFamily,
+					templateKey: input.delivery.templateKey,
+					status: input.delivery.status ?? "queued",
+					updatedAt: timestamp,
+				})
+				.returning()
+				.get();
+			tx.insert(taskEventLogs)
+				.values({
+					id: `task_event_${randomUUID().replaceAll("-", "")}`,
+					taskRunId: taskId,
+					sequence: 1,
+					stream: "system",
+					eventType: "notification.email.queued",
+					level: "info",
+					message: "已创建邮件投递并进入队列。",
+					dataJson: stringifyJson({ channel: input.delivery.channel }),
+					visibleToSiteAdmin: true,
+					createdAt: timestamp,
+				})
+				.run();
+			return {
+				created: true,
+				task: serializeTaskRun(taskRow),
+				delivery: serializeDelivery(deliveryRow),
+			};
+		});
+		return transactionResult;
+	}
+
 	public async get(id: string) {
 		const [row] = await this.db
 			.select()
@@ -344,11 +461,34 @@ export class TaskRunRepository {
 		});
 	}
 
+	public async listNotificationRunsBySubjects(input: {
+		subjectType: string;
+		subjectIds: string[];
+	}) {
+		if (input.subjectIds.length === 0) {
+			return [];
+		}
+		const rows = await this.db
+			.select()
+			.from(taskRuns)
+			.where(
+				and(
+					eq(taskRuns.category, "notification"),
+					eq(taskRuns.subjectType, input.subjectType),
+					inArray(taskRuns.subjectId, input.subjectIds),
+				),
+			)
+			.orderBy(taskRuns.createdAt);
+		return rows.map(serializeTaskRun);
+	}
+
 	public async listForTaskCenter(input: {
 		siteKey?: string;
 		type?: string;
 		category?: TaskRunCategory;
 		status?: TaskRunStatus;
+		subjectType?: string;
+		subjectId?: string;
 		limit: number;
 		offset: number;
 	}) {
@@ -357,6 +497,10 @@ export class TaskRunRepository {
 			input.type ? eq(taskRuns.type, input.type) : undefined,
 			input.category ? eq(taskRuns.category, input.category) : undefined,
 			input.status ? eq(taskRuns.status, input.status) : undefined,
+			input.subjectType
+				? eq(taskRuns.subjectType, input.subjectType)
+				: undefined,
+			input.subjectId ? eq(taskRuns.subjectId, input.subjectId) : undefined,
 		);
 		const rows = await this.db
 			.select()
@@ -685,7 +829,7 @@ export class TaskRunRepository {
 		templateKey: string;
 		status?: string;
 	}) {
-		const id = `delivery_${randomUUID().replaceAll("-", "")}`;
+		const id = createNotificationDeliveryId();
 		const timestamp = nowIso();
 		await this.db.insert(notificationDeliveries).values({
 			id,
@@ -710,6 +854,27 @@ export class TaskRunRepository {
 			.select()
 			.from(notificationDeliveries)
 			.where(eq(notificationDeliveries.taskRunId, taskRunId));
+		return rows.map(serializeDelivery);
+	}
+
+	public async listDeliveriesForTasks(input: {
+		taskRunIds: string[];
+		channel?: string;
+	}) {
+		if (input.taskRunIds.length === 0) {
+			return [];
+		}
+		const rows = await this.db
+			.select()
+			.from(notificationDeliveries)
+			.where(
+				and(
+					inArray(notificationDeliveries.taskRunId, input.taskRunIds),
+					input.channel
+						? eq(notificationDeliveries.channel, input.channel)
+						: undefined,
+				),
+			);
 		return rows.map(serializeDelivery);
 	}
 
@@ -759,6 +924,152 @@ export class TaskRunRepository {
 			})
 			.where(eq(notificationDeliveries.id, input.id));
 		return this.getDeliveryRequired(input.id);
+	}
+
+	public async completeNotificationAttempt(input: {
+		taskId: string;
+		outcomes: Array<
+			| {
+					deliveryId: string;
+					status: "sent";
+					providerMessageId?: string | null;
+					sentAt: string;
+			  }
+			| {
+					deliveryId: string;
+					status: "failed";
+					error: unknown;
+			  }
+		>;
+		next:
+			| { status: "succeeded"; result: unknown }
+			| { status: "retrying"; error: unknown; runAfter: string }
+			| { status: "failed"; error: unknown };
+		events: Array<{
+			eventType: string;
+			level: "debug" | "info" | "warn" | "error";
+			message: string;
+			data?: unknown;
+		}>;
+		updatedAt?: string;
+	}) {
+		const timestamp = input.updatedAt ?? nowIso();
+		this.db.transaction((tx) => {
+			const task = tx
+				.select()
+				.from(taskRuns)
+				.where(eq(taskRuns.id, input.taskId))
+				.get();
+			if (!task) {
+				throw new Error(`Task run not found: ${input.taskId}`);
+			}
+			for (const outcome of input.outcomes) {
+				let updateResult: { changes: number };
+				if (outcome.status === "sent") {
+					updateResult = tx
+						.update(notificationDeliveries)
+						.set({
+							status: "sent",
+							providerMessageId: outcome.providerMessageId ?? null,
+							sentAt: outcome.sentAt,
+							lastErrorJson: null,
+							updatedAt: timestamp,
+						})
+						.where(
+							and(
+								eq(notificationDeliveries.id, outcome.deliveryId),
+								eq(notificationDeliveries.taskRunId, input.taskId),
+							),
+						)
+						.run();
+				} else {
+					updateResult = tx
+						.update(notificationDeliveries)
+						.set({
+							status: "failed",
+							lastErrorJson: stringifyJson(outcome.error),
+							updatedAt: timestamp,
+						})
+						.where(
+							and(
+								eq(notificationDeliveries.id, outcome.deliveryId),
+								eq(notificationDeliveries.taskRunId, input.taskId),
+							),
+						)
+						.run();
+				}
+				if (updateResult.changes !== 1) {
+					throw new Error(
+						`Notification delivery does not belong to task: ${outcome.deliveryId}`,
+					);
+				}
+			}
+
+			if (input.next.status === "succeeded") {
+				tx.update(taskRuns)
+					.set({
+						status: "succeeded",
+						attempts: task.attempts + 1,
+						resultJson: stringifyJson(input.next.result),
+						errorJson: null,
+						finishedAt: timestamp,
+						updatedAt: timestamp,
+					})
+					.where(eq(taskRuns.id, input.taskId))
+					.run();
+			} else if (input.next.status === "retrying") {
+				tx.update(taskRuns)
+					.set({
+						status: "retrying",
+						attempts: task.attempts + 1,
+						runAfter: input.next.runAfter,
+						errorJson: stringifyJson(input.next.error),
+						finishedAt: null,
+						updatedAt: timestamp,
+					})
+					.where(eq(taskRuns.id, input.taskId))
+					.run();
+			} else {
+				tx.update(taskRuns)
+					.set({
+						status: "failed",
+						attempts: task.attempts + 1,
+						errorJson: stringifyJson(input.next.error),
+						finishedAt: timestamp,
+						updatedAt: timestamp,
+					})
+					.where(eq(taskRuns.id, input.taskId))
+					.run();
+			}
+
+			const sequenceRow = tx
+				.select({
+					value: sql<number>`COALESCE(MAX(${taskEventLogs.sequence}), 0)`,
+				})
+				.from(taskEventLogs)
+				.where(eq(taskEventLogs.taskRunId, input.taskId))
+				.get();
+			let sequence = Number(sequenceRow?.value ?? 0);
+			for (const event of input.events) {
+				sequence += 1;
+				tx.insert(taskEventLogs)
+					.values({
+						id: `task_event_${randomUUID().replaceAll("-", "")}`,
+						taskRunId: input.taskId,
+						sequence,
+						stream: event.level === "error" ? "stderr" : "system",
+						eventType: event.eventType,
+						level: event.level,
+						message: event.message,
+						dataJson:
+							event.data === undefined ? null : stringifyJson(event.data),
+						visibleToSiteAdmin: true,
+						createdAt: timestamp,
+					})
+					.run();
+			}
+		});
+		return this.getRequired(input.taskId);
 	}
 
 	public createDelivery(

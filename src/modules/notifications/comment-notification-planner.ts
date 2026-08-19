@@ -18,6 +18,8 @@ import {
 	normalizeNotificationEmail,
 } from "./email-address-policy";
 import { EmailReputationRepository } from "./email-reputation-repository";
+import { CommentEmailDeliveryRepository } from "./comment-email-delivery-repository";
+import type { CommentEmailDecisionReason } from "./comment-email-delivery-status";
 
 export type CommentNotificationSource =
 	| "public_api"
@@ -46,10 +48,12 @@ export interface CommentNotificationPlanResult {
 export class CommentNotificationPlanner {
 	private readonly taskRuns: TaskRunRepository;
 	private readonly reputation: EmailReputationRepository;
+	private readonly emailDelivery: CommentEmailDeliveryRepository;
 
 	public constructor(private readonly db: AppDatabase) {
 		this.taskRuns = new TaskRunRepository(db);
 		this.reputation = new EmailReputationRepository(db);
+		this.emailDelivery = new CommentEmailDeliveryRepository(db);
 	}
 
 	public async planForCommentEvent(
@@ -61,43 +65,74 @@ export class CommentNotificationPlanner {
 		if (options.channelFilter && !options.channelFilter.includes("email")) {
 			return { createdCount: 0, taskIds: [] };
 		}
-		if (input.source === "import" || input.source === "migration") {
+		try {
+			return await this.planEmail(input);
+		} catch (error) {
+			await this.recordDecision(input, "planning_failed", "failed").catch(
+				() => undefined,
+			);
+			throw error;
+		}
+	}
+
+	private async planEmail(
+		input: CommentNotificationPlanInput,
+	): Promise<CommentNotificationPlanResult> {
+		if (
+			await this.emailDelivery.getDecision({
+				commentId: input.commentId,
+				flow: "commenter_reply",
+				eventKey: `${input.source}:reply`,
+			})
+		) {
 			return { createdCount: 0, taskIds: [] };
 		}
-		if (!(await this.isCommenterReplyEmailAvailable(input.siteId))) {
-			return { createdCount: 0, taskIds: [] };
+		if (input.source === "import" || input.source === "migration") {
+			return this.skip(input, "source_excluded");
+		}
+		const availability = await this.commenterReplyEmailAvailability(
+			input.siteId,
+		);
+		if (!availability.siteEnabled) {
+			return this.skip(input, "site_commenter_email_disabled");
+		}
+		if (!availability.systemMailUsable) {
+			return this.skip(input, "system_email_unavailable");
 		}
 
 		const context = await this.loadReplyContext(input.commentId);
 		if (context?.reply.status !== "approved" || !context.reply.parentId) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "comment_not_approved_reply");
 		}
 		if (context.reply.siteId !== input.siteId) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "planning_failed", "failed");
 		}
 		if (
 			context.parent.authorUserId !== null ||
 			context.parent.authorIdentity !== "visitor"
 		) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "commenter_not_visitor");
 		}
 		if (!isAcceptableNotificationEmail(context.parent.authorEmail)) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "commenter_email_unavailable");
 		}
 
 		const parentEmail = normalizeNotificationEmail(context.parent.authorEmail);
 		const parentEmailHash = hashNotificationEmail(parentEmail);
 		if (!parentEmailHash) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "commenter_email_unavailable");
 		}
 		const replyEmail = normalizeNotificationEmail(context.reply.authorEmail);
 		if (replyEmail && replyEmail === parentEmail) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "same_recipient");
 		}
 
 		const preference = await this.loadPreference(input.siteId, parentEmailHash);
-		if (!preference?.notifyOnReply || preference.unsubscribedAt !== null) {
-			return { createdCount: 0, taskIds: [] };
+		if (preference?.unsubscribedAt) {
+			return this.skip(input, "commenter_unsubscribed", "suppressed");
+		}
+		if (!preference?.notifyOnReply) {
+			return this.skip(input, "commenter_not_subscribed");
 		}
 		if (
 			await this.reputation.isSuppressed({
@@ -105,56 +140,84 @@ export class CommentNotificationPlanner {
 				email: parentEmail,
 			})
 		) {
-			return { createdCount: 0, taskIds: [] };
+			return this.skip(input, "email_reputation_suppressed", "suppressed");
 		}
 
 		const idempotencyKey = `commenter:reply_approved:${input.commentId}:email:${parentEmailHash}`;
-		const existing = await this.taskRuns.getByIdempotencyKey(idempotencyKey);
-		const task = await this.taskRuns.create({
-			type: "reply_approved",
-			category: "notification",
-			siteId: input.siteId,
-			siteKey: input.siteKey,
-			actorType: input.actorType ?? null,
-			actorId: input.actorId ?? null,
-			subjectType: "comment",
-			subjectId: input.commentId,
-			payloadSummary: {
-				channel: "email",
-				recipientType: "commenter",
-				recipientAddressSnapshot: parentEmail,
-			},
-			payload: {
-				event: "reply_approved",
-				source: input.source,
+		const created = await this.taskRuns.createNotificationTaskWithDelivery({
+			task: {
+				type: "reply_approved",
 				siteId: input.siteId,
 				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				pageTitle: context.thread.pageTitle,
-				pageUrl: context.thread.pageUrl,
-				parentCommentId: context.parent.id,
-				replyCommentId: context.reply.id,
-				recipient: {
-					type: "commenter",
-					emailHash: parentEmailHash,
+				actorType: input.actorType ?? null,
+				actorId: input.actorId ?? null,
+				subjectType: "comment",
+				subjectId: input.commentId,
+				payloadSummary: {
+					channel: "email",
+					flow: "commenter_reply",
+					recipientType: "commenter",
 				},
+				payload: {
+					event: "reply_approved",
+					source: input.source,
+					siteId: input.siteId,
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					pageTitle: context.thread.pageTitle,
+					pageUrl: context.thread.pageUrl,
+					parentCommentId: context.parent.id,
+					replyCommentId: context.reply.id,
+					recipient: {
+						type: "commenter",
+						emailHash: parentEmailHash,
+					},
+				},
+				idempotencyKey,
+				maxAttempts: 3,
 			},
-			idempotencyKey,
-			maxAttempts: 3,
-		});
-		if (!existing) {
-			await this.taskRuns.createDelivery({
-				taskRunId: task.id,
+			delivery: {
 				channel: "email",
 				recipientType: "commenter",
 				recipientAddressSnapshot: parentEmail,
 				recipientIdentityKey: parentEmailHash,
 				eventFamily: "reply_approved",
 				templateKey: "commenter.reply_approved",
-			});
-		}
+			},
+		});
 
-		return { createdCount: existing ? 0 : 1, taskIds: [task.id] };
+		return {
+			createdCount: created.created ? 1 : 0,
+			taskIds: [created.task.id],
+		};
+	}
+
+	private async skip(
+		input: CommentNotificationPlanInput,
+		reasonCode: CommentEmailDecisionReason,
+		status: "skipped" | "suppressed" | "failed" = "skipped",
+	): Promise<CommentNotificationPlanResult> {
+		await this.recordDecision(input, reasonCode, status);
+		return { createdCount: 0, taskIds: [] };
+	}
+
+	private recordDecision(
+		input: CommentNotificationPlanInput,
+		reasonCode: CommentEmailDecisionReason,
+		status: "skipped" | "suppressed" | "failed",
+	) {
+		return this.emailDelivery.createDecision({
+			siteId: input.siteId,
+			siteKey: input.siteKey,
+			commentId: input.commentId,
+			flow: "commenter_reply",
+			eventKey: `${input.source}:reply`,
+			status,
+			reasonCode,
+			source: input.source,
+			actorType: input.actorType ?? null,
+			actorId: input.actorId ?? null,
+		});
 	}
 
 	private async loadReplyContext(commentId: string) {
@@ -168,7 +231,7 @@ export class CommentNotificationPlanner {
 			.from(comments)
 			.where(eq(comments.id, commentId))
 			.limit(1);
-		if (!row.reply.parentId) {
+		if (!row?.reply.parentId) {
 			return null;
 		}
 
@@ -209,7 +272,7 @@ export class CommentNotificationPlanner {
 		return row ?? null;
 	}
 
-	private async isCommenterReplyEmailAvailable(siteId: number) {
+	private async commenterReplyEmailAvailability(siteId: number) {
 		const [[settings], systemSettings] = await Promise.all([
 			this.db
 				.select({
@@ -220,9 +283,9 @@ export class CommentNotificationPlanner {
 				.limit(1),
 			new RuntimeSystemSettingsService(this.db).getSettings(),
 		]);
-		return (
-			Boolean(settings?.commenterReplyEmailEnabled) &&
-			isSystemMailUsable(systemSettings.mail)
-		);
+		return {
+			siteEnabled: Boolean(settings?.commenterReplyEmailEnabled),
+			systemMailUsable: isSystemMailUsable(systemSettings.mail),
+		};
 	}
 }

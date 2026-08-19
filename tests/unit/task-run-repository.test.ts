@@ -104,6 +104,94 @@ describe("task run repository and database queue", () => {
 		});
 	});
 
+	it("commits notification delivery and parent state together and rejects cross-task outcomes", async () => {
+		const { repository } = createFixture();
+		const first = await repository.createNotificationTaskWithDelivery({
+			task: {
+				type: "reply_approved",
+				subjectType: "comment",
+				subjectId: "comment_1",
+				payloadSummary: { channel: "email", flow: "commenter_reply" },
+				payload: {},
+			},
+			delivery: {
+				channel: "email",
+				recipientType: "commenter",
+				recipientAddressSnapshot: "reader@example.test",
+				recipientIdentityKey: "commenter:reader",
+				eventFamily: "reply_approved",
+				templateKey: "commenter.reply_approved",
+			},
+		});
+		const second = await repository.createNotificationTaskWithDelivery({
+			task: {
+				type: "reply_approved",
+				subjectType: "comment",
+				subjectId: "comment_2",
+				payloadSummary: { channel: "email", flow: "commenter_reply" },
+				payload: {},
+			},
+			delivery: {
+				channel: "email",
+				recipientType: "commenter",
+				recipientAddressSnapshot: "other@example.test",
+				recipientIdentityKey: "commenter:other",
+				eventFamily: "reply_approved",
+				templateKey: "commenter.reply_approved",
+			},
+		});
+		if (!first.delivery || !second.delivery) {
+			throw new Error("Expected notification deliveries");
+		}
+
+		await expect(
+			repository.completeNotificationAttempt({
+				taskId: first.task.id,
+				outcomes: [
+					{
+						deliveryId: second.delivery.id,
+						status: "sent",
+						sentAt: "2026-08-19T01:00:00.000Z",
+					},
+				],
+				next: { status: "succeeded", result: { sent: 1 } },
+				events: [],
+			}),
+		).rejects.toThrow("does not belong to task");
+		expect(await repository.getRequired(first.task.id)).toMatchObject({
+			status: "queued",
+			attempts: 0,
+		});
+		expect(
+			await repository.getDeliveryRequired(second.delivery.id),
+		).toMatchObject({
+			status: "queued",
+		});
+
+		await repository.completeNotificationAttempt({
+			taskId: first.task.id,
+			outcomes: [
+				{
+					deliveryId: first.delivery.id,
+					status: "sent",
+					sentAt: "2026-08-19T01:00:00.000Z",
+				},
+			],
+			next: { status: "succeeded", result: { sent: 1 } },
+			events: [],
+		});
+		expect(await repository.getRequired(first.task.id)).toMatchObject({
+			status: "succeeded",
+			attempts: 1,
+		});
+		expect(
+			await repository.getDeliveryRequired(first.delivery.id),
+		).toMatchObject({
+			status: "sent",
+			sentAt: "2026-08-19T01:00:00.000Z",
+		});
+	});
+
 	it("uses idempotency keys to return the existing task run", async () => {
 		const { repository } = createFixture();
 

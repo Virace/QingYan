@@ -1,5 +1,9 @@
 import { requestJson } from "./client";
 import type { TaskRunProjection } from "./tasks";
+import type {
+	CommentEmailDeliveryStatus,
+	CommentEmailDeliverySummary,
+} from "./email-delivery";
 
 export interface Page<T> {
 	items: T[];
@@ -120,6 +124,7 @@ export interface AdminComment {
 	pageKey: string;
 	pageTitle: string | null;
 	pageUrl: string | null;
+	emailDelivery: CommentEmailDeliverySummary;
 }
 
 export interface AdminPage {
@@ -777,6 +782,12 @@ export function listComments(input: {
 }) {
 	return requestJson<Page<AdminComment>>(
 		`/api/admin/comments?${queryString(input)}`,
+	);
+}
+
+export function getCommentEmailDeliveryStatus(commentId: string) {
+	return requestJson<CommentEmailDeliveryStatus>(
+		`/api/admin/comments/${encodeURIComponent(commentId)}/email-delivery-status`,
 	);
 }
 
