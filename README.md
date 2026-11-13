@@ -37,6 +37,36 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 
 ## 快速开始
 
+### Linux / Docker 脚本部署
+
+已有 Docker、Compose 和 Git 的服务器可以直接运行 `scripts/install.sh`，由脚本获取稳定版本源码、构建镜像并启动容器：
+
+```bash
+bash scripts/install.sh --dir /opt/apps
+```
+
+`--dir` 是父目录，运行文件放在 `/opt/apps/qingyan/`，源码缓存默认放在 `/opt/apps/.qingyan-source/`；可用 `--source-dir` 单独指定源码位置。交互流程保留数据库选择，目前只有 SQLite。自动化运行可使用 `--non-interactive`，或用 `--database sqlite` 明确指定数据库。
+
+GitHub 拉取与构建依赖分别选源：
+
+```bash
+bash scripts/install.sh --dir /opt/apps --non-interactive \
+  --github-source proxy --github-proxy https://gh-proxy.org \
+  --network-profile cn
+```
+
+安装脚本不做备份、恢复或数据搬运。需要先放入原实例文件时，使用 `--prepare-only --version <原版本>`，文件放好后执行运行目录内的 `bash update.sh --start`。完成正常部署后，用该目录内的 `bash update.sh` 更新；源码缓存移除后，更新器会重新获取。
+
+首次启动仍需在 `/qingyan/admin/install` 完成应用配置和初始化；安装令牌保存在运行目录 `.env` 的 `QINGYAN_INSTALL_TOKEN` 字段，脚本只提示文件位置。
+
+脚本可独立下载执行，不要求本地已有仓库：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/develop/scripts/install.sh) --dir /opt/apps
+```
+
+脚本版本与应用版本独立：上面的入口获取 `develop` 中的安装脚本，应用源码仍默认选择最高稳定 tag，也可用 `--version` 指定。需要固定脚本内容时，将 URL 中的 `develop` 换成包含安装器的提交 SHA。更多代理入口、参数和目录说明见 [部署指南](docs/deployment.md#首次部署)。
+
 ### 1. 安装依赖
 
 ```bash
@@ -164,7 +194,7 @@ qyctl update check
 qyctl update plan
 ```
 
-`update check` 只检测 `Virace/QingYan` published release，不修改程序。Docker Compose 部署在仓库根目录运行一个入口即可完成更新：
+`update check` 只检测 `Virace/QingYan` published release，不修改程序。新脚本部署在运行目录执行 `bash update.sh`；已有源码部署继续在仓库根目录执行：
 
 ```bash
 ./scripts/update.sh
@@ -173,7 +203,7 @@ qyctl update plan
 `v0.2.2` 之前的 checkout 尚无该脚本，可使用固定版本的远程入口完成首次更新：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.3/scripts/update.sh | bash -s --
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.5/scripts/update.sh)
 ```
 
 脚本默认选择最高的稳定 release tag，依次执行预检、整站备份、镜像构建、UpgradePlan 确认、数据升级和健康验收；可显式传入目标 tag，并用 `--yes` 接受两次确认。生产侧修改过的 `compose.yml` 和未跟踪运维文件会被安全暂存并在新 tag 上恢复，其他已跟踪源码改动仍会阻止更新。

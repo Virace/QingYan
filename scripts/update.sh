@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# 分离布局使用运行目录内的独立更新器；旧仓库布局继续执行下方原有事务。
+deployment_runtime=""
+deployment_args=("$@")
+for ((deployment_index=0; deployment_index<${#deployment_args[@]}; deployment_index++)); do
+	if [[ "${deployment_args[deployment_index]}" == --dir ]]; then
+		(( deployment_index + 1 < ${#deployment_args[@]} )) || { printf '错误：--dir 缺少参数。\n' >&2; exit 1; }
+		deployment_runtime="${deployment_args[deployment_index+1]}/qingyan"
+	fi
+done
+if [[ -z "$deployment_runtime" ]]; then
+	if [[ -f "${QINGYAN_ROOT:-.}/deployment.conf" ]]; then
+		deployment_runtime="${QINGYAN_ROOT:-.}"
+	elif [[ -f "${QINGYAN_ROOT:-.}/qingyan/deployment.conf" ]]; then
+		deployment_runtime="${QINGYAN_ROOT:-.}/qingyan"
+	fi
+fi
+if [[ -n "$deployment_runtime" ]]; then
+	[[ -f "$deployment_runtime/deployment.conf" && -f "$deployment_runtime/update.sh" ]] || { printf '错误：未找到分离布局的部署文件：%s\n' "$deployment_runtime" >&2; exit 1; }
+	exec bash "$deployment_runtime/update.sh" "$@"
+fi
+
 SERVICE_NAME="qingyan"
 AUTO_YES=false
 TARGET_TAG=""

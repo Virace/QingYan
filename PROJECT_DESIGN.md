@@ -80,6 +80,10 @@ Admin API client 位于 `apps/admin/src/api/`；页面和组件按内容、设�
 
 ## 8. 安装、升级与恢复
 
+`scripts/install.sh` 负责 Linux/Compose 首次部署，保留当前只有 SQLite 的数据库菜单，不执行备份恢复。默认将运行文件写入 `<父目录>/qingyan/`，源码构建缓存写入 `<父目录>/.qingyan-source/`，也可覆盖源码位置。镜像由源码构建，运行 Compose 只引用版本化本地镜像并挂载 config/data/logs。
+
+分离布局的 Compose 模板和更新器函数由 `install.sh` 维护；安装器通过函数序列化生成运行目录的独立 `update.sh`，源码缓存移除后仍能重新获取并更新。部署元信息位于 `deployment.conf`，镜像引用及自动生成的安装令牌位于权限为 600 的 Compose `.env`；两者均不属于应用 startup config，更新只改镜像字段并保留其他值与权限。仓库内 `scripts/update.sh` 对新布局分发到独立入口，旧混合布局继续使用既有 Git transaction。
+
 install app 只处理全新实例，完成后写 startup config、SQLite、Admin bootstrap、默认 settings 和安装锁。release 后升级先生成脱敏 `UpgradePlan`，在写入前备份 config、SQLite/WAL/SHM 和计划，再按 migration 与 application step 执行并写入 upgrade ledger。
 
 升级失败保留 partial marker 并进入 `recovery_required`，不得继续启动正常服务。CLI 与 Web Upgrade Mode 复用同一升级服务；Web 层不调用 shell 或 `systemctl`。

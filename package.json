@@ -34,6 +34,7 @@
 		"test:system": "pnpm run test:smoke && pnpm run test:e2e",
 		"test:updater": "bash tests/scripts/update-script.test.sh",
 		"test:updater:real-git": "bash tests/scripts/update-script-real-git.test.sh",
+		"test:installer": "bash tests/scripts/install-script.test.sh",
 		"config:check": "tsx src/config/check-config.ts config/qingyan.example.yml",
 		"config:check:local": "tsx src/config/check-config.ts",
 		"qingyan:upgrade": "tsx scripts/upgrade.ts",

@@ -6,24 +6,33 @@
 
 - QingYan 是有状态后端，部署时必须保护 `config/`、`data/` 和 `logs/`。
 - `config/qingyan.yml`、`qingyan.installed.lock`、SQLite 数据库和日志不应打进镜像，也不应提交到仓库。
-- 当前推荐先手动部署并验证真实链路；自动化发布、拉取和替换程序文件应在备份与升级流程固定后再接入。
+- 首次部署使用 `scripts/install.sh`，现有实例更新使用运行目录的 `update.sh` 或旧源码部署的 `scripts/update.sh`。安装器只准备程序和部署文件，不负责备份、恢复或数据搬运。
 - `v0.2.2` 的 Docker 依赖构建阶段将 Debian 主仓库固定为 TUNA HTTP，并保留基础镜像默认的 Debian security 源；仓库元数据继续由 Debian keyring 验签，同时启用 3 次重试、30 秒 HTTP 超时和 IPv4。使用 HTTP 是因为 `node:24-bookworm-slim` 在安装依赖前没有 CA 证书；直接切换 TUNA HTTPS 会导致证书校验失败和 APT exit 100。
 - 程序更新前必须先备份当前实例；`qyctl upgrade` 只做数据升级，不负责下载或替换程序文件。
 - Web 安装流程不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令重启服务；安装完成后的切换行为由 `QINGYAN_INSTALL_TRANSITION_MODE` 决定。
 
 ## 推荐目录
 
-服务器上建议使用独立工作目录，例如：
+脚本接受一个部署父目录，例如 `--dir /opt/1panel/apps`，默认生成：
 
 ```text
-/opt/1panel/apps/qingyan
-├── compose.yml
-├── config/
-├── data/
-└── logs/
+/opt/1panel/apps/
+├── qingyan/
+│   ├── compose.yml
+│   ├── .env
+│   ├── deployment.conf
+│   ├── update.sh
+│   ├── config/
+│   ├── data/
+│   └── logs/
+└── .qingyan-source/
 ```
 
 `config/` 保存 startup config 和安装锁，`data/` 保存 SQLite 数据库、导入备份和升级备份，`logs/` 保存访问日志和应用日志。
+
+`qingyan/compose.yml` 只引用本地构建的版本镜像，不包含 `build:`，也不挂载源码。`.env` 保存镜像引用和安装令牌，安装器将权限设为仅文件所有者可读写；更新时保留其他字段和文件权限。`deployment.conf` 记录版本、源码位置和网络来源，不保存应用密钥。`.qingyan-source/` 只在安装或更新构建时需要；没有构建任务运行时可以移除，下次更新会重新拉取，运行中的容器和重启不依赖该缓存。
+
+源码位置可用 `--source-dir /其他位置` 覆盖，运行目录仍为 `<父目录>/qingyan/`。旧版源码、Compose 和持久文件混放的实例继续使用原布局，不自动搬移。
 
 ## 反向代理
 
@@ -64,7 +73,82 @@ https://www.x-item.com
 
 ## 首次部署
 
-### 1. 准备服务器目录
+### 脚本入口
+
+服务器需准备 Bash、Git、Docker、Compose 和 GNU coreutils（包括 `realpath`、`timeout`）；auto 构建依赖探测还需要 curl、awk。这些是常见 Linux 工具，脚本不会自行安装系统组件。
+
+从当前源码或单独取得的安装脚本运行：
+
+```bash
+bash scripts/install.sh --dir /opt/1panel/apps
+```
+
+交互流程显示父目录、数据库和来源选项；数据库目前只有 SQLite，回车沿用默认值。非交互示例：
+
+```bash
+bash scripts/install.sh --dir /opt/1panel/apps --non-interactive \
+  --database sqlite --github-source direct --network-profile official
+```
+
+安装器默认选择最高稳定 `vX.Y.Z` tag，可用 `--version v0.2.5` 固定源码版本。父目录可以已有其他应用；若其中的 `qingyan/` 已有文件，安装器会停止并提示使用更新入口，不会覆盖原实例。
+
+无需等待应用发布新版，即可从 `develop` 下载独立安装脚本：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/develop/scripts/install.sh) --dir /opt/1panel/apps
+```
+
+脚本从哪个分支或提交下载，与最终安装哪个应用版本是两件事。应用源码仍默认使用最高稳定 tag，或由 `--version` 固定。需要固定脚本内容时，把 URL 中的 `develop` 换成包含安装器的提交 SHA；未来也可使用包含该脚本的 release tag，旧版 release 没有安装器。
+
+无法直连 raw GitHub 时，使用代理入口下载同一份脚本：
+
+```bash
+bash <(curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/Virace/QingYan/develop/scripts/install.sh) \
+  --dir /opt/1panel/apps --github-source proxy --github-proxy https://gh-proxy.org --network-profile cn
+```
+
+脚本未下载前还不能执行内部选源，因此需要分别提供下载入口。代理地址作为可配置前缀，脚本实际用 Git refs 查询和 clone 判断能否拉取源码，不以网页或 raw 下载可用作为 Git 可用的证明。
+
+| 参数 | 含义 |
+| --- | --- |
+| `--dir <path>` | 父目录，默认当前工作目录；运行文件固定在其 `qingyan/` 子目录 |
+| `--source-dir <path>` | 可选源码位置，默认父目录下的 `.qingyan-source/` |
+| `--version <vX.Y.Z>` | 固定源码版本，默认最高稳定 tag |
+| `--database sqlite` | 当前唯一支持的数据库，未来再扩充真实支持的类型 |
+| `--github-source auto/direct/proxy` | 默认 auto，短超时探测 GitHub 直连，失败或超时后探测代理 |
+| `--github-proxy <url>` | 代理前缀，默认 `https://gh-proxy.org` |
+| `--network-profile auto/official/cn` | 构建依赖来源，与 GitHub 选源独立 |
+| `--prepare-only` | 只准备文件，不构建或启动服务 |
+| `--non-interactive` | 使用参数与默认值，不询问安装选项 |
+| `--interactive` | 显式启用交互，例如从标准输入传入选择 |
+
+`auto` 的 GitHub 探测上限默认 5 秒，可通过 `QINGYAN_GITHUB_PROBE_TIMEOUT` 调整。构建依赖 auto 分别探测官方与国内的 APT、npm 和 Node headers，选择可用且耗时较低的一组。显式指定来源时不会静默切换。GitHub 代理和构建依赖源不会改变 Docker daemon 的基础镜像拉取配置。
+
+构建完成后 Compose 启动安装服务。运行 Compose 已设置容器监听 `0.0.0.0`，端口映射为 `4401:4401`。安装器自动生成安装令牌，将其保存在运行目录 `.env` 的 `QINGYAN_INSTALL_TOKEN` 字段并注入容器；需要在安装页填写令牌时从该文件读取，脚本输出中不回显令牌值。
+
+容器启动不代表业务安装已完成，继续访问 `/qingyan/admin/install`，由镜像内安装程序写配置、建表、初始化默认数据和安装锁。
+
+首次构建失败时文件会保留；修复网络或 Docker 问题后，可从运行目录执行 `bash update.sh --start`，按准备时的版本重新构建并启动。
+
+### 仅准备文件
+
+手动搬迁已有 SQLite 实例时，先准备相同版本的程序：
+
+```bash
+bash scripts/install.sh --dir /opt/1panel/apps --prepare-only --version v0.2.5
+```
+
+用户自行把原来的 `qingyan.yml`、`qingyan.installed.lock` 放入运行目录的 `config/`，把一致性数据库备份放到配置指定的位置，再执行：
+
+```bash
+bash /opt/1panel/apps/qingyan/update.sh --start
+```
+
+`--start` 固定使用准备时的版本，只构建、启动程序，不执行 updater 的备份、数据升级或恢复。原配置、数据库和安装锁有效时按现有实例启动；全新实例进入安装页。安装器不读取备份或复制用户数据。运行中仅复制 SQLite 主文件可能漏掉 WAL 中的写入，应使用一致性备份或停写后复制。
+
+### 手动源码部署：准备服务器目录
+
+该方式需要先在目标工作目录放置完整 QingYan 源码，仅复制 Compose 文件无法完成本地构建。新部署可直接使用前面的安装脚本。
 
 ```bash
 mkdir -p /opt/1panel/apps/qingyan/config
@@ -73,7 +157,7 @@ mkdir -p /opt/1panel/apps/qingyan/logs
 cd /opt/1panel/apps/qingyan
 ```
 
-### 2. 放置 Compose 文件
+### 手动源码部署：放置 Compose 文件
 
 可以直接使用仓库根目录的 `compose.yml` 作为起点。部署时建议只在服务器环境里调整端口和环境变量，不把服务器专用配置提交回仓库。
 
@@ -93,7 +177,7 @@ ports:
   - "127.0.0.1:4401:4401"
 ```
 
-### 3. 启动 install mode
+### 手动源码部署：启动 install mode
 
 首次部署时不要预先创建 `config/qingyan.yml`。让 QingYan 进入 install mode：
 
@@ -228,8 +312,16 @@ docker compose exec qingyan qyctl restore /app/data/backups/<backup-dir> --dry-r
 
 ## 更新流程
 
-Docker Compose 部署不再要求逐条执行备份、切 tag、构建、升级和检查命令。在 QingYan
-仓库根目录运行一个入口：
+新脚本布局从运行目录更新：
+
+```bash
+bash /opt/1panel/apps/qingyan/update.sh
+bash /opt/1panel/apps/qingyan/update.sh --yes --version v0.2.5
+```
+
+运行目录的更新器是独立文件，源码缓存缺失时会重新获取。它保留两次确认、整站备份、UpgradePlan、数据升级和验收；源码操作与 Compose 操作分别作用于缓存和运行目录，构建成功后才切换镜像引用，不覆盖用户的 Compose 或其他 `.env` 配置。升级完成后，目标版本包含新版安装器时会刷新运行目录的更新入口。
+
+也可以通过新版源码中的 `bash scripts/update.sh --dir <父目录>` 定位该布局。已有旧源码部署继续在仓库根目录运行原入口：
 
 ```bash
 ./scripts/update.sh                             # auto，默认优选

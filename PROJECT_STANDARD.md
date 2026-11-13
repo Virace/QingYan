@@ -58,6 +58,7 @@ pnpm test:e2e
 pnpm test:system
 pnpm test:updater
 pnpm test:updater:real-git
+pnpm test:installer
 pnpm build
 pnpm config:check
 pnpm check
@@ -69,6 +70,7 @@ pnpm check:system
 - `pnpm test:e2e` 启动本地 API 与 Admin Vite 服务，运行 Chromium 流程。
 - `pnpm test:system` 串行运行 API/SQLite 冒烟与 Admin E2E。
 - `pnpm test:updater` 与 `pnpm test:updater:real-git` 需要 Bash；后者还会在临时目录创建真实 Git 仓库。两者不访问真实部署。
+- `pnpm test:installer` 使用 Bash、Git 和 Node，在 `.temp/install-script/` 保留真实本地 Git 仓库、生成的部署文件及日志；验证安装、分离目录和缓存缺失时的更新，Docker/网络边界使用受控替身。
 - `pnpm test:smoke:commenter-email` 会使用已保存配置和真实邮件链路，只在明确准备好测试实例、收件地址和 SMTP 后手动运行，不进入默认门禁。
 - `pnpm check` 是默认交付门禁：格式、lint、完整类型检查、Vitest、构建和示例配置校验。
 - `pnpm check:system` 在默认交付门禁后继续运行系统测试；涉及 Admin 关键流程、启动链路或系统测试基础设施时使用。
@@ -116,6 +118,7 @@ pnpm check:system
 - 公开 API、schema、settings owner、secret、数据库或 upgrade lifecycle 变更必须遵守 `AGENTS.md` 的 SPEC、迁移与发布门禁。
 - Admin UI、设置、提示、错误恢复或保存模型变更必须按 `PRODUCT.md` 验收；API 级证据不能替代必要的浏览器或人工视觉确认。
 - 交付前默认运行 `pnpm check`；系统关键路径改动运行 `pnpm check:system`。Bash updater 变更另跑两个 updater 测试。
+- 安装脚本或分离部署布局变更另跑 `pnpm test:installer`；真实 Docker 构建启动、GitHub/代理网络属于专项验收，替身测试不能替代这些证据。
 
 ### 测试策略
 
