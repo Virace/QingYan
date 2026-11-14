@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AppDatabase } from "../../src/db/client";
+import { createDatabaseClients } from "../../src/db/client";
 import {
 	commenterNotificationPreferences,
 	comments,
@@ -11,18 +11,17 @@ import {
 	taskRuns,
 	unsubscribeTokens,
 } from "../../src/db/schema";
-import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
-import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
-import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
-import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
+import { hashKey } from "../../src/db/values";
+import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { NotificationChannelError } from "../../src/modules/notifications/channels/error-classifier";
+import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
-import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
+import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
-import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
-import type { AppDatabase } from "../../src/db/client";
-import { createDatabaseClients } from "../../src/db/client";
+import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
+import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import {
 	applyInitialMigration,
 	createTestApp,
@@ -127,6 +126,7 @@ async function createQueuedCommenterReplyTask(
 		.values({
 			siteId: resolvedSite.id,
 			pageKey: "/posts/worker-reply/",
+			pageKeyHash: hashKey("/posts/worker-reply/"),
 			pageTitle: "Worker Reply",
 			pageUrl: "/posts/worker-reply/",
 			commentCount: 2,
@@ -198,9 +198,16 @@ async function createQueuedCommenterReplyTask(
 
 describe("notification worker", () => {
 	it("leaves non-notification tasks queued when claiming work", async () => {
-		const fixture = await createTestApp();
-		cleanups.push(fixture.cleanup);
-		const repository = new TaskRunRepository(fixture.app.db);
+		const workspace = createTestWorkspace("qingyan-worker-category-");
+		await applyInitialMigration(workspace.databaseUrl);
+		const clients = createDatabaseClients(workspace.databaseUrl, {
+			pool: { max: 2 },
+		});
+		cleanups.push(async () => {
+			await clients.close();
+			await workspace.cleanup();
+		});
+		const repository = new TaskRunRepository(clients.db);
 		const maintenanceTask = await repository.create({
 			type: "page_metadata_refresh",
 			category: "maintenance",
@@ -210,7 +217,7 @@ describe("notification worker", () => {
 		});
 		const { task: notificationTask } = await createQueuedTask(repository);
 		const worker = new NotificationWorker({
-			queue: new DatabaseTaskQueue(fixture.app.db),
+			queue: new DatabaseTaskQueue(clients.db),
 			repository,
 			adapters: {
 				email: {
@@ -556,10 +563,12 @@ describe("notification worker", () => {
 
 	it("injects commenter unsubscribe links without persisting plaintext tokens", async () => {
 		const workspace = createTestWorkspace("qingyan-notification-worker-");
-		applyInitialMigration(workspace.databaseFile);
-		const clients = createDatabaseClients(workspace.databaseFile);
+		await applyInitialMigration(workspace.databaseUrl);
+		const clients = createDatabaseClients(workspace.databaseUrl, {
+			pool: { max: 2 },
+		});
 		const config = createTestConfig(
-			workspace.databaseFile,
+			workspace.databaseUrl,
 			workspace.logsDirectory,
 		);
 		const repository = new TaskRunRepository(clients.db);
@@ -646,8 +655,8 @@ describe("notification worker", () => {
 				}),
 			]);
 		} finally {
-			clients.sqlite.close();
-			workspace.cleanup();
+			await clients.close();
+			await workspace.cleanup();
 		}
 	});
 });

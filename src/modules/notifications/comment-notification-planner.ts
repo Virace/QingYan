@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	commenterNotificationPreferences,
 	comments,
@@ -50,7 +50,7 @@ export class CommentNotificationPlanner {
 	private readonly reputation: EmailReputationRepository;
 	private readonly emailDelivery: CommentEmailDeliveryRepository;
 
-	public constructor(private readonly db: AppDatabase) {
+	public constructor(private readonly db: DatabaseExecutor) {
 		this.taskRuns = new TaskRunRepository(db);
 		this.reputation = new EmailReputationRepository(db);
 		this.emailDelivery = new CommentEmailDeliveryRepository(db);

@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	adminBootstrapState,
 	adminUsers,
@@ -10,12 +9,12 @@ import {
 	sites,
 	taskRuns,
 } from "../../src/db/schema";
-import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
+import { hashKey } from "../../src/db/values";
 import type {
 	ServiceControlController,
 	ServiceState,
 } from "../../src/modules/service-control/systemd-service";
-import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -30,13 +29,18 @@ afterEach(async () => {
 async function seedInstalledBootstrap(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
 ) {
-	await fixture.app.db.insert(adminBootstrapState).values({
-		id: 1,
-		consolePath: "/admin",
-		username: "admin",
-		passwordHash: createPasswordHash("replace-me"),
-		passwordRotatedAt: null,
-	});
+	const [user] = await fixture.app.db
+		.select()
+		.from(adminUsers)
+		.where(eq(adminUsers.isInitialAdmin, true));
+	if (!user) throw new Error("Expected initial admin");
+	await fixture.app.db
+		.insert(adminBootstrapState)
+		.values({ id: 1, consolePath: "/admin", initialAdminUserId: user.id })
+		.onConflictDoNothing();
+	await fixture.pool.query(
+		"INSERT INTO __qingyan_upgrades(name,to_version,summary_json) VALUES('application-version:0.2.5','0.2.5','{}') ON CONFLICT(name) DO NOTHING",
+	);
 }
 
 class FakeServiceControl implements ServiceControlController {
@@ -121,7 +125,7 @@ describe("admin ops routes", () => {
 			},
 			backup: {
 				format: "qingyan.full-backup",
-				provider: "sqlite",
+				provider: "postgresql",
 			},
 			recovery: {
 				manualCommands: [
@@ -513,6 +517,7 @@ describe("admin ops routes", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:ops-restore",
+			pageKeyHash: hashKey("post:ops-restore"),
 			pageUrl: "/posts/ops-restore/",
 			title: "Ops Restore",
 			status: "active",
@@ -613,6 +618,7 @@ describe("admin ops routes", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:ops-cleanup",
+			pageKeyHash: hashKey("post:ops-cleanup"),
 			pageUrl: "/posts/ops-cleanup/",
 			title: "Ops Cleanup",
 			status: "deleted",
@@ -704,6 +710,7 @@ describe("admin ops routes", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:ops-trash-restore-a",
+				pageKeyHash: hashKey("post:ops-trash-restore-a"),
 				pageUrl: "/posts/ops-trash-restore-a/",
 				status: "trash",
 				trashedAt: "2026-06-01T00:00:00.000Z",
@@ -711,6 +718,7 @@ describe("admin ops routes", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:ops-trash-restore-b",
+				pageKeyHash: hashKey("post:ops-trash-restore-b"),
 				pageUrl: "/posts/ops-trash-restore-b/",
 				status: "trash",
 				trashedAt: "2026-06-01T00:00:00.000Z",
@@ -756,6 +764,7 @@ describe("admin ops routes", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:ops-trash-cleanup-a",
+				pageKeyHash: hashKey("post:ops-trash-cleanup-a"),
 				pageUrl: "/posts/ops-trash-cleanup-a/",
 				status: "deleted",
 				deletedAt: "2026-06-01T00:00:00.000Z",
@@ -763,6 +772,7 @@ describe("admin ops routes", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:ops-trash-cleanup-b",
+				pageKeyHash: hashKey("post:ops-trash-cleanup-b"),
 				pageUrl: "/posts/ops-trash-cleanup-b/",
 				status: "deleted",
 				deletedAt: "2026-06-01T00:00:00.000Z",

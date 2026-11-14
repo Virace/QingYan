@@ -1,12 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	adminUsers,
 	auditLogs,
 	notificationChannelConfigs,
-	siteNotificationRecipientRoutes,
-	siteNotificationRecipients,
+	siteNotificationEventChannels,
 	sites,
 } from "../../src/db/schema";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -903,9 +902,9 @@ describe("admin system settings", () => {
 			.select()
 			.from(notificationChannelConfigs)
 			.where(eq(notificationChannelConfigs.id, "webhook:ops"));
-		expect(row?.secretConfigJson).toBe(
-			JSON.stringify({ secret: "webhook-secret" }),
-		);
+		expect(JSON.parse(row?.secretConfigJson ?? "null")).toEqual({
+			secret: "webhook-secret",
+		});
 	});
 
 	it("rejects incomplete webhook and wxpusher channel configs", async () => {
@@ -1022,21 +1021,11 @@ describe("admin system settings", () => {
 		if (!site || !adminUser) {
 			throw new Error("Expected default site and admin user");
 		}
-		await fixture.app.db.insert(siteNotificationRecipients).values({
-			id: "recipient_ops",
+		await fixture.app.db.insert(siteNotificationEventChannels).values({
+			id: "event_ops_channel",
 			siteId: site.id,
-			userId: adminUser.id,
-			channelsJson: "[]",
-			eventsJson: "[]",
-			includeCommentContent: "summary",
-			enabled: true,
-		});
-		await fixture.app.db.insert(siteNotificationRecipientRoutes).values({
-			id: "recipient_ops_route",
-			recipientId: "recipient_ops",
 			eventType: "admin_comment_pending",
 			channelConfigId: "webhook:ops",
-			enabled: true,
 		});
 
 		const deleteReferencedResponse = await fixture.app.inject({

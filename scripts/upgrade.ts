@@ -1,9 +1,9 @@
-import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-
 import { loadConfig, resolveConfigPath } from "../src/config/load-config";
 import type { AppConfig } from "../src/config/types";
+import { SystemdServiceController } from "../src/modules/service-control/systemd-service";
+import { resolvePartialUpgradeMarkerPath } from "../src/modules/upgrade/partial-marker";
 import { UpgradeService } from "../src/modules/upgrade/upgrade-service";
 
 interface UpgradeCliOptions {
@@ -68,21 +68,23 @@ export async function runUpgradeCli(
 	} catch (error) {
 		configError = error;
 	}
-	const databaseFile = loadedConfig
-		? path.resolve(process.cwd(), loadedConfig.database.sqlite.file)
-		: path.resolve(process.cwd(), "config", "qingyan.db");
 	const service = new UpgradeService({
 		configPath,
 		loadedConfig,
 		configError,
-		databaseFile,
-		createSqliteClient: (file) => new Database(file),
 		currentApplicationVersion: readPackageVersion(),
 		partialUpgradeMarkerPath:
-			options.partialMarkerPath ??
-			path.join(path.dirname(databaseFile), "upgrade", "partial-upgrade.json"),
+			options.partialMarkerPath ?? resolvePartialUpgradeMarkerPath(configPath),
 	});
-	const state = service.publicState();
+	const state = await service.publicState();
+
+	if (
+		state.state === "broken_config" &&
+		state.reason === "sqlite_offline_conversion_required"
+	)
+		throw new Error(
+			"SQLITE_OFFLINE_CONVERSION_REQUIRED: 请先停写并完成独立 SQLite 到 PostgreSQL 转换与核对，再切换配置。",
+		);
 
 	if (state.state !== "upgrade_required") {
 		console.log(JSON.stringify({ state: state.state }, null, 2));
@@ -100,16 +102,25 @@ export async function runUpgradeCli(
 			"--apply requires --backup-dir before writing upgrade ledger.",
 		);
 	}
-	const result = await service.apply({
-		confirm: "UPGRADE QINGYAN",
-		backupDirectory: options.backupDirectory,
-	});
+
+	const { result } = await new SystemdServiceController().runWithStoppedService(
+		() =>
+			service.apply({
+				confirm: "UPGRADE QINGYAN",
+				backupDirectory: options.backupDirectory,
+			}),
+	);
 	console.log(JSON.stringify(result, null, 2));
 	return 0;
 }
 
 if (require.main === module) {
-	runUpgradeCli().then((exitCode) => {
-		process.exitCode = exitCode;
-	});
+	runUpgradeCli()
+		.then((exitCode) => {
+			process.exitCode = exitCode;
+		})
+		.catch((error: unknown) => {
+			console.error(error instanceof Error ? error.message : "UPGRADE_FAILED");
+			process.exitCode = 1;
+		});
 }

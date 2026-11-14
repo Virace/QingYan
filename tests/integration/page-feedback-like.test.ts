@@ -10,12 +10,13 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import {
 	type EngagementSettings,
 	serializeCommentInputLimits,
 	serializeEngagementSettings,
 } from "../../src/modules/shared/site-settings-defaults";
-import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -34,6 +35,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -149,6 +151,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/deleted-like/",
+			pageKeyHash: hashKey("/posts/deleted-like/"),
 			pageUrl: "/posts/deleted-like/",
 			status: "deleted",
 			deletedAt: "2026-05-29T00:00:00.000Z",

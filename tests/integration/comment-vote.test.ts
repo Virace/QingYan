@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	captchaSessions,
 	comments,
@@ -11,11 +10,12 @@ import {
 	visitors,
 	voteRecords,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import {
 	type EngagementSettings,
 	serializeEngagementSettings,
 } from "../../src/modules/shared/site-settings-defaults";
-import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -40,6 +40,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -84,6 +85,7 @@ async function seedApprovedComment(
 	await fixture.app.db.insert(pageThreads).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageTitle: "Vote Post",
 	});
 	const [thread] = await fixture.app.db

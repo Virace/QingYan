@@ -4,10 +4,10 @@ import { createDatabaseClients } from "../../src/db/client";
 import { adminUsers, sites } from "../../src/db/schema";
 import { ConditionTriggerEvaluator } from "../../src/modules/tasks/condition-trigger-evaluator";
 import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
+import { TaskScheduler } from "../../src/modules/tasks/scheduler";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
 import { TaskMetricRollupRepository } from "../../src/modules/tasks/task-metric-rollup-repository";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
-import { TaskScheduler } from "../../src/modules/tasks/scheduler";
 import {
 	applyInitialMigration,
 	createTestApp,
@@ -18,7 +18,7 @@ import {
 interface Fixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	scheduledTasks: ScheduledTaskRepository;
 	taskRuns: TaskRunRepository;
 	eventLogs: TaskEventLogRepository;
@@ -36,15 +36,15 @@ afterEach(async () => {
 		await cleanup();
 	}
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
 async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-condition-trigger-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
 		name: "FangYuan",
@@ -66,7 +66,7 @@ async function createFixture(): Promise<Fixture> {
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		scheduledTasks,
 		taskRuns,
 		eventLogs,
@@ -399,9 +399,9 @@ describe("ConditionTriggerEvaluator", () => {
 	it("records public request metrics without synchronously creating condition runs", async () => {
 		const testApp = await createTestApp();
 		cleanupCallbacks.push(testApp.cleanup);
-		const clients = createDatabaseClients(testApp.databaseFile);
-		cleanupCallbacks.push(() => {
-			clients.sqlite.close();
+		const clients = createDatabaseClients(testApp.databaseUrl);
+		cleanupCallbacks.push(async () => {
+			await clients.close();
 		});
 		const scheduledTasks = new ScheduledTaskRepository(clients.db);
 		const taskRuns = new TaskRunRepository(clients.db);

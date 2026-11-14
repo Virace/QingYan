@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
+import { hashKey, toSafeInteger } from "../../db/values";
 import {
 	adminUsers,
 	commentRequestMetadata,
@@ -13,11 +15,13 @@ import {
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
+	sites,
 	siteSettings,
 	visitorRequestMetadata,
 	visitors,
 	voteRecords,
 } from "../../db/schema";
+import { assertPageKeyAvailable, lockPageKey } from "../shared/page-key";
 import { AppError } from "../shared/errors";
 import { normalizePagePath } from "../shared/page-url";
 import type {
@@ -103,11 +107,11 @@ function mapCommentRequestMetadata(
 
 export class CommentsRepository {
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly siteRegistry: SiteRegistry,
 	) {}
 
-	public getDatabase(): AppDatabase {
+	public getDatabase(): DatabaseExecutor {
 		return this.db;
 	}
 
@@ -168,80 +172,50 @@ export class CommentsRepository {
 	}): Promise<VisitorRecord> {
 		const visitorKey = input.visitorKey ?? createVisitorKey();
 		const nowIso = new Date().toISOString();
-		const [existingVisitor] = await this.db
-			.select()
-			.from(visitors)
-			.where(
-				and(
-					eq(visitors.siteId, input.siteId),
-					eq(visitors.visitorKey, visitorKey),
-				),
-			)
-			.limit(1);
-
-		if (existingVisitor) {
-			await this.db
-				.update(visitors)
-				.set({
-					ipHash: hashOptionalValue(input.ip),
-					userAgentHash: hashOptionalValue(input.userAgent),
-					lastIp: input.ip,
-					lastUserAgent: input.userAgent,
-					lastSeenPageKey: input.pageKey,
-					lastSeenPageUrl: input.pageUrl,
-					lastSeenAt: nowIso,
-				})
-				.where(eq(visitors.id, existingVisitor.id));
-			await this.upsertVisitorRequestMetadata({
+		return this.db.transaction(async (tx) => {
+			const values = {
+				siteId: input.siteId,
+				visitorKey,
+				ipHash: hashOptionalValue(input.ip),
+				userAgentHash: hashOptionalValue(input.userAgent),
+				lastIp: input.ip,
+				lastUserAgent: input.userAgent,
+				lastSeenPageKey: input.pageKey,
+				lastSeenPageUrl: input.pageUrl,
+				lastSeenAt: nowIso,
+			};
+			const [inserted] = await tx
+				.insert(visitors)
+				.values(values)
+				.onConflictDoNothing({ target: [visitors.siteId, visitors.visitorKey] })
+				.returning();
+			const [visitor] = inserted
+				? [inserted]
+				: await tx
+						.update(visitors)
+						.set(values)
+						.where(
+							and(
+								eq(visitors.siteId, input.siteId),
+								eq(visitors.visitorKey, visitorKey),
+							),
+						)
+						.returning();
+			if (!visitor) throw new Error("Expected visitor row after upsert");
+			await new CommentsRepository(
+				tx,
+				this.siteRegistry,
+			).upsertVisitorRequestMetadata({
 				...input,
-				visitorId: existingVisitor.id,
+				visitorId: visitor.id,
 				seenAt: nowIso,
 			});
-
 			return {
-				id: existingVisitor.id,
-				visitorKey: existingVisitor.visitorKey,
-				created: false,
+				id: visitor.id,
+				visitorKey: visitor.visitorKey,
+				created: Boolean(inserted),
 			};
-		}
-
-		await this.db.insert(visitors).values({
-			siteId: input.siteId,
-			visitorKey,
-			ipHash: hashOptionalValue(input.ip),
-			userAgentHash: hashOptionalValue(input.userAgent),
-			lastIp: input.ip,
-			lastUserAgent: input.userAgent,
-			lastSeenPageKey: input.pageKey,
-			lastSeenPageUrl: input.pageUrl,
-			lastSeenAt: nowIso,
 		});
-
-		const [createdVisitor] = await this.db
-			.select()
-			.from(visitors)
-			.where(
-				and(
-					eq(visitors.siteId, input.siteId),
-					eq(visitors.visitorKey, visitorKey),
-				),
-			)
-			.limit(1);
-
-		if (!createdVisitor) {
-			throw new Error("Expected visitor row to exist after insertion");
-		}
-		await this.upsertVisitorRequestMetadata({
-			...input,
-			visitorId: createdVisitor.id,
-			seenAt: nowIso,
-		});
-
-		return {
-			id: createdVisitor.id,
-			visitorKey: createdVisitor.visitorKey,
-			created: true,
-		};
 	}
 
 	private async upsertVisitorRequestMetadata(input: {
@@ -331,81 +305,113 @@ export class CommentsRepository {
 	}
 
 	public async getOrCreatePageThread(input: ThreadRecordInput) {
-		const normalizedPageUrl = normalizePagePath(input.pageUrl);
-		const nowIso = new Date().toISOString();
-		const [existingThread] = await this.db
-			.select()
-			.from(pageThreads)
-			.where(
-				and(
-					eq(pageThreads.siteId, input.siteId),
-					eq(pageThreads.pageKey, input.pageKey),
-				),
-			)
-			.limit(1);
-		if (
-			existingThread?.kind !== undefined &&
-			existingThread.kind !== "public"
-		) {
-			throw new AppError(404, "PAGE_NOT_FOUND", "页面不存在。");
-		}
+		return this.db.transaction(async (tx) => {
+			await lockPageKey(tx, input.siteId, input.pageKey);
+			await assertPageKeyAvailable(
+				tx,
+				"page_threads",
+				input.siteId,
+				input.pageKey,
+			);
+			await assertPageKeyAvailable(
+				tx,
+				"site_page_registry",
+				input.siteId,
+				input.pageKey,
+			);
 
-		await this.db
-			.insert(pageThreads)
-			.values({
-				siteId: input.siteId,
-				pageKey: input.pageKey,
-				pageTitle: input.pageTitle,
-				pageUrl: normalizedPageUrl,
-				kind: "public",
-			})
-			.onConflictDoUpdate({
-				target: [pageThreads.siteId, pageThreads.pageKey],
-				set: {
+			const normalizedPageUrl = normalizePagePath(input.pageUrl);
+			const nowIso = new Date().toISOString();
+			const [existingThread] = await tx
+				.select()
+				.from(pageThreads)
+				.where(
+					and(
+						eq(pageThreads.siteId, input.siteId),
+						and(
+							eq(pageThreads.pageKeyHash, hashKey(input.pageKey)),
+							eq(pageThreads.pageKey, input.pageKey),
+						),
+					),
+				)
+				.limit(1);
+			if (
+				existingThread?.kind !== undefined &&
+				existingThread.kind !== "public"
+			) {
+				throw new AppError(404, "PAGE_NOT_FOUND", "页面不存在。");
+			}
+
+			await tx
+				.insert(pageThreads)
+				.values({
+					siteId: input.siteId,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
 					pageTitle: input.pageTitle,
 					pageUrl: normalizedPageUrl,
-					updatedAt: nowIso,
-				},
-			});
-		await this.db
-			.insert(sitePageRegistry)
-			.values({
-				siteId: input.siteId,
-				pageKey: input.pageKey,
-				pageUrl: normalizedPageUrl ?? input.pageKey,
-				title: input.pageTitle,
-				status: "active",
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.onConflictDoUpdate({
-				target: [sitePageRegistry.siteId, sitePageRegistry.pageKey],
-				set: {
+					kind: "public",
+				})
+				.onConflictDoUpdate({
+					target: [pageThreads.siteId, pageThreads.pageKeyHash],
+					setWhere: and(
+						eq(pageThreads.pageKeyHash, hashKey(input.pageKey)),
+						eq(pageThreads.pageKey, input.pageKey),
+					),
+					set: {
+						pageTitle: input.pageTitle,
+						pageUrl: normalizedPageUrl,
+						updatedAt: nowIso,
+					},
+				});
+			await tx
+				.insert(sitePageRegistry)
+				.values({
+					siteId: input.siteId,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
 					pageUrl: normalizedPageUrl ?? input.pageKey,
 					title: input.pageTitle,
 					status: "active",
 					lastSeenAt: nowIso,
 					updatedAt: nowIso,
-				},
-			});
+				})
+				.onConflictDoUpdate({
+					target: [sitePageRegistry.siteId, sitePageRegistry.pageKeyHash],
+					setWhere: and(
+						eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+						eq(sitePageRegistry.pageKey, input.pageKey),
+					),
+					set: {
+						pageUrl: normalizedPageUrl ?? input.pageKey,
+						title: input.pageTitle,
+						status: "active",
+						lastSeenAt: nowIso,
+						updatedAt: nowIso,
+					},
+				});
 
-		const [thread] = await this.db
-			.select()
-			.from(pageThreads)
-			.where(
-				and(
-					eq(pageThreads.siteId, input.siteId),
-					eq(pageThreads.pageKey, input.pageKey),
-					eq(pageThreads.kind, "public"),
-				),
-			)
-			.limit(1);
+			const [thread] = await tx
+				.select()
+				.from(pageThreads)
+				.where(
+					and(
+						eq(pageThreads.siteId, input.siteId),
+						and(
+							eq(pageThreads.pageKeyHash, hashKey(input.pageKey)),
+							eq(pageThreads.pageKey, input.pageKey),
+						),
+						eq(pageThreads.kind, "public"),
+					),
+				)
+				.limit(1);
 
-		if (!thread) {
-			throw new Error("Expected page thread to exist after upsert");
-		}
+			if (!thread) {
+				throw new Error("Expected page thread to exist after upsert");
+			}
 
-		return thread;
+			return thread;
+		});
 	}
 
 	public async ensurePageThreadForRegisteredPage(input: ThreadRecordInput) {
@@ -419,7 +425,10 @@ export class CommentsRepository {
 			.where(
 				and(
 					eq(pageThreads.siteId, input.siteId),
-					eq(pageThreads.pageKey, input.pageKey),
+					and(
+						eq(pageThreads.pageKeyHash, hashKey(input.pageKey)),
+						eq(pageThreads.pageKey, input.pageKey),
+					),
 					eq(pageThreads.kind, "public"),
 				),
 			)
@@ -438,7 +447,10 @@ export class CommentsRepository {
 			.where(
 				and(
 					eq(sitePageRegistry.siteId, input.siteId),
-					eq(sitePageRegistry.pageKey, input.pageKey),
+					and(
+						eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+						eq(sitePageRegistry.pageKey, input.pageKey),
+					),
 				),
 			)
 			.limit(1);
@@ -470,54 +482,32 @@ export class CommentsRepository {
 			.update(`${input.visitorId}:${input.pageKey}:${input.userAgent ?? ""}`)
 			.digest("hex");
 		const windowMs = input.windowMs ?? 60 * 60 * 1000;
-		const [existingSession] = await this.db
-			.select()
-			.from(pageViewSessions)
-			.where(
-				and(
-					eq(pageViewSessions.pageThreadId, input.pageThreadId),
-					eq(pageViewSessions.fingerprint, fingerprint),
-				),
-			)
-			.limit(1);
-
 		const nowIso = new Date().toISOString();
-		if (!existingSession) {
-			await this.db.insert(pageViewSessions).values({
-				pageThreadId: input.pageThreadId,
-				visitorId: input.visitorId,
-				fingerprint,
-				seenAt: nowIso,
-			});
-			await this.db
-				.update(pageThreads)
-				.set({
-					pageViewCount: sql`${pageThreads.pageViewCount} + 1`,
-					updatedAt: nowIso,
+		const cutoff = new Date(Date.now() - windowMs).toISOString();
+		await this.db.transaction(async (tx) => {
+			const [session] = await tx
+				.insert(pageViewSessions)
+				.values({
+					pageThreadId: input.pageThreadId,
+					visitorId: input.visitorId,
+					fingerprint,
+					seenAt: nowIso,
 				})
-				.where(eq(pageThreads.id, input.pageThreadId));
-
-			return;
-		}
-
-		const lastSeenAt = new Date(existingSession.seenAt).getTime();
-		if (!Number.isNaN(lastSeenAt) && Date.now() - lastSeenAt < windowMs) {
-			return;
-		}
-
-		await this.db
-			.update(pageViewSessions)
-			.set({
-				seenAt: nowIso,
-			})
-			.where(eq(pageViewSessions.id, existingSession.id));
-		await this.db
-			.update(pageThreads)
-			.set({
-				pageViewCount: sql`${pageThreads.pageViewCount} + 1`,
-				updatedAt: nowIso,
-			})
-			.where(eq(pageThreads.id, input.pageThreadId));
+				.onConflictDoUpdate({
+					target: [pageViewSessions.pageThreadId, pageViewSessions.fingerprint],
+					set: { seenAt: nowIso },
+					setWhere: sql`${pageViewSessions.seenAt} <= ${cutoff}`,
+				})
+				.returning({ id: pageViewSessions.id });
+			if (session)
+				await tx
+					.update(pageThreads)
+					.set({
+						pageViewCount: sql`${pageThreads.pageViewCount} + 1`,
+						updatedAt: nowIso,
+					})
+					.where(eq(pageThreads.id, input.pageThreadId));
+		});
 	}
 
 	public async recordLightweightPageView(input: { pageThreadId: number }) {
@@ -536,26 +526,46 @@ export class CommentsRepository {
 		pageKey: string;
 		pageUrl: string;
 	}) {
-		const nowIso = new Date().toISOString();
-		await this.db
-			.insert(pendingPageCandidates)
-			.values({
-				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				pageUrl: input.pageUrl,
-				hitCount: 1,
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.onConflictDoUpdate({
-				target: [pendingPageCandidates.siteKey, pendingPageCandidates.pageKey],
-				set: {
+		return this.db.transaction(async (tx) => {
+			const target = await this.resolvePendingPageViewTarget(tx, input);
+			if (target.kind === "protected") return;
+			if (target.kind === "registered") {
+				await new CommentsRepository(
+					tx,
+					this.siteRegistry,
+				).recordLightweightPageView({ pageThreadId: target.threadId });
+				return;
+			}
+
+			const nowIso = new Date().toISOString();
+			await tx
+				.insert(pendingPageCandidates)
+				.values({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
 					pageUrl: input.pageUrl,
-					hitCount: sql`${pendingPageCandidates.hitCount} + 1`,
+					hitCount: 1,
 					lastSeenAt: nowIso,
 					updatedAt: nowIso,
-				},
-			});
+				})
+				.onConflictDoUpdate({
+					target: [
+						pendingPageCandidates.siteKey,
+						pendingPageCandidates.pageKeyHash,
+					],
+					setWhere: and(
+						eq(pendingPageCandidates.pageKeyHash, hashKey(input.pageKey)),
+						eq(pendingPageCandidates.pageKey, input.pageKey),
+					),
+					set: {
+						pageUrl: input.pageUrl,
+						hitCount: sql`${pendingPageCandidates.hitCount} + 1`,
+						lastSeenAt: nowIso,
+						updatedAt: nowIso,
+					},
+				});
+		});
 	}
 
 	public async recordPendingPageView(input: {
@@ -567,69 +577,128 @@ export class CommentsRepository {
 		userAgent?: string;
 		windowMs?: number;
 	}) {
-		const nowIso = new Date().toISOString();
-		await this.db
-			.insert(pendingPageCandidates)
-			.values({
-				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				pageUrl: input.pageUrl,
-				hitCount: 1,
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.onConflictDoUpdate({
-				target: [pendingPageCandidates.siteKey, pendingPageCandidates.pageKey],
-				set: {
-					pageUrl: input.pageUrl,
-					hitCount: sql`${pendingPageCandidates.hitCount} + 1`,
+		return this.db.transaction(async (tx) => {
+			const target = await this.resolvePendingPageViewTarget(tx, input);
+			if (target.kind === "protected") return;
+
+			const nowIso = new Date().toISOString();
+			if (target.kind === "pending")
+				await tx
+					.insert(pendingPageCandidates)
+					.values({
+						siteKey: input.siteKey,
+						pageKey: input.pageKey,
+						pageKeyHash: hashKey(input.pageKey),
+						pageUrl: input.pageUrl,
+						hitCount: 1,
+						lastSeenAt: nowIso,
+						updatedAt: nowIso,
+					})
+					.onConflictDoUpdate({
+						target: [
+							pendingPageCandidates.siteKey,
+							pendingPageCandidates.pageKeyHash,
+						],
+						setWhere: and(
+							eq(pendingPageCandidates.pageKeyHash, hashKey(input.pageKey)),
+							eq(pendingPageCandidates.pageKey, input.pageKey),
+						),
+						set: {
+							pageUrl: input.pageUrl,
+							hitCount: sql`${pendingPageCandidates.hitCount} + 1`,
+							lastSeenAt: nowIso,
+							updatedAt: nowIso,
+						},
+					});
+
+			const fingerprint = createHash("sha256")
+				.update(
+					`${input.visitorKey ?? input.ip ?? "anonymous"}:${input.pageKey}:${input.userAgent ?? ""}`,
+				)
+				.digest("hex");
+			const cutoff = new Date(
+				Date.now() - (input.windowMs ?? 60 * 60 * 1000),
+			).toISOString();
+			const [session] = await tx
+				.insert(pendingPageViewSessions)
+				.values({
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
+					fingerprint,
 					lastSeenAt: nowIso,
 					updatedAt: nowIso,
-				},
-			});
+				})
+				.onConflictDoUpdate({
+					target: [
+						pendingPageViewSessions.siteKey,
+						pendingPageViewSessions.pageKeyHash,
+						pendingPageViewSessions.fingerprint,
+					],
+					set: {
+						hitCount: sql`${pendingPageViewSessions.hitCount} + 1`,
+						lastSeenAt: nowIso,
+						updatedAt: nowIso,
+					},
+					setWhere: and(
+						and(
+							eq(pendingPageViewSessions.pageKeyHash, hashKey(input.pageKey)),
+							eq(pendingPageViewSessions.pageKey, input.pageKey),
+						),
+						sql`${pendingPageViewSessions.lastSeenAt} <= ${cutoff}`,
+					),
+				})
+				.returning({ id: pendingPageViewSessions.id });
+			if (session && target.kind === "registered") {
+				await tx
+					.update(pageThreads)
+					.set({
+						pageViewCount: sql`${pageThreads.pageViewCount} + 1`,
+						updatedAt: nowIso,
+					})
+					.where(eq(pageThreads.id, target.threadId));
+			}
+		});
+	}
 
-		const fingerprint = createHash("sha256")
-			.update(
-				`${input.visitorKey ?? input.ip ?? "anonymous"}:${input.pageKey}:${input.userAgent ?? ""}`,
-			)
-			.digest("hex");
-		const [existingSession] = await this.db
-			.select()
-			.from(pendingPageViewSessions)
-			.where(
-				and(
-					eq(pendingPageViewSessions.siteKey, input.siteKey),
-					eq(pendingPageViewSessions.pageKey, input.pageKey),
-					eq(pendingPageViewSessions.fingerprint, fingerprint),
-				),
-			)
-			.limit(1);
-
-		if (!existingSession) {
-			await this.db.insert(pendingPageViewSessions).values({
-				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				fingerprint,
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			});
-			return;
-		}
-
-		const windowMs = input.windowMs ?? 60 * 60 * 1000;
-		const lastSeenAt = new Date(existingSession.lastSeenAt).getTime();
-		if (!Number.isNaN(lastSeenAt) && Date.now() - lastSeenAt < windowMs) {
-			return;
-		}
-
-		await this.db
-			.update(pendingPageViewSessions)
-			.set({
-				hitCount: sql`${pendingPageViewSessions.hitCount} + 1`,
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.where(eq(pendingPageViewSessions.id, existingSession.id));
+	private async resolvePendingPageViewTarget(
+		tx: DatabaseExecutor,
+		input: { siteKey: string; pageKey: string; pageUrl: string },
+	): Promise<
+		{ kind: "pending" | "protected" } | { kind: "registered"; threadId: number }
+	> {
+		const [site] = await tx
+			.select({ id: sites.id })
+			.from(sites)
+			.where(eq(sites.siteKey, input.siteKey));
+		if (site) await lockPageKey(tx, site.id, input.pageKey);
+		await lockPageKey(tx, input.siteKey, input.pageKey);
+		await assertPageKeyAvailable(
+			tx,
+			"pending_page_candidates",
+			input.siteKey,
+			input.pageKey,
+		);
+		await assertPageKeyAvailable(
+			tx,
+			"pending_page_view_sessions",
+			input.siteKey,
+			input.pageKey,
+		);
+		if (!site) return { kind: "pending" };
+		const repository = new CommentsRepository(tx, this.siteRegistry);
+		const page = await repository.getPageRegistryEntry({
+			siteId: site.id,
+			pageKey: input.pageKey,
+		});
+		if (!page) return { kind: "pending" };
+		if (page.status !== "active") return { kind: "protected" };
+		const thread = await repository.ensurePageThreadForRegisteredPage({
+			siteId: site.id,
+			pageKey: input.pageKey,
+			pageUrl: page.pageUrl,
+		});
+		return { kind: "registered", threadId: thread.id };
 	}
 
 	public async listPublicComments(input: PublicCommentsQueryInput) {
@@ -637,8 +706,48 @@ export class CommentsRepository {
 			input.sortBy === "oldest"
 				? asc(comments.createdAt)
 				: desc(comments.createdAt);
+		const replies = alias(comments, "public_comment_replies");
+		const visibleComments = and(
+			eq(comments.pageThreadId, input.pageThreadId),
+			eq(pageThreads.kind, "public"),
+			eq(comments.status, "approved"),
+			isNull(comments.deletedAt),
+		);
+		// 总数包含全部已公开评论，返回树仅沿当前页可见的父节点展开。
+		const commentPage = sql`(
+			WITH RECURSIVE public_comment_counts AS (
+				SELECT COUNT(*) AS total_count,
+					COUNT(*) FILTER (WHERE ${comments.parentId} IS NULL) AS root_count
+				FROM ${comments}
+				INNER JOIN ${pageThreads} ON ${pageThreads.id} = ${comments.pageThreadId}
+				WHERE ${visibleComments}
+			), public_comment_roots AS (
+				SELECT ${comments.id}
+				FROM ${comments}
+				INNER JOIN ${pageThreads} ON ${pageThreads.id} = ${comments.pageThreadId}
+				WHERE ${and(visibleComments, isNull(comments.parentId))}
+				ORDER BY ${orderBy}, ${asc(comments.id)}
+				LIMIT ${input.limit} OFFSET ${input.offset}
+			), public_comment_tree(id) AS (
+				SELECT id FROM public_comment_roots
+				UNION ALL
+				SELECT ${replies.id}
+				FROM ${comments} AS ${replies}
+				INNER JOIN public_comment_tree ON ${replies.parentId} = public_comment_tree.id
+				WHERE ${and(
+					eq(replies.pageThreadId, input.pageThreadId),
+					eq(replies.status, "approved"),
+					isNull(replies.deletedAt),
+				)}
+			)
+			SELECT public_comment_counts.*, public_comment_tree.id AS comment_id
+			FROM public_comment_counts
+			LEFT JOIN public_comment_tree ON true
+		) AS public_comment_page`;
 		const rows = await this.db
 			.select({
+				totalCount: sql`public_comment_page.total_count`.mapWith(toSafeInteger),
+				rootCount: sql`public_comment_page.root_count`.mapWith(toSafeInteger),
 				comment: comments,
 				metadata: commentRequestMetadata,
 				staffUser: {
@@ -647,83 +756,40 @@ export class CommentsRepository {
 					website: adminUsers.website,
 					avatarUrl: adminUsers.avatarUrl,
 				},
+				viewerVote: voteRecords.choice,
 			})
-			.from(comments)
-			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
+			.from(commentPage)
+			.leftJoin(comments, sql`${comments.id} = public_comment_page.comment_id`)
 			.leftJoin(
 				commentRequestMetadata,
 				eq(commentRequestMetadata.commentId, comments.id),
 			)
 			.leftJoin(adminUsers, eq(adminUsers.id, comments.authorUserId))
-			.where(
-				and(
-					eq(comments.pageThreadId, input.pageThreadId),
-					eq(pageThreads.kind, "public"),
-					eq(comments.status, "approved"),
-					isNull(comments.deletedAt),
-				),
+			.leftJoin(
+				voteRecords,
+				input.visitorId
+					? and(
+							eq(voteRecords.commentId, comments.id),
+							eq(voteRecords.visitorId, input.visitorId),
+						)
+					: sql`false`,
 			)
-			.orderBy(orderBy);
-		const allApprovedComments = rows.map((row) =>
-			mapCommentRequestMetadata(row.comment, row.metadata, row.staffUser),
-		);
-
-		const rootComments = allApprovedComments.filter(
-			(comment) => comment.parentId === null,
-		);
-		const paginatedRootComments = rootComments.slice(
-			input.offset,
-			input.offset + input.limit,
-		);
-		const includedCommentIds = new Set<string>(
-			paginatedRootComments.map((comment) => comment.id),
-		);
-
-		let changed = true;
-		while (changed) {
-			changed = false;
-			for (const comment of allApprovedComments) {
-				if (
-					comment.parentId &&
-					includedCommentIds.has(comment.parentId) &&
-					!includedCommentIds.has(comment.id)
-				) {
-					includedCommentIds.add(comment.id);
-					changed = true;
-				}
-			}
-		}
-
-		const selectedComments = allApprovedComments.filter((comment) =>
-			includedCommentIds.has(comment.id),
+			.orderBy(orderBy, asc(comments.id));
+		const selectedComments = rows.flatMap((row) =>
+			row.comment
+				? [mapCommentRequestMetadata(row.comment, row.metadata, row.staffUser)]
+				: [],
 		);
 		const viewerVoteMap = new Map<string, "up" | "down">();
-
-		if (input.visitorId && selectedComments.length > 0) {
-			const viewerVotes = await this.db
-				.select()
-				.from(voteRecords)
-				.where(
-					and(
-						eq(voteRecords.visitorId, input.visitorId),
-						inArray(
-							voteRecords.commentId,
-							selectedComments.map((comment) => comment.id),
-						),
-					),
-				);
-
-			for (const voteRecord of viewerVotes) {
-				viewerVoteMap.set(
-					voteRecord.commentId,
-					voteRecord.choice as "up" | "down",
-				);
+		for (const row of rows) {
+			if (row.comment && row.viewerVote) {
+				viewerVoteMap.set(row.comment.id, row.viewerVote as "up" | "down");
 			}
 		}
 
 		return {
-			totalCount: allApprovedComments.length,
-			rootCount: rootComments.length,
+			totalCount: rows[0]?.totalCount ?? 0,
+			rootCount: rows[0]?.rootCount ?? 0,
 			comments: selectedComments,
 			viewerVoteMap,
 		};

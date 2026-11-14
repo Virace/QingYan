@@ -1,5 +1,4 @@
 import { eq } from "drizzle-orm";
-
 import {
 	captchaSessions,
 	comments,
@@ -7,6 +6,7 @@ import {
 	siteSettings,
 	sites,
 } from "../src/db/schema";
+import { hashKey } from "../src/db/values";
 import { deriveCanonicalPageKeyFromPathname } from "../src/modules/shared/canonical-page-key";
 import { loginAsAdmin, withAdminWriteAuth } from "../tests/support/admin-login";
 import { createTestApp } from "../tests/support/test-fixtures";
@@ -49,6 +49,7 @@ async function main() {
 		await app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: canonicalPageKey,
+			pageKeyHash: hashKey(canonicalPageKey),
 			pageUrl,
 			status: "active",
 		});

@@ -19,7 +19,7 @@ import {
 
 interface Fixture {
 	workspace: TestWorkspace;
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	scheduledTasks: ScheduledTaskRepository;
 	taskRuns: TaskRunRepository;
 	eventLogs: TaskEventLogRepository;
@@ -35,15 +35,15 @@ afterEach(async () => {
 		await cleanup();
 	}
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
 async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-run-worker-");
-	applyCurrentMigrations(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyCurrentMigrations(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
 		name: "FangYuan",
@@ -60,7 +60,7 @@ async function createFixture(): Promise<Fixture> {
 	const [adminUser] = await clients.db.select().from(adminUsers).limit(1);
 	const fixture = {
 		workspace,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		scheduledTasks: new ScheduledTaskRepository(clients.db),
 		taskRuns: new TaskRunRepository(clients.db),
 		eventLogs: new TaskEventLogRepository(clients.db),
@@ -263,8 +263,8 @@ describe("TaskRunWorker", () => {
 
 	it("starts with the application and consumes queued scheduled task runs", async () => {
 		const workspace = createTestWorkspace("qingyan-task-worker-startup-");
-		applyCurrentMigrations(workspace.databaseFile);
-		const clients = createDatabaseClients(workspace.databaseFile);
+		await applyCurrentMigrations(workspace.databaseUrl);
+		const clients = createDatabaseClients(workspace.databaseUrl);
 		let runId = "";
 		try {
 			await clients.db.insert(sites).values({
@@ -307,11 +307,11 @@ describe("TaskRunWorker", () => {
 			});
 			runId = run.id;
 		} finally {
-			clients.sqlite.close();
+			await clients.close();
 		}
 
 		const app = await buildApp(
-			createTestConfig(workspace.databaseFile),
+			createTestConfig(workspace.databaseUrl),
 			undefined,
 			{
 				startNotificationRuntime: false,

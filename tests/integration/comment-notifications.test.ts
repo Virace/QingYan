@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	adminUsers,
 	adminUserSiteAccess,
+	adminUsers,
 	commenterNotificationPreferences,
 	comments,
 	notificationDeliveries,
@@ -13,22 +12,23 @@ import {
 	sites,
 	taskRuns,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
-import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { BackendUserNotificationPlanner } from "../../src/modules/notifications/backend-user-notification-planner";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
+import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
+import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
+import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
 import {
 	SiteNotificationEventsRepository,
 	siteBackendNotificationEventTypes,
 } from "../../src/modules/notifications/site-notification-events-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
-import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
-import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
-import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -70,6 +70,7 @@ async function seedActivePage(
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -555,6 +556,7 @@ describe("comment notifications", () => {
 			.values({
 				siteId: site.id,
 				pageKey: "post:admin-reply-notify",
+				pageKeyHash: hashKey("post:admin-reply-notify"),
 				pageTitle: "Admin Reply Notify",
 				pageUrl: "/post:admin-reply-notify",
 				commentCount: 1,

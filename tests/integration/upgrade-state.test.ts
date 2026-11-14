@@ -1,204 +1,144 @@
-import Database from "better-sqlite3";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-
-import { detectUpgradeRuntimeState } from "../../src/modules/upgrade/state";
 import { writePartialUpgradeMarker } from "../../src/modules/upgrade/partial-marker";
-import {
-	createTestConfig,
-	applyInitialMigration,
-} from "../support/test-fixtures";
+import { detectUpgradeRuntimeState } from "../../src/modules/upgrade/state";
+import { createLifecycleFixture } from "../support/lifecycle-fixture";
 
-function createWorkspace() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-upgrade-state-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const configPath = path.join(directory, "qingyan.yml");
-	return {
-		directory,
-		databaseFile,
-		configPath,
-		cleanup() {
-			rmSync(directory, { recursive: true, force: true });
-		},
-	};
-}
-
-function markCurrentDatabase(databaseFile: string, version: string) {
-	const sqlite = new Database(databaseFile);
-	try {
-		sqlite.exec(`
-			CREATE TABLE IF NOT EXISTS __qingyan_migrations (
-				name text PRIMARY KEY NOT NULL,
-				applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-			)
-		`);
-		sqlite
-			.prepare("INSERT INTO __qingyan_migrations (name) VALUES (?)")
-			.run("0000_initial.sql");
-		sqlite
-			.prepare(
-				"INSERT INTO __qingyan_upgrades (name, to_version, summary_json) VALUES (?, ?, ?)",
-			)
-			.run(`application-version:${version}`, version, "{}");
-		sqlite
-			.prepare(
-				"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
-			)
-			.run("default", "Default", "[]");
-		sqlite
-			.prepare(
-				"INSERT INTO admin_bootstrap_state (id, console_path, username, password_hash) VALUES (?, ?, ?, ?)",
-			)
-			.run(1, "/admin", "admin", "hash");
-	} finally {
-		sqlite.close();
-	}
-}
-
-describe("upgrade runtime state", () => {
-	it("classifies missing config as install state", () => {
-		const workspace = createWorkspace();
+describe("PostgreSQL lifecycle classification", () => {
+	it("classifies an empty target without creating tables", async () => {
+		const fixture = await createLifecycleFixture({ empty: true });
 		try {
-			const state = detectUpgradeRuntimeState({
-				configPath: workspace.configPath,
-				databaseFile: workspace.databaseFile,
-				createSqliteClient: (file) => new Database(file),
-				currentApplicationVersion: "0.1.0",
+			const state = await detectUpgradeRuntimeState({
+				configPath: fixture.configPath,
+				loadedConfig: fixture.config,
+				currentApplicationVersion: "0.2.5",
 			});
-
-			expect(existsSync(workspace.configPath)).toBe(false);
 			expect(state).toEqual({ state: "not_installed" });
+			expect(
+				(
+					await fixture.pool.query(
+						"SELECT tablename FROM pg_tables WHERE schemaname='public'",
+					)
+				).rows,
+			).toEqual([]);
+			expect(existsSync(fixture.configPath)).toBe(false);
 		} finally {
-			workspace.cleanup();
+			await fixture.cleanup();
 		}
 	});
-
-	it("classifies current config and database as normal", () => {
-		const workspace = createWorkspace();
+	it.each([
+		["0.2.5", "normal_current"],
+		["0.2.4", "upgrade_required"],
+		["0.2.6", "broken_config"],
+	])("classifies application version %s", async (version, state) => {
+		const fixture = await createLifecycleFixture({ version });
 		try {
-			applyInitialMigration(workspace.databaseFile);
-			markCurrentDatabase(workspace.databaseFile, "0.1.0");
-			writeFileSync(workspace.configPath, "server:\n", "utf-8");
-
-			const state = detectUpgradeRuntimeState({
-				configPath: workspace.configPath,
-				loadedConfig: createTestConfig(workspace.databaseFile),
-				databaseFile: workspace.databaseFile,
-				createSqliteClient: (file) => new Database(file),
-				currentApplicationVersion: "0.1.0",
-			});
-
-			expect(state).toEqual({ state: "normal_current" });
+			expect(
+				await detectUpgradeRuntimeState({
+					configPath: fixture.configPath,
+					loadedConfig: fixture.config,
+					currentApplicationVersion: "0.2.5",
+				}),
+			).toMatchObject({ state });
 		} finally {
-			workspace.cleanup();
+			await fixture.cleanup();
 		}
 	});
-
-	it("classifies old application upgrade ledger as upgrade required", () => {
-		const workspace = createWorkspace();
+	it("prioritizes partial marker over broken config", async () => {
+		const fixture = await createLifecycleFixture({ empty: true });
 		try {
-			applyInitialMigration(workspace.databaseFile);
-			markCurrentDatabase(workspace.databaseFile, "0.0.1");
-			writeFileSync(workspace.configPath, "server:\n", "utf-8");
-
-			const state = detectUpgradeRuntimeState({
-				configPath: workspace.configPath,
-				loadedConfig: createTestConfig(workspace.databaseFile),
-				databaseFile: workspace.databaseFile,
-				createSqliteClient: (file) => new Database(file),
-				currentApplicationVersion: "0.1.0",
-			});
-
-			expect(state.state).toBe("upgrade_required");
-			expect(state).toMatchObject({
-				plan: {
-					targetVersion: "0.1.0",
-					applicationUpgrades: [
-						{
-							name: "application-version:0.1.0",
-							fromVersion: "0.0.1",
-							toVersion: "0.1.0",
-						},
-					],
-				},
-			});
-		} finally {
-			workspace.cleanup();
-		}
-	});
-
-	it("classifies missing schema migration ledger as schema upgrade required", () => {
-		const workspace = createWorkspace();
-		try {
-			applyInitialMigration(workspace.databaseFile);
-			writeFileSync(workspace.configPath, "server:\n", "utf-8");
-
-			const state = detectUpgradeRuntimeState({
-				configPath: workspace.configPath,
-				loadedConfig: createTestConfig(workspace.databaseFile),
-				databaseFile: workspace.databaseFile,
-				createSqliteClient: (file) => new Database(file),
-				currentApplicationVersion: "0.1.0",
-			});
-
-			expect(state.state).toBe("upgrade_required");
-			expect(state).toMatchObject({
-				plan: {
-					schemaMigrations: [
-						{
-							name: "schema-migration-ledger",
-							description: "Create migration ledger",
-						},
-					],
-					applicationUpgrades: [],
-				},
-			});
-		} finally {
-			workspace.cleanup();
-		}
-	});
-
-	it("classifies partial upgrade marker as recovery required", () => {
-		const workspace = createWorkspace();
-		try {
-			const markerPath = path.join(workspace.directory, "partial-upgrade.json");
-			writeFileSync(workspace.configPath, "server:\n", "utf-8");
 			writePartialUpgradeMarker({
-				markerPath,
-				fromVersion: "0.0.1",
-				toVersion: "0.1.0",
-				planPath: "backup/upgrade-plan.json",
+				markerPath: fixture.markerPath,
+				fromVersion: "0.2.4",
+				toVersion: "0.2.5",
+				planPath: "plan.json",
 				backupDirectory: "backup",
-				currentStep: "schema-migrations",
-				now: () => new Date("2026-05-07T00:00:00.000Z"),
+				currentStep: "application-upgrades",
 			});
-
-			const state = detectUpgradeRuntimeState({
-				configPath: workspace.configPath,
-				loadedConfig: createTestConfig(workspace.databaseFile),
-				databaseFile: workspace.databaseFile,
-				createSqliteClient: (file) => new Database(file),
-				currentApplicationVersion: "0.1.0",
-				partialUpgradeMarkerPath: markerPath,
-			});
-
-			expect(state).toEqual({
+			expect(
+				await detectUpgradeRuntimeState({
+					configPath: fixture.configPath,
+					configError: new Error("invalid"),
+					currentApplicationVersion: "0.2.5",
+					partialUpgradeMarkerPath: fixture.markerPath,
+				}),
+			).toMatchObject({
 				state: "recovery_required",
 				reason: "partial_upgrade_marker",
-				recovery: {
-					kind: "qingyan_partial_upgrade",
-					startedAt: "2026-05-07T00:00:00.000Z",
-					fromVersion: "0.0.1",
-					toVersion: "0.1.0",
-					planPath: "backup/upgrade-plan.json",
-					backupDirectory: "backup",
-					currentStep: "schema-migrations",
-				},
 			});
 		} finally {
-			workspace.cleanup();
+			await fixture.cleanup();
+		}
+	});
+	it("requires the same conversion ID to complete conversion", async () => {
+		const fixture = await createLifecycleFixture();
+		try {
+			await fixture.pool.query(
+				"INSERT INTO __qingyan_upgrades(name,to_version,summary_json) VALUES('sqlite-to-postgresql-started','0.2.5',$1),('sqlite-to-postgresql-completed','0.2.5',$2)",
+				[
+					JSON.stringify({ conversionId: "source-a" }),
+					JSON.stringify({ conversionId: "source-b" }),
+				],
+			);
+			expect(
+				await detectUpgradeRuntimeState({
+					configPath: fixture.configPath,
+					loadedConfig: fixture.config,
+					currentApplicationVersion: "0.2.5",
+				}),
+			).toMatchObject({ state: "recovery_required" });
+			await fixture.pool.query(
+				"UPDATE __qingyan_upgrades SET summary_json=$1 WHERE name='sqlite-to-postgresql-completed'",
+				[JSON.stringify({ conversionId: "source-a" })],
+			);
+			expect(
+				await detectUpgradeRuntimeState({
+					configPath: fixture.configPath,
+					loadedConfig: fixture.config,
+					currentApplicationVersion: "0.2.5",
+				}),
+			).toEqual({ state: "normal_current" });
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+	it("rejects an unknown migration before normal startup", async () => {
+		const fixture = await createLifecycleFixture();
+		try {
+			await fixture.pool.query(
+				"INSERT INTO __qingyan_migrations(name,checksum) VALUES('9999_future.sql','unknown')",
+			);
+			expect(
+				await detectUpgradeRuntimeState({
+					configPath: fixture.configPath,
+					loadedConfig: fixture.config,
+					currentApplicationVersion: "0.2.5",
+				}),
+			).toMatchObject({
+				state: "broken_config",
+				reason: "database_schema_too_new",
+			});
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+	it("connection failure never classifies as an empty target", async () => {
+		const fixture = await createLifecycleFixture({ empty: true });
+		try {
+			fixture.config.database.url =
+				"postgresql://invalid:invalid@127.0.0.1:1/invalid";
+			expect(
+				await detectUpgradeRuntimeState({
+					configPath: fixture.configPath,
+					loadedConfig: fixture.config,
+					currentApplicationVersion: "0.2.5",
+				}),
+			).toMatchObject({
+				state: "broken_config",
+				reason: "database_unavailable",
+			});
+		} finally {
+			await fixture.cleanup();
 		}
 	});
 });

@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	captchaSessions,
 	sitePageRegistry,
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
@@ -43,6 +43,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});

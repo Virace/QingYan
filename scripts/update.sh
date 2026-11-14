@@ -29,8 +29,6 @@ NETWORK_PROFILE="auto"
 APT_MAIN_MIRROR=""
 COREPACK_NPM_REGISTRY=""
 PNPM_REGISTRY=""
-NODE_DIST_URL=""
-BETTER_SQLITE3_BINARY_HOST=""
 PHASE="初始化"
 REPOSITORY_ROOT=""
 PREVIOUS_COMMIT=""
@@ -202,7 +200,7 @@ wait_for_health() {
 		if [[ -n "$container_id" ]]; then
 			state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
 			if [[ "$state" == "healthy" || "$state" == "running" ]]; then
-				return 0
+                docker compose exec -T "$SERVICE_NAME" node -e 'fetch("http://127.0.0.1:4401/qingyan/healthz").then(async r=>{const b=await r.json();if(!r.ok||b.mode!=="normal")process.exit(1)}).catch(()=>process.exit(1))' </dev/null && return 0
 			fi
 			if [[ "$state" == "unhealthy" || "$state" == "exited" || "$state" == "dead" ]]; then
 				fail "容器状态为 $state。"
@@ -248,15 +246,11 @@ apply_network_profile() {
 			APT_MAIN_MIRROR="http://deb.debian.org/debian"
 			COREPACK_NPM_REGISTRY="https://registry.npmjs.org"
 			PNPM_REGISTRY="https://registry.npmjs.org"
-			NODE_DIST_URL="https://nodejs.org/download/release"
-			BETTER_SQLITE3_BINARY_HOST="https://github.com/WiseLibs/better-sqlite3/releases/download"
 			;;
 		cn)
 			APT_MAIN_MIRROR="http://mirrors.tuna.tsinghua.edu.cn/debian"
 			COREPACK_NPM_REGISTRY="https://registry.npmmirror.com"
 			PNPM_REGISTRY="https://registry.npmmirror.com"
-			NODE_DIST_URL="https://npmmirror.com/mirrors/node"
-			BETTER_SQLITE3_BINARY_HOST="https://registry.npmmirror.com/-/binary/better-sqlite3"
 			;;
 	esac
 }
@@ -283,13 +277,11 @@ case "$NETWORK_PROFILE" in
 		command -v curl > /dev/null || fail "auto 网络配置档需要 curl；也可以显式使用 --network-profile official 或 cn。"
 		command -v awk > /dev/null || fail "auto 网络配置档需要 awk；也可以显式使用 --network-profile official 或 cn。"
 		official_latency="$(probe_network_route \
-			"http://deb.debian.org/debian/dists/bookworm/InRelease" \
-			"https://registry.npmjs.org/-/ping" \
-			"https://nodejs.org/download/release/latest-v24.x/SHASUMS256.txt" || true)"
+			"http://deb.debian.org/debian/dists/trixie/InRelease" \
+			"https://registry.npmjs.org/-/ping" || true)"
 		cn_latency="$(probe_network_route \
-			"http://mirrors.tuna.tsinghua.edu.cn/debian/dists/bookworm/InRelease" \
-			"https://registry.npmmirror.com/-/ping" \
-			"https://npmmirror.com/mirrors/node/latest-v24.x/SHASUMS256.txt" || true)"
+			"http://mirrors.tuna.tsinghua.edu.cn/debian/dists/trixie/InRelease" \
+			"https://registry.npmmirror.com/-/ping" || true)"
 		if [[ -z "$official_latency" && -z "$cn_latency" ]]; then
 			fail "official 和 cn 网络配置档均不可用；请检查网络或显式选择配置档后重试。"
 		elif [[ -z "$official_latency" ]]; then
@@ -316,8 +308,6 @@ esac
 printf '  APT 主仓库：%s\n' "$APT_MAIN_MIRROR"
 printf '  Corepack/npm registry：%s\n' "$COREPACK_NPM_REGISTRY"
 printf '  pnpm registry：%s\n' "$PNPM_REGISTRY"
-printf '  Node headers：%s\n' "$NODE_DIST_URL"
-printf '  better-sqlite3：%s\n' "$BETTER_SQLITE3_BINARY_HOST"
 
 if [[ -n "$TARGET_TAG" && ! "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 	fail "目标版本必须是稳定 tag，例如 v0.2.5。"
@@ -386,7 +376,8 @@ fi
 PHASE="整站备份"
 BACKUP_DIRECTORY="/app/data/backups/pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
 log "创建升级前整站备份"
-docker compose exec -T "$SERVICE_NAME" qyctl backup "$BACKUP_DIRECTORY" --yes </dev/null
+docker compose stop "$SERVICE_NAME"
+docker compose run --rm --no-deps "$SERVICE_NAME" qyctl backup "$BACKUP_DIRECTORY" --yes --service-stopped </dev/null
 
 PHASE="切换 Release"
 if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
@@ -408,8 +399,6 @@ docker compose --progress plain build --pull \
 	--build-arg "QINGYAN_APT_MAIN_MIRROR=$APT_MAIN_MIRROR" \
 	--build-arg "QINGYAN_COREPACK_NPM_REGISTRY=$COREPACK_NPM_REGISTRY" \
 	--build-arg "QINGYAN_PNPM_REGISTRY=$PNPM_REGISTRY" \
-	--build-arg "QINGYAN_NODE_DIST_URL=$NODE_DIST_URL" \
-	--build-arg "QINGYAN_BETTER_SQLITE3_BINARY_HOST=$BETTER_SQLITE3_BINARY_HOST" \
 	"$SERVICE_NAME"
 
 PHASE="启动新容器"
@@ -428,7 +417,8 @@ fi
 
 PHASE="应用数据升级"
 log "应用数据升级"
-docker compose exec -T "$SERVICE_NAME" qyctl upgrade --yes </dev/null
+docker compose stop "$SERVICE_NAME"
+docker compose run --rm --no-deps "$SERVICE_NAME" qyctl upgrade --yes --service-stopped </dev/null
 
 PHASE="重启并验收"
 log "重启并等待健康状态"

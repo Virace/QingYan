@@ -1,4 +1,4 @@
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import {
@@ -15,21 +15,21 @@ export class AdminUsersService {
 	private readonly repository: AdminUsersRepository;
 
 	public constructor(
-		db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly security?: SecurityToolkit,
 	) {
 		this.repository = new AdminUsersRepository(db);
 	}
 
-	private async serializeUser(userId: number) {
-		const user = await this.repository.getUserById(userId);
+	private async serializeUser(userId: number, repository = this.repository) {
+		const user = await repository.getUserById(userId);
 		if (!user) {
 			throw new ResourceNotFoundError(
 				"ADMIN_USER_NOT_FOUND",
 				"后台用户不存在。",
 			);
 		}
-		const group = await this.repository.getUserGroup(user.id);
+		const group = await repository.getUserGroup(user.id);
 		if (!group) {
 			throw new AppError(
 				500,
@@ -38,9 +38,7 @@ export class AdminUsersService {
 			);
 		}
 		const siteKeys =
-			group.key === "admin"
-				? []
-				: await this.repository.listUserSiteKeys(user.id);
+			group.key === "admin" ? [] : await repository.listUserSiteKeys(user.id);
 		return {
 			id: user.id,
 			username: user.username,
@@ -111,14 +109,17 @@ export class AdminUsersService {
 		};
 	}
 
-	private async assertGroupAssignable(input: {
-		session: AuthenticatedAdminSession;
-		groupKey: AdminGroupKey;
-	}) {
+	private async assertGroupAssignable(
+		input: {
+			session: AuthenticatedAdminSession;
+			groupKey: AdminGroupKey;
+		},
+		repository = this.repository,
+	) {
 		if (input.groupKey === "admin") {
 			requireInitialAdmin(input.session);
 		}
-		const group = await this.repository.getGroupByKey(input.groupKey);
+		const group = await repository.getGroupByKey(input.groupKey);
 		if (!group) {
 			throw new ResourceNotFoundError(
 				"ADMIN_GROUP_NOT_FOUND",
@@ -128,9 +129,12 @@ export class AdminUsersService {
 		return group;
 	}
 
-	private async resolveSiteIds(siteKeys: string[]) {
+	private async resolveSiteIds(
+		siteKeys: string[],
+		repository = this.repository,
+	) {
 		const uniqueKeys = Array.from(new Set(siteKeys));
-		const sites = await this.repository.listSiteIdsByKeys(uniqueKeys);
+		const sites = await repository.listSiteIdsByKeys(uniqueKeys);
 		if (sites.length !== uniqueKeys.length) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
@@ -168,12 +172,15 @@ export class AdminUsersService {
 		});
 	}
 
-	private async assertCanMutateTarget(input: {
-		session: AuthenticatedAdminSession;
-		target: Awaited<ReturnType<AdminUsersService["serializeUser"]>>;
-		nextGroupKey?: AdminGroupKey;
-		nextStatus?: "active" | "disabled" | "deleted";
-	}) {
+	private async assertCanMutateTarget(
+		input: {
+			session: AuthenticatedAdminSession;
+			target: Awaited<ReturnType<AdminUsersService["serializeUser"]>>;
+			nextGroupKey?: AdminGroupKey;
+			nextStatus?: "active" | "disabled" | "deleted";
+		},
+		repository = this.repository,
+	) {
 		const protectsInitialAdmin =
 			input.target.isInitialAdmin &&
 			((input.nextStatus !== undefined && input.nextStatus !== "active") ||
@@ -200,7 +207,7 @@ export class AdminUsersService {
 				input.nextStatus === "deleted" ||
 				(input.nextGroupKey !== undefined && input.nextGroupKey !== "admin"))
 		) {
-			const remainingAdmins = await this.repository.countActiveAdminsExcluding(
+			const remainingAdmins = await repository.countActiveAdminsExcluding(
 				input.target.id,
 			);
 			if (remainingAdmins === 0) {
@@ -242,37 +249,46 @@ export class AdminUsersService {
 		siteKeys: string[];
 		passwordChangeRequired: boolean;
 	}) {
-		const group = await this.assertGroupAssignable(input);
-		const siteIds =
-			input.groupKey === "admin"
-				? []
-				: await this.resolveSiteIds(input.siteKeys);
-		const user = await this.repository.createUser({
-			username: input.username,
-			email: input.email,
-			displayName: input.displayName,
-			passwordHash: createPasswordHash(input.password),
-			passwordChangeRequired: input.passwordChangeRequired,
-		});
-		if (!user) {
-			throw new AppError(500, "ADMIN_USER_CREATE_FAILED", "后台用户创建失败。");
-		}
-		await this.repository.setUserGroup({
-			userId: user.id,
-			groupId: group.id,
-		});
-		await this.repository.replaceUserSiteAccess({
-			userId: user.id,
-			siteIds,
-			createdByUserId: input.session.user.id,
+		const passwordHash = createPasswordHash(input.password);
+		const user = await this.db.transaction(async (tx) => {
+			const repository = new AdminUsersRepository(tx);
+			const group = await this.assertGroupAssignable(input, repository);
+			const siteIds =
+				input.groupKey === "admin"
+					? []
+					: await this.resolveSiteIds(input.siteKeys, repository);
+			const createdUser = await repository.createUser({
+				username: input.username,
+				email: input.email,
+				displayName: input.displayName,
+				passwordHash,
+				passwordChangeRequired: input.passwordChangeRequired,
+			});
+			if (!createdUser) {
+				throw new AppError(
+					500,
+					"ADMIN_USER_CREATE_FAILED",
+					"后台用户创建失败。",
+				);
+			}
+			await repository.setUserGroup({
+				userId: createdUser.id,
+				groupId: group.id,
+			});
+			await repository.replaceUserSiteAccess({
+				userId: createdUser.id,
+				siteIds,
+				createdByUserId: input.session.user.id,
+			});
+			return this.serializeUser(createdUser.id, repository);
 		});
 		await this.writeUserAudit({
 			session: input.session,
 			action: "admin.user.created",
-			target: await this.serializeUser(user.id),
+			target: user,
 		});
 		return {
-			user: await this.serializeUser(user.id),
+			user,
 		};
 	}
 
@@ -286,53 +302,76 @@ export class AdminUsersService {
 		status?: "active" | "disabled" | "deleted";
 		passwordChangeRequired?: boolean;
 	}) {
-		const target = await this.serializeUser(input.userId);
-		const nextGroupKey = input.groupKey ?? (target.groupKey as AdminGroupKey);
-		await this.assertCanMutateTarget({
-			session: input.session,
-			target,
-			nextGroupKey,
-			nextStatus: input.status,
-		});
-		const group = input.groupKey
-			? await this.assertGroupAssignable({
-					session: input.session,
-					groupKey: input.groupKey,
-				})
-			: undefined;
+		const { target, user, revokedSessions } = await this.db.transaction(
+			async (tx) => {
+				const repository = new AdminUsersRepository(tx);
+				await repository.lockUser(input.userId);
+				const target = await this.serializeUser(input.userId, repository);
+				const nextGroupKey =
+					input.groupKey ?? (target.groupKey as AdminGroupKey);
+				await this.assertCanMutateTarget(
+					{
+						session: input.session,
+						target,
+						nextGroupKey,
+						nextStatus: input.status,
+					},
+					repository,
+				);
+				const group = input.groupKey
+					? await this.assertGroupAssignable(
+							{
+								session: input.session,
+								groupKey: input.groupKey,
+							},
+							repository,
+						)
+					: undefined;
+				const siteIds =
+					input.siteKeys || input.groupKey
+						? nextGroupKey === "admin"
+							? []
+							: await this.resolveSiteIds(
+									input.siteKeys ?? target.siteKeys,
+									repository,
+								)
+						: undefined;
 
-		await this.repository.updateUser({
-			userId: input.userId,
-			email: input.email,
-			displayName: input.displayName,
-			status: input.status,
-			passwordChangeRequired: input.passwordChangeRequired,
-		});
-		if (group) {
-			await this.repository.setUserGroup({
-				userId: input.userId,
-				groupId: group.id,
-			});
-		}
-		if (input.siteKeys || input.groupKey) {
-			const siteIds =
-				nextGroupKey === "admin"
-					? []
-					: await this.resolveSiteIds(input.siteKeys ?? target.siteKeys);
-			await this.repository.replaceUserSiteAccess({
-				userId: input.userId,
-				siteIds,
-				createdByUserId: input.session.user.id,
-			});
-		}
-		const revokedSessions =
-			input.status === "disabled" || input.status === "deleted"
-				? await this.repository.revokeSessionsForUser({
+				await repository.updateUser({
+					userId: input.userId,
+					email: input.email,
+					displayName: input.displayName,
+					status: input.status,
+					passwordChangeRequired: input.passwordChangeRequired,
+				});
+				if (group) {
+					await repository.setUserGroup({
 						userId: input.userId,
-						revokedByUserId: input.session.user.id,
-						reason: input.status,
-					})
-				: 0;
+						groupId: group.id,
+					});
+				}
+				if (siteIds) {
+					await repository.replaceUserSiteAccess({
+						userId: input.userId,
+						siteIds,
+						createdByUserId: input.session.user.id,
+					});
+				}
+				const revokedSessions =
+					input.status === "disabled" || input.status === "deleted"
+						? await repository.revokeSessionsForUser({
+								userId: input.userId,
+								revokedByUserId: input.session.user.id,
+								reason: input.status,
+							})
+						: 0;
+				return {
+					target,
+					user: await this.serializeUser(input.userId, repository),
+					revokedSessions,
+				};
+			},
+		);
 		await this.writeUserAudit({
 			session: input.session,
 			action:
@@ -356,7 +395,7 @@ export class AdminUsersService {
 			},
 		});
 		return {
-			user: await this.serializeUser(input.userId),
+			user,
 			revokedSessions,
 		};
 	}
@@ -379,23 +418,36 @@ export class AdminUsersService {
 		loginBlockedUntil?: string;
 		reason?: string;
 	}) {
-		const target = await this.serializeUser(input.userId);
-		await this.assertCanMutateTarget({
-			session: input.session,
-			target,
-		});
 		const loginBlockedUntil = this.resolveLoginBlockedUntil(input);
-		await this.repository.updateUser({
-			userId: input.userId,
-			loginBlockedUntil,
-		});
 		const reason = input.reason ?? "forced_logout";
-		const revokedSessions = await this.repository.revokeSessionsForUser({
-			userId: input.userId,
-			revokedByUserId: input.session.user.id,
-			reason,
-		});
-		const user = await this.serializeUser(input.userId);
+		const { target, user, revokedSessions } = await this.db.transaction(
+			async (tx) => {
+				const repository = new AdminUsersRepository(tx);
+				await repository.lockUser(input.userId);
+				const target = await this.serializeUser(input.userId, repository);
+				await this.assertCanMutateTarget(
+					{
+						session: input.session,
+						target,
+					},
+					repository,
+				);
+				await repository.updateUser({
+					userId: input.userId,
+					loginBlockedUntil,
+				});
+				const revokedSessions = await repository.revokeSessionsForUser({
+					userId: input.userId,
+					revokedByUserId: input.session.user.id,
+					reason,
+				});
+				return {
+					target,
+					user: await this.serializeUser(input.userId, repository),
+					revokedSessions,
+				};
+			},
+		);
 		await this.writeUserAudit({
 			session: input.session,
 			action: "admin.user.sessions_revoked",
@@ -419,21 +471,36 @@ export class AdminUsersService {
 		password: string;
 		passwordChangeRequired: boolean;
 	}) {
-		const target = await this.serializeUser(input.userId);
-		await this.assertCanMutateTarget({
-			session: input.session,
-			target,
-		});
-		await this.repository.updateUserPassword({
-			userId: input.userId,
-			passwordHash: createPasswordHash(input.password),
-			passwordChangeRequired: input.passwordChangeRequired,
-		});
-		const revokedSessions = await this.repository.revokeSessionsForUser({
-			userId: input.userId,
-			revokedByUserId: input.session.user.id,
-			reason: "password_reset",
-		});
+		const passwordHash = createPasswordHash(input.password);
+		const { target, user, revokedSessions } = await this.db.transaction(
+			async (tx) => {
+				const repository = new AdminUsersRepository(tx);
+				await repository.lockUser(input.userId);
+				const target = await this.serializeUser(input.userId, repository);
+				await this.assertCanMutateTarget(
+					{
+						session: input.session,
+						target,
+					},
+					repository,
+				);
+				await repository.updateUserPassword({
+					userId: input.userId,
+					passwordHash,
+					passwordChangeRequired: input.passwordChangeRequired,
+				});
+				const revokedSessions = await repository.revokeSessionsForUser({
+					userId: input.userId,
+					revokedByUserId: input.session.user.id,
+					reason: "password_reset",
+				});
+				return {
+					target,
+					user: await this.serializeUser(input.userId, repository),
+					revokedSessions,
+				};
+			},
+		);
 		await this.writeUserAudit({
 			session: input.session,
 			action: "admin.user.password_reset",
@@ -445,7 +512,7 @@ export class AdminUsersService {
 			},
 		});
 		return {
-			user: await this.serializeUser(input.userId),
+			user,
 			revokedSessions,
 		};
 	}

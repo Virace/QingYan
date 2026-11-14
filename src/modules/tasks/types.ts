@@ -77,6 +77,7 @@ export interface TaskRunRecord {
 	priority: number;
 	concurrencyKey: string | null;
 	workerId: string | null;
+	claimToken?: string | null;
 	lockConflictWithRunId: string | null;
 	lockConflictWithTaskName: string | null;
 	ownerUserIdSnapshot: number | null;
@@ -121,9 +122,22 @@ export type TaskClaimOptions = TaskClaimScope & {
 export interface TaskQueue {
 	enqueue(task: TaskQueuePayload): Promise<TaskRunRecord>;
 	claim(worker: string, options?: TaskClaimOptions): Promise<TaskRunRecord[]>;
-	ack(taskId: string, result: unknown): Promise<void>;
-	retry(taskId: string, error: unknown, runAfter: string): Promise<void>;
-	fail(taskId: string, error: unknown): Promise<void>;
+	ack(
+		taskId: string,
+		result: unknown,
+		claimToken?: string | null,
+	): Promise<void>;
+	retry(
+		taskId: string,
+		error: unknown,
+		runAfter: string,
+		claimToken?: string | null,
+	): Promise<void>;
+	fail(
+		taskId: string,
+		error: unknown,
+		claimToken?: string | null,
+	): Promise<void>;
 	cancel(taskId: string, reason: unknown): Promise<void>;
 }
 

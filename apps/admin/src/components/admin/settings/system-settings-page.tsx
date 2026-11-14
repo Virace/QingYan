@@ -33,6 +33,7 @@ import {
 	textareaClass,
 } from "../shared/admin-ui";
 import { useAdminConfirmDialog } from "../shared/confirm-dialog";
+import { IpRegionStatusPanel } from "./ip-region-status-panel";
 import {
 	captchaProviderLabels,
 	ipRegionCachePolicyLabels,
@@ -1801,6 +1802,7 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 							</Tabs.Content>
 							<Tabs.Content value="ip-region">
 								<div className="grid gap-4 md:grid-cols-2">
+									<IpRegionStatusPanel />
 									<SettingsSection
 										title="IP 数据库"
 										description="系统总开关控制是否允许解析 IP 地域；站点设置仍决定具体站点是否公开展示整理后的地区。"

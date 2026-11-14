@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { commenterNotificationPreferences } from "../../db/schema";
 import {
 	hashNotificationEmail,
@@ -15,7 +15,7 @@ function createPreferenceId(): string {
 }
 
 export class CommenterPreferencesRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async upsertFromCommentForm(input: {
 		siteId: number;

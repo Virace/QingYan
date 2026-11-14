@@ -11,6 +11,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import {
@@ -41,6 +42,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -105,6 +107,7 @@ describe("POST /qingyan/api/comments", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/trashed-comment/",
+			pageKeyHash: hashKey("/posts/trashed-comment/"),
 			pageUrl: "/posts/trashed-comment/",
 			status: "trash",
 			trashedAt: "2026-05-29T00:00:00.000Z",
@@ -152,6 +155,7 @@ describe("POST /qingyan/api/comments", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/stale-comment/",
+			pageKeyHash: hashKey("/posts/stale-comment/"),
 			pageUrl: "/posts/stale-comment/",
 			status: "stale",
 		});

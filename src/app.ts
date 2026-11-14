@@ -29,7 +29,6 @@ import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { createDevMemoryRoutes } from "./modules/dev/memory-routes";
 import { DevMockService } from "./modules/dev/mock-service";
 import { registerDatabaseDevRoutes } from "./modules/dev/routes";
-import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
 import type { EmailSender } from "./modules/notifications/channels/email-channel";
@@ -61,6 +60,7 @@ interface BuildAppOptions {
 	emailSender?: EmailSender;
 	adminProfileEmailSender?: AdminProfileEmailSender;
 	startNotificationRuntime?: boolean;
+	startBackgroundRuntime?: boolean;
 }
 
 function registerBaseRoutes(
@@ -68,10 +68,17 @@ function registerBaseRoutes(
 	openApi: OpenApiDocument,
 	publicPath: string,
 ): void {
-	app.get(joinPublicPath(publicPath, "/healthz"), async () => ({
-		service: "QingYan",
-		status: "ok",
-	}));
+	app.get(joinPublicPath(publicPath, "/healthz"), async (_, reply) => {
+		try {
+			const query = { text: "SELECT 1", query_timeout: 5000 };
+			if (app.databasePool) await app.databasePool.query(query);
+			return { service: "QingYan", status: "ok", mode: "normal" };
+		} catch {
+			return reply
+				.code(503)
+				.send({ service: "QingYan", status: "unavailable", mode: "normal" });
+		}
+	});
 	app.get(joinPublicPath(publicPath, "/openapi.yaml"), async (_, reply) =>
 		reply.type("application/yaml; charset=utf-8").send(openApi.yamlText),
 	);
@@ -136,6 +143,10 @@ export async function buildApp(
 	app.decorate(
 		"notificationRuntimeAutoStart",
 		options.startNotificationRuntime ?? true,
+	);
+	app.decorate(
+		"backgroundRuntimeAutoStart",
+		options.startBackgroundRuntime ?? true,
 	);
 	if (options.akismetClient) {
 		app.decorate("akismetClient", options.akismetClient);
@@ -336,9 +347,6 @@ export async function buildApp(
 	});
 	await app.register(adminProfileRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/profile"),
-	});
-	await app.register(adminImportExportRoutes, {
-		prefix: joinPublicPath(publicPath, "/api/admin/import-export"),
 	});
 
 	return app;

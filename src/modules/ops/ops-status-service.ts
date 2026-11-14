@@ -25,7 +25,7 @@ export interface OpsStatus {
 	};
 	backup: {
 		format: "qingyan.full-backup";
-		provider: "sqlite";
+		provider: "postgresql";
 	};
 	recovery: {
 		manualCommands: string[];
@@ -53,8 +53,8 @@ export class OpsStatusService {
 		},
 	) {}
 
-	public getStatus(): OpsStatus {
-		const upgradeState = this.input.upgradeService.publicState();
+	public async getStatus(): Promise<OpsStatus> {
+		const upgradeState = await this.input.upgradeService.publicState();
 		return {
 			version: {
 				current: this.input.version,
@@ -79,7 +79,7 @@ export class OpsStatusService {
 			},
 			backup: {
 				format: "qingyan.full-backup",
-				provider: "sqlite",
+				provider: "postgresql",
 			},
 			recovery: {
 				manualCommands: dockerRecoveryCommands(),

@@ -5,13 +5,13 @@ import {
 	gt,
 	inArray,
 	isNull,
-	like,
+	ilike,
 	ne,
 	or,
 	sql,
 } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	adminGroups,
 	adminSessions,
@@ -24,7 +24,7 @@ import {
 import type { AdminGroupKey } from "./permissions";
 
 export class AdminUsersRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async getGroupByKey(key: AdminGroupKey) {
 		const [group] = await this.db
@@ -89,6 +89,14 @@ export class AdminUsersRepository {
 		return user;
 	}
 
+	public async lockUser(userId: number) {
+		await this.db
+			.select({ id: adminUsers.id })
+			.from(adminUsers)
+			.where(eq(adminUsers.id, userId))
+			.for("no key update");
+	}
+
 	public async listUsers(input: {
 		siteKey?: string;
 		search?: string;
@@ -97,9 +105,9 @@ export class AdminUsersRepository {
 	}) {
 		const searchFilter = input.search
 			? or(
-					like(adminUsers.username, `%${input.search}%`),
-					like(adminUsers.email, `%${input.search}%`),
-					like(adminUsers.displayName, `%${input.search}%`),
+					ilike(adminUsers.username, `%${input.search}%`),
+					ilike(adminUsers.email, `%${input.search}%`),
+					ilike(adminUsers.displayName, `%${input.search}%`),
 				)
 			: undefined;
 		const siteFilter = input.siteKey
@@ -267,22 +275,13 @@ export class AdminUsersRepository {
 	}
 
 	public async setUserGroup(input: { userId: number; groupId: number }) {
-		const [existing] = await this.db
-			.select()
-			.from(adminUserGroups)
-			.where(eq(adminUserGroups.userId, input.userId))
-			.limit(1);
-		if (existing) {
-			await this.db
-				.update(adminUserGroups)
-				.set({
-					groupId: input.groupId,
-				})
-				.where(eq(adminUserGroups.userId, input.userId));
-			return;
-		}
-
-		await this.db.insert(adminUserGroups).values(input);
+		await this.db
+			.insert(adminUserGroups)
+			.values(input)
+			.onConflictDoUpdate({
+				target: adminUserGroups.userId,
+				set: { groupId: input.groupId },
+			});
 	}
 
 	public async replaceUserSiteAccess(input: {

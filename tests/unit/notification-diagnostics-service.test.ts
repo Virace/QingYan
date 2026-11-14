@@ -10,10 +10,6 @@ import {
 } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { BackendUserNotificationPreferencesRepository } from "../../src/modules/notifications/backend-user-preferences-repository";
-import {
-	type SiteBackendNotificationEventType,
-	SiteNotificationEventsRepository,
-} from "../../src/modules/notifications/site-notification-events-repository";
 import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { EmailReputationRepository } from "../../src/modules/notifications/email-reputation-repository";
 import {
@@ -21,6 +17,10 @@ import {
 	NotificationDiagnosticsService,
 } from "../../src/modules/notifications/notification-diagnostics-service";
 import type { NotificationRuntimeState } from "../../src/modules/notifications/notification-runtime";
+import {
+	type SiteBackendNotificationEventType,
+	SiteNotificationEventsRepository,
+} from "../../src/modules/notifications/site-notification-events-repository";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { createTestApp } from "../support/test-fixtures";
 

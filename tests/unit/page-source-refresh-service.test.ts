@@ -1,12 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { createDatabaseClients } from "../../src/db/client";
-import { applyDatabaseMigrations } from "../../src/db/migrations";
 import {
 	pageThreads,
 	pendingPageCandidates,
@@ -14,25 +8,30 @@ import {
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { PageSourceRefreshService } from "../../src/modules/page-registry/source-refresh-service";
 import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
+import {
+	applyCurrentMigrations,
+	createTestWorkspace,
+} from "../support/test-fixtures";
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
-		cleanup();
+		await cleanup();
 	}
 });
 
-function createFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-page-source-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const clients = createDatabaseClients(databaseFile);
-	applyDatabaseMigrations(clients.sqlite);
-	cleanups.push(() => {
-		clients.sqlite.close();
-		rmSync(directory, { recursive: true, force: true });
+async function createFixture() {
+	const workspace = createTestWorkspace("qingyan-page-source-");
+	const databaseUrl = workspace.databaseUrl;
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
+	await applyCurrentMigrations(databaseUrl);
+	cleanups.push(async () => {
+		await clients.close();
+		await workspace.cleanup();
 	});
 	return clients;
 }
@@ -59,7 +58,7 @@ function createTaskContext(
 	};
 }
 
-async function seedSite(fixture: ReturnType<typeof createFixture>) {
+async function seedSite(fixture: Awaited<ReturnType<typeof createFixture>>) {
 	await fixture.db.insert(sites).values({
 		id: 1,
 		siteKey: "fangyuan",
@@ -71,7 +70,7 @@ async function seedSite(fixture: ReturnType<typeof createFixture>) {
 }
 
 function createService(
-	fixture: ReturnType<typeof createFixture>,
+	fixture: Awaited<ReturnType<typeof createFixture>>,
 	fetchText: (
 		url: string,
 		options: {
@@ -118,7 +117,7 @@ async function runRefresh(
 
 describe("PageSourceRefreshService", () => {
 	it("creates active registry pages from sitemap URL payloads", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const fetchCalls: string[] = [];
 		const { service } = createService(fixture, async (url) => {
@@ -160,7 +159,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("rejects sitemap URLs outside allowed origins before fetch", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const fetchCalls: string[] = [];
 		const { service } = createService(fixture, async (url) => {
@@ -177,7 +176,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("creates active registry pages from sitemap index child sitemaps", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const fetchCalls: Array<{
 			url: string;
@@ -264,7 +263,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("rejects sitemap index child URLs outside allowed origins", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const fetchCalls: string[] = [];
 		const { service } = createService(fixture, async (url) => {
@@ -288,7 +287,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("marks missing site pages as stale in replace mode", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		let response = [
 			"<urlset>",
@@ -313,11 +312,12 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("does not restore protected page statuses during refresh", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
 			pageKey: "/posts/trash/",
+			pageKeyHash: hashKey("/posts/trash/"),
 			pageUrl: "/old/",
 			title: "Old",
 			status: "trash",
@@ -342,24 +342,27 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("reports processed, updated, skipped, failed, and stale counters", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		await fixture.db.insert(sitePageRegistry).values([
 			{
 				siteId: 1,
 				pageKey: "/posts/stale-seed/",
+				pageKeyHash: hashKey("/posts/stale-seed/"),
 				pageUrl: "/posts/stale-seed/",
 				status: "active",
 			},
 			{
 				siteId: 1,
 				pageKey: "/posts/ignored/",
+				pageKeyHash: hashKey("/posts/ignored/"),
 				pageUrl: "/posts/ignored/",
 				status: "ignored",
 			},
 			{
 				siteId: 1,
 				pageKey: "/posts/missing/",
+				pageKeyHash: hashKey("/posts/missing/"),
 				pageUrl: "/posts/missing/",
 				status: "active",
 			},
@@ -387,17 +390,19 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("writes visible refresh counter details into task log messages", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
 			pageKey: "/posts/existing/",
+			pageKeyHash: hashKey("/posts/existing/"),
 			pageUrl: "/posts/existing/",
 			status: "active",
 		});
 		await fixture.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
 			pageKey: "/posts/pending/",
+			pageKeyHash: hashKey("/posts/pending/"),
 			pageUrl: "/posts/pending/",
 			hitCount: 1,
 			status: "pending",
@@ -436,7 +441,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("does not synthesize due refresh inputs without scheduled source records", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const { service } = createService(fixture, async () => "<urlset />");
 
@@ -448,11 +453,12 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("auto-approves pending unknown pages when sitemap confirms them", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		await fixture.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
 			pageKey: "/posts/source-confirmed/",
+			pageKeyHash: hashKey("/posts/source-confirmed/"),
 			pageUrl: "/posts/source-confirmed/",
 			hitCount: 1,
 			status: "pending",
@@ -460,6 +466,7 @@ describe("PageSourceRefreshService", () => {
 		await fixture.db.insert(pendingPageViewSessions).values({
 			siteKey: "fangyuan",
 			pageKey: "/posts/source-confirmed/",
+			pageKeyHash: hashKey("/posts/source-confirmed/"),
 			fingerprint: "visitor-a",
 			hitCount: 1,
 		});
@@ -489,7 +496,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("queues a lazy title refresh run for entries without title hints", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const { service, titleRefreshRuns } = createService(
 			fixture,
@@ -508,7 +515,7 @@ describe("PageSourceRefreshService", () => {
 	});
 
 	it("passes task timeout and max bytes to sitemap fetch", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		const fetchCalls: Array<{
 			url: string;

@@ -1,6 +1,6 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { emailDeliveryReputation } from "../../db/schema";
 import {
 	hashNotificationEmail,
@@ -12,7 +12,7 @@ const suppressionThreshold = 5;
 const suppressionMs = 7 * 24 * 60 * 60 * 1000;
 
 export class EmailReputationRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	private async get(siteId: number, emailHash: string) {
 		const [row] = await this.db
@@ -143,10 +143,7 @@ export class EmailReputationRepository {
 				and(
 					eq(emailDeliveryReputation.siteId, input.siteId),
 					eq(emailDeliveryReputation.emailHash, emailHash),
-					or(
-						isNull(emailDeliveryReputation.suppressedUntil),
-						eq(emailDeliveryReputation.suppressedUntil, ""),
-					),
+					isNull(emailDeliveryReputation.suppressedUntil),
 				),
 			)
 			.limit(1);

@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, isNull, lte } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { scheduledTaskDeletedSnapshots, scheduledTasks } from "../../db/schema";
 import {
-	parseProtectedTaskPolicy,
 	type ProtectedTaskPolicy,
+	parseProtectedTaskPolicy,
 } from "./protected-task-policy";
 import { stringifyJson, type TaskRunStatus } from "./types";
 
@@ -206,7 +206,7 @@ export class ScheduledTaskRepository {
 	private readonly retentionCountMax: number;
 
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		options?: { retentionCountMax?: number },
 	) {
 		this.retentionCountMax =
@@ -368,7 +368,7 @@ export class ScheduledTaskRepository {
 					lte(scheduledTasks.nextRunAt, nowIso),
 				),
 			)
-			.orderBy(scheduledTasks.nextRunAt)
+			.orderBy(scheduledTasks.nextRunAt, scheduledTasks.id)
 			.limit(input?.limit ?? 50);
 		return rows.map(serializeScheduledTask);
 	}
@@ -381,8 +381,8 @@ export class ScheduledTaskRepository {
 			claimExpiresAt: string;
 		},
 	) {
-		return this.db.transaction((tx) => {
-			const row = tx
+		return this.db.transaction(async (tx) => {
+			const [row] = await tx
 				.select()
 				.from(scheduledTasks)
 				.where(
@@ -393,32 +393,43 @@ export class ScheduledTaskRepository {
 						lte(scheduledTasks.nextRunAt, input.nowIso),
 					),
 				)
-				.get();
-			if (!row) {
+				.for("update", { skipLocked: true });
+			if (!row || (row.claimExpiresAt && row.claimExpiresAt > input.nowIso))
 				return null;
-			}
-			if (
-				row.claimExpiresAt &&
-				row.claimExpiresAt > input.nowIso &&
-				row.claimWorkerId !== input.workerId
-			) {
-				return null;
-			}
-			tx.update(scheduledTasks)
+			const [claimed] = await tx
+				.update(scheduledTasks)
 				.set({
 					claimWorkerId: input.workerId,
 					claimExpiresAt: input.claimExpiresAt,
 					updatedAt: input.nowIso,
 				})
 				.where(eq(scheduledTasks.id, id))
-				.run();
-			const claimed = tx
-				.select()
-				.from(scheduledTasks)
-				.where(eq(scheduledTasks.id, id))
-				.get();
-			return claimed ? serializeScheduledTask(claimed) : null;
+				.returning();
+			return serializeScheduledTask(claimed);
 		});
+	}
+
+	public async releaseClaim(
+		task: ScheduledTaskRecord,
+		input: { nextRunAt: string | null; updatedAt: string },
+	) {
+		const [row] = await this.db
+			.update(scheduledTasks)
+			.set({ ...input, claimWorkerId: null, claimExpiresAt: null })
+			.where(
+				and(
+					eq(scheduledTasks.id, task.id),
+					isNull(scheduledTasks.deletedAt),
+					task.claimWorkerId === null
+						? isNull(scheduledTasks.claimWorkerId)
+						: eq(scheduledTasks.claimWorkerId, task.claimWorkerId),
+					task.claimExpiresAt === null
+						? isNull(scheduledTasks.claimExpiresAt)
+						: eq(scheduledTasks.claimExpiresAt, task.claimExpiresAt),
+				),
+			)
+			.returning();
+		return row ? serializeScheduledTask(row) : null;
 	}
 
 	public async enable(
@@ -500,35 +511,33 @@ export class ScheduledTaskRepository {
 		},
 	) {
 		const deletedAt = input.deletedAt ?? nowIso();
-		return this.db.transaction((tx) => {
-			const row = tx
+		return this.db.transaction(async (tx) => {
+			const [row] = await tx
 				.select()
 				.from(scheduledTasks)
 				.where(and(eq(scheduledTasks.id, id), isNull(scheduledTasks.deletedAt)))
-				.get();
+				.for("update");
 			if (!row) {
 				throw new Error(`Scheduled task not found: ${id}`);
 			}
 			const snapshot = serializeScheduledTask(row);
 			const snapshotId = createDeletedSnapshotId();
-			tx.insert(scheduledTaskDeletedSnapshots)
-				.values({
-					id: snapshotId,
-					scheduledTaskId: id,
-					snapshotJson: stringifyJson(snapshot),
-					deletedByUserId: input.deletedByUserId ?? null,
-					deletedAt,
-					deleteReason: input.deleteReason ?? null,
-					lastRunId: row.lastRunId,
-					lastStatus: row.lastStatus,
-				})
-				.run();
-			tx.delete(scheduledTasks).where(eq(scheduledTasks.id, id)).run();
-			const saved = tx
+			await tx.insert(scheduledTaskDeletedSnapshots).values({
+				id: snapshotId,
+				scheduledTaskId: id,
+				snapshotJson: stringifyJson(snapshot),
+				deletedByUserId: input.deletedByUserId ?? null,
+				deletedAt,
+				deleteReason: input.deleteReason ?? null,
+				lastRunId: row.lastRunId,
+				lastStatus: row.lastStatus,
+			});
+			await tx.delete(scheduledTasks).where(eq(scheduledTasks.id, id));
+			const [saved] = await tx
 				.select()
 				.from(scheduledTaskDeletedSnapshots)
 				.where(eq(scheduledTaskDeletedSnapshots.id, snapshotId))
-				.get();
+				.limit(1);
 			if (!saved) {
 				throw new Error(
 					`Scheduled task deleted snapshot not found: ${snapshotId}`,

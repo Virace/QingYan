@@ -1,6 +1,7 @@
 import type { AppRuntimeOptions } from "../config/runtime-options";
 import type { AppConfig } from "../config/types";
-import type { AppDatabase, SqliteClient } from "../db/client";
+import type { Pool } from "pg";
+import type { AppDatabase } from "../db/client";
 import type { LoggerManager } from "../logging/logger-manager";
 import type { AdminBootstrap } from "../modules/admin/bootstrap-service";
 import type { DevMockService } from "../modules/dev/mock-service";
@@ -41,12 +42,13 @@ declare module "fastify" {
 		db: AppDatabase;
 		loggerManager: LoggerManager;
 		runtimeOptions: AppRuntimeOptions;
-		sqlite: SqliteClient;
+		databasePool: Pool;
 		security: SecurityToolkit;
 		siteRegistry: SiteRegistry;
 		taskMetricRollups: TaskMetricRollupRepository;
 		notificationRuntime: NotificationRuntime;
 		notificationRuntimeAutoStart: boolean;
+		backgroundRuntimeAutoStart: boolean;
 		akismetClient?: Pick<AkismetClient, "commentCheck">;
 		commentMetadataResolver?: CommentMetadataResolver;
 		pageSourceFetchText?: (

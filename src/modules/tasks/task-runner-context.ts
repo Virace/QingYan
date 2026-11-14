@@ -3,7 +3,6 @@ import type { CommentIpRefreshInput } from "../comments/metadata/comment-ip-main
 import type { IpVersion } from "../comments/metadata/ip-region-updater";
 import type { PageSourceRefreshTrigger } from "../page-registry/source-refresh-service";
 import type { PageMetadataRefreshScope } from "../page-registry/title-refresh-service";
-import type { BackupTaskService } from "./built-in/backup-task";
 import type { BlacklistAutomationTaskService } from "./built-in/blacklist-automation-task";
 import type { DailySiteDigestTaskService } from "./built-in/daily-site-digest-task";
 import type { SiteSettingsActionTaskService } from "./built-in/site-settings-action-task";
@@ -84,7 +83,6 @@ export interface TaskRunnerServices {
 			context: TaskRunnerContext,
 		): Promise<unknown>;
 	};
-	backup?: BackupTaskService;
 	siteSettingsAction?: SiteSettingsActionTaskService;
 	blacklistAutomation?: BlacklistAutomationTaskService;
 	dailySiteDigest?: DailySiteDigestTaskService;

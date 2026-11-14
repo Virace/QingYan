@@ -1,31 +1,57 @@
 import { sql } from "drizzle-orm";
 import {
+	bigint,
+	check,
+	doublePrecision,
 	index,
 	integer,
-	real,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+	pgTable,
+	unique,
+} from "drizzle-orm/pg-core";
+import {
+	bytea,
+	jsonText,
+	exactText as text,
+	utcTimestamp,
+} from "./column-types";
 
 import { sites } from "./sites";
 
-export const taskMetricRollups = sqliteTable(
+export const taskMetricRollups = pgTable(
 	"task_metric_rollups",
 	{
 		id: text("id").primaryKey(),
-		siteId: integer("site_id").references(() => sites.id),
-		siteKey: text("site_key").notNull().default("__global__"),
+		siteId: bigint("site_id", { mode: "number" }).references(() => sites.id),
+		siteKey: text("site_key"),
 		metricKey: text("metric_key").notNull(),
-		bucketStartAt: text("bucket_start_at").notNull(),
+		bucketStartAt: utcTimestamp("bucket_start_at").notNull(),
 		bucketSizeSec: integer("bucket_size_sec").notNull(),
-		dimensionJson: text("dimension_json").notNull(),
-		value: real("value").notNull().default(0),
-		sampleCount: integer("sample_count").notNull().default(0),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		dimensionJson: jsonText("dimension_json").notNull(),
+		dimensionHash: bytea("dimension_hash").notNull(),
+		value: doublePrecision("value").notNull().default(0),
+		sampleCount: bigint("sample_count", { mode: "number" })
+			.notNull()
+			.default(0),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
+		check(
+			"task_metric_rollups_sample_count_nonnegative",
+			sql`${table.sampleCount} >= 0`,
+		),
+		check(
+			"task_metric_rollups_dimension_hash_length",
+			sql`octet_length(${table.dimensionHash}) = 32`,
+		),
+		check(
+			"task_metric_rollups_bucket_size_positive",
+			sql`${table.bucketSizeSec} > 0`,
+		),
 		index("task_metric_rollups_site_metric_bucket_idx").on(
 			table.siteId,
 			table.metricKey,
@@ -35,12 +61,14 @@ export const taskMetricRollups = sqliteTable(
 			table.metricKey,
 			table.bucketStartAt,
 		),
-		uniqueIndex("task_metric_rollups_unique_bucket_idx").on(
-			table.siteKey,
-			table.metricKey,
-			table.bucketStartAt,
-			table.bucketSizeSec,
-			table.dimensionJson,
-		),
+		unique("task_metric_rollups_unique_bucket_idx")
+			.on(
+				table.siteKey,
+				table.metricKey,
+				table.bucketStartAt,
+				table.bucketSizeSec,
+				table.dimensionHash,
+			)
+			.nullsNotDistinct(),
 	],
 );

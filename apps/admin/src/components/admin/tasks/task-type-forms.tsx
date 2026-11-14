@@ -306,59 +306,6 @@ export function TaskTypePayloadForm({
 					/>
 				</div>
 			);
-		case "backup": {
-			const include = readRecord(payload.include);
-			return (
-				<div className="grid gap-3 md:grid-cols-2">
-					<Field label="备份范围">
-						<select
-							className={inputClass}
-							value={readText(payload.scope) || "site"}
-							onChange={(event) => setValue("scope", event.target.value)}
-						>
-							<option value="site">当前站点导出</option>
-							<option value="full">完整实例备份</option>
-						</select>
-					</Field>
-					<PayloadInput
-						label="站点 Key"
-						value={readText(payload.siteKey) || siteKey}
-						placeholder="完整备份可留空"
-						onChange={(value) => setValue("siteKey", value.trim())}
-					/>
-					<div className="text-sm text-muted-foreground md:col-span-2">
-						备份输出由系统写入任务备份目录。
-					</div>
-					<PayloadInput
-						label="保留份数"
-						value={payload.retentionCount ? String(payload.retentionCount) : ""}
-						type="number"
-						onChange={(value) =>
-							setValue("retentionCount", optionalNumber(value))
-						}
-					/>
-					<CheckboxGroup
-						label="导出内容"
-						items={[
-							["siteSettings", "站点设置"],
-							["systemSettings", "系统设置"],
-							["pageThreads", "页面线程"],
-							["comments", "评论"],
-							["visitors", "访客"],
-							["voteRecords", "投票记录"],
-							["pageFeedbackRecords", "页面反馈"],
-							["blacklistRules", "黑名单规则"],
-							["rawUserAgent", "原始 UA"],
-						]}
-						values={include}
-						defaultChecked
-						onChange={(field, checked) =>
-							setRecordValue("include", field, checked)
-						}
-					/>
-				</div>
-			);
-		}
 		case "site_settings_action":
 			return (
 				<div className="grid gap-3 md:grid-cols-2">
@@ -576,38 +523,6 @@ function IpVersionField({
 							className="size-4 rounded border-input"
 						/>
 						<span>{version.toUpperCase()}</span>
-					</label>
-				))}
-			</div>
-		</Field>
-	);
-}
-
-function CheckboxGroup({
-	label,
-	items,
-	values,
-	defaultChecked = false,
-	onChange,
-}: {
-	label: string;
-	items: Array<[string, string]>;
-	values: Record<string, unknown>;
-	defaultChecked?: boolean;
-	onChange: (field: string, checked: boolean) => void;
-}) {
-	return (
-		<Field label={label}>
-			<div className="grid gap-2 rounded-md border bg-background p-3 text-sm md:grid-cols-2">
-				{items.map(([field, title]) => (
-					<label key={field} className="flex items-center gap-2">
-						<input
-							type="checkbox"
-							checked={readBoolean(values[field], defaultChecked)}
-							onChange={(event) => onChange(field, event.target.checked)}
-							className="size-4 rounded border-input"
-						/>
-						<span>{title}</span>
 					</label>
 				))}
 			</div>

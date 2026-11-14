@@ -3,49 +3,49 @@ import type { z } from "zod";
 
 import type { AppDatabase } from "../../db/client";
 import {
-	auditLogs,
 	adminGroups,
 	adminUserGroups,
-	adminUsers,
 	adminUserSiteAccess,
+	adminUsers,
+	auditLogs,
 } from "../../db/schema";
 import type { AuthenticatedAdminSession } from "../admin/session-service";
 import { toValidationFields } from "../admin/validation-fields";
+import { BackendUserNotificationRecipientsRepository } from "../notifications/backend-user-recipients-repository";
+import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
+import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 import {
 	AppError,
 	ResourceNotFoundError,
 	ValidationFailedError,
 } from "../shared/errors";
 import type { SiteRegistry } from "../shared/site-registry";
-import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
-import { BackendUserNotificationRecipientsRepository } from "../notifications/backend-user-recipients-repository";
-import {
-	calculateNextRunAt,
-	validateScheduleDefinition,
-} from "./schedule-calculator";
-import { parseTaskFailureRecipientUserId } from "./task-failure-notification-targets";
 import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
-import type { AnyTaskTypeDefinition } from "./task-type-registry";
-import {
-	isJsonEqual,
-	isRecord,
-	readPath,
-	setPath,
-	protectedOperationReason,
-	type ProtectedTaskOperation,
-} from "./protected-task-policy";
-import {
-	ScheduledTaskRepository,
-	type ScheduledTaskRecord,
-} from "./scheduled-task-repository";
-import { SystemManagedTaskService } from "./system-managed-task-service";
 import {
 	PageSourceRefreshPolicyService,
 	readPageSourceRefreshSiteKey,
 } from "./page-source-refresh-policy";
+import {
+	isJsonEqual,
+	isRecord,
+	type ProtectedTaskOperation,
+	protectedOperationReason,
+	readPath,
+	setPath,
+} from "./protected-task-policy";
+import {
+	calculateNextRunAt,
+	validateScheduleDefinition,
+} from "./schedule-calculator";
+import {
+	type ScheduledTaskRecord,
+	ScheduledTaskRepository,
+} from "./scheduled-task-repository";
+import { SystemManagedTaskService } from "./system-managed-task-service";
+import { TaskFailureNotificationService } from "./task-failure-notification-service";
+import { parseTaskFailureRecipientUserId } from "./task-failure-notification-targets";
 import { TaskRunRepository } from "./task-run-repository";
-import type { TaskRunRecord } from "./types";
-import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
+import type { AnyTaskTypeDefinition } from "./task-type-registry";
 import {
 	canManageScheduledTask,
 	canRunScheduledTask,
@@ -55,6 +55,7 @@ import {
 	projectTaskRunForSession,
 	type TaskVisibilitySession,
 } from "./task-visibility";
+import type { TaskRunRecord } from "./types";
 
 const RETENTION_COUNT_MAX = 30;
 
@@ -397,6 +398,8 @@ export class AdminTaskService {
 			lastRunId: run.id,
 			lastStatus: run.status,
 		});
+		if (run.status === "failed")
+			await new TaskFailureNotificationService(this.db).planForFailedRun(run);
 		await this.taskRuns.pruneScheduledTaskRuns({
 			scheduledTaskId: task.id,
 			retainCount: task.retentionCount,
@@ -813,6 +816,7 @@ export class AdminTaskService {
 		await this.writeRunAudit(session, "task.run.cancel", cancelled, {
 			requestId,
 		});
+		await this.taskRuns.finalizeScheduledTaskRun(cancelled.id);
 		const projected = projectTaskRunForSession(cancelled, {
 			session: toVisibilitySession(session),
 		});
@@ -839,6 +843,12 @@ export class AdminTaskService {
 			},
 			runAfter,
 		);
+		if (!retrying.applied)
+			throw new AppError(
+				409,
+				"TASK_LOCK_CONFLICT",
+				"同类任务正在执行，请稍后重试。",
+			);
 		await this.writeRunAudit(session, "task.run.retry", retrying, {
 			requestId,
 		});
@@ -1262,24 +1272,9 @@ export class AdminTaskService {
 					userIds: directUserIds,
 				});
 			const directUserIdSet = new Set(directUsers.map((user) => user.id));
-			const legacyRecipientIds = recipientIds.filter(
-				(recipientId) => parseTaskFailureRecipientUserId(recipientId) === null,
-			);
-			const legacyRecipients =
-				legacyRecipientIds.length > 0
-					? await this.notificationRecipients.listSiteRecipients(siteId)
-					: [];
-			const enabledLegacyRecipientIds = new Set(
-				legacyRecipients
-					.filter((recipient) => recipient.enabled)
-					.map((recipient) => recipient.id),
-			);
 			for (const recipientId of recipientIds) {
 				const userId = parseTaskFailureRecipientUserId(recipientId);
-				if (
-					(userId !== null && !directUserIdSet.has(userId)) ||
-					(userId === null && !enabledLegacyRecipientIds.has(recipientId))
-				) {
+				if (userId === null || !directUserIdSet.has(userId)) {
 					fields.push(
 						validationField(
 							"policy.failureNotification.recipientIds",

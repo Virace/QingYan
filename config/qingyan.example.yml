@@ -6,9 +6,14 @@ server:
   trustProxy: false
 
 database:
-  client: sqlite
-  sqlite:
-    file: ./data/qingyan.db
+  url: postgresql://qingyan:change-me@postgres:5432/qingyan
+  pool:
+    max: 5
+    connectionTimeoutMs: 5000
+    idleTimeoutMs: 30000
+  # 远程连接可启用 TLS，证书内容也可通过对应环境变量传入。
+  # tls:
+  #   rejectUnauthorized: true
 
 admin:
   session:

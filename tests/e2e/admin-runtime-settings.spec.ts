@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const authStatePath = path.resolve(
 	process.cwd(),
@@ -1102,7 +1102,8 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 		await page.getByRole("button", { name: "运维" }).click();
 	}
 	await expect(page.getByRole("heading", { name: "运维" })).toBeVisible();
-	await expect(page.getByText("qingyan.full-backup / sqlite")).toBeVisible();
+	await expect(page.getByText("PostgreSQL 实例备份")).toBeVisible();
+	await expect(page.getByText("停写后通过运维命令备份与恢复")).toBeVisible();
 	await expect(page.getByText("compose-script")).toBeVisible();
 	await expect(page.getByText("更新检测")).toBeVisible();
 	await expect(page.getByText("GitHub Release / Virace/QingYan")).toBeVisible();

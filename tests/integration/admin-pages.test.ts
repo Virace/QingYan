@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	adminUsers,
 	comments,
@@ -14,6 +13,7 @@ import {
 	taskRuns,
 	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -59,6 +59,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:welcome",
+			pageKeyHash: hashKey("post:welcome"),
 			pageTitle: "Welcome",
 			pageUrl: "/posts/welcome/",
 			commentCount: 1,
@@ -69,6 +70,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:welcome",
+			pageKeyHash: hashKey("post:welcome"),
 			pageUrl: "/posts/welcome/",
 			title: "Welcome",
 			status: "active",
@@ -77,6 +79,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:registry-only",
+			pageKeyHash: hashKey("post:registry-only"),
 			pageUrl: "/posts/registry-only/",
 			title: "Registry Only",
 			status: "active",
@@ -181,6 +184,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:lightweight-page",
+			pageKeyHash: hashKey("post:lightweight-page"),
 			pageUrl: "/posts/lightweight-page/",
 			status: "active",
 		});
@@ -220,6 +224,7 @@ describe("admin pages", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:beta",
+				pageKeyHash: hashKey("post:beta"),
 				pageTitle: "Beta",
 				pageUrl: "/posts/beta/",
 				commentCount: 2,
@@ -227,6 +232,7 @@ describe("admin pages", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:alpha",
+				pageKeyHash: hashKey("post:alpha"),
 				pageTitle: "Alpha",
 				pageUrl: "/posts/alpha/",
 				commentCount: 5,
@@ -236,6 +242,7 @@ describe("admin pages", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:beta",
+				pageKeyHash: hashKey("post:beta"),
 				pageUrl: "/posts/beta/",
 				title: "Beta",
 				status: "active",
@@ -244,6 +251,7 @@ describe("admin pages", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:alpha",
+				pageKeyHash: hashKey("post:alpha"),
 				pageUrl: "/posts/alpha/",
 				title: "Alpha",
 				status: "active",
@@ -303,6 +311,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:lifecycle",
+			pageKeyHash: hashKey("post:lifecycle"),
 			pageUrl: "/posts/lifecycle/",
 			title: "Lifecycle",
 			status: "active",
@@ -391,6 +400,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:delayed-delete",
+			pageKeyHash: hashKey("post:delayed-delete"),
 			pageUrl: "/posts/delayed-delete/",
 			title: "Delayed Delete",
 			status: "active",
@@ -453,6 +463,7 @@ describe("admin pages", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:trash-immediate-a",
+				pageKeyHash: hashKey("post:trash-immediate-a"),
 				pageUrl: "/posts/trash-immediate-a/",
 				status: "trash",
 				trashedAt: "2026-06-01T00:00:00.000Z",
@@ -460,6 +471,7 @@ describe("admin pages", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:trash-immediate-b",
+				pageKeyHash: hashKey("post:trash-immediate-b"),
 				pageUrl: "/posts/trash-immediate-b/",
 				status: "trash",
 				trashedAt: "2026-06-01T00:00:00.000Z",
@@ -509,6 +521,7 @@ describe("admin pages", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:title-refresh",
+			pageKeyHash: hashKey("post:title-refresh"),
 			pageUrl: "/posts/title-refresh/",
 			title: null,
 			status: "active",

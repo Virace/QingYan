@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	captchaSessions,
 	pageThreads,
@@ -8,6 +7,7 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { decodeSvgDataUrl } from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
@@ -34,6 +34,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -59,6 +60,7 @@ describe("comment captcha", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/ignored-captcha/",
+			pageKeyHash: hashKey("/posts/ignored-captcha/"),
 			pageUrl: "/posts/ignored-captcha/",
 			status: "ignored",
 		});

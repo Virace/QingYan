@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-
 import {
 	adminUsers,
 	delayedDeletions,
@@ -8,6 +7,7 @@ import {
 	sites,
 	systemSettings,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { DeletionPolicyService } from "../../src/modules/admin/deletion-policy-service";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -120,6 +120,7 @@ describe("DeletionPolicyService", () => {
 			await fixture.app.db.insert(sitePageRegistry).values({
 				siteId: site.id,
 				pageKey: "post:restore",
+				pageKeyHash: hashKey("post:restore"),
 				pageUrl: "/post/restore",
 				status: "deleted",
 				deletedAt: "2026-06-01T00:00:00.000Z",

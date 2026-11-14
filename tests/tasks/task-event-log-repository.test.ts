@@ -11,27 +11,27 @@ import {
 
 interface Fixture {
 	workspace: TestWorkspace;
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	taskRuns: TaskRunRepository;
 	eventLogs: TaskEventLogRepository;
 }
 
 const fixtures: Fixture[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
 async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-event-log-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	const fixture = {
 		workspace,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		taskRuns: new TaskRunRepository(clients.db),
 		eventLogs: new TaskEventLogRepository(clients.db),
 	};
@@ -118,5 +118,32 @@ describe("TaskEventLogRepository", () => {
 			hasMore: true,
 		});
 		expect(privateRows.items.map((item) => item.sequence)).toEqual([1, 2]);
+	});
+	it("serializes concurrent writers through the parent task row", async () => {
+		const { taskRuns, eventLogs } = await createFixture();
+		const run = await taskRuns.create({
+			type: "events",
+			category: "maintenance",
+			payload: {},
+		});
+		await Promise.all(
+			Array.from({ length: 12 }, (_, index) =>
+				eventLogs.append({
+					taskRunId: run.id,
+					eventType: "parallel",
+					level: "info",
+					message: String(index),
+				}),
+			),
+		);
+		const events = await eventLogs.listForRun({
+			taskRunId: run.id,
+			limit: 20,
+			offset: 0,
+			includePrivate: true,
+		});
+		expect(events.items.map((event) => event.sequence)).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+		]);
 	});
 });

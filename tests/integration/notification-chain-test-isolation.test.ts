@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { comments, pageThreads, sites } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminRepository } from "../../src/modules/admin/repository";
 import { CommentsRepository } from "../../src/modules/comments/repository";
 import { createTestApp } from "../support/test-fixtures";
@@ -31,6 +31,7 @@ describe("notification chain test data isolation", () => {
 			.values({
 				siteId: site.id,
 				pageKey: "notification-test:run-isolation",
+				pageKeyHash: hashKey("notification-test:run-isolation"),
 				pageTitle: "QingYan 评论通知链路测试",
 				pageUrl: null,
 				kind: "notification_test",

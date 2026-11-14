@@ -1,10 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/app";
 import { createDatabaseClients } from "../../src/db/client";
 import {
@@ -17,20 +13,22 @@ import {
 	sites,
 	systemSettings,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
+import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
+import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import {
 	serializeStaffDisplaySettings,
 	serializeVerifiedAuthorSettings,
 } from "../../src/modules/comments/verified-author";
-import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
-import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
+import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 import { loginAsAdmin } from "../support/admin-login";
 import {
 	applyCurrentMigrations,
 	createTestConfig,
+	createTestWorkspace,
 	defaultTestSite,
 } from "../support/test-fixtures";
-import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -49,14 +47,14 @@ async function createCustomTestApp(options?: {
 	akismetVerdict?: AkismetReviewResult["verdict"];
 	externalAvatar?: boolean;
 }) {
-	const directory = mkdtempSync(
-		path.join(tmpdir(), "qingyan-comments-create-"),
-	);
-	const databaseFile = path.join(directory, "qingyan.db");
-	applyCurrentMigrations(databaseFile);
+	const workspace = createTestWorkspace("qingyan-comments-create-");
+	const databaseUrl = workspace.databaseUrl;
+	await applyCurrentMigrations(databaseUrl);
 
-	const config = createTestConfig(databaseFile);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const config = createTestConfig(databaseUrl);
+	const { db, close } = createDatabaseClients(databaseUrl, {
+		pool: { max: 2 },
+	});
 	try {
 		await createSiteRegistry().seedSiteFromTemplate(db, defaultTestSite);
 		const [site] = await db
@@ -109,7 +107,7 @@ async function createCustomTestApp(options?: {
 			]);
 		}
 	} finally {
-		sqlite.close();
+		await close();
 	}
 
 	const app = await buildApp(config, undefined, {
@@ -128,7 +126,7 @@ async function createCustomTestApp(options?: {
 		app,
 		async cleanup() {
 			await app.close();
-			rmSync(directory, { recursive: true, force: true });
+			await workspace.cleanup();
 		},
 	};
 }
@@ -145,6 +143,7 @@ async function seedActivePage(fixture: CustomFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});

@@ -13,7 +13,7 @@ import {
 interface Fixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	scheduledTasks: ScheduledTaskRepository;
 	taskRuns: TaskRunRepository;
 	siteId: number;
@@ -22,17 +22,17 @@ interface Fixture {
 
 const fixtures: Fixture[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
-async function createFixture(): Promise<Fixture> {
+async function createFixture(adminId?: number): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-run-projection-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
 		name: "FangYuan",
@@ -40,6 +40,7 @@ async function createFixture(): Promise<Fixture> {
 	});
 	const [site] = await clients.db.select().from(sites).limit(1);
 	await clients.db.insert(adminUsers).values({
+		id: adminId,
 		username: "admin",
 		email: "admin@example.test",
 		passwordHash: "hash",
@@ -50,7 +51,7 @@ async function createFixture(): Promise<Fixture> {
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		scheduledTasks: new ScheduledTaskRepository(clients.db),
 		taskRuns: new TaskRunRepository(clients.db),
 		siteId: site.id,
@@ -63,7 +64,7 @@ async function createFixture(): Promise<Fixture> {
 describe("scheduled task run projection", () => {
 	it("keeps definition snapshots after scheduled task update and delete", async () => {
 		const { scheduledTasks, taskRuns, siteId, adminUserId } =
-			await createFixture();
+			await createFixture(2_147_483_648);
 		const task = await scheduledTasks.create({
 			name: "Original source refresh",
 			type: "page_source_refresh",

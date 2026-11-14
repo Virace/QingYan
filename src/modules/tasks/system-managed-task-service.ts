@@ -3,9 +3,9 @@ import type { SiteRegistry } from "../shared/site-registry";
 import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
 import {
 	isJsonEqual,
+	type ProtectedTaskPolicy,
 	readPath,
 	setPath,
-	type ProtectedTaskPolicy,
 } from "./protected-task-policy";
 import {
 	calculateNextRunAt,

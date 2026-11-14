@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	adminUsers,
 	auditLogs,
@@ -10,6 +9,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -416,6 +416,7 @@ describe("admin sites", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:site-summary",
+			pageKeyHash: hashKey("post:site-summary"),
 			pageTitle: "Site Summary",
 		});
 		const [thread] = await fixture.app.db

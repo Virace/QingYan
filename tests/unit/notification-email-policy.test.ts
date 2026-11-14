@@ -9,12 +9,12 @@ import {
 	sites,
 	unsubscribeTokens,
 } from "../../src/db/schema";
+import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import {
 	hashNotificationEmail,
 	isAcceptableNotificationEmail,
 	normalizeNotificationEmail,
 } from "../../src/modules/notifications/email-address-policy";
-import { CommenterPreferencesRepository } from "../../src/modules/notifications/commenter-preferences-repository";
 import { EmailReputationRepository } from "../../src/modules/notifications/email-reputation-repository";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
 import {
@@ -30,21 +30,23 @@ function requireEmailHash(email: string): string {
 	return hash;
 }
 
-function createFixture() {
+async function createFixture() {
 	const workspace = createTestWorkspace("qingyan-notification-policy-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl, {
+		pool: { max: 2 },
+	});
 
 	return {
 		...clients,
-		cleanup() {
-			clients.sqlite.close();
-			workspace.cleanup();
+		async cleanup() {
+			await clients.close();
+			await workspace.cleanup();
 		},
 	};
 }
 
-async function seedSite(fixture: ReturnType<typeof createFixture>) {
+async function seedSite(fixture: Awaited<ReturnType<typeof createFixture>>) {
 	const [site] = await fixture.db
 		.insert(sites)
 		.values({
@@ -75,7 +77,7 @@ describe("notification email policy", () => {
 	});
 
 	it("upserts comment-form preferences and keeps unsubscribe separate from reputation", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const site = await seedSite(fixture);
 			const preferences = new CommenterPreferencesRepository(fixture.db);
@@ -119,12 +121,12 @@ describe("notification email policy", () => {
 				failureScore: 1,
 			});
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("suppresses after repeated recipient failures and clears suppression after success", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const site = await seedSite(fixture);
 			const reputation = new EmailReputationRepository(fixture.db);
@@ -160,12 +162,12 @@ describe("notification email policy", () => {
 				}),
 			).toBe(false);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("stores only token hashes for unsubscribe tokens and rejects replay", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const site = await seedSite(fixture);
 			const preferences = new CommenterPreferencesRepository(fixture.db);
@@ -197,7 +199,7 @@ describe("notification email policy", () => {
 			expect(first.status).toBe("unsubscribed");
 			expect(replay.status).toBe("invalid");
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 });

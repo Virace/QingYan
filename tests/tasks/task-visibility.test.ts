@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { ScheduledTaskRecord } from "../../src/modules/tasks/scheduled-task-repository";
-import type { TaskRunRecord } from "../../src/modules/tasks/types";
 import {
 	projectScheduledTaskForSession,
 	projectTaskRunForSession,
 	type TaskVisibilitySession,
 } from "../../src/modules/tasks/task-visibility";
+import type { TaskRunRecord } from "../../src/modules/tasks/types";
 
 function session(input: Partial<TaskVisibilitySession>): TaskVisibilitySession {
 	return {

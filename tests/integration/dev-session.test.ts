@@ -107,7 +107,7 @@ describe("dev session bootstrap", () => {
 		]);
 	});
 
-	it("persists the dev default site and site settings into sqlite", async () => {
+	it("persists the dev default site and site settings into PostgreSQL", async () => {
 		const fixture = await createTestApp({
 			devMode: true,
 			devAdminToken: "dev-token",

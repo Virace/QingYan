@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	adminGroups,
@@ -10,8 +10,8 @@ import {
 	sites,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
-import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
 import { AdminTaskService } from "../../src/modules/tasks/admin-task-service";
+import { ScheduledTaskRepository } from "../../src/modules/tasks/scheduled-task-repository";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -142,8 +142,13 @@ describe("admin tasks api", () => {
 		if (!target.delivery) {
 			throw new Error("Expected delivery");
 		}
+		const claimed = await taskRuns.markRunning(target.task.id);
+		if (!claimed) {
+			throw new Error("Expected claimed notification task");
+		}
 		await taskRuns.completeNotificationAttempt({
 			taskId: target.task.id,
+			claimToken: claimed.claimToken,
 			outcomes: [
 				{
 					deliveryId: target.delivery.id,
@@ -519,7 +524,7 @@ describe("admin tasks api", () => {
 		});
 	});
 
-	it("enforces task definition permissions on create and run operations", async () => {
+	it("lets site admins create their own task but requires permission to run it", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await createScopedUser(fixture, {
@@ -530,42 +535,6 @@ describe("admin tasks api", () => {
 		const siteAdmin = await loginAsAdmin(fixture.app, {
 			username: "site-admin-task-permissions",
 			password: "replace-me",
-		});
-
-		const backupCreate = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/tasks/scheduled",
-			...withAdminWriteAuth({
-				adminCookie: siteAdmin.adminCookie,
-				csrfToken: siteAdmin.csrfToken,
-			}),
-			payload: taskPayload({
-				name: "Site admin backup",
-				type: "backup",
-				enabled: false,
-				scheduleKind: "manual_only",
-				trigger: {},
-				payload: {
-					scope: "site",
-					siteKey: "fangyuan",
-					include: {
-						siteSettings: true,
-						pageThreads: true,
-						comments: true,
-					},
-				},
-			}),
-		});
-		expect(backupCreate.statusCode).toBe(403);
-		expect(backupCreate.json()).toMatchObject({
-			error: {
-				code: "TASK_PERMISSION_DENIED",
-				details: {
-					requiredPermission: "ops.backup",
-					taskType: "backup",
-					operation: "create",
-				},
-			},
 		});
 
 		const created = await fixture.app.inject({
@@ -679,90 +648,6 @@ describe("admin tasks api", () => {
 				code: "TASK_SITE_BINDING_MISMATCH",
 				details: { siteKey: "fangyuan" },
 			},
-		});
-
-		const admin = await loginAsAdmin(fixture.app);
-		const backupMismatch = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/tasks/scheduled",
-			...withAdminWriteAuth({
-				adminCookie: admin.adminCookie,
-				csrfToken: admin.csrfToken,
-			}),
-			payload: taskPayload({
-				name: "Admin cross-site backup",
-				type: "backup",
-				scheduleKind: "manual_only",
-				trigger: {},
-				payload: {
-					scope: "site",
-					siteKey: "xitem",
-					include: {
-						siteSettings: true,
-						pageThreads: true,
-						comments: true,
-					},
-				},
-			}),
-		});
-		expect(backupMismatch.statusCode).toBe(403);
-		expect(backupMismatch.json()).toMatchObject({
-			error: {
-				code: "TASK_SITE_BINDING_MISMATCH",
-				details: { siteKey: "fangyuan" },
-			},
-		});
-	});
-
-	it("creates manual backup runs with backup category", async () => {
-		const fixture = await createTestApp();
-		cleanups.push(fixture.cleanup);
-		const admin = await loginAsAdmin(fixture.app);
-
-		const createResponse = await fixture.app.inject({
-			method: "POST",
-			url: "/qingyan/api/admin/tasks/scheduled",
-			...withAdminWriteAuth({
-				adminCookie: admin.adminCookie,
-				csrfToken: admin.csrfToken,
-			}),
-			payload: taskPayload({
-				name: "Manual FangYuan backup",
-				type: "backup",
-				enabled: false,
-				scheduleKind: "manual_only",
-				trigger: {},
-				payload: {
-					scope: "site",
-					siteKey: "fangyuan",
-					include: {
-						siteSettings: true,
-						pageThreads: true,
-						comments: true,
-					},
-					retentionCount: 3,
-				},
-			}),
-		});
-		expect(createResponse.statusCode).toBe(201);
-		const taskId = createResponse.json().id as string;
-
-		const runNow = await fixture.app.inject({
-			method: "POST",
-			url: `/qingyan/api/admin/tasks/scheduled/${taskId}/run`,
-			...withAdminWriteAuth({
-				adminCookie: admin.adminCookie,
-				csrfToken: admin.csrfToken,
-			}),
-		});
-
-		expect(runNow.statusCode).toBe(201);
-		expect(runNow.json()).toMatchObject({
-			visibility: "run_detail",
-			scheduledTaskId: taskId,
-			type: "backup",
-			category: "backup",
-			trigger: "manual",
 		});
 	});
 
@@ -995,7 +880,7 @@ describe("admin tasks api", () => {
 				},
 			},
 		});
-		expect(allowedPatch.statusCode).toBe(200);
+		expect(allowedPatch.statusCode, allowedPatch.body).toBe(200);
 		expect(allowedPatch.json()).toMatchObject({
 			name: "Protected refresh hourly",
 			trigger: { everyMinutes: 120 },

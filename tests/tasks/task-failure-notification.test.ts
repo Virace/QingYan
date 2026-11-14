@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabaseClients } from "../../src/db/client";
 import {
@@ -27,7 +27,7 @@ import {
 interface Fixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	scheduledTasks: ScheduledTaskRepository;
 	taskRuns: TaskRunRepository;
 	eventLogs: TaskEventLogRepository;
@@ -38,17 +38,17 @@ interface Fixture {
 
 const fixtures: Fixture[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
 async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-failure-notification-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
 		name: "FangYuan",
@@ -79,7 +79,7 @@ async function createFixture(): Promise<Fixture> {
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		scheduledTasks: new ScheduledTaskRepository(clients.db),
 		taskRuns: new TaskRunRepository(clients.db),
 		eventLogs: new TaskEventLogRepository(clients.db),
@@ -332,6 +332,7 @@ describe("TaskFailureNotificationService", () => {
 			const run = await fixture.taskRuns.createScheduledTaskRun({
 				scheduledTask: task,
 				trigger: "manual",
+				status: "succeeded",
 				triggerSnapshot: { index },
 				input: task.payload,
 				createdAt,
@@ -383,5 +384,116 @@ describe("TaskFailureNotificationService", () => {
 			.from(notificationDeliveries)
 			.where(inArray(notificationDeliveries.taskRunId, oldRunIds));
 		expect(remainingDeliveries).toHaveLength(0);
+	});
+	it.each([
+		false,
+		true,
+	])("waits for current failure planning before pruning (worker claim: %s)", async (claimRetry) => {
+		const fixture = await createFixture();
+		const firstFailure = await createFailedRun(fixture, {
+			policy: {
+				failureNotification: {
+					enabled: true,
+					channelConfigIds: ["webhook:missing"],
+					recipientIds: [],
+				},
+			},
+		});
+		if (!firstFailure.scheduledTaskId)
+			throw new Error("Expected scheduled run");
+		const scheduled = await fixture.scheduledTasks.get(
+			firstFailure.scheduledTaskId,
+		);
+		if (!scheduled) throw new Error("Expected scheduled task");
+		const last = await fixture.taskRuns.createScheduledTaskRun({
+			scheduledTask: scheduled,
+			trigger: "manual",
+			triggerSnapshot: {},
+			input: {},
+			status: "succeeded",
+		});
+		await fixture.scheduledTasks.updateLastRun(scheduled.id, {
+			lastRunId: last.id,
+			lastRunAt: last.createdAt,
+			lastStatus: last.status,
+		});
+		const prune = () =>
+			fixture.taskRuns.pruneScheduledTaskRuns({
+				scheduledTaskId: scheduled.id,
+				retainCount: 0,
+			});
+		expect((await prune()).deletedRunIds).toEqual([]);
+		await fixture.failureNotifications.planForFailedRun(firstFailure);
+		await fixture.taskRuns.markRetrying(
+			firstFailure.id,
+			{},
+			new Date(0).toISOString(),
+		);
+		const claim = claimRetry
+			? (await fixture.taskRuns.claimRunnable({ workerId: "retry" }))[0]
+			: null;
+		const currentFailure = await fixture.taskRuns.markFailed(
+			firstFailure.id,
+			{},
+			claim?.claimToken,
+		);
+		expect((await prune()).deletedRunIds).toEqual([]);
+		await fixture.failureNotifications.planForFailedRun(firstFailure);
+		expect((await prune()).deletedRunIds).toEqual([]);
+		await fixture.failureNotifications.planForFailedRun(currentFailure);
+		expect((await prune()).deletedRunIds).toEqual([firstFailure.id]);
+	});
+
+	it("preserves active runs and terminal runs referenced by the schedule or another task", async () => {
+		const fixture = await createFixture();
+		const scheduled = await fixture.scheduledTasks.create({
+			name: "retain references",
+			type: "page_metadata_refresh",
+			scopeKind: "site",
+			scope: { siteKey: "fangyuan" },
+			scheduleKind: "manual_only",
+			payload: {},
+			policy: {},
+			trigger: {},
+			ownerUserId: fixture.adminUserId,
+			retentionCount: 0,
+		});
+		const create = (status: "queued" | "succeeded", id: string) =>
+			fixture.taskRuns.createScheduledTaskRun({
+				id,
+				scheduledTask: scheduled,
+				trigger: "manual",
+				triggerSnapshot: {},
+				input: {},
+				status,
+			});
+		const queued = await create("queued", "keep-queued"),
+			last = await create("succeeded", "keep-last"),
+			referenced = await create("succeeded", "keep-ref"),
+			obsolete = await create("succeeded", "delete-terminal");
+		await fixture.scheduledTasks.updateLastRun(scheduled.id, {
+			lastRunAt: last.createdAt,
+			lastRunId: last.id,
+			lastStatus: last.status,
+		});
+		const notification = await fixture.taskRuns.create({
+			type: "task_failure_notification",
+			category: "notification",
+			payload: {},
+			subjectType: "task_run",
+			subjectId: referenced.id,
+		});
+		const pruned = await fixture.taskRuns.pruneScheduledTaskRuns({
+			scheduledTaskId: scheduled.id,
+			retainCount: 0,
+		});
+		expect(pruned.deletedRunIds).toEqual([obsolete.id]);
+		for (const run of [queued, last, referenced])
+			expect(await fixture.taskRuns.get(run.id)).not.toBeNull();
+		await fixture.taskRuns.markSucceeded(notification.id, {});
+		await fixture.taskRuns.finalizeScheduledTaskRun(notification.id);
+		expect(await fixture.taskRuns.get(referenced.id)).toBeNull();
+		expect(await fixture.taskRuns.get(last.id)).not.toBeNull();
+		expect(await fixture.taskRuns.get(queued.id)).not.toBeNull();
 	});
 });

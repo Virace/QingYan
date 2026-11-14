@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import type { EmailSender } from "../notifications/channels/email-channel";
 import type { SecurityToolkit } from "../../plugins/security";
 import { AppError } from "../shared/errors";
@@ -15,7 +15,7 @@ export class AdminProfileService {
 	private readonly repository: AdminUsersRepository;
 
 	public constructor(
-		db: AppDatabase,
+		db: DatabaseExecutor,
 		private readonly security: SecurityToolkit,
 		private readonly settings = new RuntimeSystemSettingsService(db),
 		private readonly emailSender?: EmailSender,

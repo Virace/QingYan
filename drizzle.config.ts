@@ -1,15 +1,11 @@
-import path from "node:path";
-
 import { defineConfig } from "drizzle-kit";
 
-const sqliteFile = process.env.QINGYAN_DB_FILE ?? "./data/qingyan.db";
-
 export default defineConfig({
-	out: "./drizzle",
+	out: "./drizzle/postgresql",
 	schema: "./src/db/schema/index.ts",
-	dialect: "sqlite",
+	dialect: "postgresql",
 	dbCredentials: {
-		url: path.resolve(process.cwd(), sqliteFile),
+		url: process.env.QINGYAN_DATABASE_URL ?? "postgresql://localhost/qingyan",
 	},
 	verbose: true,
 	strict: true,

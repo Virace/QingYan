@@ -185,8 +185,9 @@ export function OpsPage() {
 							</div>
 							<div className="rounded-md border p-3">
 								<p className="text-xs text-muted-foreground">整站备份</p>
-								<p className="mt-1 text-sm font-medium">
-									{status.backup.format} / {status.backup.provider}
+								<p className="mt-1 text-sm font-medium">PostgreSQL 实例备份</p>
+								<p className="mt-1 text-xs text-muted-foreground">
+									停写后通过运维命令备份与恢复
 								</p>
 							</div>
 							<div className="rounded-md border p-3">

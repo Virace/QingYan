@@ -101,7 +101,7 @@ type SmokeDeliverySummary = {
 };
 
 type WorkerRunResult = {
-	databaseFile: string;
+	databaseName: string;
 	processed: number;
 	tasks: Array<{
 		id: string;
@@ -717,30 +717,38 @@ class SmokeTargetedNotificationQueue implements TaskQueue {
 			) {
 				continue;
 			}
-			claimed.push(
-				await this.repository.markRunning(task.id, {
-					workerId: worker,
-					smoke: "commenter-reply-email",
-				}),
-			);
+			const running = await this.repository.markRunning(task.id, {
+				workerId: worker,
+				smoke: "commenter-reply-email",
+			});
+			if (running) claimed.push(running);
 		}
 		return claimed;
 	}
 
-	public async ack(taskId: string, result: unknown): Promise<void> {
-		await this.repository.markSucceeded(taskId, result);
+	public async ack(
+		taskId: string,
+		result: unknown,
+		claimToken?: string | null,
+	): Promise<void> {
+		await this.repository.markSucceeded(taskId, result, claimToken);
 	}
 
 	public async retry(
 		taskId: string,
 		error: unknown,
 		runAfter: string,
+		claimToken?: string | null,
 	): Promise<void> {
-		await this.repository.markRetrying(taskId, error, runAfter);
+		await this.repository.markRetrying(taskId, error, runAfter, claimToken);
 	}
 
-	public async fail(taskId: string, error: unknown): Promise<void> {
-		await this.repository.markFailed(taskId, error);
+	public async fail(
+		taskId: string,
+		error: unknown,
+		claimToken?: string | null,
+	): Promise<void> {
+		await this.repository.markFailed(taskId, error, claimToken);
 	}
 
 	public async cancel(taskId: string, reason: unknown): Promise<void> {
@@ -753,11 +761,11 @@ async function runNotificationWorkerForTasks(
 	taskIds: string[],
 ): Promise<WorkerRunResult> {
 	const appConfig = await loadConfig(config.configPath);
-	const databaseFile = path.resolve(
-		process.cwd(),
-		appConfig.database.sqlite.file,
+	const { db, close } = createDatabaseClients(
+		appConfig.database.url,
+		appConfig.database,
 	);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const databaseName = new URL(appConfig.database.url).pathname.slice(1);
 	try {
 		const settings = await new RuntimeSystemSettingsService(db).getSettings();
 		if (
@@ -807,9 +815,9 @@ async function runNotificationWorkerForTasks(
 				deliveries: deliveries.map(summarizeDelivery),
 			});
 		}
-		return { databaseFile, processed, tasks };
+		return { databaseName, processed, tasks };
 	} finally {
-		sqlite.close();
+		await close();
 	}
 }
 
@@ -1040,7 +1048,7 @@ export async function runSmoke(config = resolveSmokeConfig()) {
 	console.log(
 		"notification.worker.result",
 		JSON.stringify({
-			databaseFile: workerResult.databaseFile,
+			databaseName: workerResult.databaseName,
 			processed: workerResult.processed,
 			tasks: workerResult.tasks,
 		}),

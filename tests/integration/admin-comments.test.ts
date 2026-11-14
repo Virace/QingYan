@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-
-import { afterEach, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	adminGroups,
 	adminUserGroups,
@@ -16,10 +15,11 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
-import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -110,6 +110,7 @@ describe("admin comments", () => {
 			.values({
 				siteId: site.id,
 				pageKey: "post:email-observability",
+				pageKeyHash: hashKey("post:email-observability"),
 				pageTitle: "Email Observability",
 				pageUrl: "/posts/email-observability/",
 				commentCount: 2,
@@ -167,8 +168,13 @@ describe("admin comments", () => {
 		if (!created.delivery) {
 			throw new Error("Expected delivery");
 		}
+		const claimed = await taskRuns.markRunning(created.task.id);
+		if (!claimed) {
+			throw new Error("Expected notification task claim");
+		}
 		await taskRuns.completeNotificationAttempt({
 			taskId: created.task.id,
+			claimToken: claimed.claimToken,
 			outcomes: [
 				{
 					deliveryId: created.delivery.id,
@@ -278,6 +284,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:admin-comment-views",
+			pageKeyHash: hashKey("post:admin-comment-views"),
 			pageTitle: "Admin Comment Views",
 			pageUrl: "/posts/admin-comment-views/",
 			commentCount: 4,
@@ -416,6 +423,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:admin-avatar",
+			pageKeyHash: hashKey("post:admin-avatar"),
 			pageTitle: "Admin Avatar",
 			pageUrl: "/posts/admin-avatar/",
 			commentCount: 1,
@@ -492,6 +500,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:admin-comments",
+			pageKeyHash: hashKey("post:admin-comments"),
 			pageTitle: "Admin Comments",
 			pageUrl: "/posts/admin-comments/",
 			commentCount: 1,
@@ -739,6 +748,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:metadata-refresh",
+			pageKeyHash: hashKey("post:metadata-refresh"),
 			pageTitle: "Metadata Refresh",
 			pageUrl: "/posts/metadata-refresh/",
 		});
@@ -821,6 +831,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:bulk-update",
+			pageKeyHash: hashKey("post:bulk-update"),
 			pageTitle: "Bulk Update",
 			pageUrl: "/posts/bulk-update/",
 			commentCount: 2,
@@ -946,6 +957,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:bulk-metadata-refresh",
+			pageKeyHash: hashKey("post:bulk-metadata-refresh"),
 			pageTitle: "Bulk Metadata Refresh",
 			pageUrl: "/posts/bulk-metadata-refresh/",
 			commentCount: 2,
@@ -1036,6 +1048,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:bulk-trash",
+			pageKeyHash: hashKey("post:bulk-trash"),
 			pageTitle: "Bulk Trash",
 			pageUrl: "/posts/bulk-trash/",
 			commentCount: 4,
@@ -1222,11 +1235,13 @@ describe("admin comments", () => {
 			{
 				siteId: fangyuan.id,
 				pageKey: "post:mixed-fangyuan",
+				pageKeyHash: hashKey("post:mixed-fangyuan"),
 				pageTitle: "Mixed Fangyuan",
 			},
 			{
 				siteId: qingyan.id,
 				pageKey: "post:mixed-qingyan",
+				pageKeyHash: hashKey("post:mixed-qingyan"),
 				pageTitle: "Mixed QingYan",
 			},
 		]);
@@ -1308,6 +1323,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:comment-audit",
+			pageKeyHash: hashKey("post:comment-audit"),
 			pageTitle: "Comment Audit",
 			commentCount: 2,
 			rootCommentCount: 2,
@@ -1411,6 +1427,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:moderation-statuses",
+			pageKeyHash: hashKey("post:moderation-statuses"),
 			pageTitle: "Moderation Statuses",
 			pageUrl: "/posts/moderation-statuses/",
 			commentCount: 3,
@@ -1609,6 +1626,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:admin-reply",
+			pageKeyHash: hashKey("post:admin-reply"),
 			pageTitle: "Admin Reply",
 			pageUrl: "/posts/admin-reply/",
 			commentCount: 1,
@@ -1705,6 +1723,7 @@ describe("admin comments", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:admin-reply-disabled",
+			pageKeyHash: hashKey("post:admin-reply-disabled"),
 			pageTitle: "Admin Reply Disabled",
 			pageUrl: "/posts/admin-reply-disabled/",
 			commentCount: 1,

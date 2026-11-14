@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import { AppError } from "../shared/errors";
+
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	captchaSessions,
 	commentModeration,
@@ -68,9 +70,9 @@ function mapCommentRequestMetadata(
 }
 
 export class CommentsWriteRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
-	public get database(): AppDatabase {
+	public get database(): DatabaseExecutor {
 		return this.db;
 	}
 
@@ -190,110 +192,107 @@ export class CommentsWriteRepository {
 		status: CommentStatus;
 		moderation?: ModerationReviewResult;
 	}) {
-		const commentId = createEntityId("c");
-		const nowIso = new Date().toISOString();
-		await this.db.insert(comments).values({
-			id: commentId,
-			siteId: input.siteId,
-			pageThreadId: input.pageThreadId,
-			parentId: input.parentCommentId,
-			visitorId: input.visitorId,
-			authorUserId: input.authorUserId,
-			authorIdentity: input.authorIdentity ?? "visitor",
-			status: input.status,
-			authorName: input.authorName,
-			authorEmail: input.authorEmail,
-			authorEmailHash: hashCommentEmail(input.authorEmail),
-			authorWebsite: input.authorWebsite,
-			contentRaw: input.contentRaw,
-			contentHtml: renderCommentHtml(input.contentRaw),
-			replyCount: 0,
-			voteUpCount: 0,
-			voteDownCount: 0,
-			createdAt: nowIso,
-			updatedAt: nowIso,
-		});
-		if (hasRequestMetadata(input)) {
-			await this.db.insert(commentRequestMetadata).values({
-				commentId,
-				authorIp: input.authorIp,
-				authorUserAgent: input.authorUserAgent,
-				ipCountry: input.metadata?.authorIpCountry,
-				ipRegion: input.metadata?.authorIpRegion,
-				ipCity: input.metadata?.authorIpCity,
-				ipIsp: input.metadata?.authorIpIsp,
-				ipLocationRaw: input.metadata?.authorIpLocationRaw,
-				ipLocationSource: input.metadata?.authorIpLocationSource,
-				ipLocationDbHash: input.metadata?.authorIpLocationDbHash,
-				ipLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
-				ipLocationError: input.metadata?.authorIpLocationError,
-				deviceBrowser: input.metadata?.authorDeviceBrowser,
-				deviceBrowserVersion: input.metadata?.authorDeviceBrowserVersion,
-				deviceOs: input.metadata?.authorDeviceOs,
-				deviceOsVersion: input.metadata?.authorDeviceOsVersion,
-				deviceType: input.metadata?.authorDeviceType,
-				deviceIcon: input.metadata?.authorDeviceIcon,
-				deviceSource: input.metadata?.authorDeviceSource,
-				deviceParserVersion: input.metadata?.authorDeviceParserVersion,
-				deviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
-				deviceError: input.metadata?.authorDeviceError,
+		return this.db.transaction(async (tx) => {
+			const commentId = createEntityId("c");
+			const nowIso = new Date().toISOString();
+			await tx.insert(comments).values({
+				id: commentId,
+				siteId: input.siteId,
+				pageThreadId: input.pageThreadId,
+				parentId: input.parentCommentId,
+				visitorId: input.visitorId,
+				authorUserId: input.authorUserId,
+				authorIdentity: input.authorIdentity ?? "visitor",
+				status: input.status,
+				authorName: input.authorName,
+				authorEmail: input.authorEmail,
+				authorEmailHash: hashCommentEmail(input.authorEmail),
+				authorWebsite: input.authorWebsite,
+				contentRaw: input.contentRaw,
+				contentHtml: renderCommentHtml(input.contentRaw),
+				replyCount: 0,
+				voteUpCount: 0,
+				voteDownCount: 0,
 				createdAt: nowIso,
 				updatedAt: nowIso,
 			});
-		}
-		if (input.moderation) {
-			await this.db.insert(commentModeration).values({
-				commentId,
-				provider: input.moderation.provider,
-				mode: input.moderation.mode,
-				decision: input.moderation.decision,
-				status: input.moderation.status,
-				reason: input.moderation.reason,
-				akismetVerdict: input.moderation.akismetVerdict,
-				akismetProTip: input.moderation.akismetProTip,
-				akismetRecheckAfterSec: input.moderation.akismetRecheckAfterSec,
-				akismetDebugHelp: input.moderation.akismetDebugHelp,
-				checkedAt: input.moderation.checkedAt,
-				requestSnapshotJson: input.moderation.requestSnapshot
-					? JSON.stringify({
-							...input.moderation.requestSnapshot,
-							apiKey: undefined,
-						})
-					: undefined,
-			});
-		}
+			if (hasRequestMetadata(input)) {
+				await tx.insert(commentRequestMetadata).values({
+					commentId,
+					authorIp: input.authorIp,
+					authorUserAgent: input.authorUserAgent,
+					ipCountry: input.metadata?.authorIpCountry,
+					ipRegion: input.metadata?.authorIpRegion,
+					ipCity: input.metadata?.authorIpCity,
+					ipIsp: input.metadata?.authorIpIsp,
+					ipLocationRaw: input.metadata?.authorIpLocationRaw,
+					ipLocationSource: input.metadata?.authorIpLocationSource,
+					ipLocationDbHash: input.metadata?.authorIpLocationDbHash,
+					ipLocationUpdatedAt: input.metadata?.authorIpLocationUpdatedAt,
+					ipLocationError: input.metadata?.authorIpLocationError,
+					deviceBrowser: input.metadata?.authorDeviceBrowser,
+					deviceBrowserVersion: input.metadata?.authorDeviceBrowserVersion,
+					deviceOs: input.metadata?.authorDeviceOs,
+					deviceOsVersion: input.metadata?.authorDeviceOsVersion,
+					deviceType: input.metadata?.authorDeviceType,
+					deviceIcon: input.metadata?.authorDeviceIcon,
+					deviceSource: input.metadata?.authorDeviceSource,
+					deviceParserVersion: input.metadata?.authorDeviceParserVersion,
+					deviceUpdatedAt: input.metadata?.authorDeviceUpdatedAt,
+					deviceError: input.metadata?.authorDeviceError,
+					createdAt: nowIso,
+					updatedAt: nowIso,
+				});
+			}
+			if (input.moderation) {
+				await tx.insert(commentModeration).values({
+					commentId,
+					provider: input.moderation.provider,
+					mode: input.moderation.mode,
+					decision: input.moderation.decision,
+					status: input.moderation.status,
+					reason: input.moderation.reason,
+					akismetVerdict: input.moderation.akismetVerdict,
+					akismetProTip: input.moderation.akismetProTip,
+					akismetRecheckAfterSec: input.moderation.akismetRecheckAfterSec,
+					akismetDebugHelp: input.moderation.akismetDebugHelp,
+					checkedAt: input.moderation.checkedAt,
+					requestSnapshotJson: input.moderation.requestSnapshot
+						? JSON.stringify({
+								...input.moderation.requestSnapshot,
+								apiKey: undefined,
+							})
+						: undefined,
+				});
+			}
 
-		if (input.parentCommentId) {
-			await this.db
-				.update(comments)
+			if (input.parentCommentId) {
+				await tx
+					.update(comments)
+					.set({
+						replyCount: sql`${comments.replyCount} + 1`,
+						updatedAt: nowIso,
+					})
+					.where(eq(comments.id, input.parentCommentId));
+			}
+
+			const [thread] = await tx
+				.update(pageThreads)
 				.set({
-					replyCount: sql`${comments.replyCount} + 1`,
+					commentCount: sql`${pageThreads.commentCount} + 1`,
+					rootCommentCount: input.parentCommentId
+						? sql`${pageThreads.rootCommentCount}`
+						: sql`${pageThreads.rootCommentCount} + 1`,
 					updatedAt: nowIso,
 				})
-				.where(eq(comments.id, input.parentCommentId));
-		}
+				.where(eq(pageThreads.id, input.pageThreadId))
+				.returning();
 
-		await this.db
-			.update(pageThreads)
-			.set({
-				commentCount: sql`${pageThreads.commentCount} + 1`,
-				rootCommentCount: input.parentCommentId
-					? sql`${pageThreads.rootCommentCount}`
-					: sql`${pageThreads.rootCommentCount} + 1`,
-				updatedAt: nowIso,
-			})
-			.where(eq(pageThreads.id, input.pageThreadId));
-
-		const [thread] = await this.db
-			.select()
-			.from(pageThreads)
-			.where(eq(pageThreads.id, input.pageThreadId))
-			.limit(1);
-
-		return {
-			commentId,
-			thread,
-		};
+			return {
+				commentId,
+				thread,
+			};
+		});
 	}
 
 	public async createVote(input: {
@@ -301,41 +300,50 @@ export class CommentsWriteRepository {
 		visitorId: number;
 		choice: "up" | "down";
 	}) {
-		await this.db.insert(voteRecords).values({
-			commentId: input.commentId,
-			visitorId: input.visitorId,
-			choice: input.choice,
+		return this.db.transaction(async (tx) => {
+			const [inserted] = await tx
+				.insert(voteRecords)
+				.values({
+					commentId: input.commentId,
+					visitorId: input.visitorId,
+					choice: input.choice,
+				})
+				.onConflictDoNothing({
+					target: [voteRecords.commentId, voteRecords.visitorId],
+				})
+				.returning({ id: voteRecords.id });
+			if (!inserted)
+				throw new AppError(
+					409,
+					"VOTE_ALREADY_CAST",
+					"你已经投过票，当前不允许再次修改。",
+				);
+
+			const [comment] = await tx
+				.update(comments)
+				.set({
+					voteUpCount:
+						input.choice === "up"
+							? sql`${comments.voteUpCount} + 1`
+							: sql`${comments.voteUpCount}`,
+					voteDownCount:
+						input.choice === "down"
+							? sql`${comments.voteDownCount} + 1`
+							: sql`${comments.voteDownCount}`,
+					updatedAt: new Date().toISOString(),
+				})
+				.where(eq(comments.id, input.commentId))
+				.returning();
+
+			return comment;
 		});
-
-		await this.db
-			.update(comments)
-			.set({
-				voteUpCount:
-					input.choice === "up"
-						? sql`${comments.voteUpCount} + 1`
-						: sql`${comments.voteUpCount}`,
-				voteDownCount:
-					input.choice === "down"
-						? sql`${comments.voteDownCount} + 1`
-						: sql`${comments.voteDownCount}`,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(comments.id, input.commentId));
-
-		const [comment] = await this.db
-			.select()
-			.from(comments)
-			.where(eq(comments.id, input.commentId))
-			.limit(1);
-
-		return comment;
 	}
 
 	public async incrementCommentVote(input: {
 		commentId: string;
 		choice: "up" | "down";
 	}) {
-		await this.db
+		const [comment] = await this.db
 			.update(comments)
 			.set({
 				voteUpCount:
@@ -348,13 +356,8 @@ export class CommentsWriteRepository {
 						: sql`${comments.voteDownCount}`,
 				updatedAt: new Date().toISOString(),
 			})
-			.where(eq(comments.id, input.commentId));
-
-		const [comment] = await this.db
-			.select()
-			.from(comments)
 			.where(eq(comments.id, input.commentId))
-			.limit(1);
+			.returning();
 
 		return comment;
 	}

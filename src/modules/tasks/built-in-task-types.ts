@@ -1,31 +1,25 @@
 import { z } from "zod";
-
+import {
+	type BlacklistAutomationPayload,
+	blacklistAutomationPayloadSchema,
+	runBlacklistAutomationTask,
+} from "./built-in/blacklist-automation-task";
+import {
+	type DailySiteDigestPayload,
+	dailySiteDigestPayloadSchema,
+	runDailySiteDigestTask,
+} from "./built-in/daily-site-digest-task";
+import {
+	runSiteSettingsActionTask,
+	type SiteSettingsActionPayload,
+	siteSettingsActionPayloadSchema,
+} from "./built-in/site-settings-action-task";
+import type { TaskRunnerContext } from "./task-runner-context";
 import type {
 	TaskTypeDefinition,
 	TaskTypePermissions,
 } from "./task-type-registry";
 import { TaskTypeRegistry } from "./task-type-registry";
-import type { TaskRunnerContext } from "./task-runner-context";
-import {
-	backupPayloadSchema,
-	runBackupTask,
-	type BackupTaskPayload,
-} from "./built-in/backup-task";
-import {
-	blacklistAutomationPayloadSchema,
-	runBlacklistAutomationTask,
-	type BlacklistAutomationPayload,
-} from "./built-in/blacklist-automation-task";
-import {
-	dailySiteDigestPayloadSchema,
-	runDailySiteDigestTask,
-	type DailySiteDigestPayload,
-} from "./built-in/daily-site-digest-task";
-import {
-	runSiteSettingsActionTask,
-	siteSettingsActionPayloadSchema,
-	type SiteSettingsActionPayload,
-} from "./built-in/site-settings-action-task";
 
 const maintenancePermissions: TaskTypePermissions = {
 	read: "tasks.read",
@@ -380,49 +374,6 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 						);
 					},
 				);
-			},
-		}),
-	);
-	registry.register(
-		defineTaskType<BackupTaskPayload>({
-			type: "backup",
-			label: "站点备份",
-			description: "复用现有 QingYan 导出/备份服务生成任务备份结果。",
-			category: "backup",
-			scope: "site",
-			permissions: {
-				read: "ops.read",
-				create: "ops.backup",
-				run: "ops.backup",
-				update: "ops.backup",
-				delete: "ops.backup",
-			},
-			payloadSchema: backupPayloadSchema,
-			defaultPayload: {
-				scope: "site",
-				siteKey: "",
-				include: {
-					siteSettings: true,
-					pageThreads: true,
-					comments: true,
-					visitors: true,
-					voteRecords: true,
-					pageFeedbackRecords: true,
-					blacklistRules: true,
-					rawUserAgent: false,
-				},
-				retentionCount: 5,
-			},
-			defaultPolicy,
-			schedule,
-			dangerous: false,
-			reuse: {
-				service: "QingYanExportService",
-				method: "exportSite",
-				file: "src/modules/import-export/qingyan/export-service.ts",
-			},
-			run(payload, context) {
-				return runWithEvents(payload, context, runBackupTask);
 			},
 		}),
 	);

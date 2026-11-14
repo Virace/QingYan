@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	adminGroups,
 	adminUserGroups,
@@ -9,8 +8,9 @@ import {
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
-import { AdminRepository } from "../../src/modules/admin/repository";
+import { hashKey } from "../../src/db/values";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { AdminRepository } from "../../src/modules/admin/repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -310,7 +310,7 @@ describe("admin api ACL", () => {
 		expect(globalCreate.statusCode).toBe(200);
 	});
 
-	it("rejects global ops and import/export routes for site-scoped users", async () => {
+	it("rejects global ops routes for site-scoped users", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await createScopedUser(fixture, {
@@ -323,10 +323,7 @@ describe("admin api ACL", () => {
 			username: "global-denied-site-admin",
 			password: "replace-me",
 		});
-		for (const url of [
-			"/qingyan/api/admin/ops/status",
-			"/qingyan/api/admin/import-export/jobs?siteKey=fangyuan",
-		]) {
+		for (const url of ["/qingyan/api/admin/ops/status"]) {
 			const response = await fixture.app.inject({
 				method: "GET",
 				url,
@@ -408,23 +405,6 @@ describe("admin api ACL", () => {
 					password: "blocked-password",
 					groupKey: "site_moderator",
 					siteKeys: ["fangyuan"],
-				},
-			},
-			{
-				method: "POST",
-				url: "/qingyan/api/admin/import-export/export",
-				payload: {
-					siteKey: "fangyuan",
-					format: "qingyan.export.v1",
-				},
-			},
-			{
-				method: "POST",
-				url: "/qingyan/api/admin/import-export/wordpress/analyze",
-				payload: {
-					siteKey: "fangyuan",
-					fileName: "blocked.xml",
-					xml: "<rss><channel /></rss>",
 				},
 			},
 		];
@@ -647,6 +627,7 @@ describe("admin api ACL", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "post:moderator-page",
+			pageKeyHash: hashKey("post:moderator-page"),
 			pageUrl: "/posts/moderator-page/",
 			status: "active",
 		});
@@ -718,12 +699,14 @@ describe("admin api ACL", () => {
 			{
 				siteId: fangyuan.id,
 				pageKey: "post:granted-delete",
+				pageKeyHash: hashKey("post:granted-delete"),
 				pageUrl: "/posts/granted-delete/",
 				status: "active",
 			},
 			{
 				siteId: qingyan.id,
 				pageKey: "post:denied-delete",
+				pageKeyHash: hashKey("post:denied-delete"),
 				pageUrl: "/posts/denied-delete/",
 				status: "active",
 			},
@@ -783,6 +766,7 @@ describe("admin api ACL", () => {
 			{
 				siteId: fangyuan.id,
 				pageKey: "post:granted-trash",
+				pageKeyHash: hashKey("post:granted-trash"),
 				pageUrl: "/posts/granted-trash/",
 				status: "trash",
 				trashedAt: "2026-06-01T00:00:00.000Z",
@@ -790,6 +774,7 @@ describe("admin api ACL", () => {
 			{
 				siteId: qingyan.id,
 				pageKey: "post:denied-trash",
+				pageKeyHash: hashKey("post:denied-trash"),
 				pageUrl: "/posts/denied-trash/",
 				status: "trash",
 				trashedAt: "2026-06-01T00:00:00.000Z",

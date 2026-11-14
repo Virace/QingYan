@@ -9,8 +9,8 @@ qy_init() {
 	QY_GITHUB_SOURCE="auto"
 	QY_GITHUB_PROXY="https://gh-proxy.org"
 	QY_NETWORK="auto"
-	QY_DATABASE="sqlite"
-	QY_DATABASES=(sqlite)
+	QY_DATABASE="postgresql"
+	QY_DATABASES=(postgresql)
 	QY_TAG=""
 	QY_INTERACTIVE=auto
 	QY_YES=false
@@ -41,7 +41,7 @@ qy_usage() {
   --dir <path>                    部署父目录，默认当前目录
   --source-dir <path>             可选源码目录，默认 <父目录>/.qingyan-source
   --version <vX.Y.Z>              稳定版本，默认最高稳定 tag
-  --database sqlite              数据库，当前仅支持 SQLite（默认）
+  --database postgresql          使用预建的 PostgreSQL 18 数据库和专用账号
   --github-source auto|direct|proxy  GitHub 来源，默认 auto
   --github-proxy <url>            GitHub 代理前缀，默认 https://gh-proxy.org
   --network-profile auto|official|cn  构建依赖源，默认 auto
@@ -202,26 +202,22 @@ qy_select_network() {
 	local profile="$QY_NETWORK" official cn
 	if [[ "$profile" == auto ]]; then
 		command -v curl >/dev/null || qy_fail "auto 构建依赖源需要 curl。"
-		official="$(qy_probe_dependencies http://deb.debian.org/debian/dists/bookworm/InRelease https://registry.npmjs.org/-/ping https://nodejs.org/download/release/latest-v24.x/SHASUMS256.txt || true)"
-		cn="$(qy_probe_dependencies http://mirrors.tuna.tsinghua.edu.cn/debian/dists/bookworm/InRelease https://registry.npmmirror.com/-/ping https://npmmirror.com/mirrors/node/latest-v24.x/SHASUMS256.txt || true)"
+		official="$(qy_probe_dependencies http://deb.debian.org/debian/dists/trixie/InRelease https://registry.npmjs.org/-/ping || true)"
+		cn="$(qy_probe_dependencies http://mirrors.tuna.tsinghua.edu.cn/debian/dists/trixie/InRelease https://registry.npmmirror.com/-/ping || true)"
 		[[ -n "$official$cn" ]] || qy_fail "官方和国内构建依赖源均不可用，请检查网络。"
 		profile=official
 		if [[ -z "$official" ]] || { [[ -n "$cn" ]] && awk -v cn="$cn" -v official="$official" 'BEGIN { exit !(cn < official) }'; }; then profile=cn; fi
 	fi
-	local apt registry node_url sqlite_url
+	local apt registry
 	if [[ "$profile" == cn ]]; then
 		apt=http://mirrors.tuna.tsinghua.edu.cn/debian
 		registry=https://registry.npmmirror.com
-		node_url=https://npmmirror.com/mirrors/node
-		sqlite_url=https://registry.npmmirror.com/-/binary/better-sqlite3
 	else
 		apt=http://deb.debian.org/debian
 		registry=https://registry.npmjs.org
-		node_url=https://nodejs.org/download/release
-		sqlite_url=https://github.com/WiseLibs/better-sqlite3/releases/download
 	fi
-	QY_BUILD_ARGS=(--build-arg "QINGYAN_APT_MAIN_MIRROR=$apt" --build-arg "QINGYAN_COREPACK_NPM_REGISTRY=$registry" --build-arg "QINGYAN_PNPM_REGISTRY=$registry" --build-arg "QINGYAN_NODE_DIST_URL=$node_url" --build-arg "QINGYAN_BETTER_SQLITE3_BINARY_HOST=$sqlite_url")
-	printf '构建依赖源：%s -> %s\nAPT：%s\nnpm：%s\nNode headers：%s\nbetter-sqlite3：%s\n' "$QY_NETWORK" "$profile" "$apt" "$registry" "$node_url" "$sqlite_url"
+	QY_BUILD_ARGS=(--build-arg "QINGYAN_APT_MAIN_MIRROR=$apt" --build-arg "QINGYAN_COREPACK_NPM_REGISTRY=$registry" --build-arg "QINGYAN_PNPM_REGISTRY=$registry")
+	printf '构建依赖源：%s -> %s\nAPT：%s\nnpm：%s\n' "$QY_NETWORK" "$profile" "$apt" "$registry"
 }
 
 qy_build() {
@@ -249,6 +245,7 @@ services:
       QINGYAN_SERVER_HOST: 0.0.0.0
       QINGYAN_INSTALL_TOKEN: ${QINGYAN_INSTALL_TOKEN:?请先设置安装令牌}
       QINGYAN_INSTALL_TRANSITION_MODE: exit_for_supervisor
+      QINGYAN_DATABASE_URL:
     volumes:
       - ./config:/app/config
       - ./data:/app/data
@@ -331,7 +328,9 @@ qy_wait() {
 				[[ "$state" != true ]] || return 0
 			else
 				state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
-				[[ "$state" != healthy && "$state" != running ]] || return 0
+				if [[ "$state" == healthy || "$state" == running ]]; then
+                    qy_compose exec -T qingyan node -e 'fetch("http://127.0.0.1:4401/qingyan/healthz").then(async r=>{const b=await r.json();if(!r.ok||b.mode!=="normal")process.exit(1)}).catch(()=>process.exit(1))' </dev/null && return 0
+                fi
 			fi
 			case "$state" in unhealthy|exited|dead) qy_fail "容器状态为 $state。" ;; esac
 		fi
@@ -429,6 +428,7 @@ qy_update_main() {
 	QY_RUNTIME="$QY_PARENT/qingyan"
 	[[ -f "$QY_RUNTIME/deployment.conf" ]] || qy_fail "未找到运行目录的 deployment.conf：$QY_RUNTIME。"
 	qy_load_metadata
+    [[ "$QY_DATABASE" != sqlite ]] || qy_fail "SQLite 实例需要离线转换：先停写，运行独立 SQLite 到 PostgreSQL 转换并核对，切换新配置后再继续更新。"
 	qy_parse "$@"
 	qy_validate
 	qy_paths
@@ -457,7 +457,8 @@ qy_update_main() {
 	qy_confirm "将备份实例并更新到 $QY_TAG，是否继续？"
 	QY_PHASE="整站备份"
 	QY_BACKUP="/app/data/backups/pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
-	qy_compose exec -T qingyan qyctl backup "$QY_BACKUP" --yes </dev/null
+	qy_compose stop qingyan
+	qy_compose run --rm --no-deps qingyan qyctl backup "$QY_BACKUP" --yes --service-stopped </dev/null
 	qy_build
 	QY_PHASE="切换镜像"
 	local line
@@ -473,7 +474,8 @@ qy_update_main() {
 	qy_compose exec -T qingyan qyctl upgrade --dry-run </dev/null
 	qy_confirm '确认上述 UpgradePlan 和备份后，应用数据升级？'
 	QY_PHASE="应用数据升级"
-	qy_compose exec -T qingyan qyctl upgrade --yes </dev/null
+	qy_compose stop qingyan
+	qy_compose run --rm --no-deps qingyan qyctl upgrade --yes --service-stopped </dev/null
 	qy_compose restart qingyan
 	qy_wait healthy
 	local installed

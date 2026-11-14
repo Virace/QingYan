@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { loadConfig } from "./config/load-config";
 import type { AppConfig } from "./config/types";
 import {
@@ -9,12 +7,12 @@ import {
 
 export type StartupMode =
 	| { mode: "install"; reason?: string }
-	| { mode: "normal"; config: AppConfig; databaseFile: string }
+	| { mode: "normal"; config: AppConfig; databaseUrl: string }
 	| {
 			mode: "upgrade";
 			config?: AppConfig;
 			configError?: unknown;
-			databaseFile: string;
+			databaseUrl: string;
 			state: Extract<
 				UpgradeRuntimeState,
 				{ state: "upgrade_required" | "recovery_required" | "broken_config" }
@@ -27,9 +25,6 @@ export async function resolveStartupMode(input: {
 	configPath: string;
 	currentApplicationVersion: string;
 	partialUpgradeMarkerPath: string;
-	createSqliteClient: Parameters<
-		typeof detectUpgradeRuntimeState
-	>[0]["createSqliteClient"];
 	environment?: NodeJS.ProcessEnv;
 }): Promise<StartupMode> {
 	if (!input.installed) {
@@ -43,15 +38,11 @@ export async function resolveStartupMode(input: {
 	} catch (error) {
 		configError = error;
 	}
-	const databaseFile = config
-		? path.resolve(process.cwd(), config.database.sqlite.file)
-		: path.resolve(process.cwd(), "config", "qingyan.db");
-	const state = detectUpgradeRuntimeState({
+	const databaseUrl = config?.database.url ?? "";
+	const state = await detectUpgradeRuntimeState({
 		configPath: input.configPath,
 		loadedConfig: config,
 		configError,
-		databaseFile,
-		createSqliteClient: input.createSqliteClient,
 		currentApplicationVersion: input.currentApplicationVersion,
 		partialUpgradeMarkerPath: input.partialUpgradeMarkerPath,
 	});
@@ -64,12 +55,12 @@ export async function resolveStartupMode(input: {
 			mode: "upgrade",
 			config,
 			configError,
-			databaseFile,
+			databaseUrl,
 			state,
 		};
 	}
-	if (!config) {
-		return { mode: "install", reason: "config_missing" };
-	}
-	return { mode: "normal", config, databaseFile };
+	if (state.state === "not_installed")
+		return { mode: "install", reason: "database_uninitialized" };
+	if (!config) throw new Error("CONFIG_REQUIRED");
+	return { mode: "normal", config, databaseUrl };
 }

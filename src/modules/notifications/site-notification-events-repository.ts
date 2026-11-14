@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	adminGroups,
 	adminUserGroups,
@@ -54,7 +54,7 @@ export interface SiteNotificationEventInput {
 }
 
 type SiteNotificationEventsTransaction = Parameters<
-	Parameters<AppDatabase["transaction"]>[0]
+	Parameters<DatabaseExecutor["transaction"]>[0]
 >[0];
 
 function createAssignmentId(prefix: "sner" | "snec") {
@@ -116,7 +116,7 @@ export class SiteNotificationEventsRepository {
 	private readonly channelConfigs: NotificationChannelConfigsRepository;
 	private readonly legacyRecipients: BackendUserNotificationRecipientsRepository;
 
-	public constructor(private readonly db: AppDatabase) {
+	public constructor(private readonly db: DatabaseExecutor) {
 		this.channelConfigs = new NotificationChannelConfigsRepository(db);
 		this.legacyRecipients = new BackendUserNotificationRecipientsRepository(db);
 	}
@@ -248,20 +248,22 @@ export class SiteNotificationEventsRepository {
 			events: SiteNotificationEventInput[];
 		},
 		options?: {
-			beforeReplace?: (transaction: SiteNotificationEventsTransaction) => void;
+			beforeReplace?: (
+				transaction: SiteNotificationEventsTransaction,
+			) => Promise<unknown>;
 		},
 	) {
 		const events = await this.validateSiteEvents(input);
 
 		const nowIso = new Date().toISOString();
-		this.db.transaction((tx) => {
-			options?.beforeReplace?.(tx);
-			tx.delete(siteNotificationEventRecipients)
-				.where(eq(siteNotificationEventRecipients.siteId, input.siteId))
-				.run();
-			tx.delete(siteNotificationEventChannels)
-				.where(eq(siteNotificationEventChannels.siteId, input.siteId))
-				.run();
+		await this.db.transaction(async (tx) => {
+			await options?.beforeReplace?.(tx);
+			await tx
+				.delete(siteNotificationEventRecipients)
+				.where(eq(siteNotificationEventRecipients.siteId, input.siteId));
+			await tx
+				.delete(siteNotificationEventChannels)
+				.where(eq(siteNotificationEventChannels.siteId, input.siteId));
 
 			const recipientRows = events.flatMap((event) =>
 				event.recipientUserIds.map((userId) => ({
@@ -275,7 +277,7 @@ export class SiteNotificationEventsRepository {
 				})),
 			);
 			if (recipientRows.length > 0) {
-				tx.insert(siteNotificationEventRecipients).values(recipientRows).run();
+				await tx.insert(siteNotificationEventRecipients).values(recipientRows);
 			}
 			const channelRows = events.flatMap((event) =>
 				event.externalChannelConfigIds.map((channelConfigId) => ({
@@ -288,7 +290,7 @@ export class SiteNotificationEventsRepository {
 				})),
 			);
 			if (channelRows.length > 0) {
-				tx.insert(siteNotificationEventChannels).values(channelRows).run();
+				await tx.insert(siteNotificationEventChannels).values(channelRows);
 			}
 		});
 

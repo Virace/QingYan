@@ -19,12 +19,12 @@ import {
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
-import { SiteNotificationEventsRepository } from "../../src/modules/notifications/site-notification-events-repository";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { NotificationChainTestService } from "../../src/modules/notifications/notification-chain-test-service";
 import { NotificationDiagnosticsService } from "../../src/modules/notifications/notification-diagnostics-service";
 import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
+import { SiteNotificationEventsRepository } from "../../src/modules/notifications/site-notification-events-repository";
 import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";

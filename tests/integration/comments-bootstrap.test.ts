@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	captchaSessions,
 	commentRequestMetadata,
@@ -17,8 +16,10 @@ import {
 	visitors,
 	voteRecords,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { serializeVerifiedAuthorSettings } from "../../src/modules/comments/verified-author";
+import { PageRegistryService } from "../../src/modules/page-registry/service";
 import { serializeCommentInputLimits } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -36,6 +37,7 @@ async function seedActivePage(
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId,
 		pageKey,
+		pageKeyHash: hashKey(pageKey),
 		pageUrl,
 		status: "active",
 	});
@@ -269,6 +271,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/posts/welcome/",
+			pageKeyHash: hashKey("/posts/welcome/"),
 			pageTitle: "Welcome",
 			pageUrl: "/posts/welcome/",
 			commentCount: 2,
@@ -494,6 +497,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/lol_voice_collation.html",
+			pageKeyHash: hashKey("/lol_voice_collation.html"),
 			pageTitle: "英雄联盟音频文件整理计划——15.15",
 			pageUrl: "/lol_voice_collation.html",
 			commentCount: 1,
@@ -632,6 +636,82 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 			pageKey: "/posts/unknown-bootstrap/",
 			hitCount: 1,
 		});
+	});
+
+	it("counts a waiting visitor once when concurrent bootstrap requests cross page approval", async () => {
+		let releaseMetadata!: () => void;
+		let reportWaiting!: () => void;
+		let waitingCount = 0;
+		const metadataReleased = new Promise<void>((resolve) => {
+			releaseMetadata = resolve;
+		});
+		const requestsWaiting = new Promise<void>((resolve) => {
+			reportWaiting = resolve;
+		});
+		const fixture = await createTestApp({
+			commentMetadataResolver: {
+				async resolve(input) {
+					if (input.userAgent === "waiting-approval") {
+						waitingCount += 1;
+						if (waitingCount === 2) reportWaiting();
+						await metadataReleased;
+					}
+					return {};
+				},
+			},
+		});
+		cleanups.push(fixture.cleanup);
+		const [site] = await fixture.app.db.select().from(sites);
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				engagementJson: JSON.stringify({
+					visitors: { enabled: true },
+					pageViews: { enabled: true },
+				}),
+				commentMetadataJson: JSON.stringify({ collectUserAgent: true }),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		const headers = {
+			referer: "http://localhost:4321/posts/approval-handoff/",
+			"x-qingyan-visitor": "initial-visitor",
+		};
+		const url = "/qingyan/api/comments/bootstrap?siteKey=fangyuan";
+		expect(
+			(await fixture.app.inject({ method: "GET", url, headers })).statusCode,
+		).toBe(200);
+		const waiting = Promise.all(
+			[1, 2].map(() =>
+				fixture.app.inject({
+					method: "GET",
+					url,
+					headers: {
+						...headers,
+						"x-qingyan-visitor": "waiting-visitor",
+						"user-agent": "waiting-approval",
+					},
+				}),
+			),
+		);
+		try {
+			await requestsWaiting;
+			await new PageRegistryService(fixture.app.db).approvePendingCandidate({
+				siteId: site.id,
+				siteKey: site.siteKey,
+				pageKey: "/posts/approval-handoff/",
+			});
+		} finally {
+			releaseMetadata();
+		}
+		expect((await waiting).map((response) => response.statusCode)).toEqual([
+			200, 200,
+		]);
+		const [thread] = await fixture.app.db.select().from(pageThreads);
+		expect(thread.pageViewCount).toBe(2);
+		const [candidate] = await fixture.app.db
+			.select()
+			.from(pendingPageCandidates);
+		expect(candidate.status).toBe("approved");
 	});
 
 	it("returns inactive payload without writes for authoritative unknown bootstrap pages", async () => {
@@ -895,6 +975,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/registered-bootstrap/",
+			pageKeyHash: hashKey("/posts/registered-bootstrap/"),
 			pageUrl: "/posts/registered-bootstrap/",
 			status: "active",
 		});
@@ -970,6 +1051,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/registered-dedupe/",
+			pageKeyHash: hashKey("/posts/registered-dedupe/"),
 			pageUrl: "/posts/registered-dedupe/",
 			status: "active",
 		});
@@ -1027,6 +1109,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/trashed-bootstrap/",
+			pageKeyHash: hashKey("/posts/trashed-bootstrap/"),
 			pageUrl: "/posts/trashed-bootstrap/",
 			status: "trash",
 			trashedAt: "2026-05-29T00:00:00.000Z",
@@ -1149,6 +1232,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/posts/metadata-display/",
+			pageKeyHash: hashKey("/posts/metadata-display/"),
 			pageTitle: "Metadata Display",
 			pageUrl: "/posts/metadata-display/",
 			commentCount: 1,
@@ -1281,6 +1365,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/posts/gravatar/",
+			pageKeyHash: hashKey("/posts/gravatar/"),
 			pageTitle: "Gravatar",
 			pageUrl: "/posts/gravatar/",
 			commentCount: 1,
@@ -1428,6 +1513,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/posts/verified-badge/",
+			pageKeyHash: hashKey("/posts/verified-badge/"),
 			pageTitle: "Verified Badge",
 			pageUrl: "/posts/verified-badge/",
 			commentCount: 1,
@@ -1575,6 +1661,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/post:always",
+			pageKeyHash: hashKey("/post:always"),
 			pageTitle: "Always",
 			pageUrl: "/post:always",
 		});

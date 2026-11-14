@@ -1,29 +1,32 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { copyFile, rename } from "node:fs/promises";
 import path from "node:path";
-
-import { DatabaseBackupService } from "../database-backup/database-backup-service";
+import { sql } from "drizzle-orm";
+import { loadConfig } from "../../config/load-config";
 import type { AppConfig } from "../../config/types";
-import type { SqliteClient } from "../../db/client";
+import { createDatabaseClients, type DatabaseExecutor } from "../../db/client";
 import { applyDatabaseMigrations } from "../../db/migrations";
+import { readAdminInfo } from "../admin/bootstrap-admin-ops";
+import { DatabaseBackupService } from "../database-backup/database-backup-service";
+import { databaseIdentity } from "../database-backup/postgres-tools";
+import { writeInstallLock } from "../install/state";
+import {
+	readPartialUpgradeMarker,
+	removePartialUpgradeMarker,
+	updatePartialUpgradeMarker,
+	writePartialUpgradeMarker,
+} from "./partial-marker";
 import { detectUpgradeRuntimeState, type UpgradeRuntimeState } from "./state";
 import {
 	toPublicUpgradePlan,
 	type UpgradeApplicationStep,
 } from "./upgrade-plan";
-import {
-	removePartialUpgradeMarker,
-	updatePartialUpgradeMarker,
-	writePartialUpgradeMarker,
-} from "./partial-marker";
-
-const UPGRADE_CONFIRMATION = "UPGRADE QINGYAN";
-
 export interface UpgradeContext {
-	sqlite: SqliteClient;
+	db: DatabaseExecutor;
 	config: AppConfig;
-	databaseFile: string;
+	databaseUrl: string;
 }
-
 export interface RegisteredApplicationUpgrade {
 	name: string;
 	fromVersion?: string;
@@ -31,163 +34,172 @@ export interface RegisteredApplicationUpgrade {
 	describe(input: UpgradeContext): UpgradeApplicationStep;
 	apply(input: UpgradeContext): void | Promise<void>;
 }
-
-export interface UpgradeApplyResult {
-	state: "applied";
-	backup: Awaited<ReturnType<DatabaseBackupService["createUpgradeBackup"]>>;
-	applied: {
-		schemaMigrations: string[];
-		applicationUpgrades: string[];
-	};
-	restartRequired: true;
-}
-
 export interface UpgradeServiceOptions {
 	configPath: string;
 	loadedConfig?: AppConfig;
 	configError?: unknown;
-	databaseFile: string;
 	currentApplicationVersion: string;
 	partialUpgradeMarkerPath: string;
-	createSqliteClient: (databaseFile: string) => SqliteClient;
 	registeredApplicationUpgrades?: RegisteredApplicationUpgrade[];
 	backupDirectory?: string;
 	migrationDirectory?: string;
 	now?: () => Date;
 }
-
-function displayPath(filePath: string) {
-	const relative = path.relative(process.cwd(), filePath);
-	return relative.startsWith("..") ? filePath : relative;
+export interface UpgradeApplyResult {
+	state: "applied";
+	backup: Awaited<ReturnType<DatabaseBackupService["createUpgradeBackup"]>>;
+	applied: { schemaMigrations: string[]; applicationUpgrades: string[] };
+	restartRequired: true;
 }
-
-function upgradeId(now: Date) {
-	const stamp = now.toISOString().replace(/\D/g, "").slice(0, 14);
-	return `upgrade_${stamp}_${randomUUID().replaceAll("-", "").slice(0, 8)}`;
-}
-
-function writeAppliedUpgrades(
-	sqlite: SqliteClient,
-	steps: UpgradeApplicationStep[],
-	targetVersion: string,
-) {
-	sqlite.exec(`
-		CREATE TABLE IF NOT EXISTS __qingyan_upgrades (
-			name text PRIMARY KEY NOT NULL,
-			from_version text,
-			to_version text,
-			applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
-			summary_json text NOT NULL
-		)
-	`);
-	const insert = sqlite.prepare(`
-		INSERT OR REPLACE INTO __qingyan_upgrades
-			(name, from_version, to_version, summary_json)
-		VALUES (?, ?, ?, ?)
-	`);
-	for (const step of steps) {
-		insert.run(
-			step.name,
-			step.fromVersion ?? null,
-			step.toVersion ?? targetVersion,
-			JSON.stringify(step.summary ?? {}),
-		);
-	}
-}
-
 export class UpgradeService {
-	public constructor(private readonly options: UpgradeServiceOptions) {}
-
-	public detect(): UpgradeRuntimeState {
-		const sqlite = this.options.loadedConfig
-			? this.options.createSqliteClient(this.options.databaseFile)
-			: undefined;
+	constructor(private readonly options: UpgradeServiceOptions) {}
+	async detect(): Promise<UpgradeRuntimeState> {
+		const config = this.options.loadedConfig;
+		if (!config) return detectUpgradeRuntimeState(this.options);
+		const clients = createDatabaseClients(config.database.url, config.database);
 		try {
-			const context =
-				sqlite && this.options.loadedConfig
-					? {
-							sqlite,
-							config: this.options.loadedConfig,
-							databaseFile: this.options.databaseFile,
-						}
-					: undefined;
-			return detectUpgradeRuntimeState({
-				configPath: this.options.configPath,
-				loadedConfig: this.options.loadedConfig,
-				configError: this.options.configError,
-				databaseFile: this.options.databaseFile,
-				createSqliteClient: this.options.createSqliteClient,
-				currentApplicationVersion: this.options.currentApplicationVersion,
-				partialUpgradeMarkerPath: this.options.partialUpgradeMarkerPath,
-				requiredApplicationUpgrades: context
-					? this.options.registeredApplicationUpgrades?.map((step) =>
-							step.describe(context),
-						)
-					: undefined,
+			return await detectUpgradeRuntimeState({
+				...this.options,
+				requiredApplicationUpgrades:
+					this.options.registeredApplicationUpgrades?.map((step) =>
+						step.describe({
+							db: clients.db,
+							config,
+							databaseUrl: config.database.url,
+						}),
+					),
 			});
 		} finally {
-			sqlite?.close();
+			await clients.close();
 		}
 	}
-
-	public publicState(): UpgradeRuntimeState {
-		const state = this.detect();
-		if (state.state !== "upgrade_required") {
-			return state;
-		}
-		return {
-			state: "upgrade_required",
-			plan: toPublicUpgradePlan(state.plan),
-		};
+	async publicState(): Promise<UpgradeRuntimeState> {
+		const state = await this.detect();
+		return state.state === "upgrade_required"
+			? { ...state, plan: toPublicUpgradePlan(state.plan) }
+			: state;
 	}
+	async recover(input: { confirm: string }): Promise<void> {
+		if (input.confirm !== "UPGRADE QINGYAN")
+			throw new Error("UPGRADE_CONFIRMATION_REQUIRED");
+		const marker = readPartialUpgradeMarker(
+			this.options.partialUpgradeMarkerPath,
+		);
+		if (
+			!marker ||
+			![
+				"database-completed",
+				"schema-migrations",
+				"application-upgrades",
+				"install-database",
+			].includes(marker.currentStep)
+		)
+			throw new Error("UPGRADE_RECOVERY_REQUIRES_RESTORE");
+		const config =
+			marker.stagedConfigPath && existsSync(marker.stagedConfigPath)
+				? await loadConfig(marker.stagedConfigPath)
+				: this.options.loadedConfig;
+		if (
+			!config ||
+			marker.targetIdentity !== databaseIdentity(config.database.url) ||
+			marker.toVersion !== this.options.currentApplicationVersion
+		)
+			throw new Error("UPGRADE_RECOVERY_TARGET_MISMATCH");
 
-	public async apply(input: {
+		const clients = createDatabaseClients(config.database.url, config.database);
+		let requiredApplicationUpgrades: UpgradeApplicationStep[] | undefined;
+		try {
+			requiredApplicationUpgrades =
+				this.options.registeredApplicationUpgrades?.map((step) =>
+					step.describe({
+						db: clients.db,
+						config,
+						databaseUrl: config.database.url,
+					}),
+				);
+		} finally {
+			await clients.close();
+		}
+
+		const state = await detectUpgradeRuntimeState({
+			...this.options,
+			loadedConfig: config,
+			configError: undefined,
+			requiredApplicationUpgrades,
+			partialUpgradeMarkerPath: undefined,
+		});
+		if (state.state !== "normal_current")
+			throw new Error("UPGRADE_RECOVERY_DATABASE_NOT_CURRENT");
+		if (marker.stagedConfigPath && existsSync(marker.stagedConfigPath)) {
+			if (existsSync(this.options.configPath))
+				await copyFile(
+					this.options.configPath,
+					`${this.options.configPath}.before-recovery-${Date.now()}`,
+				);
+			await rename(marker.stagedConfigPath, this.options.configPath);
+			const clients = createDatabaseClients(
+				config.database.url,
+				config.database,
+			);
+			try {
+				const admin = await readAdminInfo(clients.db);
+				if (!admin) throw new Error("ADMIN_BOOTSTRAP_NOT_FOUND");
+				await writeInstallLock({
+					configPath: this.options.configPath,
+					databasePath: "postgresql",
+					adminConsolePath: admin.consolePath,
+				});
+			} finally {
+				await clients.close();
+			}
+		}
+
+		removePartialUpgradeMarker(this.options.partialUpgradeMarkerPath);
+	}
+	async apply(input: {
 		confirm: string;
 		backupDirectory?: string;
 	}): Promise<UpgradeApplyResult> {
-		if (input.confirm !== UPGRADE_CONFIRMATION) {
+		if (input.confirm !== "UPGRADE QINGYAN")
 			throw new Error("UPGRADE_CONFIRMATION_REQUIRED");
-		}
-		if (!this.options.loadedConfig) {
-			throw new Error("UPGRADE_CONFIG_REQUIRED");
-		}
-
-		const state = this.detect();
-		if (state.state !== "upgrade_required") {
+		const config = this.options.loadedConfig;
+		if (!config) throw new Error("UPGRADE_CONFIG_REQUIRED");
+		const state = await this.detect();
+		if (state.state !== "upgrade_required")
 			throw new Error(`UPGRADE_STATE_INVALID:${state.state}`);
-		}
-
 		const now = this.options.now?.() ?? new Date();
-		const id = upgradeId(now);
-		const backupDirectory =
+		const id = `upgrade_${now.toISOString().replace(/\D/g, "")}_${randomUUID().slice(0, 8)}`;
+		const backupDirectory = path.resolve(
 			input.backupDirectory ??
-			this.options.backupDirectory ??
-			path.join(
-				path.dirname(this.options.databaseFile),
-				"backups",
-				"upgrades",
-				id,
-			);
-		const planPath = path.join(backupDirectory, "upgrade-plan.json");
+				this.options.backupDirectory ??
+				path.join("data/backups/upgrades", id),
+		);
+		state.plan.backupPaths = {
+			database: path.join(backupDirectory, "database/qingyan.dump"),
+			config: path.join(backupDirectory, "config/qingyan.yml"),
+			plan: path.join(backupDirectory, "upgrade-plan.json"),
+		};
+		state.plan.risks.push(
+			"恢复使用 qyctl restore，把 custom dump 恢复到预建空数据库后单独切换配置；数据库角色由 PostgreSQL 运维管理。",
+		);
+
 		writePartialUpgradeMarker({
 			markerPath: this.options.partialUpgradeMarkerPath,
 			fromVersion: state.plan.currentVersion,
 			toVersion: state.plan.targetVersion,
-			planPath: displayPath(planPath),
-			backupDirectory: displayPath(backupDirectory),
+			planPath: path.join(backupDirectory, "upgrade-plan.json"),
+			backupDirectory,
 			currentStep: "backup",
+			targetIdentity: databaseIdentity(config.database.url),
 			now: () => now,
 		});
-
-		const sqlite = this.options.createSqliteClient(this.options.databaseFile);
+		const clients = createDatabaseClients(config.database.url, config.database);
 		try {
-			const backupService = new DatabaseBackupService({
-				engine: this.options.loadedConfig.database.client,
-				databaseFile: this.options.databaseFile,
-				sqlite,
+			const backup = await new DatabaseBackupService({
+				database: config.database,
+				config,
 				now: () => now,
-			});
-			const backup = await backupService.createUpgradeBackup({
+			}).createUpgradeBackup({
 				upgradeId: id,
 				fromVersion: state.plan.currentVersion,
 				toVersion: state.plan.targetVersion,
@@ -196,43 +208,36 @@ export class UpgradeService {
 				partialMarkerPath: this.options.partialUpgradeMarkerPath,
 				backupDirectory,
 			});
-
 			updatePartialUpgradeMarker(this.options.partialUpgradeMarkerPath, {
 				currentStep: "schema-migrations",
 			});
-			applyDatabaseMigrations(sqlite, this.options.migrationDirectory);
-
+			await applyDatabaseMigrations(
+				clients.pool,
+				this.options.migrationDirectory,
+			);
 			updatePartialUpgradeMarker(this.options.partialUpgradeMarkerPath, {
 				currentStep: "application-upgrades",
 			});
-			const context: UpgradeContext = {
-				sqlite,
-				config: this.options.loadedConfig,
-				databaseFile: this.options.databaseFile,
-			};
 			const registered = new Map(
 				this.options.registeredApplicationUpgrades?.map((step) => [
 					step.name,
 					step,
-				]) ?? [],
+				]),
 			);
-			for (const step of state.plan.applicationUpgrades) {
-				await registered.get(step.name)?.apply(context);
-			}
-
+			await clients.db.transaction(async (tx) => {
+				for (const step of state.plan.applicationUpgrades) {
+					await registered
+						.get(step.name)
+						?.apply({ db: tx, config, databaseUrl: config.database.url });
+					await tx.execute(
+						sql`INSERT INTO __qingyan_upgrades(name,from_version,to_version,summary_json) VALUES(${step.name},${step.fromVersion ?? null},${step.toVersion ?? state.plan.targetVersion},${JSON.stringify(step.summary ?? {})}::jsonb) ON CONFLICT(name) DO NOTHING`,
+					);
+				}
+			});
 			updatePartialUpgradeMarker(this.options.partialUpgradeMarkerPath, {
-				currentStep: "upgrade-ledger",
+				currentStep: "database-completed",
 			});
-			const applyLedger = sqlite.transaction(() => {
-				writeAppliedUpgrades(
-					sqlite,
-					state.plan.applicationUpgrades,
-					state.plan.targetVersion,
-				);
-			});
-			applyLedger();
 			removePartialUpgradeMarker(this.options.partialUpgradeMarkerPath);
-
 			return {
 				state: "applied",
 				backup,
@@ -248,11 +253,11 @@ export class UpgradeService {
 			};
 		} catch (error) {
 			updatePartialUpgradeMarker(this.options.partialUpgradeMarkerPath, {
-				error: error instanceof Error ? error.message : String(error),
+				error: "UPGRADE_FAILED",
 			});
 			throw error;
 		} finally {
-			sqlite.close();
+			await clients.close();
 		}
 	}
 }

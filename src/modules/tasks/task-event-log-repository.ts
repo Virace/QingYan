@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, count, eq, gt, sql } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
-import { taskEventLogs } from "../../db/schema";
+import type { DatabaseExecutor } from "../../db/client";
+import { taskEventLogs, taskRuns } from "../../db/schema";
 import { parseNullableJson, stringifyJson } from "./types";
 
 function nowIso(): string {
@@ -48,22 +48,13 @@ function serializeEventLog(
 }
 
 export class TaskEventLogRepository {
-	public constructor(private readonly db: AppDatabase) {}
-
-	private async nextSequence(taskRunId: string): Promise<number> {
-		const [row] = await this.db
-			.select({
-				value: sql<number>`COALESCE(MAX(${taskEventLogs.sequence}), 0) + 1`,
-			})
-			.from(taskEventLogs)
-			.where(eq(taskEventLogs.taskRunId, taskRunId));
-		return Number(row?.value ?? 1);
-	}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async append(input: {
 		id?: string;
 		taskRunId: string;
 		sequence?: number;
+		claimToken?: string | null;
 		stream?: TaskLogStream;
 		eventType: string;
 		level: TaskLogLevel;
@@ -72,30 +63,51 @@ export class TaskEventLogRepository {
 		visibleToSiteAdmin?: boolean;
 		createdAt?: string;
 	}) {
-		const id = input.id ?? createTaskEventLogId();
-		const sequence =
-			input.sequence ?? (await this.nextSequence(input.taskRunId));
-		await this.db.insert(taskEventLogs).values({
-			id,
-			taskRunId: input.taskRunId,
-			sequence,
-			stream: input.stream ?? "system",
-			eventType: input.eventType,
-			level: input.level,
-			message: input.message,
-			dataJson: input.data === undefined ? null : stringifyJson(input.data),
-			visibleToSiteAdmin: input.visibleToSiteAdmin ?? false,
-			createdAt: input.createdAt ?? nowIso(),
+		return this.db.transaction(async (tx) => {
+			const [parent] = await tx
+				.select({
+					id: taskRuns.id,
+					claimToken: taskRuns.claimToken,
+					status: taskRuns.status,
+				})
+				.from(taskRuns)
+				.where(eq(taskRuns.id, input.taskRunId))
+				.for("update");
+			if (!parent) throw new Error(`Task run not found: ${input.taskRunId}`);
+			if (
+				input.claimToken !== undefined &&
+				(!input.claimToken ||
+					parent.claimToken !== input.claimToken ||
+					parent.status !== "running")
+			)
+				return null;
+			const [sequenceRow] = await tx
+				.select({
+					value: sql<number>`coalesce(max(${taskEventLogs.sequence}), 0) + 1`,
+				})
+				.from(taskEventLogs)
+				.where(eq(taskEventLogs.taskRunId, input.taskRunId));
+			const [row] = await tx
+				.insert(taskEventLogs)
+				.values({
+					id: input.id ?? createTaskEventLogId(),
+					taskRunId: input.taskRunId,
+					sequence: input.sequence ?? Number(sequenceRow.value),
+					stream: input.stream ?? "system",
+					eventType: input.eventType,
+					level: input.level,
+					message: input.message,
+					dataJson: input.data === undefined ? null : stringifyJson(input.data),
+					visibleToSiteAdmin: input.visibleToSiteAdmin ?? false,
+					createdAt: input.createdAt ?? nowIso(),
+				})
+				.returning();
+			return serializeEventLog(row);
 		});
-		const [row] = await this.db
-			.select()
-			.from(taskEventLogs)
-			.where(eq(taskEventLogs.id, id))
-			.limit(1);
-		return serializeEventLog(row);
 	}
 
 	public async appendLogLine(input: {
+		claimToken?: string | null;
 		id?: string;
 		taskRunId: string;
 		stream: TaskLogStream;
@@ -107,6 +119,7 @@ export class TaskEventLogRepository {
 		createdAt?: string;
 	}) {
 		return this.append({
+			claimToken: input.claimToken,
 			id: input.id,
 			taskRunId: input.taskRunId,
 			stream: input.stream,

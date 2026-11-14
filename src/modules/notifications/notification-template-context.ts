@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { buildPublicUrl } from "../../config/public-path";
 import type { AppConfig } from "../../config/types";
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { comments, pageThreads, siteSettings, sites } from "../../db/schema";
 import { mergeVerifiedAuthorSettings } from "../comments/verified-author";
 import { resolvePublicPageUrl } from "../shared/page-url";
@@ -59,7 +59,7 @@ function authorLabel(authorName: string, badgeLabel: string): string {
 
 export class NotificationTemplateContextBuilder {
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly config: Pick<
 			AppConfig["server"],
 			"publicBaseUrl" | "publicPath"

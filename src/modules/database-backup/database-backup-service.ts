@@ -1,108 +1,41 @@
-import { createHash } from "node:crypto";
-import {
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
-
-import type { SqliteClient } from "../../db/client";
-
-export type DatabaseBackupKind =
-	| "import_database_backup"
-	| "upgrade_database_backup";
+import { loadConfig } from "../../config/load-config";
+import type { AppConfig, StartupConfig } from "../../config/types";
+import { createDatabaseClients } from "../../db/client";
+import { FullBackupService } from "../backup/full-backup-service";
+import { databaseIdentity } from "./postgres-tools";
 
 export interface DatabaseBackupFile {
-	role: "database" | "wal" | "shm" | "config" | "plan" | "metadata";
+	role: "database" | "config" | "plan" | "metadata" | "resource" | "lock";
 	path: string;
 	backupPath: string | null;
 	present: boolean;
 	size: number | null;
 	sha256: string | null;
 }
-
 export interface DatabaseBackupResult {
-	kind: DatabaseBackupKind;
-	engine: "sqlite";
-	strategy: "sqlite_backup_api";
+	kind: "upgrade_database_backup";
+	engine: "postgresql";
+	strategy: "pg_dump_custom";
+	serverVersion: string;
 	createdAt: string;
 	backupDirectory: string;
 	databaseBackupPath: string;
+	manifestPath: string;
 	files: DatabaseBackupFile[];
 	notes: string[];
 }
-
 export class DatabaseBackupService {
-	public constructor(
+	constructor(
 		private readonly input: {
-			engine: string;
-			databaseFile: string;
-			sqlite: SqliteClient;
-			backupRoot?: string;
+			database: StartupConfig["database"];
+			config?: AppConfig;
 			now?: () => Date;
+			backupRoot?: string;
 		},
 	) {}
-
-	public async createImportBackup(input: {
-		jobId: string;
-		siteId: number;
-		sourceType: string;
-	}): Promise<DatabaseBackupResult> {
-		if (this.input.engine !== "sqlite") {
-			throw new Error("DATABASE_BACKUP_ENGINE_UNSUPPORTED");
-		}
-
-		const createdAt = (this.input.now?.() ?? new Date()).toISOString();
-		const backupDirectory = path.join(
-			this.input.backupRoot ??
-				path.join(path.dirname(this.input.databaseFile), "backups", "imports"),
-			input.jobId,
-		);
-		mkdirSync(backupDirectory, { recursive: true });
-
-		const stamp = createdAt.replace(/\D/g, "").slice(0, 14);
-		const databaseBackupPath = path.join(
-			backupDirectory,
-			`${path.basename(this.input.databaseFile)}.bak-${stamp}`,
-		);
-		await this.input.sqlite.backup(databaseBackupPath);
-
-		const walPath = `${this.input.databaseFile}-wal`;
-		const shmPath = `${this.input.databaseFile}-shm`;
-		const files = [
-			this.fileMetadata(
-				"database",
-				this.input.databaseFile,
-				databaseBackupPath,
-			),
-			this.copyOptional("wal", walPath, backupDirectory, stamp),
-			this.copyOptional("shm", shmPath, backupDirectory, stamp),
-		];
-		const result: DatabaseBackupResult = {
-			kind: "import_database_backup",
-			engine: "sqlite",
-			strategy: "sqlite_backup_api",
-			createdAt,
-			backupDirectory: this.displayPath(backupDirectory),
-			databaseBackupPath: this.displayPath(databaseBackupPath),
-			files,
-			notes: [
-				"SQLite backup API output is the primary restore file.",
-				"WAL/SHM files are copied when present for diagnostics.",
-			],
-		};
-		const metadataPath = path.join(backupDirectory, "metadata.json");
-		writeFileSync(metadataPath, JSON.stringify({ ...result, input }, null, 2));
-		result.files.push(
-			this.fileMetadata("metadata", metadataPath, metadataPath),
-		);
-		return result;
-	}
-
-	public async createUpgradeBackup(input: {
+	async createUpgradeBackup(input: {
 		upgradeId: string;
 		fromVersion: string;
 		toVersion: string;
@@ -111,123 +44,74 @@ export class DatabaseBackupService {
 		partialMarkerPath: string;
 		backupDirectory?: string;
 	}): Promise<DatabaseBackupResult> {
-		if (this.input.engine !== "sqlite") {
-			throw new Error("DATABASE_BACKUP_ENGINE_UNSUPPORTED");
-		}
-
-		const createdAt = (this.input.now?.() ?? new Date()).toISOString();
-		const backupDirectory =
+		const backupDirectory = path.resolve(
 			input.backupDirectory ??
-			path.join(
-				path.dirname(this.input.databaseFile),
-				"backups",
-				"upgrades",
-				input.upgradeId,
-			);
-		mkdirSync(backupDirectory, { recursive: true });
-
-		const stamp = createdAt.replace(/\D/g, "").slice(0, 14);
-		const databaseBackupPath = path.join(
-			backupDirectory,
-			`${path.basename(this.input.databaseFile)}.bak-${stamp}`,
+				path.join(
+					this.input.backupRoot ?? "data/backups/upgrades",
+					input.upgradeId,
+				),
 		);
-		await this.input.sqlite.backup(databaseBackupPath);
-
-		const planPath = path.join(backupDirectory, "upgrade-plan.json");
-		writeFileSync(
-			planPath,
-			`${JSON.stringify(input.plan, null, 2)}\n`,
-			"utf-8",
+		const config = this.input.config ?? (await loadConfig(input.configPath));
+		const clients = createDatabaseClients(
+			this.input.database.url,
+			this.input.database,
 		);
-
-		const files = [
-			this.fileMetadata(
-				"database",
-				this.input.databaseFile,
-				databaseBackupPath,
-			),
-			this.copyOptional(
-				"wal",
-				`${this.input.databaseFile}-wal`,
+		try {
+			const backup = await new FullBackupService({
+				configPath: input.configPath,
+				config: { ...config, database: this.input.database },
+				pool: clients.pool,
+				packageVersion: input.fromVersion,
+				now: this.input.now,
+			}).createBackupPackage({
+				outputDirectory: backupDirectory,
+				upgrade: {
+					fromVersion: input.fromVersion,
+					toVersion: input.toVersion,
+					plan: input.plan,
+				},
+			});
+			const result: DatabaseBackupResult = {
+				kind: "upgrade_database_backup",
+				engine: "postgresql",
+				strategy: "pg_dump_custom",
+				serverVersion: backup.manifest.database.serverVersion,
+				createdAt: backup.manifest.createdAt,
 				backupDirectory,
-				stamp,
-			),
-			this.copyOptional(
-				"shm",
-				`${this.input.databaseFile}-shm`,
-				backupDirectory,
-				stamp,
-			),
-			this.copyOptional("config", input.configPath, backupDirectory, stamp),
-			this.fileMetadata("plan", planPath, planPath),
-		];
-		const result: DatabaseBackupResult = {
-			kind: "upgrade_database_backup",
-			engine: "sqlite",
-			strategy: "sqlite_backup_api",
-			createdAt,
-			backupDirectory: this.displayPath(backupDirectory),
-			databaseBackupPath: this.displayPath(databaseBackupPath),
-			files,
-			notes: [
-				"SQLite backup API output is the primary restore file.",
-				"Startup config and public UpgradePlan are included for recovery.",
-				"WAL/SHM files are copied when present for diagnostics.",
-			],
-		};
-		const metadataPath = path.join(backupDirectory, "metadata.json");
-		writeFileSync(metadataPath, JSON.stringify({ ...result, input }, null, 2));
-		result.files.push(
-			this.fileMetadata("metadata", metadataPath, metadataPath),
-		);
-		return result;
-	}
-
-	private copyOptional(
-		role: Exclude<DatabaseBackupFile["role"], "database" | "plan" | "metadata">,
-		filePath: string,
-		backupDirectory: string,
-		stamp: string,
-	): DatabaseBackupFile {
-		if (!existsSync(filePath)) {
-			return {
-				role,
-				path: this.displayPath(filePath),
-				backupPath: null,
-				present: false,
-				size: null,
-				sha256: null,
+				databaseBackupPath: path.join(backupDirectory, "database/qingyan.dump"),
+				manifestPath: backup.manifestPath,
+				files: backup.manifest.files.map((file) => ({
+					role: file.role as DatabaseBackupFile["role"],
+					path: path.join(backupDirectory, file.path),
+					backupPath: path.join(backupDirectory, file.path),
+					present: true,
+					size: file.size,
+					sha256: file.sha256,
+				})),
+				notes: [
+					"停写后生成的 PostgreSQL custom dump 为恢复主文件。",
+					"使用 qyctl restore 读取 manifest.json，恢复到预建空数据库。",
+					"配置与备份含凭据，应限制备份目录访问权限。",
+				],
 			};
+			writeFileSync(
+				path.join(backupDirectory, "metadata.json"),
+				JSON.stringify(
+					{
+						...result,
+						target: databaseIdentity(this.input.database.url),
+						fromVersion: input.fromVersion,
+						toVersion: input.toVersion,
+						success: true,
+					},
+					null,
+					2,
+				),
+				{ mode: 0o600 },
+			);
+			return result;
+		} finally {
+			await clients.close();
 		}
-
-		const backupPath = path.join(
-			backupDirectory,
-			`${path.basename(filePath)}.bak-${stamp}`,
-		);
-		copyFileSync(filePath, backupPath);
-		return this.fileMetadata(role, filePath, backupPath);
-	}
-
-	private fileMetadata(
-		role: DatabaseBackupFile["role"],
-		filePath: string,
-		backupPath: string,
-	): DatabaseBackupFile {
-		const stat = statSync(backupPath);
-		return {
-			role,
-			path: this.displayPath(filePath),
-			backupPath: this.displayPath(backupPath),
-			present: true,
-			size: stat.size,
-			sha256: createHash("sha256")
-				.update(readFileSync(backupPath))
-				.digest("hex"),
-		};
-	}
-
-	private displayPath(filePath: string) {
-		const relative = path.relative(process.cwd(), filePath);
-		return relative.startsWith("..") ? filePath : relative;
 	}
 }

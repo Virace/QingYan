@@ -11,6 +11,7 @@ services:
       TZ: Asia/Shanghai
       QINGYAN_CONFIG_PATH: /app/config/qingyan.yml
       QINGYAN_INSTALL_TRANSITION_MODE: exit_for_supervisor
+      QINGYAN_DATABASE_URL:
     volumes:
       - ./config:/app/config
       - ./data:/app/data
@@ -28,3 +29,5 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+
+# PostgreSQL 使用预建的专用数据库与账号，通过 QINGYAN_DATABASE_URL 配置。

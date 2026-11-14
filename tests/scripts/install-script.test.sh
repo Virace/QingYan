@@ -37,12 +37,12 @@ cat > "$FAKE_BIN/docker" <<'DOCKER'
 set -euo pipefail
 printf '%s | docker %s\n' "$PWD" "$*" >> "$CALL_LOG"
 case "$*" in
-	"info"|"compose version"|"compose config --quiet"|"compose up -d qingyan"|"compose ps"|"compose restart qingyan") exit 0 ;;
+	"info"|"compose version"|"compose config --quiet"|"compose up -d qingyan"|"compose ps"|"compose restart qingyan"|"compose stop qingyan") exit 0 ;;
 	"compose ps -q qingyan") printf 'container-id\n'; exit 0 ;;
 	"inspect "*) if [[ "$*" == *State.Running* ]]; then printf 'true\n'; else printf 'healthy\n'; fi; exit 0 ;;
 	"build "*) [[ "${FAKE_BUILD_FAIL:-0}" != 1 ]] || exit 42; exit 0 ;;
 	"compose exec -T qingyan qyctl --version") printf 'QingYan 1.1.0\n'; exit 0 ;;
-	"compose exec -T qingyan qyctl "*|"compose logs "*) exit 0 ;;
+	"compose exec -T qingyan qyctl "*|"compose run --rm --no-deps qingyan qyctl "*|"compose exec -T qingyan node "*|"compose logs "*) exit 0 ;;
 esac
 printf 'unexpected docker command: %s\n' "$*" >&2
 exit 91
@@ -108,7 +108,7 @@ custom_token="$(sed -n 's/^QINGYAN_INSTALL_TOKEN=//p' "$CUSTOM_PARENT/qingyan/.e
 printf '\n\n\n\n' | env PATH="$FAKE_BIN:$PATH" CALL_LOG="$CALL_LOG" QINGYAN_REPOSITORY_URL="$ORIGIN_URL" \
 	bash "$INSTALL_SCRIPT" --interactive --dir "$TEST_ROOT/interactive" --github-source direct --network-profile cn --prepare-only > "$TEST_ROOT/interactive.log" 2>&1
 grep -F '请选择数据库' "$TEST_ROOT/interactive.log" >/dev/null
-grep -F '1) sqlite' "$TEST_ROOT/interactive.log" >/dev/null
+grep -F '1) postgresql' "$TEST_ROOT/interactive.log" >/dev/null
 
 : > "$CALL_LOG"
 run_install --dir "$TEST_ROOT/normal" --network-profile auto > "$TEST_ROOT/normal.log" 2>&1

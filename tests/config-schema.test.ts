@@ -17,12 +17,7 @@ function createStartupConfig() {
 			publicBaseUrl: "http://localhost:4401",
 			trustProxy: false,
 		},
-		database: {
-			client: "sqlite",
-			sqlite: {
-				file: "./data/qingyan.db",
-			},
-		},
+		database: { url: "postgresql://qingyan:secret@localhost/qingyan" },
 		admin: {
 			session: {
 				cookieName: "qingyan_admin",
@@ -121,8 +116,8 @@ describe("configSchema", () => {
 					restartRequired: true,
 				}),
 				expect.objectContaining({
-					path: "database.sqlite.file",
-					envName: "QINGYAN_SQLITE_FILE",
+					path: "database.url",
+					envName: "QINGYAN_DATABASE_URL",
 					category: "startup",
 					restartRequired: true,
 				}),
@@ -155,9 +150,7 @@ describe("configSchema", () => {
 				"  publicBaseUrl: http://localhost:4401",
 				"  trustProxy: false",
 				"database:",
-				"  client: sqlite",
-				"  sqlite:",
-				"    file: ./data/qingyan.db",
+				"  url: postgresql://qingyan:secret@localhost/qingyan",
 				"admin:",
 				"  session:",
 				"    cookieName: qingyan_admin",
@@ -198,12 +191,14 @@ describe("configSchema", () => {
 			const config = await loadConfig(configPath, {
 				QINGYAN_SERVER_PORT: "5501",
 				QINGYAN_PUBLIC_PATH: "qingyan",
-				QINGYAN_SQLITE_FILE: "./data/env.db",
+				QINGYAN_DATABASE_URL: "postgresql://qingyan:secret@localhost/env",
 			});
 
 			expect(config.server.port).toBe(5501);
 			expect(config.server.publicPath).toBe("/qingyan");
-			expect(config.database.sqlite.file).toBe("./data/env.db");
+			expect(config.database.url).toBe(
+				"postgresql://qingyan:secret@localhost/env",
+			);
 			expect("sites" in config).toBe(false);
 			expect("captcha" in config).toBe(false);
 			expect("mail" in config).toBe(false);
@@ -224,9 +219,7 @@ describe("configSchema", () => {
 				"  publicBaseUrl: http://localhost:4401",
 				"  trustProxy: false",
 				"database:",
-				"  client: sqlite",
-				"  sqlite:",
-				"    file: ./data/qingyan.db",
+				"  url: postgresql://qingyan:secret@localhost/qingyan",
 				"admin:",
 				"  session:",
 				"    cookieName: qingyan_admin",

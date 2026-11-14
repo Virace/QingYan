@@ -1,3 +1,5 @@
+import { canonicalJson } from "../../db/values";
+
 export interface ProtectedTaskPolicy {
 	kind: string;
 	managedBy: string;
@@ -117,7 +119,8 @@ export function setPath(
 }
 
 export function isJsonEqual(left: unknown, right: unknown): boolean {
-	return JSON.stringify(left) === JSON.stringify(right);
+	if (left === undefined || right === undefined) return left === right;
+	return canonicalJson(left) === canonicalJson(right);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

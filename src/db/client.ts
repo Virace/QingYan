@@ -1,27 +1,63 @@
-import Database from "better-sqlite3";
-import {
-	drizzle,
-	type BetterSQLite3Database,
-} from "drizzle-orm/better-sqlite3";
+import { getTableColumns, is, Table } from "drizzle-orm";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool, type PoolConfig, types } from "pg";
 
 import * as schema from "./schema";
+import { toSafeInteger, toUtcTimestamp } from "./values";
 
-export type AppDatabase = BetterSQLite3Database<typeof schema>;
-export type SqliteClient = InstanceType<typeof Database>;
+// Drizzle 在查询级覆盖 parser；使用原始 JSON 文本才能区分 SQL NULL 和 JSON null。
+types.setTypeParser(types.builtins.JSON, (value) => value);
+types.setTypeParser(types.builtins.JSONB, (value) => value);
 
-export interface DatabaseClients {
-	sqlite: SqliteClient;
-	db: AppDatabase;
+export type AppDatabase = NodePgDatabase<typeof schema>;
+export type AppTransaction = Parameters<
+	Parameters<AppDatabase["transaction"]>[0]
+>[0];
+export type DatabaseExecutor = AppDatabase | AppTransaction;
+
+export interface DatabaseOptions {
+	pool?: { max?: number; connectionTimeoutMs?: number; idleTimeoutMs?: number };
+	tls?: Exclude<PoolConfig["ssl"], boolean | undefined>;
+	onPoolError?: (error: Error) => void;
 }
 
-export function createDatabaseClients(databaseFile: string): DatabaseClients {
-	const sqlite = new Database(databaseFile);
-	sqlite.pragma("foreign_keys = ON");
-	sqlite.pragma("journal_mode = WAL");
+export interface DatabaseClients {
+	pool: Pool;
+	db: AppDatabase;
+	close(): Promise<void>;
+}
 
-	const db = drizzle(sqlite, {
-		schema,
+for (const table of Object.values(schema)) {
+	if (!is(table, Table)) continue;
+	for (const column of Object.values(getTableColumns(table))) {
+		if (column.getSQLType() !== "bigint") continue;
+		column.mapFromDriverValue = toSafeInteger;
+		column.mapToDriverValue = toSafeInteger;
+	}
+}
+
+export function createDatabaseClients(
+	databaseUrl: string,
+	options: DatabaseOptions = {},
+): DatabaseClients {
+	const pool = new Pool({
+		connectionString: databaseUrl,
+		max: options.pool?.max ?? 5,
+		connectionTimeoutMillis: options.pool?.connectionTimeoutMs ?? 5_000,
+		idleTimeoutMillis: options.pool?.idleTimeoutMs ?? 30_000,
+		options: "-c timezone=UTC -c datestyle=ISO,YMD",
+		ssl: options.tls,
+		types: {
+			getTypeParser: (oid, format) => {
+				if (format !== "binary" && oid === types.builtins.INT8)
+					return toSafeInteger;
+				if (format !== "binary" && oid === types.builtins.TIMESTAMPTZ)
+					return toUtcTimestamp;
+				return types.getTypeParser(oid, format);
+			},
+		},
 	});
-
-	return { sqlite, db };
+	pool.on("error", options.onPoolError ?? (() => {}));
+	const db = drizzle(pool, { schema });
+	return { pool, db, close: () => pool.end() };
 }

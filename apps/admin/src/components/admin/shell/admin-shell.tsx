@@ -12,7 +12,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BadgeCheckIcon,
 	BookOpenIcon,
-	DatabaseIcon,
 	FlagIcon,
 	GlobeIcon,
 	LogOutIcon,
@@ -28,11 +27,7 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 
-import {
-	fetchAdminMe,
-	logoutAdmin,
-	type AdminSiteSummary,
-} from "@/api/session";
+import { fetchAdminMe, logoutAdmin } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -96,10 +91,6 @@ const SitesPage = lazyAdminPage<{ openSite: OpenSite }, "SitesPage">(
 	() => import("../content/sites-page"),
 	"SitesPage",
 );
-const DataPage = lazyAdminPage<{ site: AdminSiteSummary }, "DataPage">(
-	() => import("../data/data-page"),
-	"DataPage",
-);
 const TasksPage = lazyAdminPage<TasksPageProps, "TasksPage">(
 	() => import("../tasks/tasks-page"),
 	"TasksPage",
@@ -133,7 +124,6 @@ export type AdminView =
 	| "visitors"
 	| "blacklist"
 	| "sites"
-	| "data"
 	| "tasks"
 	| "ops"
 	| "users"
@@ -180,7 +170,6 @@ const navItems: Array<{
 	},
 	{ id: "sites", label: "站点", icon: GlobeIcon, permission: "sites.read" },
 	{ id: "users", label: "用户", icon: UserCogIcon, permission: "users.read" },
-	{ id: "data", label: "数据", icon: DatabaseIcon, permission: "data.export" },
 	{
 		id: "tasks",
 		label: "任务",
@@ -347,18 +336,6 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return <BlacklistPage siteKey={activeSiteKey} />;
 			case "sites":
 				return <SitesPage openSite={openSite} />;
-			case "data":
-				return (
-					<DataPage
-						site={
-							activeSite ?? {
-								siteKey: activeSiteKey,
-								name: activeSiteKey || "未选择站点",
-								allowedOrigins: [],
-							}
-						}
-					/>
-				);
 			case "tasks":
 				return (
 					<TasksPage

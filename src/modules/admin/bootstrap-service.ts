@@ -2,8 +2,10 @@ import { eq } from "drizzle-orm";
 
 import type { AppRuntimeOptions } from "../../config/runtime-options";
 import type { AppConfig } from "../../config/types";
-import type { AppDatabase } from "../../db/client";
-import { adminBootstrapState } from "../../db/schema";
+import type { DatabaseExecutor } from "../../db/client";
+import { adminBootstrapState, adminUsers } from "../../db/schema";
+import { AdminIdentityService } from "./admin-identity-service";
+import { AdminUsersRepository } from "./admin-users-repository";
 import { createAdminConsolePath } from "./bootstrap-utils";
 import {
 	createInitialAdminPassword,
@@ -16,6 +18,8 @@ export interface AdminBootstrap {
 	username: string;
 	passwordHash: string;
 	generatedPassword?: string;
+	initialAdminUserId?: number;
+	development?: boolean;
 }
 
 function resolveConfiguredBootstrap(config: AppConfig): AdminBootstrap | null {
@@ -36,29 +40,32 @@ function resolveConfiguredBootstrap(config: AppConfig): AdminBootstrap | null {
 
 export async function resolveAdminBootstrap(
 	config: AppConfig,
-	db: AppDatabase,
+	db: DatabaseExecutor,
 	runtimeOptions?: AppRuntimeOptions,
 ): Promise<AdminBootstrap> {
-	const configured = resolveConfiguredBootstrap(config);
-	if (configured) {
-		return applyDevAdminCredentials(configured, runtimeOptions);
-	}
-
 	const [existing] = await db
-		.select()
+		.select({
+			consolePath: adminBootstrapState.consolePath,
+			initialAdminUserId: adminUsers.id,
+			username: adminUsers.username,
+			passwordHash: adminUsers.passwordHash,
+		})
 		.from(adminBootstrapState)
+		.innerJoin(
+			adminUsers,
+			eq(adminUsers.id, adminBootstrapState.initialAdminUserId),
+		)
 		.where(eq(adminBootstrapState.id, 1))
 		.limit(1);
-	if (existing) {
+	if (existing)
 		return applyDevAdminCredentials(
 			{
+				...existing,
 				consolePath: config.admin.console.path ?? existing.consolePath,
-				username: config.admin.auth.username ?? existing.username,
-				passwordHash: config.admin.auth.passwordHash ?? existing.passwordHash,
 			},
 			runtimeOptions,
 		);
-	}
+	const configured = resolveConfiguredBootstrap(config);
 
 	if (runtimeOptions?.devMode.enabled) {
 		return createDevAdminBootstrap(
@@ -79,15 +86,13 @@ export async function resolveAdminBootstrap(
 		generatedPassword,
 	};
 
-	await db.insert(adminBootstrapState).values({
-		id: 1,
-		consolePath: bootstrap.consolePath,
-		username: bootstrap.username,
-		passwordHash: bootstrap.passwordHash,
-		passwordRotatedAt: null,
-	});
-
-	return bootstrap;
+	const selected = configured ?? bootstrap;
+	const user = await new AdminIdentityService(db).ensureInitialAdmin(selected);
+	return {
+		...selected,
+		username: user.username,
+		passwordHash: user.passwordHash,
+	};
 }
 
 function applyDevAdminCredentials(
@@ -98,7 +103,10 @@ function applyDevAdminCredentials(
 		return bootstrap;
 	}
 
-	return createDevAdminBootstrap(bootstrap.consolePath, runtimeOptions);
+	return {
+		...createDevAdminBootstrap(bootstrap.consolePath, runtimeOptions),
+		initialAdminUserId: bootstrap.initialAdminUserId,
+	};
 }
 
 function createDevAdminBootstrap(
@@ -112,18 +120,23 @@ function createDevAdminBootstrap(
 		username,
 		passwordHash: createPasswordHash(password),
 		generatedPassword: password,
+		development: true,
 	};
 }
 
 export async function resetAdminPassword(
-	db: AppDatabase,
+	db: DatabaseExecutor,
 	password: string,
 ): Promise<void> {
-	await db
-		.update(adminBootstrapState)
-		.set({
-			passwordHash: createPasswordHash(password),
-			passwordRotatedAt: new Date().toISOString(),
-		})
-		.where(eq(adminBootstrapState.id, 1));
+	const [state] = await db
+		.select()
+		.from(adminBootstrapState)
+		.where(eq(adminBootstrapState.id, 1))
+		.limit(1);
+	if (!state) throw new Error("ADMIN_BOOTSTRAP_NOT_FOUND");
+	await new AdminUsersRepository(db).updateUserPassword({
+		userId: state.initialAdminUserId,
+		passwordHash: createPasswordHash(password),
+		passwordChangeRequired: false,
+	});
 }

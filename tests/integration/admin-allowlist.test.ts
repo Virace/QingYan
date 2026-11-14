@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq, isNotNull } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	allowlistRules,
 	blacklistRules,
@@ -8,6 +7,7 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeCommentInputLimits } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -44,6 +44,7 @@ async function seedPage(
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status,
 	});

@@ -1,6 +1,6 @@
 import { and, desc, eq, lte } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { delayedDeletions, sites } from "../../db/schema";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
@@ -41,7 +41,7 @@ function addDays(date: Date, days: number) {
 }
 
 export class DeletionPolicyService {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async listDelayedDeletions(input: ListDelayedDeletionsInput) {
 		const conditions = [

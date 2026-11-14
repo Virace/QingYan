@@ -1,7 +1,10 @@
-import type { NotificationDeliveryRecord, TaskRunRecord } from "../tasks/types";
-import type { TaskQueue } from "../tasks/types";
-import type { TaskRunRepository } from "../tasks/task-run-repository";
 import type { AppLogRecord } from "../../logging/types";
+import type { TaskRunRepository } from "../tasks/task-run-repository";
+import type {
+	NotificationDeliveryRecord,
+	TaskQueue,
+	TaskRunRecord,
+} from "../tasks/types";
 import {
 	classifyChannelError,
 	NotificationChannelError,
@@ -102,6 +105,7 @@ export class NotificationWorker {
 			let failed = 0;
 			let temporaryError: unknown = null;
 			let terminalError: unknown = null;
+			let applied = false;
 			const attemptNumber = task.attempts + 1;
 			const outcomes: Parameters<
 				TaskRunRepository["completeNotificationAttempt"]
@@ -112,6 +116,8 @@ export class NotificationWorker {
 			const reputationUpdates: Array<() => Promise<unknown> | unknown> = [];
 
 			for (const delivery of deliveries) {
+				if (!(await this.input.repository.ownsClaim(task.id, task.claimToken)))
+					break;
 				if (delivery.status === "sent" && delivery.sentAt) {
 					sent += 1;
 					continue;
@@ -265,14 +271,17 @@ export class NotificationWorker {
 						runAfter,
 					},
 				});
-				await this.input.repository.completeNotificationAttempt({
-					taskId: task.id,
-					outcomes,
-					next: { status: "retrying", error: temporaryError, runAfter },
-					events,
-					updatedAt: nowIso,
-				});
-				if (isEmailTask) {
+				const completed =
+					await this.input.repository.completeNotificationAttempt({
+						taskId: task.id,
+						claimToken: task.claimToken,
+						outcomes,
+						next: { status: "retrying", error: temporaryError, runAfter },
+						events,
+						updatedAt: nowIso,
+					});
+				applied = completed.applied;
+				if (applied && isEmailTask) {
 					await this.writeApplicationLog(task, {
 						event: "notification.email.retry_scheduled",
 						level: "warn",
@@ -295,17 +304,20 @@ export class NotificationWorker {
 						failedCount: failed,
 					},
 				});
-				await this.input.repository.completeNotificationAttempt({
-					taskId: task.id,
-					outcomes,
-					next: {
-						status: "failed",
-						error: terminalError ?? temporaryError,
-					},
-					events,
-					updatedAt: nowIso,
-				});
-				if (isEmailTask) {
+				const completed =
+					await this.input.repository.completeNotificationAttempt({
+						taskId: task.id,
+						claimToken: task.claimToken,
+						outcomes,
+						next: {
+							status: "failed",
+							error: terminalError ?? temporaryError,
+						},
+						events,
+						updatedAt: nowIso,
+					});
+				applied = completed.applied;
+				if (applied && isEmailTask) {
 					await this.writeApplicationLog(task, {
 						event: "notification.email.failed",
 						level: "error",
@@ -318,14 +330,17 @@ export class NotificationWorker {
 					});
 				}
 			} else {
-				await this.input.repository.completeNotificationAttempt({
-					taskId: task.id,
-					outcomes,
-					next: { status: "succeeded", result: { sent, failed } },
-					events,
-					updatedAt: nowIso,
-				});
-				if (isEmailTask) {
+				const completed =
+					await this.input.repository.completeNotificationAttempt({
+						taskId: task.id,
+						claimToken: task.claimToken,
+						outcomes,
+						next: { status: "succeeded", result: { sent, failed } },
+						events,
+						updatedAt: nowIso,
+					});
+				applied = completed.applied;
+				if (applied && isEmailTask) {
 					await this.writeApplicationLog(task, {
 						event: "notification.email.sent",
 						level: "info",
@@ -338,9 +353,11 @@ export class NotificationWorker {
 					});
 				}
 			}
-			for (const updateReputation of reputationUpdates) {
+			for (const updateReputation of applied ? reputationUpdates : []) {
 				await Promise.resolve(updateReputation()).catch(() => undefined);
 			}
+			if (applied)
+				await this.input.repository.finalizeScheduledTaskRun(task.id);
 		}
 
 		return processed;

@@ -1,16 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-	adminBootstrapState,
 	adminGroups,
 	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
 	sites,
 } from "../../src/db/schema";
-import { AdminRepository } from "../../src/modules/admin/repository";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { AdminRepository } from "../../src/modules/admin/repository";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -22,18 +21,6 @@ afterEach(async () => {
 		await cleanup();
 	}
 });
-
-async function seedInstalledBootstrap(
-	fixture: Awaited<ReturnType<typeof createTestApp>>,
-) {
-	await fixture.app.db.insert(adminBootstrapState).values({
-		id: 1,
-		consolePath: "/admin",
-		username: "admin",
-		passwordHash: createPasswordHash("replace-me"),
-		passwordRotatedAt: null,
-	});
-}
 
 async function createSecondSite(
 	fixture: Awaited<ReturnType<typeof createTestApp>>,
@@ -102,7 +89,6 @@ describe("admin task run projection", () => {
 	it("lists notification task runs in the admin task center", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await seedInstalledBootstrap(fixture);
 		const admin = await loginAsAdmin(fixture.app);
 		const taskRuns = new TaskRunRepository(fixture.app.db);
 		await taskRuns.create({
@@ -185,7 +171,6 @@ describe("admin task run projection", () => {
 	it("filters task runs by site key", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
-		await seedInstalledBootstrap(fixture);
 		await createSecondSite(fixture);
 		const admin = await loginAsAdmin(fixture.app);
 		const taskRuns = new TaskRunRepository(fixture.app.db);

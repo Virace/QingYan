@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	blacklistRules,
 	comments,
@@ -8,6 +7,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -60,6 +60,7 @@ describe("admin overview", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:overview",
+			pageKeyHash: hashKey("post:overview"),
 			pageTitle: "Overview",
 		});
 		const [thread] = await fixture.app.db

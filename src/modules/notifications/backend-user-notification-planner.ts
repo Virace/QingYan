@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { siteSettings } from "../../db/schema";
 import { isSystemMailUsable } from "../comments/public-contract";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
@@ -122,7 +122,7 @@ export class BackendUserNotificationPlanner {
 	private readonly tasks: TaskRunRepository;
 	private readonly emailDelivery: CommentEmailDeliveryRepository;
 
-	public constructor(private readonly db: AppDatabase) {
+	public constructor(private readonly db: DatabaseExecutor) {
 		this.events = new SiteNotificationEventsRepository(db);
 		this.preferences = new BackendUserNotificationPreferencesRepository(db);
 		this.tasks = new TaskRunRepository(db);

@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	adminGroups,
 	adminUserGroups,
@@ -12,6 +11,7 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
@@ -53,6 +53,7 @@ async function seedActivePage(
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});

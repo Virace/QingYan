@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { FastifyPluginAsync } from "fastify";
@@ -107,21 +106,16 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.siteRegistry,
 	);
 	const version = readPackageVersion();
-	const databaseFile = path.resolve(
-		process.cwd(),
-		fastify.config.database.sqlite.file,
-	);
+	const configPath = process.env.QINGYAN_CONFIG_PATH ?? "config/qingyan.yml";
 	const upgradeService = new UpgradeService({
-		configPath: process.env.QINGYAN_CONFIG_PATH ?? "config/qingyan.yml",
+		configPath,
 		loadedConfig: fastify.config,
-		databaseFile,
 		currentApplicationVersion: version,
-		partialUpgradeMarkerPath: path.join(
-			path.dirname(databaseFile),
+		partialUpgradeMarkerPath: path.resolve(
+			path.dirname(configPath),
 			"upgrade",
 			"partial-upgrade.json",
 		),
-		createSqliteClient: (file) => new Database(file),
 	});
 	const releaseClient = new GitHubReleaseClient({
 		owner: "Virace",

@@ -26,7 +26,7 @@ export interface OpsStatus {
 	};
 	backup: {
 		format: "qingyan.full-backup";
-		provider: "sqlite";
+		provider: "postgresql";
 	};
 	recovery: {
 		manualCommands: string[];
@@ -149,19 +149,16 @@ export interface TaskExecutionOptions {
 export interface IpRegionMaintenanceStatus {
 	databases: Array<{
 		ipVersion: IpVersion;
-		filePath: string;
-		fileHash: string;
+		filePath: string | null;
+		fileHash: string | null;
 		sourceUrl: string | null;
-		cachePolicy: string;
-		activatedAt: string;
+		cachePolicy: string | null;
+		activatedAt: string | null;
 		updatedAt: string;
-	}>;
-	recentRuns: Array<{
-		ipVersion: IpVersion;
-		status: string;
-		refreshedComments: number;
-		errorMessage: string | null;
-		createdAt: string;
+		lastCheckedAt: string | null;
+		lastCheckStatus: "success" | "skipped" | "failed" | null;
+		lastCheckReason: string | null;
+		lastCheckError: string | null;
 	}>;
 	commentMetadata: {
 		totalWithIp: number;
