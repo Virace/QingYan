@@ -1,19 +1,17 @@
-import { useEffect, useState } from "react";
 import { Tabs } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import {
+	type AdminSystemSettings,
 	getSystemSettings,
+	type NotificationChannel,
+	type NotificationChannelConfig,
 	patchAdminSystemSettingsSection,
 	testNotificationChannel,
 	testSystemMail,
-	type AdminSystemSettings,
-	type NotificationChannel,
-	type NotificationChannelConfig,
 } from "@/api/admin";
-import { adminUiErrorMessage } from "@/api/client";
-import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -22,24 +20,6 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-
-import {
-	BooleanField,
-	EmptyState,
-	Field,
-	SettingsSection,
-	SettingsSubsection,
-	inputClass,
-	textareaClass,
-} from "../shared/admin-ui";
-import { useAdminConfirmDialog } from "../shared/confirm-dialog";
-import { IpRegionStatusPanel } from "./ip-region-status-panel";
-import {
-	captchaProviderLabels,
-	ipRegionCachePolicyLabels,
-	loggingLevelLabels,
-	recaptchaVariantLabels,
-} from "../shared/display-labels";
 import {
 	cloneNotificationChannelConfigDraft,
 	createNotificationChannelConfigDraft,
@@ -47,6 +27,24 @@ import {
 	notificationTestResultSummary,
 	upsertNotificationChannelConfig,
 } from "../content/notification-ui-model";
+import { useAdminUnsavedChanges } from "../shared/admin-navigation-guard";
+import {
+	BooleanField,
+	EmptyState,
+	Field,
+	inputClass,
+	SettingsSection,
+	SettingsSubsection,
+	textareaClass,
+} from "../shared/admin-ui";
+import { useAdminConfirmDialog } from "../shared/confirm-dialog";
+import {
+	captchaProviderLabels,
+	ipRegionCachePolicyLabels,
+	loggingLevelLabels,
+	recaptchaVariantLabels,
+} from "../shared/display-labels";
+import { IpRegionStatusPanel } from "./ip-region-status-panel";
 import {
 	MailTestPanel,
 	NotificationChannelConfigDialog,
@@ -59,20 +57,28 @@ import {
 	firstFieldError,
 } from "./settings-error-model";
 import {
-	showExternalAvatarDetails,
-	showMailDetails,
-} from "./settings-visibility";
-import {
-	SettingsSaveError,
 	buildSystemSettingsSectionPayload,
+	countSettingsChanges,
 	initialSettingsTab,
 	isSameSettingsPayload,
 	replaceSettingsTabQuery,
+	replaceSystemSettingsSection,
+	SettingsDraftActions,
+	SettingsLoadError,
+	SettingsSaveError,
+	type SystemSettingsTab,
 	secretPlaceholder,
+	systemDraftPayload,
+	systemDraftSections,
 	systemSectionSaveLabels,
 	systemSettingsTabs,
-	type SystemSettingsTab,
+	withoutEmptySecrets,
 } from "./settings-shared";
+import {
+	showExternalAvatarDetails,
+	showMailDetails,
+} from "./settings-visibility";
+import { useSettingsDraft } from "./use-settings-draft";
 export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
@@ -80,56 +86,109 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 		queryKey: ["admin", "system-settings"],
 		queryFn: getSystemSettings,
 	});
-	const [draft, setDraft] = useState<AdminSystemSettings | null>(null);
+	const {
+		draft,
+		saved,
+		setDraft,
+		dirtySections,
+		acceptSavedSection,
+		discardSection,
+	} = useSettingsDraft(
+		"system",
+		query.data,
+		systemDraftSections,
+		systemDraftPayload,
+		replaceSystemSettingsSection,
+	);
 	const [channelDialog, setChannelDialog] = useState<{
 		mode: "create" | "edit";
 		draft: NotificationChannelConfig;
+		initial: NotificationChannelConfig;
 	} | null>(null);
 	const [channelTestConfig, setChannelTestConfig] =
 		useState<NotificationChannelConfig | null>(null);
+	const [templatesDirty, setTemplatesDirty] = useState(false);
 	const [systemTab, setSystemTab] = useState<SystemSettingsTab>(() =>
 		initialSettingsTab("systemTab", systemSettingsTabs, "security"),
 	);
-	const [savedMailSettings, setSavedMailSettings] = useState<
-		AdminSystemSettings["mail"] | null
-	>(null);
+	const channelDialogDirty = Boolean(
+		channelDialog &&
+			!isSameSettingsPayload(channelDialog.initial, channelDialog.draft),
+	);
+	useAdminUnsavedChanges(dirtySections.length > 0 || channelDialogDirty);
+	useEffect(() => {
+		const updateTab = () =>
+			setSystemTab(
+				initialSettingsTab("systemTab", systemSettingsTabs, "security"),
+			);
+		window.addEventListener("admin:navigation", updateTab);
+		return () => window.removeEventListener("admin:navigation", updateTab);
+	}, []);
 	const mutation = useMutation({
 		mutationFn: (input: { section: SystemSettingsTab; payload: unknown }) =>
 			patchAdminSystemSettingsSection(input.section, input.payload),
 		meta: { suppressGlobalToast: true },
-		onSuccess: (settings) => {
-			setDraft(settings);
-			setSavedMailSettings(settings.mail);
+		onSuccess: (settings, input) => {
+			acceptSavedSection(settings, input.section, input.payload);
 			queryClient.setQueryData(["admin", "system-settings"], settings);
 			toast.success("系统设置已保存");
 		},
 		onError: (error) => {
-			toast.error(adminUiErrorMessage(error, "系统设置保存失败。"));
+			toast.error(
+				buildSettingsErrorModel(error, "系统设置保存失败。")?.message,
+			);
+		},
+	});
+	const channelMutation = useMutation({
+		mutationFn: (channelConfigs: NotificationChannelConfig[]) =>
+			patchAdminSystemSettingsSection("notifications", {
+				channelConfigs: saved
+					? withoutEmptySecrets({
+							...saved,
+							notifications: { ...saved.notifications, channelConfigs },
+						}).notifications.channelConfigs
+					: channelConfigs,
+			}),
+		meta: { suppressGlobalToast: true },
+		onSuccess: (settings) => {
+			acceptSavedSection(settings, "channels");
+			queryClient.setQueryData(["admin", "system-settings"], settings);
+			void queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+			setChannelDialog(null);
+			toast.success("通知渠道已保存");
 		},
 	});
 	const channelTestMutation = useMutation({
+		meta: { suppressGlobalErrorToast: true },
 		mutationFn: (input: { channelConfigId: string; recipient?: string }) =>
 			testNotificationChannel({ ...input, siteKey }),
 	});
 	const mailTestMutation = useMutation({
+		meta: { suppressGlobalErrorToast: true },
 		mutationFn: () => testSystemMail(),
 	});
 
-	useEffect(() => {
-		if (query.data) {
-			setDraft(query.data);
-			setSavedMailSettings(query.data.mail);
-		}
-	}, [query.data]);
 	const setControlledSystemTab = (nextTab: string) => {
 		const normalized = systemSettingsTabs.includes(nextTab as SystemSettingsTab)
 			? (nextTab as SystemSettingsTab)
 			: "security";
 		setSystemTab(normalized);
+		mutation.reset();
 		replaceSettingsTabQuery("systemTab", normalized);
 	};
 
 	if (!draft) {
+		if (query.isError)
+			return (
+				<SettingsLoadError
+					message={
+						buildSettingsErrorModel(query.error, "系统设置加载失败。")
+							?.message ?? "系统设置加载失败，请重试。"
+					}
+					pending={query.isFetching}
+					onRetry={() => void query.refetch()}
+				/>
+			);
 		return <EmptyState text="加载中" />;
 	}
 
@@ -157,8 +216,11 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 	);
 	const mailTestState = mailChannelTestState({
 		settings: draft,
-		dirty: savedMailSettings
-			? JSON.stringify(savedMailSettings) !== JSON.stringify(draft.mail)
+		dirty: saved
+			? !isSameSettingsPayload(
+					buildSystemSettingsSectionPayload("mail", saved),
+					buildSystemSettingsSectionPayload("mail", draft),
+				)
 			: false,
 	});
 	const profileVerificationMailReady =
@@ -167,31 +229,26 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 		Boolean(draft.mail.smtp.from.trim());
 	const openChannelCreateDialog = (
 		type: Exclude<NotificationChannel, "email">,
-	) =>
-		setChannelDialog({
-			mode: "create",
-			draft: createNotificationChannelConfigDraft(type),
-		});
-	const openChannelEditDialog = (config: NotificationChannelConfig) =>
-		setChannelDialog({
-			mode: "edit",
-			draft: cloneNotificationChannelConfigDraft(config),
-		});
+	) => {
+		channelMutation.reset();
+		const initial = createNotificationChannelConfigDraft(type);
+		setChannelDialog({ mode: "create", draft: initial, initial });
+	};
+	const openChannelEditDialog = (config: NotificationChannelConfig) => {
+		channelMutation.reset();
+		const initial = cloneNotificationChannelConfigDraft(config);
+		setChannelDialog({ mode: "edit", draft: initial, initial });
+	};
 	const submitChannelDialog = () => {
-		if (!channelDialog) {
+		if (!channelDialog || !saved) {
 			return;
 		}
-		setDraft({
-			...draft,
-			notifications: {
-				...draft.notifications,
-				channelConfigs: upsertNotificationChannelConfig(
-					draft.notifications.channelConfigs,
-					channelDialog.draft,
-				),
-			},
-		});
-		setChannelDialog(null);
+		channelMutation.mutate(
+			upsertNotificationChannelConfig(
+				saved.notifications.channelConfigs,
+				channelDialog.draft,
+			),
+		);
 	};
 	const removeChannelConfig = async (config: NotificationChannelConfig) => {
 		const confirmed = await confirm({
@@ -204,15 +261,12 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 		if (!confirmed) {
 			return;
 		}
-		setDraft({
-			...draft,
-			notifications: {
-				...draft.notifications,
-				channelConfigs: draft.notifications.channelConfigs.filter(
+		if (saved)
+			channelMutation.mutate(
+				saved.notifications.channelConfigs.filter(
 					(item) => item.id !== config.id,
 				),
-			},
-		});
+			);
 	};
 
 	return (
@@ -230,8 +284,8 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 							systemTab,
 							draft,
 						);
-						const currentPayload = query.data
-							? buildSystemSettingsSectionPayload(systemTab, query.data)
+						const currentPayload = saved
+							? buildSystemSettingsSectionPayload(systemTab, saved)
 							: null;
 						if (
 							currentPayload &&
@@ -240,7 +294,10 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 							toast.info("配置无变化");
 							return;
 						}
-						if (draft.admin.deletion.retentionDays === 0) {
+						if (
+							systemTab === "security" &&
+							draft.admin.deletion.retentionDays === 0
+						) {
 							const confirmed = await confirm({
 								title: "立即永久删除",
 								description:
@@ -259,20 +316,41 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 					}}
 				>
 					<SettingsSaveError model={saveError} fallback="系统设置保存失败" />
+					{!channelDialog ? (
+						<SettingsSaveError
+							model={buildSettingsErrorModel(
+								channelMutation.error,
+								"通知渠道保存失败，请检查配置后重试。",
+							)}
+							fallback="通知渠道保存失败"
+						/>
+					) : null}
 					<Tabs.Root
 						value={systemTab}
 						onValueChange={setControlledSystemTab}
 						className="md:col-span-2"
 					>
 						<Tabs.List>
-							<Tabs.Trigger value="security">后台与安全</Tabs.Trigger>
-							<Tabs.Trigger value="rate-limit">限流</Tabs.Trigger>
-							<Tabs.Trigger value="mail">邮件</Tabs.Trigger>
-							<Tabs.Trigger value="notifications">发送服务</Tabs.Trigger>
-							<Tabs.Trigger value="captcha">验证码</Tabs.Trigger>
-							<Tabs.Trigger value="avatar">头像与公开接口</Tabs.Trigger>
-							<Tabs.Trigger value="ip-region">IP 地域</Tabs.Trigger>
-							<Tabs.Trigger value="anti-spam">反垃圾</Tabs.Trigger>
+							{(
+								[
+									["security", "后台与安全"],
+									["rate-limit", "限流"],
+									["mail", "邮件"],
+									["notifications", "发送服务"],
+									["captcha", "验证码"],
+									["avatar", "头像与公开接口"],
+									["ip-region", "IP 地域"],
+									["anti-spam", "反垃圾"],
+								] as const
+							).map(([tab, label]) => (
+								<Tabs.Trigger key={tab} value={tab} aria-label={label}>
+									{label}
+									{dirtySections.includes(tab) ||
+									(tab === "notifications" && templatesDirty)
+										? " · 未保存"
+										: ""}
+								</Tabs.Trigger>
+							))}
 						</Tabs.List>
 						<div className="pt-4">
 							<Tabs.Content value="security">
@@ -1127,7 +1205,11 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 									</SettingsSection>
 								</div>
 							</Tabs.Content>
-							<Tabs.Content value="notifications">
+							<Tabs.Content
+								value="notifications"
+								forceMount
+								hidden={systemTab !== "notifications"}
+							>
 								<div className="grid gap-4 md:grid-cols-2">
 									<SettingsSaveError
 										model={channelTestError}
@@ -1139,6 +1221,7 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 									>
 										<NotificationChannelConfigList
 											configs={draft.notifications.channelConfigs}
+											pending={channelMutation.isPending}
 											onAdd={openChannelCreateDialog}
 											onEdit={openChannelEditDialog}
 											onRemove={(config) => void removeChannelConfig(config)}
@@ -1150,7 +1233,9 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 											{notificationTestResultSummary(channelTestMutation.data)}
 										</div>
 									) : null}
-									<NotificationTemplatesPanel />
+									<NotificationTemplatesPanel
+										onDirtyChange={setTemplatesDirty}
+									/>
 									<details className="md:col-span-2 rounded-md border bg-background px-4 py-3">
 										<summary className="cursor-pointer font-medium">
 											高级发送设置
@@ -1969,20 +2054,52 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 							</Tabs.Content>
 						</div>
 					</Tabs.Root>
-					<div className="md:col-span-2">
-						<Button type="submit" disabled={mutation.isPending}>
-							{systemSectionSaveLabels[systemTab]}
-						</Button>
-					</div>
+					<SettingsDraftActions
+						changeCount={
+							saved
+								? countSettingsChanges(
+										buildSystemSettingsSectionPayload(systemTab, saved),
+										buildSystemSettingsSectionPayload(systemTab, draft),
+									)
+								: 0
+						}
+						totalDirtySections={dirtySections.length}
+						pending={mutation.isPending}
+						saveLabel={systemSectionSaveLabels[systemTab]}
+						additionalChanges={
+							templatesDirty
+								? "有未保存模板，请在“发送服务 > 模板管理”中保存"
+								: undefined
+						}
+						onDiscard={() => {
+							discardSection(systemTab);
+							mutation.reset();
+						}}
+					/>
 				</form>
 				<NotificationChannelConfigDialog
 					open={Boolean(channelDialog)}
 					mode={channelDialog?.mode ?? "create"}
 					draft={channelDialog?.draft ?? null}
-					onOpenChange={(open) => {
-						if (!open) {
-							setChannelDialog(null);
-						}
+					pending={channelMutation.isPending}
+					error={buildSettingsErrorModel(
+						channelMutation.error,
+						"通知渠道保存失败，请检查配置后重试。",
+					)}
+					onOpenChange={async (open) => {
+						if (open || channelMutation.isPending) return;
+						if (
+							channelDialogDirty &&
+							!(await confirm({
+								title: "放弃渠道更改",
+								description: "渠道尚未保存。确认放弃这些更改？",
+								confirmText: "放弃更改",
+								destructive: true,
+							}))
+						)
+							return;
+						setChannelDialog(null);
+						channelMutation.reset();
 					}}
 					onDraftChange={(nextDraft) =>
 						channelDialog

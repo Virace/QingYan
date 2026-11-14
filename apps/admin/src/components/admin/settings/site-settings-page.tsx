@@ -9,9 +9,7 @@ import {
 	listAdminUsers,
 	patchAdminSiteSettingsSection,
 } from "@/api/admin";
-import { adminUiErrorMessage } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -21,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { eligibleNotificationRecipientUsers } from "../content/notification-ui-model";
+import { useAdminUnsavedChanges } from "../shared/admin-navigation-guard";
 import {
 	BooleanField,
 	EmptyState,
@@ -38,26 +37,30 @@ import {
 } from "./settings-error-model";
 import {
 	buildSiteSettingsSectionPayload,
+	countSettingsChanges,
 	initialSettingsTab,
 	isSameSettingsPayload,
 	parseSitemapUrlList,
 	replaceSettingsTabQuery,
+	replaceSiteSettingsSection,
+	SettingsDraftActions,
+	SettingsLoadError,
 	SettingsSaveError,
 	type SiteSettingsTab,
 	siteSectionSaveLabels,
 	siteSettingsTabs,
 } from "./settings-shared";
 import {
-	countSiteNotificationChanges,
+	showCaptchaThresholdDetails,
+	showLowTrustCounterHint,
+} from "./settings-visibility";
+import {
 	normalizeSiteNotificationEvents,
 	updateEventExternalTargets,
 	updateEventRecipients,
 } from "./site-notification-events-model";
 import { SiteNotificationEventPanel } from "./site-notification-events-panel";
-import {
-	showCaptchaThresholdDetails,
-	showLowTrustCounterHint,
-} from "./settings-visibility";
+import { useSettingsDraft } from "./use-settings-draft";
 export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
@@ -72,10 +75,30 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		queryFn: () => listAdminUsers({ siteKey: resolvedSiteKey, limit: 100 }),
 		enabled: Boolean(resolvedSiteKey),
 	});
-	const [draft, setDraft] = useState<AdminSettings | null>(null);
+	const {
+		draft,
+		saved,
+		setDraft,
+		dirtySections,
+		acceptSavedSection,
+		discardSection,
+	} = useSettingsDraft(
+		resolvedSiteKey,
+		query.data,
+		siteSettingsTabs,
+		buildSiteSettingsSectionPayload,
+		replaceSiteSettingsSection,
+	);
+	useAdminUnsavedChanges(dirtySections.length > 0);
 	const [siteTab, setSiteTab] = useState<SiteSettingsTab>(() =>
 		initialSettingsTab("siteTab", siteSettingsTabs, "comments"),
 	);
+	useEffect(() => {
+		const updateTab = () =>
+			setSiteTab(initialSettingsTab("siteTab", siteSettingsTabs, "comments"));
+		window.addEventListener("admin:navigation", updateTab);
+		return () => window.removeEventListener("admin:navigation", updateTab);
+	}, []);
 	const mutation = useMutation({
 		mutationFn: (input: { section: SiteSettingsTab; payload: unknown }) =>
 			patchAdminSiteSettingsSection(
@@ -85,7 +108,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			),
 		meta: { suppressGlobalToast: true },
 		onSuccess: (settings, input) => {
-			setDraft(settings);
+			acceptSavedSection(settings, input.section, input.payload);
 			queryClient.setQueryData(
 				["admin", "settings", resolvedSiteKey],
 				settings,
@@ -98,42 +121,29 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 			toast.success("站点设置已保存");
 		},
 		onError: (error) => {
-			toast.error(adminUiErrorMessage(error, "站点设置保存失败。"));
+			toast.error(
+				buildSettingsErrorModel(error, "站点设置保存失败。")?.message,
+			);
 		},
 	});
 
-	useEffect(() => {
-		if (query.data) {
-			setDraft(query.data);
-		}
-	}, [query.data]);
-	const notificationChangeCount =
-		query.data && draft
-			? countSiteNotificationChanges(
-					query.data.notifications,
-					draft.notifications,
-				)
-			: 0;
-	const notificationDraftDirty = notificationChangeCount > 0;
-	useEffect(() => {
-		if (!notificationDraftDirty) {
-			return;
-		}
-		const guardUnsavedChanges = (event: BeforeUnloadEvent) => {
-			event.preventDefault();
-		};
-		window.addEventListener("beforeunload", guardUnsavedChanges);
-		return () =>
-			window.removeEventListener("beforeunload", guardUnsavedChanges);
-	}, [notificationDraftDirty]);
+	const notificationDraftDirty = dirtySections.includes("notifications");
 
 	if (!draft) {
 		if (!resolvedSiteKey) {
 			return <EmptyState text="请选择站点" />;
 		}
 		if (query.isError) {
-			const message = adminUiErrorMessage(query.error, "站点设置加载失败。");
-			return <EmptyState text={message} />;
+			const message =
+				buildSettingsErrorModel(query.error, "站点设置加载失败。")?.message ??
+				"站点设置加载失败，请重试。";
+			return (
+				<SettingsLoadError
+					message={message}
+					pending={query.isFetching}
+					onRetry={() => void query.refetch()}
+				/>
+			);
 		}
 		return <EmptyState text="加载中" />;
 	}
@@ -248,28 +258,14 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 		const normalized = siteSettingsTabs.includes(nextTab as SiteSettingsTab)
 			? (nextTab as SiteSettingsTab)
 			: "comments";
-		if (
-			siteTab === "notifications" &&
-			normalized !== "notifications" &&
-			notificationDraftDirty
-		) {
-			if (!window.confirm("通知设置尚未应用。要放弃这些更改并离开吗？")) {
-				return;
-			}
-			if (query.data) {
-				setDraft({
-					...draft,
-					notifications: structuredClone(query.data.notifications),
-				});
-			}
-		}
 		setSiteTab(normalized);
+		mutation.reset();
 		replaceSettingsTabQuery("siteTab", normalized);
 	};
 	const saveSiteSettingsSection = async () => {
 		const nextPayload = buildSiteSettingsSectionPayload(siteTab, draft);
-		const currentPayload = query.data
-			? buildSiteSettingsSectionPayload(siteTab, query.data)
+		const currentPayload = saved
+			? buildSiteSettingsSectionPayload(siteTab, saved)
 			: null;
 		if (currentPayload && isSameSettingsPayload(currentPayload, nextPayload)) {
 			toast.info("配置无变化");
@@ -317,10 +313,20 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 						className="md:col-span-2"
 					>
 						<Tabs.List>
-							<Tabs.Trigger value="comments">评论</Tabs.Trigger>
-							<Tabs.Trigger value="engagement">访客与计数</Tabs.Trigger>
-							<Tabs.Trigger value="notifications">通知</Tabs.Trigger>
-							<Tabs.Trigger value="pageRegistry">页面注册</Tabs.Trigger>
+							<Tabs.Trigger value="comments" aria-label="评论">
+								评论{dirtySections.includes("comments") ? " · 未保存" : ""}
+							</Tabs.Trigger>
+							<Tabs.Trigger value="engagement" aria-label="访客与计数">
+								访客与计数
+								{dirtySections.includes("engagement") ? " · 未保存" : ""}
+							</Tabs.Trigger>
+							<Tabs.Trigger value="notifications" aria-label="通知">
+								通知{dirtySections.includes("notifications") ? " · 未保存" : ""}
+							</Tabs.Trigger>
+							<Tabs.Trigger value="pageRegistry" aria-label="页面注册">
+								页面注册
+								{dirtySections.includes("pageRegistry") ? " · 未保存" : ""}
+							</Tabs.Trigger>
 						</Tabs.List>
 						<div className="pt-4">
 							<Tabs.Content value="comments">
@@ -1540,38 +1546,23 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							</Tabs.Content>
 						</div>
 					</Tabs.Root>
-					{siteTab === "notifications" ? (
-						notificationDraftDirty ? (
-							<div className="sticky bottom-4 z-20 flex min-w-0 flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur md:col-span-2 md:flex-row md:items-center md:justify-between">
-								<p className="min-w-0 text-sm font-medium">
-									有 {notificationChangeCount} 项通知设置尚未应用
-								</p>
-								<div className="flex shrink-0 flex-wrap gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										disabled={mutation.isPending}
-										onClick={() => {
-											if (query.data) {
-												setDraft(structuredClone(query.data));
-											}
-										}}
-									>
-										放弃更改
-									</Button>
-									<Button type="submit" disabled={mutation.isPending}>
-										{mutation.isPending ? "正在应用" : "应用全部更改"}
-									</Button>
-								</div>
-							</div>
-						) : null
-					) : (
-						<div className="md:col-span-2">
-							<Button type="submit" disabled={mutation.isPending}>
-								{siteSectionSaveLabels[siteTab]}
-							</Button>
-						</div>
-					)}
+					<SettingsDraftActions
+						changeCount={
+							saved
+								? countSettingsChanges(
+										buildSiteSettingsSectionPayload(siteTab, saved),
+										buildSiteSettingsSectionPayload(siteTab, draft),
+									)
+								: 0
+						}
+						totalDirtySections={dirtySections.length}
+						pending={mutation.isPending}
+						saveLabel={siteSectionSaveLabels[siteTab]}
+						onDiscard={() => {
+							discardSection(siteTab);
+							mutation.reset();
+						}}
+					/>
 				</form>
 			</CardContent>
 		</Card>

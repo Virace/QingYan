@@ -27,6 +27,7 @@ import {
 	notificationChannelLabels,
 	notificationChannelTargetSummary,
 } from "../content/notification-ui-model";
+import { useAdminUnsavedChanges } from "../shared/admin-navigation-guard";
 import {
 	BooleanField,
 	EmptyState,
@@ -46,6 +47,7 @@ import {
 import { buildSettingsErrorModel } from "./settings-error-model";
 import {
 	configStringValue,
+	isSameSettingsPayload,
 	SettingsSaveError,
 	secretPlaceholder,
 	secretStringValue,
@@ -310,12 +312,14 @@ export function MailTestPanel({
 
 export function NotificationChannelConfigList({
 	configs,
+	pending = false,
 	onAdd,
 	onEdit,
 	onRemove,
 	onTest,
 }: {
 	configs: NotificationChannelConfig[];
+	pending?: boolean;
 	onAdd: (type: Exclude<NotificationChannel, "email">) => void;
 	onEdit: (config: NotificationChannelConfig) => void;
 	onRemove: (config: NotificationChannelConfig) => void;
@@ -328,6 +332,7 @@ export function NotificationChannelConfigList({
 					type="button"
 					variant="outline"
 					onClick={() => onAdd("webhook")}
+					disabled={pending}
 				>
 					添加 Webhook
 				</Button>
@@ -335,6 +340,7 @@ export function NotificationChannelConfigList({
 					type="button"
 					variant="outline"
 					onClick={() => onAdd("wxpusher")}
+					disabled={pending}
 				>
 					添加 WxPusher
 				</Button>
@@ -383,6 +389,7 @@ export function NotificationChannelConfigList({
 												size="sm"
 												variant="outline"
 												onClick={() => onEdit(config)}
+												disabled={pending}
 											>
 												编辑
 											</Button>
@@ -396,7 +403,7 @@ export function NotificationChannelConfigList({
 												type="button"
 												size="sm"
 												variant="outline"
-												disabled={!config.enabled}
+												disabled={pending || !config.enabled}
 												onClick={() => onTest(config)}
 											>
 												测试
@@ -408,6 +415,7 @@ export function NotificationChannelConfigList({
 												size="sm"
 												variant="destructive"
 												onClick={() => onRemove(config)}
+												disabled={pending}
 											>
 												删除
 											</Button>
@@ -430,6 +438,8 @@ export function NotificationChannelConfigDialog({
 	onOpenChange,
 	onDraftChange,
 	onSubmit,
+	pending,
+	error,
 }: {
 	open: boolean;
 	draft: NotificationChannelConfig | null;
@@ -437,6 +447,8 @@ export function NotificationChannelConfigDialog({
 	onOpenChange: (open: boolean) => void;
 	onDraftChange: (draft: NotificationChannelConfig) => void;
 	onSubmit: () => void;
+	pending: boolean;
+	error: ReturnType<typeof buildSettingsErrorModel>;
 }) {
 	if (!draft) {
 		return null;
@@ -448,21 +460,24 @@ export function NotificationChannelConfigDialog({
 					{mode === "create" ? "添加通知渠道" : "编辑通知渠道"}
 				</Dialog.Title>
 				<Dialog.Description size="2">
-					确认后才写回渠道列表；密钥字段留空时保留已有配置。
+					确认后立即保存；密钥字段留空时保留已有配置。
 				</Dialog.Description>
 				<div className="mt-4 grid gap-3">
-					<NotificationChannelConfigEditor
-						config={draft}
-						onChange={onDraftChange}
-					/>
+					<SettingsSaveError model={error} fallback="通知渠道保存失败" />
+					<fieldset disabled={pending} className="min-w-0">
+						<NotificationChannelConfigEditor
+							config={draft}
+							onChange={onDraftChange}
+						/>
+					</fieldset>
 					<div className="flex justify-end gap-2">
 						<Dialog.Close>
-							<Button type="button" variant="outline">
+							<Button type="button" variant="outline" disabled={pending}>
 								取消
 							</Button>
 						</Dialog.Close>
-						<Button type="button" onClick={onSubmit}>
-							确认
+						<Button type="button" onClick={onSubmit} disabled={pending}>
+							{pending ? "正在保存" : "确认"}
 						</Button>
 					</div>
 				</div>
@@ -623,7 +638,11 @@ function NotificationTemplateTestDialog({
 	);
 }
 
-export function NotificationTemplatesPanel() {
+export function NotificationTemplatesPanel({
+	onDirtyChange,
+}: {
+	onDirtyChange?: (dirty: boolean) => void;
+}) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
 	const query = useQuery({
@@ -674,6 +693,18 @@ export function NotificationTemplatesPanel() {
 		(draft?.format !== selectedTemplate?.format ||
 			draft?.subjectTemplate !== (selectedTemplate?.subjectTemplate ?? "") ||
 			draft?.bodyTemplate !== selectedTemplate?.bodyTemplate);
+	const dirtyTemplates = templates.filter(
+		(template) =>
+			drafts[template.key] &&
+			!isSameSettingsPayload(
+				drafts[template.key],
+				notificationTemplateDraftFrom(template),
+			),
+	);
+	useAdminUnsavedChanges(dirtyTemplates.length > 0);
+	useEffect(() => {
+		onDirtyChange?.(dirtyTemplates.length > 0);
+	}, [dirtyTemplates.length, onDirtyChange]);
 
 	useEffect(() => {
 		if (!selectedEventType && events[0]) {
@@ -708,6 +739,7 @@ export function NotificationTemplatesPanel() {
 		setPreview(null);
 	};
 	const updateMutation = useMutation({
+		meta: { suppressGlobalToast: true },
 		mutationFn: (input: {
 			templateKey: string;
 			format: NotificationTemplateFormat;
@@ -724,14 +756,19 @@ export function NotificationTemplatesPanel() {
 				...current,
 				[template.key]: notificationTemplateDraftFrom(template),
 			}));
-			setSelectedEventType(template.eventType);
-			setSelectedTemplateKey(template.key);
+			queryClient.setQueryData(["admin", "notification-templates"], {
+				templates: templates.map((savedTemplate) =>
+					savedTemplate.key === template.key ? template : savedTemplate,
+				),
+			});
+			toast.success("模板已保存");
 			void queryClient.invalidateQueries({
 				queryKey: ["admin", "notification-templates"],
 			});
 		},
 	});
 	const previewMutation = useMutation({
+		meta: { suppressGlobalErrorToast: true },
 		mutationFn: (input: {
 			templateKey: string;
 			format: NotificationTemplateFormat;
@@ -741,14 +778,18 @@ export function NotificationTemplatesPanel() {
 		onSuccess: ({ rendered }) => setPreview(rendered),
 	});
 	const restoreMutation = useMutation({
+		meta: { suppressGlobalErrorToast: true },
 		mutationFn: restoreNotificationTemplateDefault,
 		onSuccess: ({ template }) => {
 			setDrafts((current) => ({
 				...current,
 				[template.key]: notificationTemplateDraftFrom(template),
 			}));
-			setSelectedEventType(template.eventType);
-			setSelectedTemplateKey(template.key);
+			queryClient.setQueryData(["admin", "notification-templates"], {
+				templates: templates.map((savedTemplate) =>
+					savedTemplate.key === template.key ? template : savedTemplate,
+				),
+			});
 			setPreview(null);
 			void queryClient.invalidateQueries({
 				queryKey: ["admin", "notification-templates"],
@@ -756,6 +797,7 @@ export function NotificationTemplatesPanel() {
 		},
 	});
 	const testMutation = useMutation({
+		meta: { suppressGlobalErrorToast: true },
 		mutationFn: (input: { templateKey: string; recipient?: string }) =>
 			testNotificationTemplate(input.templateKey, {
 				recipient: input.recipient,
@@ -817,11 +859,58 @@ export function NotificationTemplatesPanel() {
 				<SettingsSaveError model={updateError} fallback="模板保存失败" />
 				<SettingsSaveError model={restoreError} fallback="恢复默认模板失败" />
 				<SettingsSaveError model={testError} fallback="模板测试发送失败" />
+				{query.isError ? (
+					<div className="flex items-center gap-3" role="alert">
+						<p className="text-sm">模板加载失败，请重试。</p>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => void query.refetch()}
+							disabled={query.isFetching}
+						>
+							重试
+						</Button>
+					</div>
+				) : null}
 				{templates.length === 0 ? (
 					<EmptyState text={query.isLoading ? "模板加载中" : "暂无通知模板"} />
 				) : null}
 				{selectedEvent && selectedTemplate && draft ? (
 					<>
+						<div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-md border bg-background p-2">
+							<p className="mr-auto text-sm" role="status">
+								{isDirty ? "当前模板未保存" : "当前模板已保存"}
+								{dirtyTemplates.length > (isDirty ? 1 : 0)
+									? `，另有 ${dirtyTemplates.length - (isDirty ? 1 : 0)} 个模板未保存`
+									: ""}
+							</p>
+							<Button
+								type="button"
+								variant="outline"
+								disabled={!isDirty || updateMutation.isPending}
+								onClick={() => {
+									setDrafts((current) => {
+										const next = { ...current };
+										delete next[selectedTemplate.key];
+										return next;
+									});
+									setPreview(null);
+								}}
+							>
+								放弃模板更改
+							</Button>
+							<Button
+								type="button"
+								disabled={
+									!currentPayload || !isDirty || updateMutation.isPending
+								}
+								onClick={() =>
+									currentPayload && updateMutation.mutate(currentPayload)
+								}
+							>
+								{updateMutation.isPending ? "正在保存模板" : "保存模板"}
+							</Button>
+						</div>
 						<div className="grid gap-3 lg:grid-cols-[minmax(220px,280px)_minmax(260px,1fr)]">
 							<div className="grid gap-3 rounded-md border bg-background p-3">
 								<Field label="通知事件">
@@ -842,6 +931,13 @@ export function NotificationTemplatesPanel() {
 										{events.map((event) => (
 											<option key={event.eventType} value={event.eventType}>
 												{event.eventLabel}
+												{event.templates.some((template) =>
+													dirtyTemplates.some(
+														(dirty) => dirty.key === template.key,
+													),
+												)
+													? " · 未保存"
+													: ""}
 											</option>
 										))}
 									</select>
@@ -858,6 +954,11 @@ export function NotificationTemplatesPanel() {
 										{selectedEvent.templates.map((template) => (
 											<option key={template.key} value={template.key}>
 												{notificationTemplateOptionLabel(template)}
+												{dirtyTemplates.some(
+													(dirty) => dirty.key === template.key,
+												)
+													? " · 未保存"
+													: ""}
 											</option>
 										))}
 									</select>
@@ -893,6 +994,9 @@ export function NotificationTemplatesPanel() {
 										<select
 											className={inputClass}
 											value={draft.format}
+											disabled={
+												updateMutation.isPending || restoreMutation.isPending
+											}
 											onChange={(event) =>
 												updateDraft(selectedTemplate, {
 													format: event.target
@@ -917,6 +1021,9 @@ export function NotificationTemplatesPanel() {
 									<Field label="主题模板">
 										<Input
 											value={draft.subjectTemplate}
+											disabled={
+												updateMutation.isPending || restoreMutation.isPending
+											}
 											onChange={(event) =>
 												updateDraft(selectedTemplate, {
 													subjectTemplate: event.target.value,
@@ -933,6 +1040,9 @@ export function NotificationTemplatesPanel() {
 									<textarea
 										className={`${textareaClass} min-h-48 font-mono`}
 										value={draft.bodyTemplate}
+										disabled={
+											updateMutation.isPending || restoreMutation.isPending
+										}
 										onChange={(event) =>
 											updateDraft(selectedTemplate, {
 												bodyTemplate: event.target.value,
@@ -954,16 +1064,6 @@ export function NotificationTemplatesPanel() {
 									<Button
 										type="button"
 										variant="outline"
-										disabled={!currentPayload || updateMutation.isPending}
-										onClick={() =>
-											currentPayload && updateMutation.mutate(currentPayload)
-										}
-									>
-										保存
-									</Button>
-									<Button
-										type="button"
-										variant="outline"
 										disabled={!selectedTemplate || restoreMutation.isPending}
 										onClick={() => void restoreCurrentTemplate()}
 									>
@@ -972,7 +1072,9 @@ export function NotificationTemplatesPanel() {
 									<Button
 										type="button"
 										variant="outline"
-										disabled={!selectedTemplate || testMutation.isPending}
+										disabled={
+											!selectedTemplate || isDirty || testMutation.isPending
+										}
 										onClick={() => setTestOpen(true)}
 									>
 										测试发送

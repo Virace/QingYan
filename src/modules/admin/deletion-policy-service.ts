@@ -1,8 +1,9 @@
-import { and, desc, eq, lte } from "drizzle-orm";
+import { and, count, desc, eq, lte } from "drizzle-orm";
 
 import type { DatabaseExecutor } from "../../db/client";
-import { delayedDeletions, sites } from "../../db/schema";
+import { delayedDeletions, sitePageRegistry, sites } from "../../db/schema";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { findDelayedDeletionPages } from "../page-registry/deletion-state";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 
 type DelayedDeletionRecord = typeof delayedDeletions.$inferSelect;
@@ -21,12 +22,18 @@ export interface RestoreDeletionInput {
 	id: number;
 	actorUserId: number;
 	now?: Date;
-	restore: (record: DelayedDeletionRecord) => Promise<number> | number;
+	restore: (
+		record: DelayedDeletionRecord,
+		db: DatabaseExecutor,
+	) => Promise<number> | number;
 }
 
 export interface RunDueHardDeletesInput {
 	now?: Date;
-	hardDelete: (record: DelayedDeletionRecord) => Promise<number> | number;
+	hardDelete: (
+		record: DelayedDeletionRecord,
+		db: DatabaseExecutor,
+	) => Promise<number> | number;
 }
 
 export interface ListDelayedDeletionsInput {
@@ -65,21 +72,46 @@ export class DeletionPolicyService {
 				metadataJson: delayedDeletions.metadataJson,
 				createdAt: delayedDeletions.createdAt,
 				updatedAt: delayedDeletions.updatedAt,
+				siteName: sites.name,
+				pageTitle: sitePageRegistry.title,
+				pageUrl: sitePageRegistry.pageUrl,
 			})
 			.from(delayedDeletions)
 			.leftJoin(sites, eq(sites.id, delayedDeletions.siteId))
+			.leftJoin(
+				sitePageRegistry,
+				and(
+					eq(delayedDeletions.resourceType, "page"),
+					eq(sitePageRegistry.siteId, delayedDeletions.siteId),
+					eq(sitePageRegistry.pageKey, delayedDeletions.resourceId),
+				),
+			)
 			.where(and(...conditions))
-			.orderBy(desc(delayedDeletions.createdAt), desc(delayedDeletions.id));
+			.orderBy(desc(delayedDeletions.createdAt), desc(delayedDeletions.id))
+			.limit(input.limit)
+			.offset(input.offset);
+		const [total] = await this.db
+			.select({ count: count() })
+			.from(delayedDeletions)
+			.where(and(...conditions));
+		const now = Date.now();
+		const recoverablePages = await findDelayedDeletionPages(this.db, rows);
 
 		return {
-			items: rows
-				.slice(input.offset, input.offset + input.limit)
-				.map((row) => ({
-					...row,
-					metadata: parseMetadata(row.metadataJson),
-					metadataJson: undefined,
-				})),
-			totalCount: rows.length,
+			items: rows.map((row) => ({
+				...row,
+				displayName:
+					row.resourceType === "page_trash"
+						? "清空页面回收站"
+						: row.pageTitle || row.pageUrl || "已删除页面",
+				canRestore:
+					row.status === "pending" &&
+					new Date(row.hardDeleteAfter).getTime() > now &&
+					(recoverablePages.get(row.id)?.length ?? 0) > 0,
+				metadata: parseMetadata(row.metadataJson),
+				metadataJson: undefined,
+			})),
+			totalCount: total?.count ?? 0,
 			limit: input.limit,
 			offset: input.offset,
 		};
@@ -142,38 +174,45 @@ export class DeletionPolicyService {
 	}
 
 	public async restoreDeletion(input: RestoreDeletionInput) {
-		const [record] = await this.db
-			.select()
-			.from(delayedDeletions)
-			.where(eq(delayedDeletions.id, input.id))
-			.limit(1);
-		if (!record) {
-			throw new ResourceNotFoundError(
-				"DELAYED_DELETION_NOT_FOUND",
-				"延迟删除记录不存在。",
-			);
-		}
-		if (record.status !== "pending") {
-			throw new AppError(
-				409,
-				"DELAYED_DELETION_NOT_PENDING",
-				"延迟删除记录不处于待恢复状态。",
-			);
-		}
+		return this.db.transaction(async (tx) => {
+			const [record] = await tx
+				.select()
+				.from(delayedDeletions)
+				.where(eq(delayedDeletions.id, input.id))
+				.limit(1)
+				.for("update");
+			const now = input.now ?? new Date();
+			if (!record) {
+				throw new ResourceNotFoundError(
+					"DELAYED_DELETION_NOT_FOUND",
+					"延迟删除记录不存在。",
+				);
+			}
+			if (record.status !== "pending") {
+				throw new AppError(
+					409,
+					"DELAYED_DELETION_NOT_PENDING",
+					"延迟删除记录不处于待恢复状态。",
+				);
+			}
 
-		await input.restore(record);
-		const nowIso = (input.now ?? new Date()).toISOString();
-		const [restored] = await this.db
-			.update(delayedDeletions)
-			.set({
-				status: "restored",
-				restoredByUserId: input.actorUserId,
-				restoredAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.where(eq(delayedDeletions.id, input.id))
-			.returning();
-		return restored;
+			if (new Date(record.hardDeleteAfter).getTime() <= now.getTime()) {
+				throw new AppError(409, "DELAYED_DELETION_EXPIRED", "恢复期限已过。");
+			}
+			await input.restore(record, tx);
+			const nowIso = now.toISOString();
+			const [restored] = await tx
+				.update(delayedDeletions)
+				.set({
+					status: "restored",
+					restoredByUserId: input.actorUserId,
+					restoredAt: nowIso,
+					updatedAt: nowIso,
+				})
+				.where(eq(delayedDeletions.id, input.id))
+				.returning();
+			return restored;
+		});
 	}
 
 	public async runDueHardDeletes(input: RunDueHardDeletesInput) {
@@ -199,31 +238,45 @@ export class DeletionPolicyService {
 			hardDeleteAfter: string;
 			hardDeletedCount: number;
 		}> = [];
-		for (const record of records) {
-			const recordHardDeletedCount = await input.hardDelete(record);
-			hardDeletedCount += recordHardDeletedCount;
-			recordsSummary.push({
-				id: record.id,
-				resourceType: record.resourceType,
-				resourceId: record.resourceId,
-				siteId: record.siteId,
-				requestedByUserId: record.requestedByUserId,
-				requestedAt: record.requestedAt,
-				hardDeleteAfter: record.hardDeleteAfter,
-				hardDeletedCount: recordHardDeletedCount,
+		for (const candidate of records) {
+			await this.db.transaction(async (tx) => {
+				const [record] = await tx
+					.select()
+					.from(delayedDeletions)
+					.where(
+						and(
+							eq(delayedDeletions.id, candidate.id),
+							eq(delayedDeletions.status, "pending"),
+							lte(delayedDeletions.hardDeleteAfter, nowIso),
+						),
+					)
+					.for("update");
+				if (!record) return;
+				const recordHardDeletedCount = await input.hardDelete(record, tx);
+				hardDeletedCount += recordHardDeletedCount;
+				recordsSummary.push({
+					id: record.id,
+					resourceType: record.resourceType,
+					resourceId: record.resourceId,
+					siteId: record.siteId,
+					requestedByUserId: record.requestedByUserId,
+					requestedAt: record.requestedAt,
+					hardDeleteAfter: record.hardDeleteAfter,
+					hardDeletedCount: recordHardDeletedCount,
+				});
+				await tx
+					.update(delayedDeletions)
+					.set({
+						status: "hard_deleted",
+						hardDeletedAt: nowIso,
+						updatedAt: nowIso,
+					})
+					.where(eq(delayedDeletions.id, record.id));
 			});
-			await this.db
-				.update(delayedDeletions)
-				.set({
-					status: "hard_deleted",
-					hardDeletedAt: nowIso,
-					updatedAt: nowIso,
-				})
-				.where(eq(delayedDeletions.id, record.id));
 		}
 
 		return {
-			processedCount: records.length,
+			processedCount: recordsSummary.length,
 			hardDeletedCount,
 			hardDeletedAt: nowIso,
 			records: recordsSummary,

@@ -257,9 +257,39 @@ export function listTaskDefinitions() {
 	);
 }
 
-export function listScheduledTasks() {
+export interface TaskListQuery {
+	limit?: number;
+	offset?: number;
+	search?: string;
+}
+
+export interface ScheduledTaskListQuery extends TaskListQuery {
+	type?: string;
+	status?: TaskRunStatus;
+	scopeKind?: "global" | "site";
+	visibility?: "owned" | "summary";
+}
+
+export interface TaskRunListQuery extends TaskListQuery {
+	commentId?: string;
+	type?: string;
+	status?: TaskRunStatus;
+	siteKey?: string;
+	scopeKind?: "global" | "site";
+}
+
+function taskListUrl(path: string, input: TaskListQuery) {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(input)) {
+		if (value !== undefined && value !== "") params.set(key, String(value));
+	}
+	const query = params.toString();
+	return `${path}${query ? `?${query}` : ""}`;
+}
+
+export function listScheduledTasks(input: ScheduledTaskListQuery = {}) {
 	return requestJson<{ items: ScheduledTaskProjection[]; totalCount: number }>(
-		"/api/admin/tasks/scheduled",
+		taskListUrl("/api/admin/tasks/scheduled", input),
 	);
 }
 
@@ -327,14 +357,9 @@ export function transferScheduledTaskOwner(id: string, ownerUserId: number) {
 	);
 }
 
-export function listTaskRuns(input: { commentId?: string } = {}) {
-	const params = new URLSearchParams();
-	if (input.commentId) {
-		params.set("commentId", input.commentId);
-	}
-	const query = params.toString();
+export function listTaskRuns(input: TaskRunListQuery = {}) {
 	return requestJson<{ items: TaskRunProjection[]; totalCount: number }>(
-		`/api/admin/tasks/runs${query ? `?${query}` : ""}`,
+		taskListUrl("/api/admin/tasks/runs", input),
 	);
 }
 
@@ -367,17 +392,17 @@ export function listTaskRunLogs(
 	);
 }
 
-export function listTaskAudit() {
+export function listTaskAudit(input: TaskListQuery = {}) {
 	return requestJson<{ items: TaskAuditItem[]; totalCount: number }>(
-		"/api/admin/tasks/audit",
+		taskListUrl("/api/admin/tasks/audit", input),
 	);
 }
 
-export function listDeletedTaskSnapshots() {
+export function listDeletedTaskSnapshots(input: TaskListQuery = {}) {
 	return requestJson<{
 		items: ScheduledTaskDeletedSnapshot[];
 		totalCount: number;
-	}>("/api/admin/tasks/deleted-snapshots");
+	}>(taskListUrl("/api/admin/tasks/deleted-snapshots", input));
 }
 
 export function getDeletedTaskSnapshot(id: string) {

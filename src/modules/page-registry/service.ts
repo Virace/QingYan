@@ -1,9 +1,10 @@
-import { and, desc, eq, notExists, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notExists, or, sql } from "drizzle-orm";
 
 import type { DatabaseExecutor } from "../../db/client";
 import { hashKey, toSafeInteger } from "../../db/values";
 import {
 	pageThreads,
+	type delayedDeletions,
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
@@ -11,6 +12,7 @@ import {
 } from "../../db/schema";
 import { assertPageKeyAvailable, lockPageKey } from "../shared/page-key";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import { findDelayedDeletionPages } from "./deletion-state";
 
 type ReconcileRegisteredPendingCandidatesInput = {
 	siteKey?: string;
@@ -559,22 +561,20 @@ export class PageRegistryService {
 			eq(sitePageRegistry.status, "trash"),
 		);
 		const rows = await this.db
-			.select({
+			.update(sitePageRegistry)
+			.set({
+				status: "deleted",
+				deletedAt: nowIso,
+				updatedAt: nowIso,
+			})
+			.where(whereClause)
+			.returning({
+				id: sitePageRegistry.id,
+				siteId: sitePageRegistry.siteId,
 				pageKey: sitePageRegistry.pageKey,
 				pageUrl: sitePageRegistry.pageUrl,
-			})
-			.from(sitePageRegistry)
-			.where(whereClause);
-		if (rows.length > 0) {
-			await this.db
-				.update(sitePageRegistry)
-				.set({
-					status: "deleted",
-					deletedAt: nowIso,
-					updatedAt: nowIso,
-				})
-				.where(whereClause);
-		}
+				deletedAt: sitePageRegistry.deletedAt,
+			});
 
 		return {
 			deletedCount: rows.length,
@@ -582,47 +582,51 @@ export class PageRegistryService {
 		};
 	}
 
-	public async restoreDeletedPage(input: {
-		pageKey: string;
-		siteId?: number | null;
-		siteKey?: string;
-	}) {
-		const page = await this.setPageLifecycle(
-			{
-				...input,
-				siteId: input.siteId ?? undefined,
-			},
-			"active",
-		);
-		return {
-			...page,
-			restoredCount: 1,
-		};
+	public async restoreDelayedDeletion(
+		record: typeof delayedDeletions.$inferSelect,
+	) {
+		const pages =
+			(await findDelayedDeletionPages(this.db, [record], true)).get(
+				record.id,
+			) ?? [];
+		if (pages.length === 0)
+			throw new AppError(
+				409,
+				"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+				"原删除内容已不可恢复。",
+			);
+		await this.db
+			.update(sitePageRegistry)
+			.set({
+				status: "active",
+				deletedAt: null,
+				trashedAt: null,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(
+				inArray(
+					sitePageRegistry.id,
+					pages.map((page) => page.id),
+				),
+			);
+		return pages.length;
 	}
 
-	public async restoreDeletedPages(input: {
-		pageKeys: string[];
-		siteId?: number | null;
-	}) {
-		if (input.pageKeys.length === 0) {
-			return 0;
-		}
-		let restoredCount = 0;
-		for (const pageKey of input.pageKeys) {
-			try {
-				await this.restoreDeletedPage({
-					pageKey,
-					siteId: input.siteId,
-				});
-				restoredCount += 1;
-			} catch (error) {
-				if (error instanceof ResourceNotFoundError) {
-					continue;
-				}
-				throw error;
-			}
-		}
-		return restoredCount;
+	public async hardDeleteDelayedDeletion(
+		record: typeof delayedDeletions.$inferSelect,
+	) {
+		const pages =
+			(await findDelayedDeletionPages(this.db, [record], true)).get(
+				record.id,
+			) ?? [];
+		if (pages.length === 0) return 0;
+		await this.db.delete(sitePageRegistry).where(
+			inArray(
+				sitePageRegistry.id,
+				pages.map((page) => page.id),
+			),
+		);
+		return pages.length;
 	}
 
 	public async hardDeletePage(input: {
@@ -711,6 +715,15 @@ export class PageRegistryService {
 			trashedAt: status === "trash" ? nowIso : null,
 			deletedAt: status === "deleted" ? nowIso : null,
 			updatedAt: nowIso,
+			deletionSnapshot:
+				status === "deleted"
+					? {
+							id: page.id,
+							siteId: page.siteId,
+							pageKey: page.pageKey,
+							deletedAt: nowIso,
+						}
+					: undefined,
 		};
 	}
 

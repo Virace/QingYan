@@ -7,7 +7,10 @@ import {
 	adminUserSiteAccess,
 	adminUsers,
 	auditLogs,
+	scheduledTaskDeletedSnapshots,
+	scheduledTasks,
 	sites,
+	taskRuns,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminTaskService } from "../../src/modules/tasks/admin-task-service";
@@ -104,6 +107,257 @@ function taskPayload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("admin tasks api", () => {
+	it("pages and searches complete task histories before applying limits", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const admin = await loginAsAdmin(fixture.app);
+		const [initialAdmin] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.isInitialAdmin, true));
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!initialAdmin || !site) throw new Error("Expected admin and site");
+		const repository = new ScheduledTaskRepository(fixture.app.db);
+		const template = await repository.create({
+			id: "history_scheduled_0",
+			name: "旧任务 0",
+			type: "page_metadata_refresh",
+			siteId: site.id,
+			scopeKind: "site",
+			scope: { siteKey: site.siteKey },
+			scheduleKind: "manual_only",
+			payload: { siteKey: site.siteKey, scope: "missing_only" },
+			policy: {},
+			trigger: {},
+			ownerUserId: initialAdmin.id,
+			createdAt: "2026-01-01T00:00:00.000Z",
+		});
+		const history = Array.from({ length: 205 }, (_, index) => ({
+			index,
+			createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+		}));
+		await fixture.app.db.insert(scheduledTasks).values(
+			history.slice(1).map(({ index, createdAt }) => ({
+				id: `history_scheduled_${index}`,
+				name: `旧任务 ${index}`,
+				type: template.type,
+				siteId: site.id,
+				scopeKind: "site",
+				scopeJson: "{}",
+				scheduleKind: "manual_only",
+				payloadJson: "{}",
+				policyJson: "{}",
+				triggerJson: "{}",
+				ownerUserId: initialAdmin.id,
+				createdAt,
+			})),
+		);
+		await fixture.app.db.insert(taskRuns).values(
+			history.map(({ index, createdAt }) => ({
+				id: `history_run_${index}`,
+				type: template.type,
+				category: "maintenance",
+				status: "succeeded",
+				queueBackend: "database",
+				scheduledTaskNameSnapshot: `旧任务 ${index}`,
+				siteId: site.id,
+				siteKey: site.siteKey,
+				payloadSummaryJson: "{}",
+				payloadJson: "{}",
+				createdAt,
+			})),
+		);
+		await fixture.app.db.insert(auditLogs).values(
+			history.map(({ index, createdAt }) => ({
+				siteId: site.id,
+				actorType: "admin_user",
+				actorId: String(initialAdmin.id),
+				action: "task.scheduled.create",
+				targetType: "scheduled_task",
+				targetId: `history_scheduled_${index}`,
+				payloadJson: JSON.stringify({
+					taskName: `旧任务 ${index}`,
+					taskType: template.type,
+				}),
+				createdAt,
+			})),
+		);
+		await fixture.app.db.insert(auditLogs).values(
+			history.map(({ index }) => ({
+				actorType: "admin_user",
+				action: "admin.settings.update",
+				targetType: "settings",
+				targetId: `settings_${index}`,
+				createdAt: "2026-02-01T00:00:00.000Z",
+			})),
+		);
+		await fixture.app.db.insert(scheduledTaskDeletedSnapshots).values(
+			history.map(({ index, createdAt }) => ({
+				id: `history_snapshot_${index}`,
+				scheduledTaskId: `deleted_${index}`,
+				snapshotJson: JSON.stringify({ ...template, name: `旧任务 ${index}` }),
+				deletedAt: createdAt,
+			})),
+		);
+		for (const [path, id] of [
+			["scheduled", "history_scheduled_0"],
+			["runs", "history_run_0"],
+			["audit", undefined],
+			["deleted-snapshots", "history_snapshot_0"],
+		] as const) {
+			const page = await fixture.app.inject({
+				method: "GET",
+				url: `/qingyan/api/admin/tasks/${path}?limit=5&offset=200`,
+				cookies: { qingyan_admin: admin.adminCookie.value },
+			});
+			expect(page.statusCode).toBe(200);
+			expect(page.json().totalCount).toBe(205);
+			expect(page.json().items).toHaveLength(5);
+			if (id) expect(page.json().items[4].id).toBe(id);
+			else expect(page.json().items[4].taskName).toBe("旧任务 0");
+			const search = await fixture.app.inject({
+				method: "GET",
+				url: `/qingyan/api/admin/tasks/${path}?limit=1&search=${encodeURIComponent("旧任务 0")}`,
+				cookies: { qingyan_admin: admin.adminCookie.value },
+			});
+			expect(search.statusCode).toBe(200);
+			expect(search.json().totalCount).toBe(1);
+			expect(search.json().items).toHaveLength(1);
+		}
+		const typeSearch = await fixture.app.inject({
+			method: "GET",
+			url: `/qingyan/api/admin/tasks/runs?limit=1&search=${encodeURIComponent("页面 Title 刷新")}`,
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(typeSearch.json().totalCount).toBe(205);
+		const beyondEnd = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/tasks/runs?limit=20&offset=220",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(beyondEnd.json()).toMatchObject({ items: [], totalCount: 205 });
+	});
+
+	it("counts only accessible sites and manageable definitions before pagination", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await createSite(fixture, {
+			siteKey: "other",
+			name: "Other",
+			allowedOrigins: ["http://localhost:4322"],
+		});
+		const user = await createScopedUser(fixture, {
+			username: "history-owner",
+			groupKey: "site_admin",
+			siteKeys: ["fangyuan"],
+		});
+		const admin = await loginAsAdmin(fixture.app);
+		const scoped = await loginAsAdmin(fixture.app, {
+			username: user.username,
+			password: "replace-me",
+		});
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		const [other] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "other"));
+		const [initialAdmin] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.where(eq(adminUsers.isInitialAdmin, true));
+		if (!site || !other || !initialAdmin)
+			throw new Error("Expected sites and admin");
+		const repository = new ScheduledTaskRepository(fixture.app.db);
+		for (const [id, siteId, ownerUserId, createdAt] of [
+			["owned_old", site.id, user.id, "2026-01-01T00:00:00.000Z"],
+			["summary_new", site.id, initialAdmin.id, "2026-02-01T00:00:00.000Z"],
+			["inaccessible_newest", other.id, user.id, "2026-03-01T00:00:00.000Z"],
+		] as const) {
+			await repository.create({
+				id,
+				name: id,
+				type: "page_metadata_refresh",
+				siteId,
+				scopeKind: "site",
+				scope: {},
+				scheduleKind: "manual_only",
+				payload: {},
+				policy: {},
+				trigger: {},
+				ownerUserId,
+				createdAt,
+			});
+			await fixture.app.db.insert(taskRuns).values({
+				id,
+				type: "page_metadata_refresh",
+				category: "maintenance",
+				status: "succeeded",
+				queueBackend: "database",
+				siteId,
+				payloadSummaryJson: "{}",
+				payloadJson: "{}",
+				createdAt,
+			});
+			await fixture.app.db.insert(auditLogs).values({
+				siteId,
+				actorType: "admin_user",
+				action: "task.scheduled.create",
+				targetType: "scheduled_task",
+				targetId: id,
+				createdAt,
+			});
+		}
+		for (const path of ["scheduled", "runs", "audit"]) {
+			const response = await fixture.app.inject({
+				method: "GET",
+				url: `/qingyan/api/admin/tasks/${path}?limit=1&offset=1`,
+				cookies: { qingyan_admin: scoped.adminCookie.value },
+			});
+			expect(response.statusCode).toBe(200);
+			expect(response.json().totalCount).toBe(2);
+			expect(response.json().items).toHaveLength(1);
+			expect(
+				response.json().items[0][path === "audit" ? "targetId" : "id"],
+			).toBe("owned_old");
+		}
+		const owned = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/tasks/scheduled?limit=1&visibility=owned",
+			cookies: { qingyan_admin: scoped.adminCookie.value },
+		});
+		expect(owned.json()).toMatchObject({
+			totalCount: 1,
+			items: [{ id: "owned_old", visibility: "definition" }],
+		});
+		const summary = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/tasks/scheduled?limit=1&visibility=summary",
+			cookies: { qingyan_admin: scoped.adminCookie.value },
+		});
+		expect(summary.json()).toMatchObject({
+			totalCount: 1,
+			items: [{ id: "summary_new", visibility: "summary" }],
+		});
+		const denied = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/tasks/deleted-snapshots?limit=1&offset=200",
+			cookies: { qingyan_admin: scoped.adminCookie.value },
+		});
+		expect(denied.statusCode).toBe(403);
+		const invalid = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/tasks/runs?limit=201",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(invalid.statusCode).toBe(400);
+	});
+
 	it("filters notification runs by comment and returns a safe delivery projection", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
@@ -193,6 +447,20 @@ describe("admin tasks api", () => {
 		expect(listResponse.json().items[0].type).toBe("站点人员评论提醒");
 		expect(listResponse.json().items[0]).not.toHaveProperty("payload");
 		expect(listResponse.json().items[0]).not.toHaveProperty("error");
+		for (const [search, totalCount] of [
+			["站点人员评论提醒", 1],
+			["private body", 0],
+			["private SMTP response", 0],
+		] as const) {
+			const searched = await fixture.app.inject({
+				method: "GET",
+				url: `/qingyan/api/admin/tasks/runs?commentId=comment-task-filter&limit=1&search=${encodeURIComponent(search)}`,
+				cookies: { qingyan_admin: admin.adminCookie.value },
+			});
+			expect(searched.statusCode).toBe(200);
+			expect(searched.json().totalCount).toBe(totalCount);
+			expect(searched.json().items).toHaveLength(totalCount);
+		}
 
 		const detailResponse = await fixture.app.inject({
 			method: "GET",

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 
 import { EmptyState } from "../shared/admin-ui";
+import { DeletionRecoveryPanel } from "./deletion-recovery-panel";
 
 function StateText({ state }: { state?: string }) {
 	if (state === "normal_current") {
@@ -128,7 +129,13 @@ function UpdatePlanPanel({ plan }: { plan?: UpdatePlan }) {
 	);
 }
 
-export function OpsPage() {
+export function OpsPage({
+	siteKey,
+	canRestore = false,
+}: {
+	siteKey?: string;
+	canRestore?: boolean;
+}) {
 	const restartConfirmId = useId();
 	const [restartConfirm, setRestartConfirm] = useState("");
 	const statusQuery = useQuery({
@@ -161,6 +168,11 @@ export function OpsPage() {
 	const updateCheck = updateCheckMutation.data ?? status?.update.check;
 	return (
 		<div className="flex flex-col gap-4">
+			<DeletionRecoveryPanel
+				key={siteKey ?? "all"}
+				siteKey={siteKey}
+				canRestore={canRestore}
+			/>
 			<Card>
 				<CardHeader>
 					<CardTitle className="text-lg">运维</CardTitle>

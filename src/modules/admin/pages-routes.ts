@@ -28,7 +28,6 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 		repository,
 	);
 	const pageRegistryService = new PageRegistryService(fastify.db);
-	const deletionPolicyService = new DeletionPolicyService(fastify.db);
 	const adminTasks = new AdminTaskService(fastify.db, fastify.siteRegistry);
 
 	fastify.get("/", async (request) => {
@@ -115,35 +114,42 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsedBody.data.siteKey,
 			permission: "pages.trash_empty",
 		});
-		const result = await pageRegistryService.clearTrash({
-			siteId: site?.id,
-			siteKey: parsedBody.data.siteKey,
-		});
-		const pageKeys = result.pages.map((page) => page.pageKey);
-		const deletion = await deletionPolicyService.requestDeletion({
-			resourceType: "page_trash",
-			resourceId: parsedBody.data.siteKey ?? "all",
-			siteId: site?.id ?? null,
-			actorUserId: session.user.id,
-			metadata: {
+		return fastify.db.transaction(async (tx) => {
+			const pageRegistryService = new PageRegistryService(tx);
+			const deletionPolicyService = new DeletionPolicyService(tx);
+			const result = await pageRegistryService.clearTrash({
+				siteId: site?.id,
 				siteKey: parsedBody.data.siteKey,
-				pageCount: result.deletedCount,
-				pages: result.pages,
-			},
-			hardDelete: async () =>
-				pageRegistryService.hardDeletePages({
-					pageKeys,
-					siteId: site?.id ?? null,
-				}),
+			});
+			const deletion = await deletionPolicyService.requestDeletion({
+				resourceType: "page_trash",
+				resourceId: parsedBody.data.siteKey ?? "all",
+				siteId: site?.id ?? null,
+				actorUserId: session.user.id,
+				metadata: {
+					siteKey: parsedBody.data.siteKey,
+					pageCount: result.deletedCount,
+					pages: result.pages,
+				},
+				hardDelete: async () => {
+					let deletedCount = 0;
+					for (const page of result.pages)
+						deletedCount += await pageRegistryService.hardDeletePage({
+							pageKey: page.pageKey,
+							siteId: page.siteId,
+						});
+					return deletedCount;
+				},
+			});
+			return {
+				deletedCount: result.deletedCount,
+				deletion: {
+					mode: deletion.mode,
+					resourceCount: result.deletedCount,
+					hardDeleteAfter: deletion.record?.hardDeleteAfter,
+				},
+			};
 		});
-		return {
-			deletedCount: result.deletedCount,
-			deletion: {
-				mode: deletion.mode,
-				resourceCount: result.deletedCount,
-				hardDeleteAfter: deletion.record?.hardDeleteAfter,
-			},
-		};
 	});
 
 	fastify.post("/:pageKey/delete", async (request) => {
@@ -155,28 +161,34 @@ export const adminPagesRoutes: FastifyPluginAsync = async (fastify) => {
 			siteKey: parsed.siteKey,
 			permission: "pages.delete",
 		});
-		const page = await pageRegistryService.deletePage(parsed);
-		const deletion = await deletionPolicyService.requestDeletion({
-			resourceType: "page",
-			resourceId: parsed.pageKey,
-			siteId: parsed.siteId ?? null,
-			actorUserId: session.user.id,
-			metadata: {
-				siteKey: page.siteKey,
-				pageKey: page.pageKey,
-				pageUrl: page.pageUrl,
-			},
-			hardDelete: async () => 1,
-		});
-		return {
-			page: {
-				...page,
-				deletion: {
-					mode: deletion.mode,
-					hardDeleteAfter: deletion.record?.hardDeleteAfter,
+		return fastify.db.transaction(async (tx) => {
+			const pageRegistryService = new PageRegistryService(tx);
+			const deletionPolicyService = new DeletionPolicyService(tx);
+			const { deletionSnapshot, ...page } =
+				await pageRegistryService.deletePage(parsed);
+			const deletion = await deletionPolicyService.requestDeletion({
+				resourceType: "page",
+				resourceId: parsed.pageKey,
+				siteId: deletionSnapshot?.siteId ?? parsed.siteId ?? null,
+				actorUserId: session.user.id,
+				metadata: {
+					siteKey: page.siteKey,
+					pageKey: page.pageKey,
+					pageUrl: page.pageUrl,
+					deletionSnapshot,
 				},
-			},
-		};
+				hardDelete: () => pageRegistryService.hardDeletePage(parsed),
+			});
+			return {
+				page: {
+					...page,
+					deletion: {
+						mode: deletion.mode,
+						hardDeleteAfter: deletion.record?.hardDeleteAfter,
+					},
+				},
+			};
+		});
 	});
 
 	fastify.post("/:pageKey/title/refresh", async (request) => {

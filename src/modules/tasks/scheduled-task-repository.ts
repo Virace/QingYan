@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 
-import { and, desc, eq, isNull, lte } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	lte,
+	not,
+	notInArray,
+	or,
+	sql,
+} from "drizzle-orm";
 
 import type { DatabaseExecutor } from "../../db/client";
 import { scheduledTaskDeletedSnapshots, scheduledTasks } from "../../db/schema";
@@ -8,6 +21,7 @@ import {
 	type ProtectedTaskPolicy,
 	parseProtectedTaskPolicy,
 } from "./protected-task-policy";
+import { type TaskListQuery, taskTextSearch } from "./task-list-query";
 import { stringifyJson, type TaskRunStatus } from "./types";
 
 const DEFAULT_RETENTION_COUNT_MAX = 30;
@@ -357,6 +371,92 @@ export class ScheduledTaskRepository {
 		return rows.map(serializeScheduledTask);
 	}
 
+	public async listForTaskCenter(
+		input: TaskListQuery & {
+			type?: string;
+			status?: TaskRunStatus;
+			scopeKind?: string;
+			visibility?: "owned" | "summary";
+			searchTypes?: string[];
+			access: {
+				isGlobalAdmin: boolean;
+				isSiteAdmin: boolean;
+				userId: number;
+				siteIds: number[];
+				canManageProtected: boolean;
+				deniedUpdateTypes: string[];
+			};
+		},
+	) {
+		const access = input.access;
+		const canManage = and(
+			access.isGlobalAdmin
+				? sql`true`
+				: access.isSiteAdmin
+					? or(
+							and(
+								isNull(scheduledTasks.systemKey),
+								isNull(scheduledTasks.protectionJson),
+								eq(scheduledTasks.ownerUserId, access.userId),
+							),
+							access.canManageProtected
+								? or(
+										isNotNull(scheduledTasks.systemKey),
+										isNotNull(scheduledTasks.protectionJson),
+									)
+								: undefined,
+						)
+					: sql`false`,
+			access.deniedUpdateTypes.length
+				? notInArray(scheduledTasks.type, access.deniedUpdateTypes)
+				: undefined,
+		);
+		const whereCondition = and(
+			isNull(scheduledTasks.deletedAt),
+			access.isGlobalAdmin
+				? undefined
+				: inArray(scheduledTasks.siteId, access.siteIds),
+			input.type ? eq(scheduledTasks.type, input.type) : undefined,
+			input.status ? eq(scheduledTasks.lastStatus, input.status) : undefined,
+			input.scopeKind
+				? eq(scheduledTasks.scopeKind, input.scopeKind)
+				: undefined,
+			input.visibility === "owned"
+				? canManage
+				: input.visibility === "summary" && canManage
+					? not(canManage)
+					: undefined,
+			input.search?.trim()
+				? or(
+						taskTextSearch(input.search, [
+							scheduledTasks.name,
+							scheduledTasks.description,
+							scheduledTasks.type,
+							sql`${scheduledTasks.ownerUserId}::text`,
+						]),
+						input.searchTypes?.length
+							? inArray(scheduledTasks.type, input.searchTypes)
+							: undefined,
+					)
+				: undefined,
+		);
+		const rows = await this.db
+			.select()
+			.from(scheduledTasks)
+			.where(whereCondition)
+			.orderBy(desc(scheduledTasks.createdAt), desc(scheduledTasks.id))
+			.limit(input.limit ?? 200)
+			.offset(input.offset ?? 0);
+		const [total] = await this.db
+			.select({ value: count() })
+			.from(scheduledTasks)
+			.where(whereCondition);
+		return {
+			items: rows.map(serializeScheduledTask),
+			totalCount: Number(total?.value ?? 0),
+		};
+	}
+
 	public async listDue(nowIso: string, input?: { limit?: number }) {
 		const rows = await this.db
 			.select()
@@ -558,6 +658,42 @@ export class ScheduledTaskRepository {
 			.limit(input?.limit ?? 50)
 			.offset(input?.offset ?? 0);
 		return rows.map(serializeDeletedSnapshot);
+	}
+
+	public async listDeletedSnapshotsPage(
+		input: TaskListQuery & { searchTypes?: string[] },
+	) {
+		const snapshotType = sql`${scheduledTaskDeletedSnapshots.snapshotJson} ->> 'type'`;
+		const whereCondition = input.search?.trim()
+			? or(
+					taskTextSearch(input.search, [
+						sql`${scheduledTaskDeletedSnapshots.snapshotJson} ->> 'name'`,
+						snapshotType,
+						scheduledTaskDeletedSnapshots.deleteReason,
+					]),
+					input.searchTypes?.length
+						? inArray(snapshotType, input.searchTypes)
+						: undefined,
+				)
+			: undefined;
+		const rows = await this.db
+			.select()
+			.from(scheduledTaskDeletedSnapshots)
+			.where(whereCondition)
+			.orderBy(
+				desc(scheduledTaskDeletedSnapshots.deletedAt),
+				desc(scheduledTaskDeletedSnapshots.id),
+			)
+			.limit(input.limit ?? 200)
+			.offset(input.offset ?? 0);
+		const [total] = await this.db
+			.select({ value: count() })
+			.from(scheduledTaskDeletedSnapshots)
+			.where(whereCondition);
+		return {
+			items: rows.map(serializeDeletedSnapshot),
+			totalCount: Number(total?.value ?? 0),
+		};
 	}
 
 	public async getDeletedSnapshot(id: string) {

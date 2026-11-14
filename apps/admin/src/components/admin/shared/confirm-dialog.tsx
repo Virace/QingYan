@@ -28,15 +28,16 @@ export function AdminConfirmDialogProvider({
 }: {
 	children: React.ReactNode;
 }) {
-	const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(
+	const [pendingConfirm, setPendingConfirm] = useState<ConfirmOptions | null>(
 		null,
 	);
+	const [open, setOpen] = useState(false);
 	const pendingRef = useRef<PendingConfirm | null>(null);
 
 	const closeConfirm = useCallback((confirmed: boolean) => {
 		const current = pendingRef.current;
 		pendingRef.current = null;
-		setPendingConfirm(null);
+		setOpen(false);
 		current?.resolve(confirmed);
 	}, []);
 
@@ -45,7 +46,8 @@ export function AdminConfirmDialogProvider({
 			pendingRef.current?.resolve(false);
 			const nextConfirm = { ...options, resolve };
 			pendingRef.current = nextConfirm;
-			setPendingConfirm(nextConfirm);
+			setPendingConfirm(options);
+			setOpen(true);
 		});
 	}, []);
 
@@ -53,7 +55,7 @@ export function AdminConfirmDialogProvider({
 		<AdminConfirmDialogContext.Provider value={confirm}>
 			{children}
 			<AlertDialog.Root
-				open={pendingConfirm !== null}
+				open={open}
 				onOpenChange={(open) => {
 					if (!open) {
 						closeConfirm(false);

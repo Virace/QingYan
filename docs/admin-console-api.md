@@ -983,6 +983,10 @@ Query：
 AdminSettings
 ```
 
+### `PATCH /api/admin/settings/{siteKey}/sections/{section}`
+
+保存单个站点设置分区。`section` 仅接受 `comments`、`engagement`、`notifications`、`pageRegistry`；请求体直接提交该分区的非空字段对象，不再包裹分区名，例如修改评论开关时提交 `{ "enabled": false }`。需要 `site_settings.update` 和目标站点访问权；成功返回完整、已持久化的 `AdminSettings`，字段校验失败返回 `VALIDATION_FAILED + fields[]`。未提交的分区保持原值。
+
 ### `PUT /api/admin/sites/{siteKey}/settings`
 
 更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`pageRegistry`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
@@ -1570,6 +1574,25 @@ AdminSystemSettings
 }
 ```
 
+### `PATCH /api/admin/system-settings/sections/{section}`
+
+保存单个系统设置分区，需要 `system_settings.update`。请求体是非空字段对象；服务端从当前已保存设置合并本次字段，再校验、持久化并返回完整的 `AdminSystemSettings`，secret 仍只返回已配置状态。未提交的分区保持原值，校验失败返回 `VALIDATION_FAILED + fields[]`。
+
+| `section` | 请求体对应的设置 |
+| --- | --- |
+| `security` | 可用 `{ admin, security, logging }` 分别提交；直接提交的安全字段合并到 `security` |
+| `rate-limit` | `security.rateLimit` 的内部字段 |
+| `mail` | `mail` 的内部字段，例如 `{ "enabled": true, "smtp": { "host": "smtp.example.test" } }` |
+| `notifications` | `notifications` 的内部字段 |
+| `captcha` | `captcha` 的内部字段 |
+| `avatar` | 可用 `{ avatar, publicApi }` 分别提交；直接提交的头像字段合并到 `avatar` |
+| `ip-region` | `ipRegion` 的内部字段 |
+| `anti-spam` | `antiSpam` 的内部字段 |
+
+对象字段递归合并，提交的数组整列表替换。通知渠道新增、编辑和删除均通过 `notifications` 分区提交 `{ channelConfigs: [...] }`，该数组必须包含需要保留的全部可编辑发送目标；遗漏的已保存目标视为删除，仍被站点通知或任务失败通知引用时返回 `NOTIFICATION_CHANNEL_CONFIG_IN_USE`。`email:default` 可随列表带回，但不会作为可编辑目标保存；省略目标的 secret 字段保留其已有密钥。
+
+Admin Console 的渠道弹窗点击“保存”立即调用此接口，服务端成功后才关闭并更新列表；失败时保留弹窗和输入。渠道保存不依赖设置页另一次“应用更改”。其它设置分区的局部保存只应用对应分区，不提交其它分区尚未应用的草稿。
+
 ### `POST /api/admin/system-settings/notifications/channel-test`
 
 创建通知通道测试任务。该接口需要 `system_settings.update` 权限，会创建 `channel_test` 类型的 `task_runs` 和对应 `notification_deliveries`，再由通知 worker 或测试流程投递。
@@ -1723,6 +1746,20 @@ AdminSystemSettings
 
 任务调度中心只允许后端注册的内置 task type，不支持任意 Shell、Python、JavaScript、SQL、系统命令、容器命令或脚本库任务。
 
+计划任务、运行记录、审计和删除快照四个列表共享以下 query：
+
+```ts
+{
+  limit?: number;  // 默认 200，整数，范围 1–200
+  offset?: number; // 默认 0，非负整数
+  search?: string; // 去除首尾空白，最多 200 字符；空字符串不筛选
+}
+```
+
+搜索不区分大小写，按字面子串匹配，`%` 和 `_` 不作为通配符。站点可见范围、业务筛选和搜索均在数据库分页前应用，`totalCount` 表示全部符合条件且当前用户可见的记录数量，与本页 `items.length` 分开计算。结果按创建时间倒序、ID 倒序排列；删除快照使用删除时间倒序、ID 倒序。超出末页时返回空 `items` 并保留准确的 `totalCount`，非法分页或筛选参数返回 `INVALID_REQUEST`。
+
+Admin Console 显式传入每页条数和偏移，搜索、筛选、站点或评论范围变化后从第一页重新读取；轮询沿用当前查询与页码。
+
 ### `GET /api/admin/tasks/definitions`
 
 列出后端权威 task type registry。
@@ -1773,6 +1810,19 @@ AdminSystemSettings
 ### `GET /api/admin/tasks/scheduled`
 
 列出当前用户可见的计划任务定义。非 owner 的站点管理员和站点评论管理员只能看到摘要投影，不能看到 raw payload、policy、trigger 或日志。
+
+除共享 query 外，支持：
+
+```ts
+{
+  type?: string; // 精确任务类型
+  status?: "queued" | "delayed" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "blocked" | "suppressed" | "cancelled";
+  scopeKind?: "global" | "site";
+  visibility?: "owned" | "summary";
+}
+```
+
+`status` 筛选最近运行状态 `lastStatus`。`visibility="owned"` 表示当前会话可管理、返回 `definition` 投影的任务，包含符合权限的系统托管任务；`summary` 表示仅摘要可见的任务。`search` 匹配名称、描述、任务类型（含中文类型名）或负责人用户 ID，不搜索任务 payload。
 
 响应：
 ```ts
@@ -1902,7 +1952,21 @@ AdminSystemSettings
 
 列出任务运行记录。
 
-Query 可传 `commentId`，此时只返回 `subject_type=comment` 且 `subject_id` 匹配的运行记录；可见性仍由当前用户的任务权限和站点范围决定。
+除共享 query 外，支持：
+
+```ts
+{
+  type?: string; // 精确内部任务类型
+  status?: "queued" | "delayed" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "blocked" | "suppressed" | "cancelled";
+  siteKey?: string;
+  scopeKind?: "global" | "site";
+  commentId?: string;
+}
+```
+
+`scopeKind="global"` 筛选没有 `siteKey` 的运行，`site` 筛选有 `siteKey` 的运行；传入 `siteKey` 时精确匹配该站点。`commentId` 只返回 `subject_type=comment` 且 `subject_id` 匹配的运行记录，可与其余筛选组合；站点权限先于分页执行。
+
+普通任务的 `search` 匹配计划任务名称快照、任务类型（含中文类型名）、跳过原因或阻塞原因。通知任务仅匹配安全的业务流程名称及“邮件通知”“评论通知”，不匹配内部类型、任务 payload、收件地址或原始异常。
 
 评论邮件详情中的“查看任务记录”使用该 query 进入任务中心；Admin Console 应明确显示当前处于评论范围过滤，并允许用户清除范围。通知运行在列表和详情中使用 `workflow`、安全 `deliveries` 与业务文案呈现，不把运行 ID 或底层任务类型显示为用户可见名称。
 
@@ -1976,9 +2040,15 @@ Query：
 
 列出任务相关审计记录。初始管理员和管理员可见全局任务审计；站点用户只能看到其授权站点范围内的任务审计摘要。
 
+支持共享分页与搜索 query。数据库先限定 `task.*` 动作和当前用户可见范围，再搜索、计数和分页；其它后台动作不会占用任务审计的分页额度。站点用户的审计范围还限定 `actorType="admin_user"`。
+
+`search` 匹配动作、操作者类型或 ID、目标类型或 ID、任务名、任务类型（含中文类型名）、站点、运行 ID 或计划任务 ID。响应为 `{ items: TaskAuditItem[], totalCount: number }`；单项只返回审计摘要，不返回任务执行输入、输出或错误详情。
+
 ### `GET /api/admin/tasks/deleted-snapshots`
 
 列出计划任务删除快照。仅初始管理员可访问。
+
+支持共享分页与搜索 query，`search` 匹配快照中的任务名、任务类型（含中文类型名）或删除原因。响应为 `{ items: ScheduledTaskDeletedSnapshot[], totalCount: number }`；保留删除快照的摘要投影，不返回完整原始任务配置。非初始管理员返回 `403 TASK_DELETED_SNAPSHOT_ACCESS_DENIED`，不会先返回可探测的分页总数。
 
 ### `GET /api/admin/tasks/deleted-snapshots/{snapshotId}`
 
@@ -2064,6 +2134,92 @@ Query：
 ```
 
 ## Ops
+
+### `GET /api/admin/ops/delayed-deletions`
+
+分页读取延迟删除记录，需要 `ops.read` 和目标站点访问权；只有全局管理员可以省略 `siteKey` 查看全部站点。
+
+Query：
+
+```ts
+{
+  siteKey?: string;
+  status?: "pending" | "restored" | "hard_deleted"; // 默认 pending
+  limit?: number;  // 默认 20，整数，范围 1–100
+  offset?: number; // 默认 0，非负整数
+}
+```
+
+站点和状态筛选先于分页，结果按创建时间倒序、ID 倒序排列。响应：
+
+```ts
+{
+  items: Array<Omit<DelayedDeletionRecord, "metadataJson"> & {
+    siteKey: string | null;
+    siteName: string | null;
+    pageTitle: string | null;
+    pageUrl: string | null;
+    displayName: string;
+    canRestore: boolean;
+    metadata: unknown;
+  }>;
+  totalCount: number;
+  limit: number;
+  offset: number;
+}
+```
+
+`displayName` 使用页面标题、页面地址或“已删除页面”，批量清空记录显示“清空页面回收站”。`metadata` 是解析后的删除元信息，无有效内容时为 `null`。`canRestore` 要求记录仍为 `pending`、当前时间早于 `hardDeleteAfter`，且至少一个页面当前仍为 `deleted` 并属于这次删除登记。服务端按页面身份、删除时间和最新删除登记核对归属；缺少快照的旧记录只在归属明确时可恢复。已经恢复、重建、重新删除或归属不明的页面不会使旧记录变得可恢复。执行恢复仍需单独通过 `ops.restore` 和站点权限检查。
+
+`DelayedDeletionRecord`：
+
+```ts
+{
+  id: number;
+  resourceType: string;
+  resourceId: string;
+  siteId: number | null;
+  requestedByUserId: number | null;
+  requestedAt: string;
+  hardDeleteAfter: string;
+  restoredByUserId: number | null;
+  restoredAt: string | null;
+  hardDeletedAt: string | null;
+  status: "pending" | "restored" | "hard_deleted";
+  metadataJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### `POST /api/admin/ops/delayed-deletions/{deletionId}/restore`
+
+恢复保留期内的删除记录，需要 `ops.restore`、目标记录的站点访问权和 CSRF token。`deletionId` 必须是正整数，不需要请求体。当前支持单个页面 `page` 和清空页面回收站产生的 `page_trash` 记录；两者均只恢复当前仍为 `deleted` 且属于这次删除登记的页面。批量记录可以恢复其中仍符合条件的页面，`restoredCount` 返回实际恢复数量。
+
+服务端在同一事务中锁定删除记录和候选页面，重新检查待恢复状态、截止时间及页面删除归属，恢复资源并写入 `restored` 状态。列表中的 `canRestore` 不替代执行时核验。成功后返回：
+
+```ts
+{
+  deletion: DelayedDeletionRecord;
+  resource: {
+    resourceType: string;
+    resourceId: string;
+    restoredCount: number;
+  };
+}
+```
+
+`deletion` 是更新后的删除记录，包含 `restoredByUserId`、`restoredAt` 和原始 `metadataJson`，不带 GET 列表的展示字段。恢复成功会写入 `delayed_deletion.restored` 审计；Admin Console 随后重新读取列表和服务端计数。
+
+错误：
+
+- `400 INVALID_REQUEST`：记录 ID 无效。
+- `403 ADMIN_PERMISSION_REQUIRED` / `ADMIN_SITE_ACCESS_REQUIRED`：缺少恢复权限或目标站点访问权。
+- `404 DELAYED_DELETION_NOT_FOUND`：记录不存在。
+- `409 DELAYED_DELETION_NOT_PENDING`：记录已恢复或已永久删除。
+- `409 DELAYED_DELETION_EXPIRED`：当前时间已达到或超过 `hardDeleteAfter`，即使清理尚未执行也不能恢复。
+- `409 DELAYED_DELETION_RESOURCE_UNSUPPORTED`：资源类型不支持恢复。
+- `409 DELAYED_DELETION_RESOURCE_UNAVAILABLE`：单个或批量记录中没有仍属于这次删除登记的可恢复页面，包括页面已不存在、已恢复、重建或重新删除的情况。
 
 ### `GET /api/admin/ops/ip-region`
 

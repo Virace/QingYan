@@ -9,6 +9,7 @@ import {
 	isNotNull,
 	isNull,
 	lte,
+	ne,
 	notInArray,
 	or,
 	sql,
@@ -25,6 +26,7 @@ import {
 import { advisoryLockKey, canonicalJson } from "../../db/values";
 import type { ScheduledTaskRecord } from "./scheduled-task-repository";
 import { TaskEventLogRepository } from "./task-event-log-repository";
+import { taskTextSearch } from "./task-list-query";
 import {
 	type NotificationDeliveryRecord,
 	parseNullableJson,
@@ -525,9 +527,29 @@ export class TaskRunRepository {
 		status?: TaskRunStatus;
 		subjectType?: string;
 		subjectId?: string;
+		allowedSiteIds?: number[];
+		scopeKind?: "global" | "site";
+		search?: string;
+		searchTypes?: string[];
+		safeNotificationSearch?: boolean;
 		limit: number;
 		offset: number;
 	}) {
+		const notificationWorkflow = sql`case
+			when ${taskRuns.payloadSummaryJson} ->> 'flow' = 'commenter_reply' or ${taskRuns.type} = 'reply_approved' then '评论者回复提醒'
+			when ${taskRuns.payloadSummaryJson} ->> 'flow' = 'site_staff_comment' or starts_with(${taskRuns.type}, 'backend_user_comment') then '站点人员评论提醒'
+			else '邮件通知' end`;
+		const runSearch = or(
+			taskTextSearch(input.search, [
+				taskRuns.scheduledTaskNameSnapshot,
+				taskRuns.type,
+				taskRuns.skipReason,
+				taskRuns.blockReason,
+			]),
+			input.searchTypes?.length
+				? inArray(taskRuns.type, input.searchTypes)
+				: undefined,
+		);
 		const whereCondition = and(
 			input.siteKey ? eq(taskRuns.siteKey, input.siteKey) : undefined,
 			input.type ? eq(taskRuns.type, input.type) : undefined,
@@ -537,6 +559,29 @@ export class TaskRunRepository {
 				? eq(taskRuns.subjectType, input.subjectType)
 				: undefined,
 			input.subjectId ? eq(taskRuns.subjectId, input.subjectId) : undefined,
+			input.allowedSiteIds
+				? inArray(taskRuns.siteId, input.allowedSiteIds)
+				: undefined,
+			input.scopeKind === "global"
+				? isNull(taskRuns.siteKey)
+				: input.scopeKind === "site"
+					? isNotNull(taskRuns.siteKey)
+					: undefined,
+			input.search?.trim()
+				? input.safeNotificationSearch
+					? or(
+							and(ne(taskRuns.category, "notification"), runSearch),
+							and(
+								eq(taskRuns.category, "notification"),
+								taskTextSearch(input.search, [
+									notificationWorkflow,
+									sql`'邮件通知'`,
+									sql`'评论通知'`,
+								]),
+							),
+						)
+					: runSearch
+				: undefined,
 		);
 		const rows = await this.db
 			.select()

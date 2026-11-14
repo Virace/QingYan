@@ -2,6 +2,9 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	adminBootstrapState,
+	adminGroups,
+	adminUserGroups,
+	adminUserSiteAccess,
 	adminUsers,
 	auditLogs,
 	delayedDeletions,
@@ -10,6 +13,7 @@ import {
 	taskRuns,
 } from "../../src/db/schema";
 import { hashKey } from "../../src/db/values";
+import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import type {
 	ServiceControlController,
 	ServiceState,
@@ -532,6 +536,8 @@ describe("admin ops routes", () => {
 			},
 		});
 		expect(deleteResponse.statusCode).toBe(200);
+		const deletionDeadline = deleteResponse.json().page.deletion
+			.hardDeleteAfter as string;
 
 		const listResponse = await fixture.app.inject({
 			method: "GET",
@@ -550,6 +556,9 @@ describe("admin ops routes", () => {
 					resourceId: "post:ops-restore",
 					siteKey: "fangyuan",
 					status: "pending",
+					displayName: "Ops Restore",
+					canRestore: true,
+					hardDeleteAfter: deletionDeadline,
 					metadata: {
 						pageKey: "post:ops-restore",
 						siteKey: "fangyuan",
@@ -558,6 +567,44 @@ describe("admin ops routes", () => {
 			],
 		});
 		const recordId = listResponse.json().items[0].id as number;
+		const deletionRecord = listResponse.json().items[0];
+		expect(
+			new Date(deletionDeadline).getTime() -
+				new Date(deletionRecord.requestedAt).getTime(),
+		).toBe(15 * 24 * 60 * 60 * 1000);
+		const [siteGroup] = await fixture.app.db
+			.select()
+			.from(adminGroups)
+			.where(eq(adminGroups.key, "site_admin"));
+		if (!siteGroup) throw new Error("Expected site admin group");
+		const [scopedUser] = await fixture.app.db
+			.insert(adminUsers)
+			.values({
+				username: "ops-reader",
+				email: "ops-reader@example.test",
+				passwordHash: createPasswordHash("replace-me"),
+				displayName: "Ops Reader",
+				status: "active",
+			})
+			.returning();
+		if (!scopedUser) throw new Error("Expected scoped user");
+		await fixture.app.db
+			.insert(adminUserGroups)
+			.values({ userId: scopedUser.id, groupId: siteGroup.id });
+		await fixture.app.db
+			.insert(adminUserSiteAccess)
+			.values({ userId: scopedUser.id, siteId: site.id });
+		const scoped = await loginAsAdmin(fixture.app, {
+			username: "ops-reader",
+			password: "replace-me",
+		});
+		const deniedRestore = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/ops/delayed-deletions/${recordId}/restore`,
+			...withAdminWriteAuth(scoped),
+		});
+		expect(deniedRestore.statusCode).toBe(403);
+		expect(deniedRestore.json().error.code).toBe("ADMIN_PERMISSION_REQUIRED");
 
 		const restoreResponse = await fixture.app.inject({
 			method: "POST",
@@ -586,6 +633,49 @@ describe("admin ops routes", () => {
 			status: "active",
 			deletedAt: null,
 		});
+		const activePages = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/pages?siteKey=fangyuan&status=active",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(activePages.statusCode).toBe(200);
+		expect(activePages.json().items).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					pageKey: "post:ops-restore",
+					status: "active",
+				}),
+			]),
+		);
+		const duplicateRestore = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/ops/delayed-deletions/${recordId}/restore`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(duplicateRestore.statusCode).toBe(409);
+		expect(duplicateRestore.json().error.code).toBe(
+			"DELAYED_DELETION_NOT_PENDING",
+		);
+		const restoredList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/delayed-deletions?siteKey=fangyuan&status=restored&limit=1&offset=0",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(restoredList.json()).toMatchObject({
+			totalCount: 1,
+			items: [{ id: recordId, canRestore: false, status: "restored" }],
+		});
+		const beyondPage = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/delayed-deletions?siteKey=fangyuan&status=restored&limit=1&offset=1",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(beyondPage.json()).toMatchObject({
+			totalCount: 1,
+			limit: 1,
+			offset: 1,
+			items: [],
+		});
 		const audits = await fixture.app.db.select().from(auditLogs);
 		expect(audits).toEqual(
 			expect.arrayContaining([
@@ -597,6 +687,265 @@ describe("admin ops routes", () => {
 				}),
 			]),
 		);
+	});
+
+	it("keeps an empty page-trash recovery pending rather than reporting success", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) throw new Error("Expected site");
+		const [record] = await fixture.app.db
+			.insert(delayedDeletions)
+			.values({
+				resourceType: "page_trash",
+				resourceId: "fangyuan",
+				siteId: site.id,
+				requestedAt: new Date().toISOString(),
+				hardDeleteAfter: new Date(Date.now() + 86400000).toISOString(),
+				status: "pending",
+				metadataJson: JSON.stringify({ pages: [] }),
+			})
+			.returning();
+		if (!record) throw new Error("Expected deletion record");
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: `/qingyan/api/admin/ops/delayed-deletions/${record.id}/restore`,
+			...withAdminWriteAuth(admin),
+		});
+		expect(response.statusCode).toBe(409);
+		expect(response.json().error.code).toBe(
+			"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+		);
+		const [persisted] = await fixture.app.db
+			.select()
+			.from(delayedDeletions)
+			.where(eq(delayedDeletions.id, record.id));
+		expect(persisted).toMatchObject({ status: "pending", restoredAt: null });
+	});
+
+	it.each([
+		{ resourceType: "page", legacy: false },
+		{ resourceType: "page", legacy: true },
+		{ resourceType: "page_trash", legacy: false },
+		{ resourceType: "page_trash", legacy: true },
+	])("binds $resourceType recovery and cleanup to the current deletion (legacy=$legacy)", async ({
+		resourceType,
+		legacy,
+	}) => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) throw new Error("Expected site");
+		const pageKey = "post:deletion-owner";
+		await fixture.app.db.insert(sitePageRegistry).values({
+			siteId: site.id,
+			pageKey,
+			pageKeyHash: hashKey(pageKey),
+			pageUrl: "/posts/deletion-owner/",
+			status: "active",
+		});
+		const lifecycle = async (action: "delete" | "restore" | "trash") => {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: `/qingyan/api/admin/pages/${encodeURIComponent(pageKey)}/${action}`,
+				...withAdminWriteAuth(admin),
+				payload: { siteKey: "fangyuan" },
+			});
+			expect(response.statusCode).toBe(200);
+		};
+		const readRecords = () =>
+			fixture.app.db
+				.select()
+				.from(delayedDeletions)
+				.orderBy(delayedDeletions.id);
+		const deletePage = async () => {
+			if (resourceType === "page") await lifecycle("delete");
+			else {
+				await lifecycle("trash");
+				const response = await fixture.app.inject({
+					method: "POST",
+					url: "/qingyan/api/admin/pages/trash/clear",
+					...withAdminWriteAuth(admin),
+					payload: { siteKey: "fangyuan" },
+				});
+				expect(response.statusCode).toBe(200);
+			}
+			const record = (await readRecords()).at(-1);
+			if (!record) throw new Error("Expected deletion record");
+			if (legacy)
+				await fixture.app.db
+					.update(delayedDeletions)
+					.set({
+						metadataJson: JSON.stringify(
+							resourceType === "page" ? { pageKey } : { pages: [{ pageKey }] },
+						),
+					})
+					.where(eq(delayedDeletions.id, record.id));
+			return record.id;
+		};
+		const restoreRecord = (id: number) =>
+			fixture.app.inject({
+				method: "POST",
+				url: `/qingyan/api/admin/ops/delayed-deletions/${id}/restore`,
+				...withAdminWriteAuth(admin),
+			});
+		const firstId = await deletePage();
+		await lifecycle("restore");
+		const restoredList = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/delayed-deletions?siteKey=fangyuan",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(restoredList.json().items).toEqual([
+			expect.objectContaining({ id: firstId, canRestore: false }),
+		]);
+		expect((await restoreRecord(firstId)).json().error.code).toBe(
+			"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+		);
+		await lifecycle("trash");
+		expect((await restoreRecord(firstId)).json().error.code).toBe(
+			"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+		);
+		const secondId = await deletePage();
+		const currentId = await deletePage();
+		const pending = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/ops/delayed-deletions?siteKey=fangyuan",
+			cookies: { qingyan_admin: admin.adminCookie.value },
+		});
+		expect(pending.json().items).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: firstId, canRestore: false }),
+				expect.objectContaining({ id: secondId, canRestore: false }),
+				expect.objectContaining({ id: currentId, canRestore: true }),
+			]),
+		);
+		for (const id of [firstId, secondId]) {
+			const rejected = await restoreRecord(id);
+			expect(rejected.statusCode).toBe(409);
+			expect(rejected.json().error.code).toBe(
+				"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+			);
+		}
+		const expireAndClean = async (id: number) => {
+			await fixture.app.db
+				.update(delayedDeletions)
+				.set({ hardDeleteAfter: "2026-01-01T00:00:00.000Z" })
+				.where(eq(delayedDeletions.id, id));
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/admin/ops/delayed-deletions/cleanup",
+				...withAdminWriteAuth(admin),
+				payload: {},
+			});
+			expect(response.statusCode).toBe(200);
+			expect(response.json()).toMatchObject({
+				processedCount: 1,
+				hardDeletedCount: 0,
+			});
+		};
+		await expireAndClean(firstId);
+		const [stillDeleted] = await fixture.app.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.pageKey, pageKey));
+		expect(stillDeleted?.status).toBe("deleted");
+		const restored = await restoreRecord(currentId);
+		expect(restored.statusCode).toBe(200);
+		expect(restored.json().resource.restoredCount).toBe(1);
+		await expireAndClean(secondId);
+		const [active] = await fixture.app.db
+			.select()
+			.from(sitePageRegistry)
+			.where(eq(sitePageRegistry.pageKey, pageKey));
+		expect(active?.status).toBe("active");
+	});
+
+	it.each([
+		"restore",
+		"cleanup",
+	] as const)("only applies batch %s to pages still owned by that deletion", async (action) => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		await seedInstalledBootstrap(fixture);
+		const admin = await loginAsAdmin(fixture.app);
+		const [site] = await fixture.app.db
+			.select()
+			.from(sites)
+			.where(eq(sites.siteKey, "fangyuan"));
+		if (!site) throw new Error("Expected site");
+		await fixture.app.db.insert(sitePageRegistry).values(
+			["post:batch-original", "post:batch-newer"].map((pageKey) => ({
+				siteId: site.id,
+				pageKey,
+				pageKeyHash: hashKey(pageKey),
+				pageUrl: `/${pageKey}/`,
+				status: "trash",
+				trashedAt: new Date().toISOString(),
+			})),
+		);
+		const cleared = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/admin/pages/trash/clear",
+			...withAdminWriteAuth(admin),
+			payload: { siteKey: "fangyuan" },
+		});
+		expect(cleared.statusCode).toBe(200);
+		const [batch] = await fixture.app.db.select().from(delayedDeletions);
+		if (!batch) throw new Error("Expected batch deletion");
+		for (const lifecycle of ["restore", "delete"]) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: `/qingyan/api/admin/pages/post%3Abatch-newer/${lifecycle}`,
+				...withAdminWriteAuth(admin),
+				payload: { siteKey: "fangyuan" },
+			});
+			expect(response.statusCode).toBe(200);
+		}
+		if (action === "restore") {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: `/qingyan/api/admin/ops/delayed-deletions/${batch.id}/restore`,
+				...withAdminWriteAuth(admin),
+			});
+			expect(response.statusCode).toBe(200);
+			expect(response.json().resource.restoredCount).toBe(1);
+		} else {
+			await fixture.app.db
+				.update(delayedDeletions)
+				.set({ hardDeleteAfter: "2026-01-01T00:00:00.000Z" })
+				.where(eq(delayedDeletions.id, batch.id));
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/admin/ops/delayed-deletions/cleanup",
+				...withAdminWriteAuth(admin),
+				payload: {},
+			});
+			expect(response.statusCode).toBe(200);
+			expect(response.json().hardDeletedCount).toBe(1);
+		}
+		const pages = await fixture.app.db.select().from(sitePageRegistry);
+		expect(
+			pages.find((page) => page.pageKey === "post:batch-newer")?.status,
+		).toBe("deleted");
+		if (action === "restore")
+			expect(
+				pages.find((page) => page.pageKey === "post:batch-original")?.status,
+			).toBe("active");
+		else
+			expect(
+				pages.find((page) => page.pageKey === "post:batch-original"),
+			).toBeUndefined();
 	});
 
 	it("runs due delayed deletion cleanup with actor and resource count audit", async () => {

@@ -120,6 +120,46 @@ export function restartService(input: { confirm: string }) {
 	);
 }
 
+export type DelayedDeletionStatus = "pending" | "restored" | "hard_deleted";
+
+export interface DelayedDeletion {
+	id: number;
+	resourceType: string;
+	displayName: string;
+	siteKey: string | null;
+	siteName: string | null;
+	requestedAt: string;
+	hardDeleteAfter: string;
+	restoredAt: string | null;
+	status: DelayedDeletionStatus;
+	canRestore: boolean;
+}
+
+export function listDelayedDeletions(input: {
+	siteKey?: string;
+	status: DelayedDeletionStatus;
+	limit: number;
+	offset: number;
+}) {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(input)) {
+		if (value !== undefined) params.set(key, String(value));
+	}
+	return requestJson<{
+		items: DelayedDeletion[];
+		totalCount: number;
+		limit: number;
+		offset: number;
+	}>(`/api/admin/ops/delayed-deletions?${params}`);
+}
+
+export function restoreDelayedDeletion(id: number) {
+	return requestJson<{ resource: { restoredCount: number } }>(
+		`/api/admin/ops/delayed-deletions/${id}/restore`,
+		{ method: "POST" },
+	);
+}
+
 export type IpVersion = "v4" | "v6";
 
 export interface TaskQueueState {
