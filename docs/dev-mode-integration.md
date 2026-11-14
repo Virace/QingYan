@@ -70,7 +70,7 @@ QINGYAN_DEV_MODE=true pnpm dev:api
 QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 ```
 
-无数据库模式会自动启用 dev mode，不连接 SQLite，也不要求先执行迁移。它仍然提供 `${server.publicPath}/api/dev/*` 控制面、`${server.publicPath}/api/*` 前台业务接口，以及用于自动化联调的最小后台会话接口。mock 状态只保存在运行时内存中，进程重启后会重置。
+无数据库模式会自动启用 dev mode，不连接 PostgreSQL，也不要求先执行迁移。它仍然提供 `${server.publicPath}/api/dev/*` 控制面、`${server.publicPath}/api/*` 前台业务接口，以及用于自动化联调的最小后台会话接口。mock 状态只保存在运行时内存中，进程重启后会重置。
 
 ### dev mode 的固定语义
 
@@ -78,7 +78,7 @@ QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev
 
 - 只提供一个开发站点：`default`
 - `default` 来自 dev seed，不从 startup config 的 `sites[]` 派生
-- DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite
+- DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 PostgreSQL
 - 后台登录临时使用 dev 管理员账号，默认 `admin / admin`
 - 后台入口保留已安装的配置路径，同时额外开放 `${server.publicPath}/admin/` 作为 dev-only 别名
 - 前端仍然必须显式传 `siteKey: "default"`

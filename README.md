@@ -7,7 +7,7 @@
 ![Node 24](https://img.shields.io/badge/node-%3E%3D24-43853d?logo=node.js&logoColor=white)
 ![TypeScript 6](https://img.shields.io/badge/typescript-6-3178c6?logo=typescript&logoColor=white)
 ![Fastify 5](https://img.shields.io/badge/fastify-5-000000?logo=fastify&logoColor=white)
-![SQLite](https://img.shields.io/badge/sqlite-3-003b57?logo=sqlite&logoColor=white)
+![PostgreSQL 18](https://img.shields.io/badge/postgresql-18-4169e1?logo=postgresql&logoColor=white)
 ![OpenAPI](https://img.shields.io/badge/openapi-3.1-6ba539?logo=openapiinitiative&logoColor=white)
 
 清言（QingYan）是一个很干净、API-first 的评论与对话基础设施。当前基线聚焦后端接口与后台管理能力，可服务于 FangYuan 等内容站点的评论、验证码、页面点赞和管理需求。
@@ -16,7 +16,7 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
-当前正式版本为 [`v0.2.3`](https://github.com/Virace/QingYan/releases/tag/v0.2.3)，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+最近发布版本为 [`v0.2.5`](https://github.com/Virace/QingYan/releases/tag/v0.2.5)；当前开发版本使用 PostgreSQL 单一运行后端，旧 SQLite 实例需要离线转换，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
 
 ## 当前能力
 
@@ -32,7 +32,7 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 - 文本 `.log` + 结构化 `.jsonl` 双格式落盘
 - 后台可动态调整日志等级和保留天数
 - 默认浏览器后台入口：`GET /qingyan/admin`
-- SQLite + Drizzle migration 基线
+- PostgreSQL 18 + Drizzle / node-postgres，单一迁移账本
 - Docker / Compose 本地或单机部署
 
 ## 快速开始
@@ -45,7 +45,9 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 bash scripts/install.sh --dir /opt/apps
 ```
 
-`--dir` 是父目录，运行文件放在 `/opt/apps/qingyan/`，源码缓存默认放在 `/opt/apps/.qingyan-source/`；可用 `--source-dir` 单独指定源码位置。交互流程保留数据库选择，目前只有 SQLite。自动化运行可使用 `--non-interactive`，或用 `--database sqlite` 明确指定数据库。
+`--dir` 是父目录，运行文件放在 `/opt/apps/qingyan/`，源码缓存默认放在 `/opt/apps/.qingyan-source/`；可用 `--source-dir` 单独指定源码位置。数据库使用预建的 PostgreSQL 18 专用库和账号。自动化运行可使用 `--non-interactive --database postgresql`；连接可在安装表单填写或通过受保护环境变量 `QINGYAN_DATABASE_URL` 注入。
+
+安装脚本默认获取最高稳定 tag。`v0.2.5` 仍为 SQLite 源版本；当前 PostgreSQL 改造发布后，应显式固定对应的 PostgreSQL tag。已有 SQLite 实例先完成离线转换，再按已核对版本切换。
 
 GitHub 拉取与构建依赖分别选源：
 
@@ -75,6 +77,8 @@ pnpm install
 
 ### 2. 首次安装
 
+先准备 PostgreSQL 18 数据库与专用账号，使用 UTF8、UTC 与 C 比较规则。配置见 [配置说明](docs/configuration.md#database)，本地隔离测试库见 [开发验证](docs/deployment.md#本地开发与测试数据库)。生产不要使用测试账号。
+
 首次部署推荐让 QingYan 进入 install mode，而不是手写完整业务配置。
 
 ```bash
@@ -89,7 +93,7 @@ install.url=http://127.0.0.1:4401/qingyan/admin/install
 
 浏览器访问 `/qingyan/admin/` 或 `/qingyan/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中。
 
-安装流程会生成 startup config、初始化 SQLite、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后按 `QINGYAN_INSTALL_TRANSITION_MODE` 切换到正常服务；默认 `reload_in_process` 会在同一进程内启动正常服务，Docker Compose 可使用 `exit_for_supervisor` 退出后由 restart policy 拉起，受限运行时可使用 `manual` 提示人工重启。安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/qingyan/admin` 会跳转到安装页，正常 `/qingyan/api/*` 接口不会注册；安装完成后的外部后台入口由 `server.publicPath + admin.consolePath` 决定。
+安装流程会生成 startup config、初始化预建的空 PostgreSQL 数据库、写入管理员 bootstrap、默认站点、站点设置、完整默认系统设置，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装完成后按 `QINGYAN_INSTALL_TRANSITION_MODE` 切换到正常服务；默认 `reload_in_process` 会在同一进程内启动正常服务，Docker Compose 可使用 `exit_for_supervisor` 退出后由 restart policy 拉起，受限运行时可使用 `manual` 提示人工重启。安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示，不作为后台 SPA 路由。安装期间不启用管理员登录，`/qingyan/admin` 会跳转到安装页，正常 `/qingyan/api/*` 接口不会注册；安装完成后的外部后台入口由 `server.publicPath + admin.consolePath` 决定。
 
 需要指定配置路径或安装 token 时可使用：
 
@@ -99,7 +103,7 @@ QINGYAN_CONFIG_PATH=./config/qingyan.yml QINGYAN_INSTALL_TOKEN=change-me pnpm de
 
 安装完成切换方式可用 `QINGYAN_INSTALL_TRANSITION_MODE=reload_in_process|exit_for_supervisor|manual` 调整。Web 安装接口不会调用 `qyctl`、`systemctl` 或任意外部 shell 命令。
 
-startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应、Admin system settings 和普通 QingYan export 都不会返回明文。
+startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应和 Admin system settings 都不会返回明文。
 
 ### 3. 校验配置
 
@@ -164,7 +168,7 @@ qyctl help
 
 Docker 镜像内同样提供 `qyctl` 和 `qingyanctl`。它们用于运维、备份、恢复、升级和重置后台信息；首次安装完成后的 Web 切换不依赖 CLI 存在。
 
-`qyctl info` 用于快速查看服务状态、控制台入口、管理员用户名、配置文件和数据库位置，不显示管理员密码。数据库只保存密码 hash；如需重置密码，使用：
+`qyctl info` 用于快速查看服务状态、控制台入口、管理员用户名、配置文件和脱敏数据库身份，不显示管理员密码。数据库只保存密码 hash；如需重置密码，使用：
 
 ```bash
 qyctl admin repass
@@ -178,14 +182,17 @@ qyctl admin entrance
 qyctl admin entrance /hidden-admin
 ```
 
-站点级 JSON 导入导出只用于评论、页面线程、访客、站点设置等业务数据迁移，不是整站备份：
+运行时已撤下后台 QingYan/WordPress 导入导出、站点导入导出 CLI 和全部定时备份。旧 SQLite 转换使用独立的 `pnpm db:convert`，详见 [离线转换与切换](docs/postgresql-conversion.md)。
+
+整实例备份使用 PostgreSQL 自定义格式 dump，连同配置、安装锁、必要资源和 manifest 保存。先停写并等待在途任务结束，再执行：
 
 ```bash
-qyctl export default ./site.json
-qyctl import default ./site.json --dry-run
+qyctl backup ./qingyan-full-backup --yes --service-stopped
+qyctl restore ./qingyan-full-backup.qingyan-backup --dry-run
+qyctl restore ./qingyan-full-backup.qingyan-backup --yes --target-config ./restore-target.yml --output-config ./restored/qingyan.yml
 ```
 
-整站备份使用 `qyctl backup`，包含数据库完整备份、配置文件、安装锁和 manifest。恢复计划可用 `qyctl restore <backup> --dry-run` 检查。`qyctl upgrade` 只负责数据升级；Docker Compose 的备份、Release 切换、镜像构建、UpgradePlan 确认和健康验收统一由 `scripts/update.sh` 编排。
+恢复目标必须是运维预建的空数据库，目标配置含其连接参数。恢复后生成新配置，切换另行确认执行；原配置和原库保留。备份与恢复文件含密钥和用户内容，按私密数据保管。Docker 停写、恢复与升级步骤见 [部署指南](docs/deployment.md#备份与恢复)。
 
 程序更新检测基于当前仓库的 GitHub Release：
 
@@ -219,8 +226,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Virace/QingYan/v0.2.5/script
 - 首个正式版本 `v0.1.0` 已发布；公开输入由站点级上限约束，后续破坏性升级必须走 upgrade lifecycle
 - 应用层滥用保护和自动黑名单可在 Admin Console 关闭；关闭时建议由 WAF、反向代理、CDN 或 API 网关承担更强限流与拦截
 - 黑名单和白名单均在 Admin Console 的安全规则中管理；白名单只影响黑名单/自动黑名单优先级，不绕过页面状态、功能开关、验证码、基础限流或输入校验
-- 普通 QingYan export 不包含 SMTP / captcha secret，迁移 secret 需通过环境变量、Admin Console 重新输入，或等待未来 full backup/restore 模式
-- release 后破坏性升级规则由项目规范维护；开发过程设计 / 计划文档保存在仓库外 `E:\Project\Docs\Web\QingYan`
+- release 后破坏性升级规则由项目规范维护；开发过程设计和计划文档保存在项目外文档区
 
 ## 升级入口
 
@@ -232,16 +238,16 @@ upgrade.state=upgrade_required
 upgrade.token=qy_upgrade_<一次性随机值>
 ```
 
-浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，输入同一段启动日志中的升级 token，并在确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。升级写入前会先创建 SQLite 数据库备份、startup config 备份和公开 UpgradePlan 备份；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
+浏览器访问 `/qingyan/upgrade` 可查看脱敏后的 `UpgradePlan`，输入同一段启动日志中的升级 token，并在确认备份路径和风险后输入 `UPGRADE QINGYAN` 执行升级。PostgreSQL 常规升级写入前会先停写并创建数据库 dump、startup config、必要资源和公开 UpgradePlan 备份；旧 SQLite 配置会提示先执行离线转换；失败时保留 partial marker，下次启动进入 `recovery_required`，不会继续启动正常服务。
 
 CLI 仍是底层运维入口，适合服务器、Docker、CI 或 Web 无法启动的场景：
 
 ```bash
 pnpm qingyan:upgrade -- --dry-run --config config/qingyan.yml
-pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backup/upgrade
+qyctl upgrade --yes --service-stopped --config config/qingyan.yml --backup-dir ./backup/upgrade
 ```
 
-`--dry-run` 只输出脱敏后的 `UpgradePlan`，不写配置、SQLite 或 upgrade ledger。`--apply` 必须显式提供 `--backup-dir`，并与 Web Upgrade Mode 复用同一个升级执行服务。
+`--dry-run` 只输出脱敏后的 `UpgradePlan`，不写配置、数据库或 upgrade ledger。写入前必须停写，可通过 `--backup-dir` 指定备份目录，并与 Web Upgrade Mode 复用同一个升级执行服务。
 
 ## OpenAPI
 
@@ -283,7 +289,7 @@ docker build -t qingyan:local .
 docker compose up --build
 ```
 
-默认 Compose 会：
+默认 Compose 连接外部或共享 PostgreSQL，设置受保护的 `QINGYAN_DATABASE_URL`；数据库服务、专用库与角色由运维预建。PostgreSQL 镜像固定版本及资源建议见部署指南。默认 Compose 会：
 
 - 暴露 `4401:4401`
 - 挂载 `./config:/app/config`
@@ -293,9 +299,9 @@ docker compose up --build
 
 ## 数据库与 `drizzle/`
 
-`drizzle/` 目录需要入仓库。
+`drizzle/postgresql/` 是当前 PostgreSQL 基线，旧 `drizzle/0000_*.sql` 至已发布 SQLite SQL 保留冻结，仅供离线源版本识别与转换验证。两类资产均需入仓库。
 
-原因很简单：它不是缓存，而是当前数据库结构的 migration 基线。没有它，就无法稳定重建 SQLite schema，也无法保证不同环境使用的是同一版数据库结构。
+原因很简单：它不是缓存，而是当前数据库结构的 migration 基线。没有它，就无法稳定重建 PostgreSQL schema，也无法保证不同环境使用的是同一版数据库结构。
 
 常用命令：
 
@@ -320,7 +326,7 @@ pnpm dev:admin
 ```
 
 `pnpm check` 会串行执行格式检查、lint、typecheck、测试、构建和示例配置校验。
-`pnpm test:system` 会运行 API/SQLite 冒烟链路与 Admin Chromium E2E；
+`pnpm test:system` 会运行 API/PostgreSQL 冒烟链路与 Admin Chromium E2E；
 `pnpm check:system` 在完整静态与构建门禁后继续运行该系统测试。
 真实邮件发送使用显式的 `pnpm test:smoke:commenter-email`，不会进入默认门禁。
 
@@ -355,7 +361,7 @@ QINGYAN_DEV_ALLOWED_ORIGIN=http://localhost:4321
 QINGYAN_DEV_MODE=true pnpm dev:api
 ```
 
-如果只需要运行内置 mock，不希望连接或初始化 SQLite，可使用无数据库模式：
+如果只需要运行内置 mock，不希望连接或初始化 PostgreSQL，可使用无数据库模式：
 
 ```bash
 QINGYAN_DATABASE_MODE=none QINGYAN_DEV_ADMIN_TOKEN=dev-token pnpm dev

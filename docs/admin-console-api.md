@@ -9,7 +9,7 @@
 - 运行时完整路径带 `server.publicPath` 前缀，默认是 `/qingyan/api/admin/*`；本文后续用 Admin Console 源码中的相对写法 `/api/admin/*` 表示同一组接口。
 - Base URL 与服务部署地址一致，例如本地开发默认 `http://localhost:4401`。
 - Admin Console Web 使用 same-origin fetch，请求默认携带 cookie：`credentials: "include"`。源码中的 `/api/*` 会通过页面注入的 `__QINGYAN_ADMIN__.apiBase` 解析到当前实例的 `${server.publicPath}/api`。
-- 除 WordPress WXR 上传分析接口外，请求体和响应体默认是 JSON。
+- 请求体和响应体默认是 JSON。
 - 已登录接口使用后台会话 cookie，默认 cookie 名由 `admin.session.cookieName` 配置决定，示例为 `qingyan_admin`。
 - 登录验证码是内置图片验证码，当前后台登录接口接受 `challengeId` 和 `captchaValue`。
 - `POST`、`PUT`、`PATCH`、`DELETE` 写操作需要管理员会话和 CSRF token。登录和 `GET /api/admin/session/me` 会返回 `csrf.header` 与 `csrf.token`，Admin Console 后续写请求会把 token 放入对应 header。
@@ -32,7 +32,6 @@
 - `apps/admin/src/api/session.ts`
 - `apps/admin/src/api/overview.ts`
 - `apps/admin/src/api/admin.ts`
-- `apps/admin/src/api/import-export.ts`
 - `apps/admin/src/api/ops.ts`
 
 ## Session
@@ -365,6 +364,8 @@ Admin Console 仅在详情打开、页面可见且摘要仍为 `processing` 时�
 ```
 
 ### `GET /api/admin/pages`
+
+支持按更新时间、创建时间、评论数、访客数、评论人数、点赞数、标题或页面标识排序，并在数据库中分页。标题和页面标识采用 PostgreSQL `C` 排序规则，空标题按空字符串处理。排序值相同时按更新时间降序、记录 ID 降序确定顺序。
 
 页面聚合视图。单项结构：
 
@@ -1712,219 +1713,9 @@ AdminSystemSettings
 }
 ```
 
-## Import And Export
+## 已退役的数据操作
 
-### `GET /api/admin/import-export/jobs`
-
-列出导入任务记录。
-
-Query：
-
-```ts
-{
-  siteKey?: string;
-  status?: string;
-  sourceType?: string;
-  limit?: number; // default 20, max 100
-}
-```
-
-响应：
-
-```ts
-{
-  items: ImportJobListItem[];
-  nextCursor: string | null;
-}
-```
-
-### `GET /api/admin/import-export/jobs/{jobId}`
-
-获取单个导入任务记录。
-
-响应：
-
-```ts
-{
-  job: ImportJobListItem;
-}
-```
-
-`ImportJobListItem`：
-
-```ts
-{
-  id: string;
-  siteId: number;
-  sourceType: string;
-  sourceFileName: string;
-  format: string;
-  formatVersion: number;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  appliedAt: string | null;
-  summary: unknown;
-  backup: ImportJobBackup | null;
-  error: unknown;
-}
-```
-
-### `POST /api/admin/import-export/export`
-
-导出 QingYan 站点数据，响应会带 `content-disposition` 下载文件名。
-
-请求：
-
-```ts
-{
-  siteKey: string;
-  format: "qingyan.export.v1";
-  include?: {
-    siteSettings?: boolean;
-    systemSettings?: boolean;
-    pageThreads?: boolean;
-    comments?: boolean;
-    visitors?: boolean;
-    voteRecords?: boolean;
-    pageFeedbackRecords?: boolean;
-    blacklistRules?: boolean;
-  };
-}
-```
-
-### `POST /api/admin/import-export/qingyan/dry-run`
-
-对 QingYan JSON 导入做 dry-run，并创建导入任务。
-
-请求：
-
-```ts
-{
-  siteKey: string;
-  fileName: string;
-  payload: unknown;
-  existingStrategy: "fail_on_existing" | "skip_existing";
-  importMode?: "data_only" | "settings_only" | "full_site";
-  settingsStrategy?: "fail_on_existing" | "replace_settings";
-}
-```
-
-### `POST /api/admin/import-export/qingyan/jobs/{jobId}/apply`
-
-应用 QingYan JSON 导入任务，并在写入前创建数据库备份。
-
-请求：
-
-```ts
-{
-  existingStrategy: "fail_on_existing" | "skip_existing";
-  importMode?: "data_only" | "settings_only" | "full_site";
-  settingsStrategy?: "fail_on_existing" | "replace_settings";
-}
-```
-
-### `POST /api/admin/import-export/wordpress/analyze`
-
-分析 WordPress WXR。Admin Console Web 当前以 XML 文件 body 上传：
-
-- Query 使用除 `xml` 外的 `WordPressAnalyzePayload` 字段。
-- `Content-Type` 为 `application/xml` 或 `text/xml`。
-- Body 为 WXR XML 文本。
-
-Query：
-
-```ts
-{
-  siteKey: string;
-  fileName: string;
-  sourceBasePath?: string;
-  targetDistRoot?: string;
-  pageKeyStrategy?:
-    | "path_without_leading_slash"
-    | "path_with_leading_slash"
-    | "page_url_path"
-    | "custom_template"
-    | "explicit_only";
-  postPathTemplate?: string;
-  pagePathTemplate?: string;
-  mappingJson?: string;
-}
-```
-
-响应包含 `job`、`report` 和 `suggestedMapping`。`report.authorSummary` 会汇总 WXR 作者匹配结果：
-
-```ts
-{
-  totalAuthors: number;
-  staffStrong: number;
-  staffEmailCandidate: number;
-  registeredUnknown: number;
-  visitor: number;
-}
-```
-
-每个 `report.items[].comments[]` 可包含 `authorMatch.kind`：`staff_strong` 表示 `comment_user_id` 匹配 `wp:author_id`；`staff_email_candidate` 表示未登录评论但邮箱匹配 WXR 作者，需要在生成计划前确认；`registered_unknown` 表示有非 0 用户 ID 但 WXR 作者列表没有对应项；`visitor` 表示普通访客评论。`report.htmlContentSummary` 会统计原始评论内容中疑似 HTML 标签的数量和少量示例；当前导入仍按纯文本转义。
-
-### `POST /api/admin/import-export/wordpress/jobs/{jobId}/plan`
-
-把 WordPress analyze job 转换为导入 plan。若 analyze 报告中存在 `staff_email_candidate`，请求必须提供 `authorDecisions`；强匹配 `staff_strong` 会自动进入 `authorIdentity: "verified"`，显式拒绝的邮箱候选会按 `visitor` 导入。
-
-请求：
-
-```ts
-{
-  authorDecisions?: Record<string, "verified" | "visitor">; // key 为 oldCommentId
-}
-```
-
-响应包含 `job` 和 `plan.summary`。
-
-### `POST /api/admin/import-export/jobs/{jobId}/dry-run`
-
-对通用导入任务做 dry-run。
-
-请求：
-
-```ts
-{
-  existingStrategy: "fail_on_existing" | "skip_existing";
-}
-```
-
-### `POST /api/admin/import-export/jobs/{jobId}/apply`
-
-应用通用导入任务，并在写入前创建数据库备份。
-
-请求：
-
-```ts
-{
-  existingStrategy: "fail_on_existing" | "skip_existing";
-}
-```
-
-`ImportJobBackup`：
-
-```ts
-{
-  kind: "import_database_backup";
-  engine: string;
-  strategy: string;
-  createdAt: string;
-  backupDirectory: string;
-  databaseBackupPath?: string;
-  files: Array<{
-    role: "database" | "wal" | "shm" | "metadata";
-    path: string;
-    backupPath: string | null;
-    present: boolean;
-    size: number | null;
-    sha256: string | null;
-  }>;
-  notes: string[];
-}
-```
+`/api/admin/import-export/*`、后台导入导出页面、上传下载和独占 `data.*` / `wordpress_migration.*` 权限已退出。旧 SQLite 迁入由独立离线转换工具承担，不提供这些接口的兼容分支。所有 `backup` 定时任务类型退出，运维整实例备份与升级前备份继续通过停写运维入口执行。
 
 ## Task Scheduler
 
@@ -1975,7 +1766,6 @@ Query：
 - `page_metadata_refresh`
 - `comment_ip_refresh`
 - `ip_region_update`
-- `backup`
 - `site_settings_action`
 - `blacklist_automation`
 - `daily_site_digest`
@@ -2275,6 +2065,34 @@ Query：
 
 ## Ops
 
+### `GET /api/admin/ops/ip-region`
+
+需 `ops.read`。返回当前激活库、最近检查与评论地址统计，手动维护任务通过 `recentJobs` 关联现有任务中心；不再返回独立 `recentRuns` 历史。
+
+```ts
+{
+  databases: Array<{
+    ipVersion: "v4" | "v6";
+    filePath: string | null;
+    fileHash: string | null;
+    sourceUrl: string | null;
+    cachePolicy: string | null;
+    activatedAt: string | null;
+    updatedAt: string;
+    lastCheckedAt: string | null;
+    lastCheckStatus: "success" | "skipped" | "failed" | null;
+    lastCheckReason: string | null;
+    lastCheckError: string | null;
+  }>;
+  commentMetadata: { totalWithIp: number; missingLocation: number; failedLocation: number };
+  recentJobs: TaskRunProjection[];
+}
+```
+
+尚无激活库也可保留最近检查失败；判断激活应同时确认文件路径、hash 与 activatedAt。检查失败不会清除原激活状态。Admin 按稳定状态映射安全提示，不直接展示 lastCheckError 原始异常。
+
+`POST /api/admin/ops/ip-region/update` 与 `POST /api/admin/ops/comment-ip/refresh` 继续创建已有维护任务；执行日志通过任务中心读取。
+
 ### `GET /api/admin/ops/status`
 
 获取运维页状态。
@@ -2307,7 +2125,7 @@ Query：
   };
   backup: {
     format: "qingyan.full-backup";
-    provider: "sqlite";
+    provider: "postgresql";
   };
   recovery: {
     manualCommands: string[];
@@ -2422,7 +2240,7 @@ Query：
 
 ### `GET /api/admin/ops/tasks`
 
-任务中心列表。该接口只读取 `task_runs` 投影；导入任务仍由 import-export job API 管理。
+任务中心列表。该接口只读取 `task_runs` 投影；已退役的导入导出和定时备份不再提供执行入口。
 
 Query：
 
