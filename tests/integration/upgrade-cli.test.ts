@@ -1,7 +1,12 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runUpgradeCli } from "../../scripts/upgrade";
 import { createLifecycleFixture } from "../support/lifecycle-fixture";
+
+const { version: applicationVersion } = JSON.parse(
+	readFileSync(path.resolve("package.json"), "utf8"),
+) as { version: string };
 
 describe("upgrade script", () => {
 	it.each([
@@ -21,12 +26,13 @@ describe("upgrade script", () => {
 				await runUpgradeCli(["--dry-run", "--config", fixture.configPath]),
 			).toBe(0);
 			expect(output.mock.calls.flat().join(" ")).toContain(
-				"application-version:0.2.5",
+				`application-version:${applicationVersion}`,
 			);
 			expect(
 				(
 					await fixture.pool.query(
-						"SELECT name FROM __qingyan_upgrades WHERE name='application-version:0.2.5'",
+						"SELECT name FROM __qingyan_upgrades WHERE name=$1",
+						[`application-version:${applicationVersion}`],
 					)
 				).rowCount,
 			).toBe(0);
@@ -45,7 +51,8 @@ describe("upgrade script", () => {
 			expect(
 				(
 					await fixture.pool.query(
-						"SELECT name FROM __qingyan_upgrades WHERE name='application-version:0.2.5'",
+						"SELECT name FROM __qingyan_upgrades WHERE name=$1",
+						[`application-version:${applicationVersion}`],
 					)
 				).rowCount,
 			).toBe(0);

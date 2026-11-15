@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCli } from "../../src/cli/main";
 import type { CliRuntime } from "../../src/cli/runtime";
@@ -19,6 +21,10 @@ import {
 import { SystemdServiceController } from "../../src/modules/service-control/systemd-service";
 import { createLifecycleFixture } from "../support/lifecycle-fixture";
 import { applyInitialMigration } from "../support/test-fixtures";
+
+const { version: applicationVersion } = JSON.parse(
+	readFileSync(path.resolve("package.json"), "utf8"),
+) as { version: string };
 
 class FakeService extends SystemdServiceController {
 	public calls: string[] = [];
@@ -98,7 +104,7 @@ describe("qingyanctl core commands", () => {
 
 			expect(result.exitCode).toBe(0);
 			expect(result.output.stderr).toEqual([]);
-			expect(result.output.stdout).toEqual(["QingYan 0.2.5"]);
+			expect(result.output.stdout).toEqual([`QingYan ${applicationVersion}`]);
 		}
 	});
 
