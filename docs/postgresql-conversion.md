@@ -10,6 +10,7 @@
 - URL 只从 `QINGYAN_DATABASE_URL` 读取，也可 `--database-url-env <变量名>` 指定受保护环境变量；不在命令行传连接 URL。Node 24、PostgreSQL 18 与客户端版本按部署文档准备。
 - `convert` 以空目标库为边界。失败目标保留未完成账本并阻止 normal 启动；重试使用新的空目标，不向失败目标反复合并。
 - `convert` 只生成 `target-config.yml`，不覆盖真实旧配置。配置切换是单独操作，执行前再次核对目标库和输出报告。
+- 已有 PostgreSQL 只需提供实际库名、账号、密码与可达地址；不重新安装数据库容器。目标库保持为空，转换器自行应用本版本 schema；不要先执行 `db:migrate`、安装向导或导入旧 export。
 
 ## 预演与正式窗口
 
@@ -40,6 +41,55 @@ node dist/modules/database-conversion/main.js verify --output /migration/convers
 `verify` 会重新打开归档和目标 PG，逐表逐字段核对内容、关联、账本匹配与报告校验和，并核对源/目标配置、`configuration.json` 内容及已归档资源的校验和。行数相同不能替代内容核对。已有评论 ID、正文/HTML、作者、父子关系、UTC 时间、累计量、凭据 hash、权限、通知已接受结果、任务幂等与有效配置保持；退役导入历史、backup 计划/快照及相关运行历史、独立 IP 更新历史完整归档。访客、访问与指标未新增删除期限。
 
 真实样本兼容验证使用现有测试入口，并设置 `QINGYAN_CONVERSION_SOURCE_SQLITE`、`QINGYAN_CONVERSION_SOURCE_CONFIG` 和隔离 `QINGYAN_TEST_DATABASE_URL`；样本和凭据不入仓库。
+
+## 已有 Docker 实例的命令编排
+
+以下命令在正式停写窗口执行。提前构建 `qingyan:v0.3.0`，准备只含目标 `QINGYAN_DATABASE_URL` 的权限为 `600` 的环境文件。连接地址使用已有 PostgreSQL 容器在对应网络中的 DNS 名和内部端口，不使用应用容器内的 `127.0.0.1`。保留旧镜像、Compose、环境文件、配置、安装锁、数据库及资源备份。
+
+下面变量均须替换为本实例的实际路径；`PG_ENV` 不写进仓库，也不打印其内容。转换产物使用全新目录，后续命令保持相同的容器路径。
+
+```bash
+INSTANCE_ROOT=/opt/apps/qingyan
+TARGET_IMAGE=qingyan:v0.3.0
+DATABASE_NETWORK=1panel-network
+PG_ENV=/protected/qingyan-postgresql.env
+CONVERSION_ROOT="$INSTANCE_ROOT/data/sqlite-conversion-v0.3.0"
+
+# 同时停止其他独立 worker 或运维写入者。
+docker compose --project-directory "$INSTANCE_ROOT" stop qingyan
+mkdir -m 700 "$CONVERSION_ROOT"
+
+docker run --rm --network "$DATABASE_NETWORK" --env-file "$PG_ENV" \
+  --mount "type=bind,src=$INSTANCE_ROOT/config,dst=/app/config,readonly" \
+  --mount "type=bind,src=$INSTANCE_ROOT/data,dst=/app/data,readonly" \
+  --mount "type=bind,src=$CONVERSION_ROOT,dst=/migration/conversion" \
+  "$TARGET_IMAGE" node dist/modules/database-conversion/main.js convert \
+  --source /app/data/qingyan.db --config /app/config/qingyan.yml \
+  --output /migration/conversion --source-stopped \
+  --source-root /app --source-runtime-root /app
+
+docker run --rm --network "$DATABASE_NETWORK" --env-file "$PG_ENV" \
+  --mount "type=bind,src=$CONVERSION_ROOT,dst=/migration/conversion,readonly" \
+  "$TARGET_IMAGE" node dist/modules/database-conversion/main.js verify \
+  --output /migration/conversion
+```
+
+只有 `convert` 返回 `verified=true`、`configurationSwitchReady=true` 且独立 `verify` 成功后，才能继续配置切换。此时不要先启动正常服务：启动后的任务和访问会改变数据，转换核对应在这些写入前完成。
+
+```bash
+CONFIG_CHECKSUM=$(sha256sum "$INSTANCE_ROOT/config/qingyan.yml" | cut -d ' ' -f 1)
+
+docker run --rm --network "$DATABASE_NETWORK" --env-file "$PG_ENV" \
+  --mount "type=bind,src=$INSTANCE_ROOT/config,dst=/app/config" \
+  --mount "type=bind,src=$CONVERSION_ROOT,dst=/migration/conversion" \
+  "$TARGET_IMAGE" node dist/modules/database-conversion/main.js apply-config \
+  --output /migration/conversion --destination /app/config/qingyan.yml \
+  --expected-config-checksum "$CONFIG_CHECKSUM"
+```
+
+保留第一次计算的 `CONFIG_CHECKSUM`，中断重跑 `apply-config` 时仍传这个旧配置校验和。然后将运行 Compose 的应用镜像改为目标版本、接入既有数据库网络，并核对 `QINGYAN_DATABASE_URL` 环境覆盖。分离布局还要将 `deployment.conf` 的 `DATABASE` 更新为 `postgresql`、`VERSION` 更新为目标 tag，更新 `.env` 的镜像与数据库网络字段，并从目标源码重新生成 `update.sh`，保留其它部署选项。保留原有端口绑定、卷、反向代理与运行参数，再启动应用验收。`apply-config` 不修改 Compose 或部署元数据，也不会自动完成这些部署步骤。
+
+普通 `update.sh` / `qyctl upgrade` 不编排首次 SQLite 转换；新安装器也不向已有实例搬数据。完成上述切换并验收后，后续 PostgreSQL 版本更新再走普通 updater。
 
 ## 配置切换与验收
 

@@ -181,7 +181,7 @@ bash scripts/install.sh --dir /opt/1panel/apps --non-interactive \
   --database postgresql --github-source direct --network-profile official
 ```
 
-安装器默认选择最高稳定 `vX.Y.Z` tag，可用 `--version <已发布的 PostgreSQL 版本 tag>` 固定源码版本；`v0.2.5` 仍为 SQLite 源版本，不能用它部署新 PostgreSQL 实例。父目录可以已有其他应用；若其中的 `qingyan/` 已有文件，安装器会停止并提示使用更新入口，不会覆盖原实例。
+安装器默认选择最高稳定 `vX.Y.Z` tag，可用 `--version v0.3.0` 固定 PostgreSQL 源码版本；`v0.2.5` 是 SQLite 源版本，不能用它部署新 PostgreSQL 实例。父目录可以已有其他应用；若其中的 `qingyan/` 已有文件，安装器会停止并提示使用更新入口，不会覆盖原实例。
 
 无需等待应用发布新版，即可从 `develop` 下载独立安装脚本：
 
@@ -410,7 +410,7 @@ docker compose run --rm --no-deps qingyan qyctl restore /app/data/backups/full-b
 
 ## 更新流程
 
-新脚本布局从运行目录执行 `bash update.sh`；旧源码部署继续执行 `bash scripts/update.sh`。固定目标使用 `--version <PostgreSQL 发布 tag>`（旧布局允许位置参数 tag）；`--yes` 接受脚本已有确认。数据库改造尚未正式发布时，不以旧 SQLite tag 代替目标版本。
+新脚本布局从运行目录执行 `bash update.sh`；旧源码部署继续执行 `bash scripts/update.sh`。固定目标使用 `--version v0.3.0`（旧布局允许位置参数 tag）；`--yes` 接受脚本已有确认。此入口用于已经运行 PostgreSQL 的实例；`v0.2.5` SQLite 实例先完成离线转换和切换，不能直接执行这条更新流程。
 
 更新器准备源码、构建目标镜像、展示脱敏 UpgradePlan 后，停止应用容器，再通过 `compose run --rm --no-deps` 执行备份与升级；成功后启动应用并验证版本及 `normal_current` 就绪状态。minimal install/upgrade 健康状态只表示对应模式可操作，不代表正常业务已经恢复。升级失败保持停写并保留备份与 partial marker，不擅自覆盖配置或库。
 

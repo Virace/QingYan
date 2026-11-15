@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 import { createLifecycleFixture } from "./lifecycle-fixture";
 
 async function main() {
-	const fixture = await createLifecycleFixture();
+	const { version } = JSON.parse(
+		readFileSync(path.resolve("package.json"), "utf8"),
+	) as { version: string };
+	const fixture = await createLifecycleFixture({ version });
 	const server = spawn(
 		process.execPath,
 		[require.resolve("tsx/cli"), "src/server.ts"],

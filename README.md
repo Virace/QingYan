@@ -16,7 +16,7 @@
 
 QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前一个已接入的前端，不要求和 QingYan 同步发布，也不依赖 QingYan 仓库内的实现细节或发布节奏。
 
-最近发布版本为 [`v0.2.5`](https://github.com/Virace/QingYan/releases/tag/v0.2.5)；当前开发版本使用 PostgreSQL 单一运行后端，旧 SQLite 实例需要离线转换，首个 upgrade lifecycle 基线为 `v0.1.0`。后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化必须进入 upgrade lifecycle。
+当前版本为 [`v0.3.0`](https://github.com/Virace/QingYan/releases/tag/v0.3.0)，使用 PostgreSQL 单一运行后端。`v0.2.5` 及更早的 SQLite 实例需要先完成[离线转换](docs/postgresql-conversion.md)，不能直接运行普通更新命令。版本变化见 [v0.3.0 发布说明](docs/releases/v0.3.0.md)。首个 upgrade lifecycle 基线为 `v0.1.0`；后续涉及 schema、配置语义、settings owner 或数据格式的破坏性变化继续进入 upgrade lifecycle。
 
 ## 当前能力
 
@@ -49,7 +49,7 @@ bash scripts/install.sh --dir /opt/apps
 
 非交互运行先设置受保护环境变量 `QINGYAN_DATABASE_URL`，或显式使用 `--create-database`。数据库不加入 QingYan Compose，独立新建的数据库也不发布宿主机端口。受限 1Panel 网关使用独立镜像和可选 `onepanel` profile，通过 `--gateway-config` 与 `--panel-api-key-file` 显式配置后启用；详见 [部署指南](docs/deployment.md)。
 
-安装脚本默认获取最高稳定 tag。`v0.2.5` 仍为 SQLite 源版本；当前 PostgreSQL 改造发布后，应显式固定对应的 PostgreSQL tag。已有 SQLite 实例先完成离线转换，再按已核对版本切换。
+安装脚本默认获取最高稳定 tag，也可用 `--version v0.3.0` 固定 PostgreSQL 版本。`v0.2.5` 是 SQLite 源版本；已有 SQLite 实例先完成离线转换，再按已核对版本切换。
 
 GitHub 拉取与构建依赖分别选源：
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -23,6 +25,9 @@ import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
+const { version: applicationVersion } = JSON.parse(
+	readFileSync(path.resolve("package.json"), "utf8"),
+) as { version: string };
 
 afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
@@ -43,7 +48,8 @@ async function seedInstalledBootstrap(
 		.values({ id: 1, consolePath: "/admin", initialAdminUserId: user.id })
 		.onConflictDoNothing();
 	await fixture.pool.query(
-		"INSERT INTO __qingyan_upgrades(name,to_version,summary_json) VALUES('application-version:0.2.5','0.2.5','{}') ON CONFLICT(name) DO NOTHING",
+		"INSERT INTO __qingyan_upgrades(name,to_version,summary_json) VALUES($1,$2,'{}') ON CONFLICT(name) DO NOTHING",
+		[`application-version:${applicationVersion}`, applicationVersion],
 	);
 }
 
@@ -103,7 +109,7 @@ describe("admin ops routes", () => {
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({
 			version: {
-				current: "0.2.5",
+				current: applicationVersion,
 			},
 			update: {
 				supported: true,
@@ -114,7 +120,7 @@ describe("admin ops routes", () => {
 				},
 				check: {
 					state: "not_checked",
-					currentVersion: "0.2.5",
+					currentVersion: applicationVersion,
 					autoUpdatable: false,
 					source: {
 						provider: "github-releases",
