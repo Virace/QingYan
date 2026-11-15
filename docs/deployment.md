@@ -19,10 +19,12 @@
 /opt/1panel/apps/
 ├── qingyan/
 │   ├── compose.yml
+│   ├── gateway.compose.json
 │   ├── .env
 │   ├── deployment.conf
 │   ├── update.sh
 │   ├── config/
+│   ├── gateway/
 │   ├── data/
 │   └── logs/
 └── .qingyan-source/
@@ -30,7 +32,9 @@
 
 `config/` 保存 startup config 和安装锁，`data/` 保存 IP 库等本地资源、转换归档和升级备份；PostgreSQL 数据卷由数据库服务单独持久化，`logs/` 保存访问日志和应用日志。
 
-`qingyan/compose.yml` 只引用本地构建的版本镜像，不包含 `build:`，也不挂载源码。`.env` 保存镜像引用和安装令牌，安装器将权限设为仅文件所有者可读写；更新时保留其他字段和文件权限。`deployment.conf` 记录版本、源码位置和网络来源，不保存应用密钥。`.qingyan-source/` 只在安装或更新构建时需要；没有构建任务运行时可以移除，下次更新会重新拉取，运行中的容器和重启不依赖该缓存。
+`qingyan/compose.yml` 只引用本地构建的版本镜像，不包含 `build:`，也不挂载源码。`gateway.compose.json` 是安装器维护的 Compose 叠加文件，为受限网关及已有数据库网络补充连接；`.env` 的 `COMPOSE_FILE` 保留已有文件顺序并附加此文件，原 Compose 的端口、卷和本地定制不重写。
+
+`.env` 保存两项镜像引用、安装令牌、数据库连接及网关启用状态，权限为 600；网关的面板 Key 只放在 `gateway/secrets/onepanel-api-key`，内部凭据单独放在 `gateway/client/qingyan-gateway-token`，QingYan 只挂载后者所在目录。上述文件及部署备份含凭据，不进入 Git。`deployment.conf` 记录版本、源码位置和网络来源，不保存应用密钥。`.qingyan-source/` 只在安装或更新构建时需要；没有构建任务运行时可以移除，下次更新会重新拉取，运行中的容器和重启不依赖该缓存。
 
 源码位置可用 `--source-dir /其他位置` 覆盖，运行目录仍为 `<父目录>/qingyan/`。旧版源码、Compose 和持久文件混放的实例继续使用原布局，不自动搬移。
 
@@ -89,7 +93,48 @@ ALTER DATABASE qingyan SET timezone TO 'UTC';
 
 应用角色需能连接并在本库创建和维护 schema、表、索引与序列；无需创建实例级角色。新装/转换/恢复目标必须为空，普通运行启动不会初始化故障数据库。数据库 URL、pool 与 TLS 见 [配置说明](configuration.md#database)。共享实例内其他应用由其独立角色管理，应用备份不会备份全局角色。
 
-PG 18 官方镜像将持久卷挂载在 `/var/lib/postgresql`，默认 PGDATA 为 `/var/lib/postgresql/18/docker`，不要沿用旧镜像的 `/var/lib/postgresql/data` 挂载。共享 Docker 网络可用 PG 服务名连接；跨主机连接使用 TLS 和网络访问控制。Compose 不会自动启动一个数据库服务，连接由 `QINGYAN_DATABASE_URL` 或安装配置提供。
+PG 18 官方镜像将持久卷挂载在 `/var/lib/postgresql`，默认 PGDATA 为 `/var/lib/postgresql/18/docker`，不要沿用旧镜像的 `/var/lib/postgresql/data` 挂载。数据库始终在 QingYan Compose 之外管理。已有 1Panel/PostgreSQL 容器通过其受控 Docker 网络和容器服务名连接，无需发布宿主机端口；本机回环地址 `127.0.0.1` 在应用容器内指向应用自身，不能用它连接另一个容器。跨主机连接使用 TLS 和网络访问控制。
+
+实际安装时先检查已有 PostgreSQL 容器或本机服务。检测到实例后，由用户输入连接 URL 和数据库所在 Docker 网络；脚本不提取现有数据库的密码。没有检测到时，可以选择输入外部连接，或明确同意创建独立 PostgreSQL 18 容器；两项都不选择则取消安装。非交互运行必须提供 `QINGYAN_DATABASE_URL` 或显式 `--create-database`，不会自动装库。`--prepare-only` 保留仅准备文件的行为，后续 `--start` 在没有已有配置时执行同一选择。
+
+已有 1Panel 容器的自动化入口示例：
+
+```bash
+# 先通过受保护入口设置 QINGYAN_DATABASE_URL，地址使用数据库容器服务名。
+bash scripts/install.sh --dir /opt/apps --non-interactive \
+  --database-network 1panel-network
+```
+
+明确新建时使用：
+
+```bash
+bash scripts/install.sh --dir /opt/apps --non-interactive --create-database
+```
+
+该选项创建独立的 `qingyan-postgresql` 容器和 `qingyan-database` 网络，不发布任何宿主机端口；应用只接入该网络。数据库目录为 `<父目录>/qingyan-postgresql/`，其中 `data/` 保存数据，`postgres-password` 保存管理凭据，`qingyan.env` 保存专用应用角色的连接信息，均由所有者保护。运行角色不是 superuser，也不能创建数据库或其他角色。应用镜像中的 PostgreSQL 客户端/驱动会在选定网络内检查版本与连接，失败不会进入应用安装。QingYan 更新、回滚及应用停止不会停止或删除独立数据库；创建途中失败也保留数据库现场及凭据。
+
+安装器的只读探测不能替代连接验证。未发布端口的容器会通过容器列表识别；已存在的数据库网络使用 `--database-network <name>` 或 `QINGYAN_DATABASE_NETWORK` 指定，脚本不会修改既有监听、账号或容器网络。
+
+## 1Panel 受限网关
+
+网关是同一应用编排中的独立服务，使用与 QingYan 版本对应的 `qingyan-onepanel-gateway:<tag>` 本地镜像。默认不启动 `onepanel` profile，不要求未配置网关的实例提供占位 Key。显式提供已审定的配置与 Key 文件后启用：
+
+```bash
+bash scripts/install.sh --dir /opt/apps \
+  --gateway-config /root/qingyan-gateway.json \
+  --panel-api-key-file /root/onepanel-api-key \
+  --waf-mapping /root/waf-sites.json
+```
+
+`--waf-mapping` 将经核对的站点映射复制到 `config/waf-sites.json` 并显式启用应用同步；映射格式见 [1Panel 网关](onepanel-gateway.md)。只提供网关配置及 Key 而不提供映射时，通用网关可以启动，QingYan 的 WAF 同步保持关闭。`QINGYAN_GATEWAY_ENABLED` 记录网关服务状态，`QINGYAN_WAF_ENABLED` 独立记录应用同步意图。
+
+已有分离布局在运行目录执行同样选项的 `bash update.sh`；旧源码布局使用 `bash scripts/update.sh`。网关不发布宿主机端口，专用网络默认 `172.30.251.0/28`，宿主 bridge 地址 `.1`，网关固定来源 `.3`；启用前检查与现有 Docker 网络是否冲突。需要更换时同时设置 `QINGYAN_GATEWAY_SUBNET`、`QINGYAN_GATEWAY_HOST_IP`、`QINGYAN_GATEWAY_IP`，并核对面板来源白名单及配置中的上游地址。已存在但参数不同的网络不会被自动替换。
+
+更新器分别构建并记录两个镜像，只在显式启用后启动和检查网关健康。数据升级前停写时一并暂停两个服务；启动目标应用进行升级时设置 `QINGYAN_WAF_SYNC_PAUSED=true`，本地处罚意图继续保留，WAF 轮询、同步和补齐暂停。升级与正常服务健康验收通过后恢复先前的暂停状态，并重建应用容器；先前没有显式暂停时恢复自动同步。
+
+配置、Key、内部凭据、启用/暂停状态和镜像引用统一备份到 `data/deployment-backups/<时间>-<进程>/`。结构/应用升级尚未开始写入时，失败恢复旧配置及两个镜像引用并重新启动原服务；数据写入开始后保留现场和整站备份，进入原有恢复流程，不把镜像回退当作数据库回退。旧源码布局的安全 stash 排除 `.env`、网关凭据目录及运行叠加文件，凭据只进入受保护的部署快照。
+
+`--disable-gateway` 显式停用同步及 profile，保留配置和凭据以便核对。白名单、签名转发和网络边界见 [1Panel 网关](onepanel-gateway.md)。网关健康只证明本地服务可用，上游授权及 WAF 操作结果仍按其实际返回验收。
 
 对 4 核、系统可见 3.64 GiB 且多个 Docker 服务共用的环境，应用池先按 `max=5`、连接等待 5 秒、空闲释放 30 秒运行。PG 的连接数、shared_buffers、work_mem 与应用/其他容器内存共同核算；备份、转换和索引构建留出额外空间。容量与维护窗口以同环境预演结果确定。
 

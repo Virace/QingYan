@@ -40,6 +40,11 @@ LOCAL_CHANGES_PRESENT=false
 LOCAL_CHANGES_STASH=""
 LOCAL_CHANGES_APPLY_ATTEMPTED=false
 LOCAL_CHANGES_APPLIED=false
+DEPLOYMENT_OPTIONS=()
+DEPLOYMENT_HELPER=false
+SCHEMA_WRITES_STARTED=false
+SERVICES_STOPPED=false
+GATEWAY_WAS_ENABLED=false
 
 usage() {
 	cat <<'USAGE'
@@ -51,6 +56,9 @@ usage() {
 默认会在切换版本和应用数据升级前请求确认；--yes 表示接受两次确认。
 --network-profile 默认使用 auto，在 official 和 cn 之间探测并选择更快的构建依赖源。
 显式选择配置档时不会在构建期间自动回退，便于复现和排错。
+--gateway-config <file> 与 --panel-api-key-file <file> 显式启用受限网关。
+--waf-mapping <file> 显式启用映射站点的 WAF 同步。
+--disable-gateway 停用同步并保留配置；--database-network <name> 接入已有数据库网络。
 USAGE
 }
 
@@ -61,6 +69,10 @@ log() {
 fail() {
 	printf '错误：%s\n' "$1" >&2
 	return 1
+}
+
+deployment_compose() {
+	if [[ "$DEPLOYMENT_HELPER" == true ]]; then qy_compose "$@"; else docker compose "$@"; fi
 }
 
 confirm() {
@@ -106,16 +118,26 @@ apply_local_deployment_files() {
 	LOCAL_CHANGES_APPLIED=true
 }
 
+stash_deployment_files() {
+	local paths=()
+	mapfile -d '' -t paths < <(
+		git diff --name-only -z HEAD -- . ':(exclude).env' ':(exclude)gateway/' ':(exclude)gateway.compose.json'
+		git ls-files --others --exclude-standard -z -- . ':(exclude).env' ':(exclude)gateway/' ':(exclude)gateway.compose.json'
+	)
+	(( ${#paths[@]} > 0 )) || return 1
+	git stash push --include-untracked --message "$1" -- "${paths[@]}" > /dev/null
+}
+
 restore_pre_activation_state() {
 	local rollback_stash=""
 
 	if [[ "$LOCAL_CHANGES_APPLIED" == "true" ]]; then
-		git stash push --include-untracked --message "qingyan-update-rollback" > /dev/null
+		stash_deployment_files qingyan-update-rollback || return 1
 		rollback_stash="$(git rev-parse refs/stash)"
 		LOCAL_CHANGES_APPLIED=false
 	elif [[ "$LOCAL_CHANGES_APPLY_ATTEMPTED" == "true" ]]; then
 		git reset --hard HEAD > /dev/null
-		git clean -fd > /dev/null
+		git clean -fd -e .env -e gateway/ -e gateway.compose.json > /dev/null
 	fi
 
 	restore_previous_revision || return 1
@@ -133,6 +155,7 @@ restore_pre_activation_state() {
 
 on_error() {
 	local exit_code=$?
+	local layout_restored=true
 	trap - ERR
 	set +e
 	printf '\n更新失败：阶段=%s，退出码=%s\n' "$PHASE" "$exit_code" >&2
@@ -143,24 +166,34 @@ on_error() {
 		printf '升级前整站备份：%s\n' "$BACKUP_DIRECTORY" >&2
 	fi
 
-	if [[ "$ACTIVATION_STARTED" == "false" && ( "$SWITCHED_REVISION" == "true" || -n "$LOCAL_CHANGES_STASH" ) ]]; then
+	if [[ "$SCHEMA_WRITES_STARTED" == false && "$DEPLOYMENT_HELPER" == true ]]; then
+		[[ "$QY_GATEWAY_ENABLED" != true ]] || qy_compose stop onepanel-gateway >/dev/null 2>&1
+		if ! qy_restore_layout; then layout_restored=false; printf '部署配置快照恢复失败，保留现场，不重新启动服务。\n' >&2; fi
+	fi
+	if [[ "$SCHEMA_WRITES_STARTED" == "false" && ( "$SWITCHED_REVISION" == "true" || -n "$LOCAL_CHANGES_STASH" ) ]]; then
 		if restore_pre_activation_state; then
 			if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
-				printf '已恢复原 Git revision 和本地部署文件；运行中的旧容器未被替换。\n' >&2
+				printf '已恢复原 Git revision 和本地部署文件。\n' >&2
 			else
-				printf '已恢复原 Git revision；运行中的旧容器未被替换。\n' >&2
+				printf '已恢复原 Git revision。\n' >&2
 			fi
 		else
 			printf '无法自动恢复 Git revision 或本地部署文件，请保留现场并人工检查。\n' >&2
 		fi
 	fi
 
-	if [[ "$ACTIVATION_STARTED" == "true" ]]; then
+	if [[ "$SCHEMA_WRITES_STARTED" == false && "$SERVICES_STOPPED" == true && "$layout_restored" == true ]]; then
+		local services=("$SERVICE_NAME")
+		[[ "$GATEWAY_WAS_ENABLED" != true ]] || services+=(onepanel-gateway)
+		if [[ "$ACTIVATION_STARTED" == true ]]; then deployment_compose up -d "${services[@]}"
+		else deployment_compose start "${services[@]}"; fi
+	fi
+	if [[ "$SCHEMA_WRITES_STARTED" == "true" ]]; then
 		if [[ -n "$LOCAL_CHANGES_STASH" ]]; then
 			printf '本地部署文件的安全 stash：%s\n' "$LOCAL_CHANGES_STASH" >&2
 		fi
 		printf '\n新容器已经开始激活，脚本不会自动覆盖数据库或配置。最近日志如下：\n' >&2
-		docker compose logs --tail=200 "$SERVICE_NAME" >&2 || true
+		deployment_compose logs --tail=200 "$SERVICE_NAME" >&2 || true
 	fi
 	exit "$exit_code"
 }
@@ -174,7 +207,7 @@ wait_for_container_running() {
 	local state
 
 	while (( SECONDS < deadline )); do
-		container_id="$(docker compose ps -q "$SERVICE_NAME")"
+		container_id="$(deployment_compose ps -q "$SERVICE_NAME")"
 		if [[ -n "$container_id" ]]; then
 			running="$(docker inspect --format '{{.State.Running}}' "$container_id" 2>/dev/null || true)"
 			if [[ "$running" == "true" ]]; then
@@ -196,11 +229,11 @@ wait_for_health() {
 	local state
 
 	while (( SECONDS < deadline )); do
-		container_id="$(docker compose ps -q "$SERVICE_NAME")"
+		container_id="$(deployment_compose ps -q "$SERVICE_NAME")"
 		if [[ -n "$container_id" ]]; then
 			state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
 			if [[ "$state" == "healthy" || "$state" == "running" ]]; then
-                docker compose exec -T "$SERVICE_NAME" node -e 'fetch("http://127.0.0.1:4401/qingyan/healthz").then(async r=>{const b=await r.json();if(!r.ok||b.mode!=="normal")process.exit(1)}).catch(()=>process.exit(1))' </dev/null && return 0
+                deployment_compose exec -T "$SERVICE_NAME" node -e 'fetch("http://127.0.0.1:4401/qingyan/healthz").then(async r=>{const b=await r.json();if(!r.ok||b.mode!=="normal")process.exit(1)}).catch(()=>process.exit(1))' </dev/null && return 0
 			fi
 			if [[ "$state" == "unhealthy" || "$state" == "exited" || "$state" == "dead" ]]; then
 				fail "容器状态为 $state。"
@@ -225,6 +258,15 @@ while (( $# > 0 )); do
 		--help|-h)
 			usage
 			exit 0
+			;;
+		--gateway-config|--panel-api-key-file|--database-network|--waf-mapping)
+			[[ $# -ge 2 && -n "$2" ]] || fail "$1 缺少参数。"
+			DEPLOYMENT_OPTIONS+=("$1" "$2")
+			shift 2
+			;;
+		--disable-gateway)
+			DEPLOYMENT_OPTIONS+=("$1")
+			shift
 			;;
 		v[0-9]*.[0-9]*.[0-9]*)
 			if [[ -n "$TARGET_TAG" ]]; then
@@ -328,7 +370,7 @@ cd "$REPOSITORY_ROOT"
 REPOSITORY_ROOT="$(pwd)"
 [[ -f compose.yml ]] || fail "$REPOSITORY_ROOT 不是 QingYan Docker Compose 仓库根目录。"
 
-worktree_status="$(git status --porcelain=v1 --untracked-files=normal)"
+worktree_status="$(git status --porcelain=v1 --untracked-files=normal -- . ':(exclude).env' ':(exclude)gateway/' ':(exclude)gateway.compose.json')"
 tracked_changes="$(git diff --name-only HEAD --)"
 while IFS= read -r tracked_path; do
 	[[ -n "$tracked_path" ]] || continue
@@ -376,13 +418,15 @@ fi
 PHASE="整站备份"
 BACKUP_DIRECTORY="/app/data/backups/pre-update-$(date -u +%Y%m%dT%H%M%SZ)"
 log "创建升级前整站备份"
-docker compose stop "$SERVICE_NAME"
+if [[ -f .env ]] && { grep -Ex "QINGYAN_(GATEWAY|WAF)_ENABLED=('true'|\"true\"|true)" .env >/dev/null; }; then GATEWAY_WAS_ENABLED=true; fi
+SERVICES_STOPPED=true
+if [[ "$GATEWAY_WAS_ENABLED" == true ]]; then docker compose stop "$SERVICE_NAME" onepanel-gateway; else docker compose stop "$SERVICE_NAME"; fi
 docker compose run --rm --no-deps "$SERVICE_NAME" qyctl backup "$BACKUP_DIRECTORY" --yes --service-stopped </dev/null
 
 PHASE="切换 Release"
 if [[ "$LOCAL_CHANGES_PRESENT" == "true" ]]; then
 	log "安全暂存本地部署文件"
-	git stash push --include-untracked --message "qingyan-update-${PREVIOUS_COMMIT}" > /dev/null
+	stash_deployment_files "qingyan-update-${PREVIOUS_COMMIT}"
 	LOCAL_CHANGES_STASH="$(git rev-parse refs/stash)"
 fi
 log "切换到 $TARGET_TAG"
@@ -395,45 +439,72 @@ fi
 
 PHASE="构建镜像"
 log "构建 $TARGET_TAG 镜像"
-docker compose --progress plain build --pull \
+if [[ -f "$REPOSITORY_ROOT/scripts/install.sh" && -f "$REPOSITORY_ROOT/scripts/deployment-layout.mjs" ]]; then
+	source "$REPOSITORY_ROOT/scripts/install.sh"
+	qy_init
+	QY_MODE=update
+	QY_RUNTIME="$REPOSITORY_ROOT"
+	QY_SOURCE="$REPOSITORY_ROOT"
+	QY_PARENT="$(dirname "$REPOSITORY_ROOT")"
+	QY_TAG="$TARGET_TAG"
+	qy_parse --yes "${DEPLOYMENT_OPTIONS[@]}"
+	qy_validate
+	qy_backup_layout
+	DEPLOYMENT_HELPER=true
+	QY_GATEWAY_ENABLED="$GATEWAY_WAS_ENABLED"
+	qy_pause_gateway_sync
+	qy_write_image "qingyan:$TARGET_TAG"
+elif (( ${#DEPLOYMENT_OPTIONS[@]} > 0 )) || [[ "$GATEWAY_WAS_ENABLED" == true ]]; then fail "目标版本不支持当前网关部署或所选部署选项。"; fi
+deployment_compose --progress plain build --pull \
 	--build-arg "QINGYAN_APT_MAIN_MIRROR=$APT_MAIN_MIRROR" \
 	--build-arg "QINGYAN_COREPACK_NPM_REGISTRY=$COREPACK_NPM_REGISTRY" \
 	--build-arg "QINGYAN_PNPM_REGISTRY=$PNPM_REGISTRY" \
 	"$SERVICE_NAME"
+if [[ "$DEPLOYMENT_HELPER" == true ]]; then
+	if [[ -f "$REPOSITORY_ROOT/services/onepanel-gateway/Dockerfile" ]]; then
+		docker build --pull --progress plain --tag "qingyan-onepanel-gateway:$TARGET_TAG" \
+			-f "$REPOSITORY_ROOT/services/onepanel-gateway/Dockerfile" "$REPOSITORY_ROOT/services/onepanel-gateway"
+	fi
+	qy_prepare_gateway
+	qy_prepare_layout
+fi
 
 PHASE="启动新容器"
 ACTIVATION_STARTED=true
 log "启动新容器"
-docker compose up -d "$SERVICE_NAME"
+if [[ "$DEPLOYMENT_HELPER" == true ]]; then qy_start_services; qy_wait_gateway; else docker compose up -d "$SERVICE_NAME"; fi
 wait_for_container_running
 
 PHASE="检查升级计划"
 log "UpgradePlan"
-docker compose exec -T "$SERVICE_NAME" qyctl upgrade --dry-run </dev/null
+deployment_compose exec -T "$SERVICE_NAME" qyctl upgrade --dry-run </dev/null
 
 if ! confirm "确认上述 UpgradePlan 和备份后，应用数据升级？"; then
-	fail "用户未确认数据升级；新容器保持当前状态，未写入升级数据。"
+	fail "用户未确认数据升级；恢复升级前部署，未写入升级数据。"
 fi
 
 PHASE="应用数据升级"
 log "应用数据升级"
-docker compose stop "$SERVICE_NAME"
-docker compose run --rm --no-deps "$SERVICE_NAME" qyctl upgrade --yes --service-stopped </dev/null
+deployment_compose stop "$SERVICE_NAME"
+SCHEMA_WRITES_STARTED=true
+deployment_compose run --rm --no-deps "$SERVICE_NAME" qyctl upgrade --yes --service-stopped </dev/null
 
 PHASE="重启并验收"
 log "重启并等待健康状态"
-docker compose restart "$SERVICE_NAME"
+deployment_compose restart "$SERVICE_NAME"
 wait_for_health
+[[ "$DEPLOYMENT_HELPER" != true ]] || qy_wait_gateway
 
-installed_version="$(docker compose exec -T "$SERVICE_NAME" qyctl --version </dev/null)"
+installed_version="$(deployment_compose exec -T "$SERVICE_NAME" qyctl --version </dev/null)"
 printf '%s\n' "$installed_version"
 expected_version="${TARGET_TAG#v}"
 [[ "$installed_version" == "QingYan $expected_version" ]] || fail "容器版本与目标 tag 不一致：$installed_version。"
+[[ "$DEPLOYMENT_HELPER" != true ]] || qy_resume_gateway_sync
 
-if ! docker compose exec -T "$SERVICE_NAME" qyctl update check </dev/null; then
+if ! deployment_compose exec -T "$SERVICE_NAME" qyctl update check </dev/null; then
 	printf '警告：最终 GitHub Release 检测失败，请稍后重试；容器版本和健康状态已验证。\n' >&2
 fi
-docker compose ps
+deployment_compose ps
 
 if [[ -n "$LOCAL_CHANGES_STASH" ]]; then
 	if drop_stash_commit "$LOCAL_CHANGES_STASH"; then

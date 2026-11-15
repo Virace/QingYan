@@ -33,6 +33,14 @@ if [[ "${1:-}" == "status" ]]; then
 	fi
 	exit 0
 fi
+if [[ "${1:-}" == "diff" && "${2:-}" == "--name-only" && "${3:-}" == "-z" ]]; then
+	[[ "${FAKE_DEPLOYMENT_DIRTY:-0}" != 1 ]] || printf 'compose.yml\0'
+	exit 0
+fi
+if [[ "${1:-}" == "ls-files" && "${2:-}" == "--others" ]]; then
+	[[ "${FAKE_DEPLOYMENT_DIRTY:-0}" != 1 ]] || printf 'up.sh\0'
+	exit 0
+fi
 if [[ "${1:-}" == "diff" && "${2:-}" == "--name-only" && "${3:-}" == "HEAD" ]]; then
 	if [[ "${FAKE_DEPLOYMENT_DIRTY:-0}" == "1" ]]; then
 		printf 'compose.yml\n'
@@ -165,7 +173,7 @@ if [[ "$*" == *"qyctl update check"* ]]; then
 	printf '状态：当前已是最新版本\n'
 	exit 0
 fi
-if [[ "$*" == "compose stop qingyan" || "$*" == "compose exec -T qingyan node "* ]]; then exit 0; fi
+if [[ "$*" == "compose stop qingyan" || "$*" == "compose start qingyan" || "$*" == "compose exec -T qingyan node "* ]]; then exit 0; fi
 if [[ "$*" == *"qyctl backup"* ]]; then
 	printf 'backup-created\n'
 	exit 0

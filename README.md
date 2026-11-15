@@ -45,7 +45,9 @@ QingYan 与 FangYuan 通过公开 HTTP API 契约解耦：FangYuan 只是当前�
 bash scripts/install.sh --dir /opt/apps
 ```
 
-`--dir` 是父目录，运行文件放在 `/opt/apps/qingyan/`，源码缓存默认放在 `/opt/apps/.qingyan-source/`；可用 `--source-dir` 单独指定源码位置。数据库使用预建的 PostgreSQL 18 专用库和账号。自动化运行可使用 `--non-interactive --database postgresql`；连接可在安装表单填写或通过受保护环境变量 `QINGYAN_DATABASE_URL` 注入。
+`--dir` 是父目录，运行文件放在 `/opt/apps/qingyan/`，源码缓存默认放在 `/opt/apps/.qingyan-source/`；可用 `--source-dir` 单独指定源码位置。安装器检测已有 PostgreSQL 18 服务，并请用户输入专用库的连接信息；已有 1Panel 数据库通过 `--database-network` 指定其 Docker 网络，连接使用容器服务名，无需对外发布端口。未检测到实例时可以明确选择创建独立 PostgreSQL 容器；不选连接且不选创建则取消安装。
+
+非交互运行先设置受保护环境变量 `QINGYAN_DATABASE_URL`，或显式使用 `--create-database`。数据库不加入 QingYan Compose，独立新建的数据库也不发布宿主机端口。受限 1Panel 网关使用独立镜像和可选 `onepanel` profile，通过 `--gateway-config` 与 `--panel-api-key-file` 显式配置后启用；详见 [部署指南](docs/deployment.md)。
 
 安装脚本默认获取最高稳定 tag。`v0.2.5` 仍为 SQLite 源版本；当前 PostgreSQL 改造发布后，应显式固定对应的 PostgreSQL tag。已有 SQLite 实例先完成离线转换，再按已核对版本切换。
 
@@ -53,6 +55,7 @@ GitHub 拉取与构建依赖分别选源：
 
 ```bash
 bash scripts/install.sh --dir /opt/apps --non-interactive \
+  --create-database \
   --github-source proxy --github-proxy https://gh-proxy.org \
   --network-profile cn
 ```
