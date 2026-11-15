@@ -5,6 +5,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function shouldRedactKey(key: string): boolean {
 	const normalized = key.toLowerCase();
 	return (
+		normalized === "x-qingyan-security" ||
 		normalized === "database.url" ||
 		normalized === "databaseurl" ||
 		normalized === "connectionstring" ||

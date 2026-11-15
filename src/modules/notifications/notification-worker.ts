@@ -14,6 +14,8 @@ import {
 	NotificationTemplateError,
 	renderNotificationTemplate,
 } from "./templates/renderer";
+import type { NotificationTemplateResolver } from "./templates/resolver";
+import type { CommentNotificationIntent } from "./comment-notification-intent";
 
 type ReputationRecorder = {
 	recordRecipientFailure(input: {
@@ -45,8 +47,24 @@ type NotificationWorkerInput = {
 			task: TaskRunRecord;
 			delivery: NotificationDeliveryRecord;
 		}): Promise<Record<string, unknown>>;
+		buildTransient?(input: {
+			task: TaskRunRecord;
+			delivery: NotificationDeliveryRecord;
+		}): Promise<Record<string, unknown>>;
 	};
+	templates?: NotificationTemplateResolver;
+	loadEmailFormat?: () => Promise<"html" | "text">;
+	planCommentNotification?: (
+		input: CommentNotificationIntent,
+	) => Promise<unknown>;
 	logApp?: (record: AppLogRecord) => Promise<void>;
+};
+
+type PreparedTemplate = {
+	subjectTemplate?: string | null;
+	bodyTemplate: string;
+	format: "html" | "text" | "json";
+	context: Record<string, unknown>;
 };
 
 type TemplatePayload = {
@@ -54,12 +72,29 @@ type TemplatePayload = {
 	subjectTemplate?: string;
 	bodyTemplate?: string;
 	format?: "html" | "text" | "json";
+	preparedDeliveries?: Record<string, PreparedTemplate>;
 };
 
 function asTemplatePayload(payload: unknown): TemplatePayload {
 	return payload && typeof payload === "object"
 		? (payload as TemplatePayload)
 		: {};
+}
+
+function renderPreparedTemplate(
+	prepared: PreparedTemplate,
+	transient: Record<string, unknown>,
+) {
+	return renderNotificationTemplate({
+		...prepared,
+		context: {
+			...prepared.context,
+			links: {
+				...((prepared.context.links as Record<string, unknown>) ?? {}),
+				...transient,
+			},
+		},
+	});
 }
 
 function fallbackBody(delivery: NotificationDeliveryRecord): string {
@@ -84,9 +119,15 @@ export class NotificationWorker {
 			includeCategories: ["notification"],
 		});
 		let processed = 0;
+		let plannedIntent = false;
 
 		for (const task of tasks) {
 			processed += 1;
+			if (task.type === "comment_notification_intent") {
+				await this.processIntent(task, now);
+				plannedIntent = true;
+				continue;
+			}
 			const deliveries = await this.input.repository.listDeliveriesForTask(
 				task.id,
 			);
@@ -147,25 +188,79 @@ export class NotificationWorker {
 						);
 					}
 					const payload = asTemplatePayload(task.payload);
-					const format = payload.format ?? "text";
-					const rendered = renderNotificationTemplate({
-						format,
-						subjectTemplate:
-							payload.subjectTemplate ?? "[QingYan] Notification",
-						bodyTemplate: payload.bodyTemplate ?? fallbackBody(delivery),
-						context: payload.templateContext ??
+					let prepared = payload.preparedDeliveries?.[delivery.id];
+					let transient: Record<string, unknown> = {};
+					let initialRendered:
+						| ReturnType<typeof renderNotificationTemplate>
+						| undefined;
+					if (!prepared) {
+						const selectedFormat =
+							payload.format ??
+							(delivery.channel === "email"
+								? await this.input.loadEmailFormat?.()
+								: undefined);
+						const template =
+							!payload.bodyTemplate && this.input.templates
+								? await this.input.templates.resolve(delivery, selectedFormat)
+								: undefined;
+						const format = template?.format ?? selectedFormat ?? "text";
+						const context = payload.templateContext ??
 							(await this.input.templateContextBuilder?.build({
 								task,
 								delivery,
-							})) ?? {
-								comment: { content: "QingYan notification" },
-							},
-					});
+							})) ?? { comment: { content: "QingYan notification" } };
+						const savedContext = structuredClone(context);
+						if (
+							savedContext.links &&
+							typeof savedContext.links === "object" &&
+							"unsubscribe" in savedContext.links
+						) {
+							transient = { unsubscribe: savedContext.links.unsubscribe };
+							delete savedContext.links.unsubscribe;
+						}
+						prepared = {
+							format,
+							subjectTemplate:
+								payload.subjectTemplate ??
+								template?.subjectTemplate ??
+								"[QingYan] Notification",
+							bodyTemplate:
+								payload.bodyTemplate ??
+								template?.bodyTemplate ??
+								fallbackBody(delivery),
+							context: savedContext,
+						};
+						initialRendered = renderPreparedTemplate(prepared, transient);
+						payload.preparedDeliveries = {
+							...payload.preparedDeliveries,
+							[delivery.id]: prepared,
+						};
+						if (
+							!(await this.input.repository.saveNotificationPayload(
+								task.id,
+								task.claimToken,
+								{ ...(task.payload as Record<string, unknown>), ...payload },
+							))
+						)
+							break;
+						task.payload = {
+							...(task.payload as Record<string, unknown>),
+							...payload,
+						};
+					} else {
+						transient =
+							(await this.input.templateContextBuilder?.buildTransient?.({
+								task,
+								delivery,
+							})) ?? {};
+					}
+					const rendered =
+						initialRendered ?? renderPreparedTemplate(prepared, transient);
 					const result = await adapter.send({
 						to: delivery.recipientAddressSnapshot,
 						subject: rendered.subject,
 						body: rendered.body,
-						format,
+						format: prepared.format,
 					});
 					outcomes.push({
 						deliveryId: delivery.id,
@@ -360,7 +455,80 @@ export class NotificationWorker {
 				await this.input.repository.finalizeScheduledTaskRun(task.id);
 		}
 
+		if (plannedIntent && processed < options.limit)
+			processed += await this.runNextNotificationTask({
+				limit: options.limit - processed,
+				now,
+			});
 		return processed;
+	}
+
+	private async processIntent(task: TaskRunRecord, now: Date) {
+		try {
+			if (!this.input.planCommentNotification)
+				throw new Error("Comment notification planner is not configured");
+			await this.input.planCommentNotification(
+				task.payload as CommentNotificationIntent,
+			);
+			await this.input.repository.completeNotificationAttempt({
+				taskId: task.id,
+				claimToken: task.claimToken,
+				outcomes: [],
+				next: { status: "succeeded", result: { planned: true } },
+				events: [
+					{
+						eventType: "notification.email.planned",
+						level: "info",
+						message: "评论通知已完成收件规划。",
+					},
+				],
+				updatedAt: now.toISOString(),
+			});
+		} catch (cause) {
+			const error = {
+				code: "COMMENT_NOTIFICATION_PLANNING_FAILED",
+				message: "评论通知暂未完成规划。",
+			};
+			await this.writeApplicationLog(task, {
+				event: "notification.email.failed",
+				level: "error",
+				message: "评论通知暂未完成规划，已保留重试记录。",
+				data: {
+					stage: "planning",
+					attempt: task.attempts + 1,
+					errorName: cause instanceof Error ? cause.name : "UnknownError",
+					errorCode:
+						cause &&
+						typeof cause === "object" &&
+						"code" in cause &&
+						typeof cause.code === "string"
+							? cause.code
+							: undefined,
+				},
+			});
+			await this.input.repository.completeNotificationAttempt({
+				taskId: task.id,
+				claimToken: task.claimToken,
+				outcomes: [],
+				next:
+					task.attempts + 1 < task.maxAttempts
+						? {
+								status: "retrying",
+								error,
+								runAfter: new Date(now.getTime() + 15_000).toISOString(),
+							}
+						: { status: "failed", error },
+				events: [
+					{
+						eventType: "notification.email.planning_failed",
+						level: "error",
+						message: "评论通知尚未完成收件规划。",
+						data: { attempt: task.attempts + 1 },
+					},
+				],
+				updatedAt: now.toISOString(),
+			});
+		}
 	}
 
 	private async writeApplicationLog(

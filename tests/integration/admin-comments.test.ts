@@ -391,6 +391,18 @@ describe("admin comments", () => {
 			trashList.json().items.map((comment: { id: string }) => comment.id),
 		).toEqual(["c_admin_view_trash"]);
 		expect(trashList.json().pagination.totalCount).toBe(1);
+		for (const commentId of ["c_admin_view_pending", "c_admin_view_spam"]) {
+			const target = await fixture.app.inject({
+				method: "GET",
+				url: `/qingyan/api/admin/comments?siteKey=fangyuan&commentId=${commentId}&limit=1&offset=0`,
+				cookies,
+			});
+			expect(target.statusCode).toBe(200);
+			expect(
+				target.json().items.map((comment: { id: string }) => comment.id),
+			).toEqual([commentId]);
+			expect(target.json().pagination.totalCount).toBe(1);
+		}
 	});
 
 	it("returns admin comment avatar urls when external avatars are enabled", async () => {
@@ -1279,6 +1291,12 @@ describe("admin comments", () => {
 			username: "comment-site-moderator",
 			password: "replace-me",
 		});
+		const hiddenTarget = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/admin/comments?siteKey=qingyan&commentId=c_mixed_qingyan",
+			cookies: { qingyan_admin: moderator.adminCookie?.value ?? "" },
+		});
+		expect(hiddenTarget.statusCode).toBe(403);
 
 		const response = await fixture.app.inject({
 			method: "POST",
@@ -1598,11 +1616,16 @@ describe("admin comments", () => {
 		expect(publicThread.json().items).toEqual([]);
 	});
 
-	it("creates a verified reply from admin comments API", async () => {
+	it("creates an account-bound staff reply from admin comments API", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
 		const { adminCookie, csrfToken } = await loginAsAdmin(fixture.app);
+		const [actingUser] = await fixture.app.db
+			.select()
+			.from(adminUsers)
+			.limit(1);
+		if (!actingUser) throw new Error("Expected acting account");
 		const [site] = await fixture.app.db
 			.select()
 			.from(sites)
@@ -1673,7 +1696,7 @@ describe("admin comments", () => {
 
 		expect(reply.statusCode).toBe(200);
 		expect(reply.json().comment.author).toMatchObject({
-			name: "Virace",
+			name: actingUser.displayName,
 			badge: { label: "楼主" },
 		});
 
@@ -1683,8 +1706,9 @@ describe("admin comments", () => {
 			.where(eq(comments.contentRaw, "管理员回复"));
 		expect(created).toMatchObject({
 			parentId: "c_admin_reply_root",
-			authorIdentity: "verified",
-			authorEmail: "owner@example.com",
+			authorIdentity: "staff",
+			authorUserId: actingUser.id,
+			authorEmail: actingUser.email,
 			status: "approved",
 		});
 
@@ -1695,7 +1719,7 @@ describe("admin comments", () => {
 		expect(updatedRoot?.replyCount).toBe(1);
 	});
 
-	it("rejects admin replies when verified author is disabled", async () => {
+	it("keeps authorized account replies available when trusted author display is disabled", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -1767,11 +1791,16 @@ describe("admin comments", () => {
 			},
 		});
 
-		expect(reply.statusCode).toBe(400);
-		expect(reply.json()).toMatchObject({
-			error: {
-				code: "VERIFIED_AUTHOR_DISABLED",
-			},
+		expect(reply.statusCode).toBe(200);
+		const [created] = await fixture.app.db
+			.select()
+			.from(comments)
+			.where(eq(comments.id, reply.json().comment.id));
+		expect(created).toMatchObject({
+			authorIdentity: "staff",
+			status: "approved",
 		});
+		expect(created.authorUserId).not.toBeNull();
+		expect(reply.json().comment.author).not.toHaveProperty("badge");
 	});
 });

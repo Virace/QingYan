@@ -139,6 +139,7 @@ function mailSettings(
 	return {
 		mail: {
 			enabled: false,
+			commentFormat: "text",
 			smtp: {
 				host: "",
 				port: 587,

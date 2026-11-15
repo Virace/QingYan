@@ -4,7 +4,6 @@ import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import type { DatabaseExecutor } from "../../db/client";
-import { hashKey, toSafeInteger } from "../../db/values";
 import {
 	adminUsers,
 	commentRequestMetadata,
@@ -15,14 +14,15 @@ import {
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
-	sites,
 	siteSettings,
+	sites,
 	visitorRequestMetadata,
 	visitors,
 	voteRecords,
 } from "../../db/schema";
-import { assertPageKeyAvailable, lockPageKey } from "../shared/page-key";
+import { hashKey, toSafeInteger } from "../../db/values";
 import { AppError } from "../shared/errors";
+import { assertPageKeyAvailable, lockPageKey } from "../shared/page-key";
 import { normalizePagePath } from "../shared/page-url";
 import type {
 	RegisteredSiteRecord,
@@ -113,6 +113,9 @@ export class CommentsRepository {
 
 	public getDatabase(): DatabaseExecutor {
 		return this.db;
+	}
+	public withDatabase(db: DatabaseExecutor) {
+		return new CommentsRepository(db, this.siteRegistry);
 	}
 
 	public getRegisteredSite(siteKey: string): RegisteredSiteRecord | undefined {

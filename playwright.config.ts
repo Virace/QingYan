@@ -8,6 +8,7 @@ export default defineConfig({
 	testDir: "./tests/e2e",
 	outputDir: ".temp/playwright/results",
 	fullyParallel: false,
+	workers: 1,
 	retries: process.env.CI ? 2 : 0,
 	reporter: [["list"]],
 	use: {

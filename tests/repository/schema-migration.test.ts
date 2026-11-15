@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createDatabaseClients } from "../../src/db/client";
@@ -25,7 +25,7 @@ describe("PostgreSQL structure migrations", () => {
 			]);
 			const state = await getDatabaseMigrationState(clients.pool);
 			expect(state).toEqual({
-				applied: ["0000_initial.sql"],
+				applied: ["0000_initial.sql", "0001_api_abuse_and_email_policy.sql"],
 				pending: [],
 				unknown: [],
 				checksumMismatches: [],
@@ -76,6 +76,56 @@ describe("PostgreSQL structure migrations", () => {
 				],
 			);
 			expect(retired.rows).toEqual([]);
+		} finally {
+			await clients.close();
+			await workspace.cleanup();
+		}
+	});
+
+	it("upgrades the published baseline without losing site data and expires old captcha sessions", async () => {
+		const workspace = createTestWorkspace("schema-abuse-upgrade-");
+		await ensureTestDatabase(workspace.databaseUrl);
+		const clients = createDatabaseClients(workspace.databaseUrl);
+		const directory = path.join(workspace.directory, "baseline");
+		mkdirSync(directory);
+		copyFileSync(
+			path.resolve("drizzle/postgresql/0000_initial.sql"),
+			path.join(directory, "0000_initial.sql"),
+		);
+		try {
+			await applyDatabaseMigrations(clients.pool, directory);
+			const site = await clients.pool.query<{ id: string }>(
+				"INSERT INTO sites(site_key,name,allowed_origins_json) VALUES('existing','Existing site','[]') RETURNING id",
+			);
+			const siteId = site.rows[0].id;
+			const visitor = await clients.pool.query<{ id: string }>(
+				"INSERT INTO visitors(site_id,visitor_key) VALUES($1,'existing-visitor') RETURNING id",
+				[siteId],
+			);
+			await clients.pool.query(
+				"INSERT INTO captcha_sessions(id,site_id,visitor_id,triggered_by,mode,verified,expires_at) VALUES('old-grant',$1,$2,'threshold','threshold',true,CURRENT_TIMESTAMP + INTERVAL '5 minutes')",
+				[siteId, visitor.rows[0].id],
+			);
+			expect((await getDatabaseMigrationState(clients.pool)).pending).toEqual([
+				"0001_api_abuse_and_email_policy.sql",
+			]);
+			await applyDatabaseMigrations(clients.pool);
+			await applyDatabaseMigrations(clients.pool);
+			expect(await getDatabaseMigrationState(clients.pool)).toEqual({
+				applied: ["0000_initial.sql", "0001_api_abuse_and_email_policy.sql"],
+				pending: [],
+				unknown: [],
+				checksumMismatches: [],
+			});
+			expect(
+				(await clients.pool.query("SELECT site_key,name FROM sites")).rows,
+			).toEqual([{ site_key: "existing", name: "Existing site" }]);
+			expect(
+				(await clients.pool.query("SELECT visitor_key FROM visitors")).rows,
+			).toEqual([{ visitor_key: "existing-visitor" }]);
+			expect(
+				(await clients.pool.query("SELECT id FROM captcha_sessions")).rows,
+			).toEqual([]);
 		} finally {
 			await clients.close();
 			await workspace.cleanup();

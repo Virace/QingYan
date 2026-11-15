@@ -128,9 +128,7 @@ describe("logging business events", () => {
 		});
 		expect(captchaState.statusCode).toBe(200);
 
-		const visitorCookie = captchaState.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
+		const securityToken = captchaState.headers["x-qingyan-security"] as string;
 		const challengeId = captchaState.json().challenge.challengeId as string;
 
 		const invalidVerify = await fixture.app.inject({
@@ -139,9 +137,7 @@ describe("logging business events", () => {
 			headers: {
 				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_failed",
-			},
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				"x-qingyan-security": securityToken,
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -173,9 +169,7 @@ describe("logging business events", () => {
 			headers: {
 				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_verified",
-			},
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				"x-qingyan-security": securityToken,
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -193,9 +187,7 @@ describe("logging business events", () => {
 			headers: {
 				...refererFor("post:logging-events"),
 				"x-request-id": "req_comment_created",
-			},
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				"x-qingyan-security": securityToken,
 			},
 			payload: {
 				siteKey: "fangyuan",

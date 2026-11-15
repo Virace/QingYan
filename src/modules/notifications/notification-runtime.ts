@@ -7,7 +7,7 @@ export interface NotificationRuntimeState {
 	lastError: string | null;
 }
 
-const DEFAULT_INTERVAL_MS = 5_000;
+const DEFAULT_INTERVAL_MS = 1_000;
 const DEFAULT_CLAIM_LIMIT = 10;
 
 function errorMessage(error: unknown): string {

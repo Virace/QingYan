@@ -50,6 +50,8 @@ type OpenComments = (input: OpenCommentsInput) => void;
 type OpenSite = (siteKey: string, nextView: AdminView) => void;
 
 type CommentsPageProps = {
+	commentId?: string;
+	onClearCommentFilter?: () => void;
 	siteKey?: string;
 	search: string;
 	setSearch: Dispatch<SetStateAction<string>>;
@@ -339,6 +341,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			case "comments":
 				return (
 					<CommentsPage
+						commentId={taskCommentId}
+						onClearCommentFilter={clearTaskCommentFilter}
 						siteKey={activeSiteKey}
 						search={commentSearch}
 						setSearch={setCommentSearch}

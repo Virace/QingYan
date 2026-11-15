@@ -14,6 +14,11 @@ import {
 	type SiteBackendNotificationEventType,
 	SiteNotificationEventsRepository,
 } from "./site-notification-events-repository";
+import {
+	captureCommentEventSnapshot,
+	snapshotForContentLevel,
+	type CommentEventSnapshot,
+} from "./comment-event-snapshot";
 
 export type CommentNotificationSource =
 	| "public_api"
@@ -32,6 +37,7 @@ export type BackendUserCommentStatus =
 	| "deleted";
 
 export interface BackendUserNotificationEvent {
+	commentSnapshot?: CommentEventSnapshot | null;
 	source: CommentNotificationSource;
 	siteId: number;
 	siteKey: string;
@@ -135,6 +141,12 @@ export class BackendUserNotificationPlanner {
 			channelFilter?: NotificationChannelFilter;
 		} = {},
 	): Promise<BackendUserNotificationPlanResult> {
+		event = {
+			...event,
+			commentSnapshot:
+				event.commentSnapshot ??
+				(await captureCommentEventSnapshot(this.db, event.commentId)),
+		};
 		const emailPlanning = { completed: false };
 		try {
 			return await this.planCommentEvent(event, options, emailPlanning);
@@ -324,10 +336,18 @@ export class BackendUserNotificationPlanner {
 							channelConfigId,
 							channelConfigName: "默认邮件",
 							includeCommentContent: recipient.includeCommentContent,
+							commentSnapshot: snapshotForContentLevel(
+								event.commentSnapshot ?? null,
+								recipient.includeCommentContent,
+							),
 							contentRaw:
 								recipient.includeCommentContent === "none"
 									? null
-									: event.contentRaw,
+									: recipient.includeCommentContent === "full"
+										? event.contentRaw
+										: event.contentRaw
+											? Array.from(event.contentRaw).slice(0, 501).join("")
+											: event.contentRaw,
 						},
 					},
 					delivery: {
@@ -412,7 +432,13 @@ export class BackendUserNotificationPlanner {
 					channelConfigId: config.id,
 					channelConfigName: config.name,
 					includeCommentContent: "summary",
-					contentRaw: event.contentRaw,
+					commentSnapshot: snapshotForContentLevel(
+						event.commentSnapshot ?? null,
+						"summary",
+					),
+					contentRaw: event.contentRaw
+						? Array.from(event.contentRaw).slice(0, 501).join("")
+						: event.contentRaw,
 				},
 			});
 			tasks.push(task);

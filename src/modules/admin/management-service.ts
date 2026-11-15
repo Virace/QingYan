@@ -1,5 +1,9 @@
 import type { SecurityToolkit } from "../../plugins/security";
+import { type AbusePolicy, readAbusePolicy } from "../comments/abuse-policy";
+import { AbuseRepository } from "../comments/abuse-repository";
+import { requireCommentAccount } from "../comments/account-identity";
 import { buildCommentForm } from "../comments/comment-form";
+import { type EmailPolicy, readEmailPolicy } from "../comments/email-policy";
 import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
 import {
 	type CommentStatus,
@@ -17,7 +21,8 @@ import {
 	type VerifiedAuthorSettings,
 } from "../comments/verified-author";
 import { CommentsWriteRepository } from "../comments/write-repository";
-import { CommentNotificationPlanner } from "../notifications/comment-notification-planner";
+import { CommentEmailDeliveryRepository } from "../notifications/comment-email-delivery-repository";
+import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 import type { SiteNotificationEventInput } from "../notifications/site-notification-events-repository";
 import {
 	AppError,
@@ -51,8 +56,6 @@ import {
 	sanitizeOptionalSafeHttpUrl,
 } from "../shared/url-policy";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
-import { CommentEmailDeliveryRepository } from "../notifications/comment-email-delivery-repository";
-import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 import { AdminTaskService } from "../tasks/admin-task-service";
 import type { AdminRepository } from "./repository";
 
@@ -166,6 +169,7 @@ export class AdminManagementService {
 	}
 
 	public async listComments(input: {
+		commentId?: string;
 		siteKey?: string;
 		pageKey?: string;
 		status?: CommentStatus;
@@ -179,6 +183,7 @@ export class AdminManagementService {
 			this.repository.database,
 		);
 		const result = await this.repository.listComments({
+			commentId: input.commentId,
 			siteId,
 			pageKey: input.pageKey,
 			status: input.status,
@@ -500,20 +505,11 @@ export class AdminManagementService {
 			message: input.status ? "评论状态已更新" : "评论内容已更新",
 			targetType: "comment",
 			targetId: commentId,
+			payload: {
+				previousStatus: existingComment?.status,
+				status: comment.status,
+			},
 		});
-		if (
-			input.status === "approved" &&
-			existingComment?.status !== "approved" &&
-			comment.parentId
-		) {
-			await this.planReplyNotification({
-				commentId,
-				source: "admin_moderation",
-				requestId: input.requestId,
-				actorUserId: input.actorUserId,
-			});
-		}
-
 		return comment;
 	}
 
@@ -530,7 +526,7 @@ export class AdminManagementService {
 	}) {
 		const comments = await this.repository.bulkUpdateComments(
 			input.commentIds,
-			input.patch,
+			{ ...input.patch, actorUserId: input.actorUserId },
 		);
 
 		await this.security.writeAudit({
@@ -548,20 +544,6 @@ export class AdminManagementService {
 				patch: input.patch,
 			},
 		});
-		if (input.patch.status === "approved") {
-			for (const comment of comments) {
-				if (!comment.parentId) {
-					continue;
-				}
-				await this.planReplyNotification({
-					commentId: comment.id,
-					source: "admin_moderation",
-					requestId: input.requestId,
-					actorUserId: input.actorUserId,
-				});
-			}
-		}
-
 		return {
 			comments,
 			updatedCount: comments.length,
@@ -769,13 +751,13 @@ export class AdminManagementService {
 		const verifiedAuthor = mergeVerifiedAuthorSettings(
 			context.verifiedAuthorJson,
 		);
-		if (!verifiedAuthor.enabled) {
-			throw new AppError(
-				400,
-				"VERIFIED_AUTHOR_DISABLED",
-				"可信评论作者未启用。",
-			);
-		}
+		if (!input.actorUserId)
+			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "请先登录后回复。 ");
+		const account = await requireCommentAccount(
+			this.repository.database,
+			input.actorUserId,
+			context.siteId,
+		);
 
 		const writeRepository = new CommentsWriteRepository(
 			this.repository.database,
@@ -785,12 +767,22 @@ export class AdminManagementService {
 			pageThreadId: context.pageThreadId,
 			parentCommentId,
 			visitorId: null,
-			authorIdentity: "verified",
-			authorName: verifiedAuthor.displayName,
-			authorEmail: verifiedAuthor.email || undefined,
-			authorWebsite: verifiedAuthor.website || undefined,
+			authorIdentity: "staff",
+			authorUserId: account.id,
+			authorName: account.displayName,
+			authorEmail: account.email || undefined,
+			authorWebsite: account.website || undefined,
 			contentRaw: input.contentRaw,
 			status: "approved",
+			notification: {
+				siteKey: context.siteKey,
+				pageKey: context.pageKey,
+				source: "admin_reply",
+				notifyBackend: false,
+				notifyReply: true,
+				actorType: "admin_user",
+				actorId: String(account.id),
+			},
 		});
 		const comment = await this.repository.getCommentById(created.commentId);
 		if (!comment) {
@@ -812,13 +804,6 @@ export class AdminManagementService {
 				status: "approved",
 			},
 		});
-		await this.planReplyNotification({
-			commentId: created.commentId,
-			source: "admin_reply",
-			requestId: input.requestId,
-			actorUserId: input.actorUserId,
-		});
-
 		const [presentedComment] = presentComments(
 			[
 				{
@@ -845,49 +830,6 @@ export class AdminManagementService {
 		};
 	}
 
-	private async planReplyNotification(input: {
-		commentId: string;
-		source: "admin_moderation" | "admin_reply";
-		requestId?: string;
-		actorUserId?: number;
-	}) {
-		try {
-			const context = await this.repository.getCommentReplyContext(
-				input.commentId,
-			);
-			if (!context) {
-				return;
-			}
-			await new CommentNotificationPlanner(
-				this.repository.database,
-			).planForCommentEvent({
-				siteId: context.siteId,
-				siteKey: context.siteKey,
-				pageKey: context.pageKey,
-				commentId: input.commentId,
-				source: input.source,
-				actorType: input.actorUserId ? "admin_user" : "system",
-				actorId: input.actorUserId ? String(input.actorUserId) : "system",
-			});
-		} catch (error) {
-			await this.security
-				.writeAudit({
-					requestId: input.requestId,
-					actorType: "system",
-					actorId: "notification_planner",
-					event: "notification.email.failed",
-					message: "评论通知规划失败",
-					targetType: "comment",
-					targetId: input.commentId,
-					payload: {
-						source: input.source,
-						error: error instanceof Error ? error.message : String(error),
-					},
-				})
-				.catch(() => undefined);
-		}
-	}
-
 	public async listBlacklist(input: {
 		siteKey?: string;
 		search?: string;
@@ -901,12 +843,75 @@ export class AdminManagementService {
 			limit: input.limit,
 			offset: input.offset,
 		});
-
-		return buildPaginationResult(result.items, {
+		const penalties = await new AbuseRepository(
+			this.repository.database,
+		).listByRuleIds(result.items.map((rule) => rule.id));
+		const byRule = new Map(
+			penalties.map((penalty) => [penalty.sourceRuleId, penalty]),
+		);
+		const items = result.items.map((rule) => {
+			const penalty = byRule.get(rule.id);
+			return {
+				...rule,
+				penalty: penalty
+					? {
+							releasedAt: penalty.releasedAt,
+							releaseKind: penalty.releaseKind,
+							releaseReason: penalty.releaseReason,
+							stateVersion: penalty.stateVersion,
+							startedAt: penalty.startedAt,
+							expiresAt: penalty.expiresAt,
+							evidence: JSON.parse(penalty.evidenceJson) as {
+								count?: number;
+								windowSec?: number;
+								repeat?: boolean;
+							},
+						}
+					: null,
+			};
+		});
+		return buildPaginationResult(items, {
 			limit: input.limit,
 			offset: input.offset,
 			totalCount: result.totalCount,
 		});
+	}
+
+	public async releaseBlacklist(input: {
+		ruleId: number;
+		kind: "revoked" | "released";
+		reason: string;
+		actorUserId?: number;
+	}) {
+		const penalty = await new AbuseRepository(this.repository.database).release(
+			input,
+		);
+		if (!penalty)
+			throw new ResourceNotFoundError(
+				"BLACKLIST_RULE_NOT_FOUND",
+				"没有可解除的自动限制。",
+			);
+		const site = this.siteRegistry
+			.listRegisteredSites()
+			.find((site) => site.id === penalty.siteId);
+		if (site) this.security.resetWriteState(site.siteKey, penalty.ip);
+		await this.security.writeAudit({
+			siteKey: site?.siteKey,
+			actorType: input.actorUserId ? "admin_user" : "system",
+			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+			action:
+				input.kind === "revoked"
+					? "blacklist.penalty.revoked"
+					: "blacklist.penalty.released",
+			targetType: "blacklist_rule",
+			targetId: String(input.ruleId),
+			payload: { reason: input.reason },
+		});
+		return {
+			released: true,
+			kind: penalty.releaseKind,
+			expiresAt: penalty.expiresAt,
+		};
 	}
 
 	public async createBlacklist(input: {
@@ -961,6 +966,12 @@ export class AdminManagementService {
 				"黑名单规则不存在。",
 			);
 		}
+		if (rule.siteId && rule.targetType === "ip" && rule.matchMode === "exact") {
+			const site = this.siteRegistry
+				.listRegisteredSites()
+				.find((site) => site.id === rule.siteId);
+			if (site) this.security.resetWriteState(site.siteKey, rule.targetValue);
+		}
 
 		await this.security.writeAudit({
 			requestId: input.requestId,
@@ -994,6 +1005,18 @@ export class AdminManagementService {
 				"BLACKLIST_RULE_NOT_FOUND",
 				"黑名单规则不存在。",
 			);
+		}
+		for (const rule of rules) {
+			if (
+				rule.siteId &&
+				rule.targetType === "ip" &&
+				rule.matchMode === "exact"
+			) {
+				const site = this.siteRegistry
+					.listRegisteredSites()
+					.find((site) => site.id === rule.siteId);
+				if (site) this.security.resetWriteState(site.siteKey, rule.targetValue);
+			}
 		}
 
 		await this.security.writeAudit({
@@ -1206,7 +1229,7 @@ export class AdminManagementService {
 					autoBlacklist: {
 						enabled: settings.autoBlacklistEnabled,
 						scope: settings.autoBlacklistScope as "post" | "all",
-						ttlSec: settings.autoBlacklistTtlSec,
+						ttlSec: readAbusePolicy(settings.abusePolicyJson).penaltyTtlSec,
 					},
 				},
 				inputLimits: mergeCommentInputLimits(settings.commentInputLimitsJson),
@@ -1215,6 +1238,8 @@ export class AdminManagementService {
 					settings.verifiedAuthorJson,
 				),
 				staffDisplay: mergeStaffDisplaySettings(settings.staffDisplayJson),
+				emailPolicy: readEmailPolicy(settings.emailPolicyJson),
+				abusePolicy: readAbusePolicy(settings.abusePolicyJson),
 				moderation: mergeSiteModerationSettings(
 					settings.moderationJson,
 					settings.defaultStatus as "pending" | "approved",
@@ -1336,6 +1361,8 @@ export class AdminManagementService {
 				verifiedAuthor?: VerifiedAuthorSettings;
 				staffDisplay?: StaffDisplaySettings;
 				moderation?: SiteModerationSettings;
+				emailPolicy?: EmailPolicy;
+				abusePolicy?: AbusePolicy;
 			};
 			pageFeedback?: {
 				allowLike?: boolean;
@@ -1430,6 +1457,20 @@ export class AdminManagementService {
 			moderationJson: input.comments?.moderation
 				? serializeSiteModerationSettings(input.comments.moderation)
 				: undefined,
+			emailPolicyJson: input.comments?.emailPolicy
+				? JSON.stringify(input.comments.emailPolicy)
+				: undefined,
+			abusePolicyJson:
+				input.comments?.abusePolicy ||
+				input.comments?.abuseGuard?.autoBlacklist?.ttlSec !== undefined
+					? JSON.stringify(
+							input.comments?.abusePolicy ?? {
+								...readAbusePolicy(existingSettings.abusePolicyJson),
+								penaltyTtlSec:
+									input.comments?.abuseGuard?.autoBlacklist?.ttlSec,
+							},
+						)
+					: undefined,
 			engagementJson: nextEngagement
 				? serializeEngagementSettings(nextEngagement)
 				: undefined,

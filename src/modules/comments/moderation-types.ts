@@ -27,24 +27,35 @@ export type ModerationDecision = z.infer<typeof moderationDecisionSchema>;
 export const moderationFailPolicySchema = z.literal("pending");
 export type ModerationFailPolicy = z.infer<typeof moderationFailPolicySchema>;
 
-export const siteModerationSettingsSchema = z.object({
-	mode: moderationModeSchema,
-	provider: z.enum(["none", "akismet"]),
-	akismet: z
-		.object({
-			failPolicy: moderationFailPolicySchema,
-			discardBlatantSpam: z.boolean(),
-		})
-		.strict(),
-});
+export const siteModerationSettingsSchema = z
+	.object({
+		mode: moderationModeSchema,
+		provider: z.enum(["none", "akismet"]),
+		localReviewEnabled: z.boolean().default(false),
+		akismet: z
+			.object({
+				failPolicy: moderationFailPolicySchema,
+				discardBlatantSpam: z.boolean(),
+			})
+			.strict(),
+	})
+	.superRefine((settings, context) => {
+		if (settings.localReviewEnabled && settings.mode !== "akismet_auto")
+			context.addIssue({
+				code: "custom",
+				path: ["localReviewEnabled"],
+				message: "本地审核仅适用于 Akismet 自动审核模式。",
+			});
+	});
 
-export type SiteModerationSettings = z.infer<
+export type SiteModerationSettings = z.input<
 	typeof siteModerationSettingsSchema
 >;
 
 export const defaultSiteModerationSettings: SiteModerationSettings = {
 	mode: "manual",
 	provider: "none",
+	localReviewEnabled: false,
 	akismet: {
 		failPolicy: "pending",
 		discardBlatantSpam: false,

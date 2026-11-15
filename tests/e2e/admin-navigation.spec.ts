@@ -14,6 +14,71 @@ test.use({
 	storageState: existsSync(authStatePath) ? authStatePath : undefined,
 });
 
+test("mail comment target survives login and reload and can return to the full list", async ({
+	page,
+}, testInfo) => {
+	await page.context().clearCookies();
+	await page.route("**/api/admin/comments?*", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify({
+				items: [],
+				pagination: { limit: 20, offset: 0, totalCount: 0 },
+			}),
+		});
+	});
+	await page.goto(
+		"/qingyan/admin/?view=comments&siteKey=default&commentId=mail_target_older_than_first_page",
+	);
+	await expect(
+		page.getByRole("img", { name: "管理员登录验证码", exact: true }),
+	).toBeVisible();
+	await page.getByLabel("用户名").fill("admin");
+	await page.getByLabel("密码").fill("admin");
+	await page.locator("#admin-captcha").fill("2468");
+	const targetRequest = page.waitForRequest(
+		(request) =>
+			new URL(request.url()).pathname.endsWith("/api/admin/comments") &&
+			new URL(request.url()).searchParams.get("commentId") ===
+				"mail_target_older_than_first_page",
+	);
+	const loginResponse = page.waitForResponse(
+		(response) =>
+			response.request().method() === "POST" &&
+			new URL(response.url()).pathname.endsWith("/api/admin/session/login"),
+	);
+	await page.getByRole("button", { name: "登录后台", exact: true }).click();
+	expect((await loginResponse).status()).toBe(200);
+	await expect(
+		page.getByRole("button", { name: "退出", exact: true }),
+	).toBeVisible();
+	const query = new URL((await targetRequest).url()).searchParams;
+	expect(query.get("offset")).toBe("0");
+	expect(query.has("status")).toBe(false);
+	await expect(
+		page.getByText("当前显示链接中的评论", { exact: true }),
+	).toBeVisible();
+	await page.screenshot({
+		path: testInfo.outputPath("mail-target-desktop.png"),
+		fullPage: true,
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.screenshot({
+		path: testInfo.outputPath("mail-target-narrow.png"),
+		fullPage: true,
+	});
+	await expect(
+		page.getByText("该评论已删除或无权查看，请返回评论列表。", { exact: true }),
+	).toBeVisible();
+	await page.reload();
+	await expect(page).toHaveURL(/commentId=mail_target_older_than_first_page/u);
+	await expect(
+		page.getByText("当前显示链接中的评论", { exact: true }),
+	).toBeVisible();
+	await page.getByRole("button", { name: "查看全部评论", exact: true }).click();
+	await expect(page).not.toHaveURL(/commentId=/u);
+});
+
 async function openAdmin(page: Page) {
 	await page.goto("/qingyan/admin/");
 	const loginButton = page.getByRole("button", {

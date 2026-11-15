@@ -119,10 +119,12 @@ describe("comment captcha", () => {
 
 		expect(stateResponse.statusCode).toBe(200);
 		expect(
-			stateResponse.cookies.some((cookie) => cookie.name === "qingyan_visitor"),
+			stateResponse.cookies.some((cookie) =>
+				cookie.name.startsWith("qingyan_security_"),
+			),
 		).toBe(true);
-		const visitorCookie = stateResponse.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
+		const visitorCookie = stateResponse.cookies.find((cookie) =>
+			cookie.name.startsWith("qingyan_security_"),
 		);
 		const challengeId = stateResponse.json().challenge.challengeId as string;
 		const [session] = await fixture.app.db
@@ -143,7 +145,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha"),
 			payload: {
@@ -165,7 +167,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha"),
 			payload: {
@@ -198,8 +200,8 @@ describe("comment captcha", () => {
 		});
 		expect(initialState.statusCode).toBe(200);
 
-		const visitorCookie = initialState.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
+		const visitorCookie = initialState.cookies.find((cookie) =>
+			cookie.name.startsWith("qingyan_security_"),
 		);
 		const initialChallenge = initialState.json().challenge as {
 			challengeId: string;
@@ -228,7 +230,7 @@ describe("comment captcha", () => {
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 		});
@@ -239,7 +241,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/refresh",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 			payload: {
@@ -281,7 +283,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 			payload: {
@@ -303,7 +305,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 			payload: {

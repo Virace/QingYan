@@ -81,6 +81,7 @@ export function renderRecaptchaWidgetHtml(input: {
           siteKey: model.commentsSiteKey,
           pageKey: model.pageKey,
           challengeId: model.challengeId,
+          securityToken: new URLSearchParams(location.hash.slice(1)).get("securityToken") || undefined,
           token
         })
       });

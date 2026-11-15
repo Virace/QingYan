@@ -20,6 +20,10 @@ import {
 import { EmailReputationRepository } from "./email-reputation-repository";
 import { CommentEmailDeliveryRepository } from "./comment-email-delivery-repository";
 import type { CommentEmailDecisionReason } from "./comment-email-delivery-status";
+import {
+	captureCommentEventSnapshot,
+	type CommentEventSnapshot,
+} from "./comment-event-snapshot";
 
 export type CommentNotificationSource =
 	| "public_api"
@@ -31,6 +35,7 @@ export type CommentNotificationSource =
 	| "system";
 
 export interface CommentNotificationPlanInput {
+	commentSnapshot?: CommentEventSnapshot | null;
 	siteId: number;
 	siteKey: string;
 	pageKey: string;
@@ -160,6 +165,9 @@ export class CommentNotificationPlanner {
 				},
 				payload: {
 					event: "reply_approved",
+					commentSnapshot:
+						input.commentSnapshot ??
+						(await captureCommentEventSnapshot(this.db, input.commentId)),
 					source: input.source,
 					siteId: input.siteId,
 					siteKey: input.siteKey,

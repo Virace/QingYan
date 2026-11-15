@@ -21,6 +21,7 @@ import {
 	blacklistRules,
 	commenterNotificationPreferences,
 	commentRequestMetadata,
+	commentReviewEvents,
 	comments,
 	emailDeliveryReputation,
 	pageThreads,
@@ -31,6 +32,9 @@ import {
 	visitorRequestMetadata,
 	visitors,
 } from "../../db/schema";
+import { enqueueCommentNotificationIntent } from "../notifications/comment-notification-intent";
+import { requireCommentAccount } from "../comments/account-identity";
+import { AbuseRepository } from "../comments/abuse-repository";
 import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { CommentStatus } from "../comments/moderation-types";
 import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
@@ -621,6 +625,7 @@ export class AdminRepository {
 	}
 
 	public async listComments(input: {
+		commentId?: string;
 		siteId?: number;
 		pageKey?: string;
 		status?: CommentStatus;
@@ -630,8 +635,11 @@ export class AdminRepository {
 		limit: number;
 		offset: number;
 	}) {
-		const hasExplicitStatusFilter = Boolean(input.status || input.statusGroup);
+		const hasExplicitStatusFilter = Boolean(
+			input.commentId || input.status || input.statusGroup,
+		);
 		const conditions = [
+			input.commentId ? eq(comments.id, input.commentId) : undefined,
 			input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 			eq(pageThreads.kind, "public"),
 			input.status ? eq(comments.status, input.status) : undefined,
@@ -1782,23 +1790,93 @@ export class AdminRepository {
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
+			actorUserId?: number;
 		},
 	) {
-		await this.db
-			.update(comments)
-			.set({
-				status: input.status,
-				isPinned: input.isPinned,
-				isFolded: input.isFolded,
-				contentRaw: input.contentRaw,
-				contentHtml: input.contentRaw
-					? renderCommentHtml(input.contentRaw)
-					: undefined,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(comments.id, commentId));
-
-		return this.getCommentById(commentId);
+		return this.db.transaction(async (tx) => {
+			const [previous] = await tx
+				.select()
+				.from(comments)
+				.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+				.for("update")
+				.limit(1);
+			if (!previous) return undefined;
+			const status = input.status ?? (previous.status as CommentStatus);
+			const contentChanged =
+				input.contentRaw !== undefined &&
+				input.contentRaw !== previous.contentRaw;
+			const changed = status !== previous.status || contentChanged;
+			const nowIso = new Date().toISOString();
+			if (input.actorUserId && changed)
+				await requireCommentAccount(tx, input.actorUserId, previous.siteId);
+			const approval = changed
+				? {
+						approvedAt:
+							status === "approved" && input.actorUserId ? nowIso : null,
+						approvalSource:
+							status === "approved" && input.actorUserId ? "manual" : null,
+						approvedByUserId:
+							status === "approved" ? (input.actorUserId ?? null) : null,
+					}
+				: {};
+			await tx
+				.update(comments)
+				.set({
+					status,
+					isPinned: input.isPinned,
+					isFolded: input.isFolded,
+					contentRaw: input.contentRaw,
+					contentHtml:
+						input.contentRaw !== undefined
+							? renderCommentHtml(input.contentRaw)
+							: undefined,
+					updatedAt: nowIso,
+					...approval,
+				})
+				.where(eq(comments.id, commentId));
+			if (changed) {
+				await tx.insert(commentReviewEvents).values({
+					commentId,
+					actorUserId: input.actorUserId,
+					previousStatus: previous.status,
+					status,
+					contentChanged,
+					effectiveAt: nowIso,
+				});
+				const [site] = await tx
+					.select()
+					.from(sites)
+					.where(eq(sites.id, previous.siteId))
+					.limit(1);
+				const [thread] = await tx
+					.select()
+					.from(pageThreads)
+					.where(eq(pageThreads.id, previous.pageThreadId))
+					.limit(1);
+				if (site && thread)
+					await enqueueCommentNotificationIntent(tx, {
+						source: "admin_moderation",
+						siteId: previous.siteId,
+						siteKey: site.siteKey,
+						commentId,
+						pageKey: thread.pageKey,
+						status: status as CommentStatus,
+						previousStatus: previous.status as CommentStatus,
+						authorUserId: previous.authorUserId,
+						contentRaw: input.contentRaw ?? previous.contentRaw,
+						createdAt: previous.createdAt,
+						actorType: input.actorUserId ? "admin_user" : "system",
+						actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+						notifyBackend: true,
+						notifyReply: Boolean(
+							previous.parentId &&
+								previous.status !== "approved" &&
+								status === "approved",
+						),
+					});
+			}
+			return new AdminRepository(tx).getCommentById(commentId);
+		});
 	}
 
 	public async bulkUpdateComments(
@@ -1808,37 +1886,23 @@ export class AdminRepository {
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
+			actorUserId?: number;
 		},
 	) {
-		if (commentIds.length === 0) {
-			return [];
-		}
-
-		await this.db
-			.update(comments)
-			.set({
-				status: input.status,
-				isPinned: input.isPinned,
-				isFolded: input.isFolded,
-				contentRaw: input.contentRaw,
-				contentHtml: input.contentRaw
-					? renderCommentHtml(input.contentRaw)
-					: undefined,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
-
-		const updatedComments = await this.db
-			.select()
-			.from(comments)
-			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
-		const updatedById = new Map(
-			updatedComments.map((comment) => [comment.id, comment]),
-		);
-
-		return commentIds.flatMap((commentId) => {
-			const comment = updatedById.get(commentId);
-			return comment ? [comment] : [];
+		return this.db.transaction(async (tx) => {
+			const updated: Array<
+				NonNullable<Awaited<ReturnType<AdminRepository["getCommentById"]>>>
+			> = [];
+			const repository = new AdminRepository(tx);
+			for (const commentId of [...new Set(commentIds)].sort()) {
+				const comment = await repository.updateComment(commentId, input);
+				if (comment) updated.push(comment);
+			}
+			const byId = new Map(updated.map((comment) => [comment.id, comment]));
+			return commentIds.flatMap((id) => {
+				const comment = byId.get(id);
+				return comment ? [comment] : [];
+			});
 		});
 	}
 
@@ -2017,7 +2081,13 @@ export class AdminRepository {
 			return undefined;
 		}
 
-		await this.db.delete(blacklistRules).where(eq(blacklistRules.id, ruleId));
+		const penalty = await new AbuseRepository(this.db).release({
+			ruleId,
+			kind: "released",
+			reason: "管理员提前解除",
+		});
+		if (!penalty)
+			await this.db.delete(blacklistRules).where(eq(blacklistRules.id, ruleId));
 		return rule;
 	}
 
@@ -2057,12 +2127,7 @@ export class AdminRepository {
 			return [];
 		}
 
-		await this.db.delete(blacklistRules).where(
-			inArray(
-				blacklistRules.id,
-				rules.map((rule) => rule.id),
-			),
-		);
+		for (const rule of rules) await this.deleteBlacklistRule(rule.id);
 
 		return rules;
 	}
@@ -2251,6 +2316,8 @@ export class AdminRepository {
 			verifiedAuthorJson?: string;
 			staffDisplayJson?: string;
 			moderationJson?: string;
+			emailPolicyJson?: string;
+			abusePolicyJson?: string;
 			pageRegistryJson?: string;
 			engagementJson?: string;
 			commenterReplyEmailEnabled?: boolean;
@@ -2281,6 +2348,8 @@ export class AdminRepository {
 			verifiedAuthorJson: input.verifiedAuthorJson,
 			staffDisplayJson: input.staffDisplayJson,
 			moderationJson: input.moderationJson,
+			emailPolicyJson: input.emailPolicyJson,
+			abusePolicyJson: input.abusePolicyJson,
 			pageRegistryJson: input.pageRegistryJson,
 			engagementJson: input.engagementJson,
 			commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,

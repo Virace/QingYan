@@ -1,3 +1,5 @@
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -130,16 +132,12 @@ describe("commenter reply email smoke helpers", () => {
 	});
 
 	it("detects the ESM CLI entrypoint from file paths instead of raw file URLs", () => {
+		const entry = path.resolve("scripts/commenter-reply-email-smoke.ts");
+		expect(isSmokeCliEntryPoint(pathToFileURL(entry).href, entry)).toBe(true);
 		expect(
 			isSmokeCliEntryPoint(
-				"file:///H:/Programming/Web/QingYan/scripts/commenter-reply-email-smoke.ts",
-				"H:\\Programming\\Web\\QingYan\\scripts\\commenter-reply-email-smoke.ts",
-			),
-		).toBe(true);
-		expect(
-			isSmokeCliEntryPoint(
-				"file:///H:/Programming/Web/QingYan/scripts/commenter-reply-email-smoke.ts",
-				"H:\\Programming\\Web\\QingYan\\scripts\\other.ts",
+				pathToFileURL(entry).href,
+				path.resolve("scripts/other.ts"),
 			),
 		).toBe(false);
 	});

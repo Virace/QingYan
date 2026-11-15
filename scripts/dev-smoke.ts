@@ -60,9 +60,14 @@ async function main() {
 			headers: publicRequestHeaders,
 		});
 		assertResponseStatus("Captcha state", captchaState, 200);
-		const visitorCookie = captchaState.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
+		const securityToken = captchaState.headers["x-qingyan-security"];
+		if (typeof securityToken !== "string") {
+			throw new Error("Captcha security credential was not issued");
+		}
+		const authorizedPublicHeaders = {
+			...publicRequestHeaders,
+			"x-qingyan-security": securityToken,
+		};
 		const challengeId = captchaState.json().challenge.challengeId as string;
 		const [captchaSession] = await app.db
 			.select()
@@ -80,10 +85,7 @@ async function main() {
 		const captchaVerification = await app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
-			headers: publicRequestHeaders,
+			headers: authorizedPublicHeaders,
 			payload: {
 				siteKey: "fangyuan",
 				pageKey,
@@ -97,10 +99,7 @@ async function main() {
 		const createComment = await app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
-			headers: publicRequestHeaders,
+			headers: authorizedPublicHeaders,
 			payload: {
 				siteKey: "fangyuan",
 				pageKey,
@@ -121,6 +120,9 @@ async function main() {
 		});
 		assertResponseStatus("Comment creation", createComment, 200);
 		const commentId = createComment.json().comment.id as string;
+		const visitorCookie = createComment.cookies.find(
+			(cookie) => cookie.name === "qingyan_visitor",
+		);
 
 		const { adminCookie, csrfToken } = await loginAsAdmin(app);
 		const approveComment = await app.inject({

@@ -171,6 +171,49 @@ function defineTaskType<TPayload>(
 
 export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 	const registry = new TaskTypeRegistry();
+	registry.register(
+		defineTaskType({
+			type: "waf_sync",
+			label: "站点访问防护同步",
+			description: "核对站点访问限制、处理到期并采集防护事件。",
+			scope: "site",
+			permissions: {
+				read: "blacklist.read",
+				create: "blacklist.create",
+				run: "blacklist.create",
+				update: "blacklist.create",
+				delete: "blacklist.delete",
+			},
+			payloadSchema: z
+				.object({
+					siteId: z.number().int().positive().optional(),
+					siteKey: z.string().min(1).optional(),
+					recordId: z.string().min(1).optional(),
+				})
+				.refine(
+					(payload) =>
+						payload.siteId !== undefined || payload.siteKey !== undefined,
+				),
+			defaultPayload: { siteKey: "" },
+			defaultPolicy: { maxAttempts: 3, retryDelaySec: 60, timeoutMs: 300000 },
+			schedule: { manual: true, presets: [], cron: true, condition: false },
+			dangerous: true,
+			reuse: {
+				service: "WafRuntime",
+				method: "execute",
+				file: "src/modules/waf/runtime.ts",
+			},
+			precondition(_payload, context) {
+				return context.services.wafSync && !context.services.wafSync.paused
+					? "ok"
+					: "blocked";
+			},
+			async run(payload, context) {
+				if (!context.services.wafSync) throw new Error("WAF_NOT_CONFIGURED");
+				return context.services.wafSync.execute(payload, context);
+			},
+		}),
+	);
 
 	registry.register(
 		defineTaskType<PageSourceRefreshPayload>({

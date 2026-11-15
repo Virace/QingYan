@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
 
 import { InvalidRequestError } from "../shared/errors";
 import { AdminManagementService } from "./management-service";
@@ -118,5 +119,27 @@ export const adminBlacklistRoutes: FastifyPluginAsync = async (fastify) => {
 				actorUserId: session.user.id,
 			}),
 		};
+	});
+	fastify.post("/:ruleId/release", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const params = adminBlacklistParamsSchema.parse(request.params);
+		const body = z
+			.object({
+				kind: z.enum(["revoked", "released"]),
+				reason: z.string().trim().min(1).max(500),
+			})
+			.safeParse(request.body);
+		if (!body.success) throw new InvalidRequestError();
+		const rule = await repository.getBlacklistRule(params.ruleId);
+		requireSiteIdAccess({
+			session,
+			siteId: rule?.siteId,
+			permission: "blacklist.delete",
+		});
+		return service.releaseBlacklist({
+			ruleId: params.ruleId,
+			...body.data,
+			actorUserId: session.user.id,
+		});
 	});
 };

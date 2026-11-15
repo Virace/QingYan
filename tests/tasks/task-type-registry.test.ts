@@ -7,6 +7,7 @@ describe("built-in task type registry", () => {
 		const registry = createBuiltInTaskTypeRegistry();
 
 		expect(registry.list().map((definition) => definition.type)).toEqual([
+			"waf_sync",
 			"page_source_refresh",
 			"page_metadata_refresh",
 			"comment_ip_refresh",

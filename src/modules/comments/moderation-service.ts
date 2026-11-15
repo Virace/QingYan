@@ -28,6 +28,7 @@ export interface ModerationReviewInput {
 }
 
 export interface ModerationReviewResult {
+	localReview?: import("./local-review").LocalReviewEvidence;
 	provider: ModerationProvider;
 	mode: SiteModerationSettings["mode"];
 	decision: ModerationDecision;

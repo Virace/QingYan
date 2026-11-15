@@ -30,6 +30,8 @@ import {
 	textareaClass,
 } from "../shared/admin-ui";
 import { useAdminConfirmDialog } from "../shared/confirm-dialog";
+import { CommentAbusePolicyEditor } from "./comment-abuse-policy-editor";
+import { CommentEmailPolicyEditor } from "./comment-email-policy-editor";
 import { NotificationDiagnosticsPanel } from "./notification-settings-panels";
 import {
 	buildSettingsErrorModel,
@@ -329,7 +331,38 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 							</Tabs.Trigger>
 						</Tabs.List>
 						<div className="pt-4">
-							<Tabs.Content value="comments">
+							<Tabs.Content value="comments" className="grid gap-4">
+								<CommentEmailPolicyEditor
+									siteKey={resolvedSiteKey}
+									policy={draft.comments.emailPolicy}
+									verifiedAuthorEmail={draft.comments.verifiedAuthor.email}
+									error={firstFieldError(saveError, "comments.emailPolicy")}
+									onChange={(emailPolicy) =>
+										setDraft({
+											...draft,
+											comments: { ...draft.comments, emailPolicy },
+										})
+									}
+								/>
+								<CommentAbusePolicyEditor
+									policy={draft.comments.abusePolicy}
+									onChange={(abusePolicy) =>
+										setDraft({
+											...draft,
+											comments: {
+												...draft.comments,
+												abusePolicy,
+												abuseGuard: {
+													...draft.comments.abuseGuard,
+													autoBlacklist: {
+														...draft.comments.abuseGuard.autoBlacklist,
+														ttlSec: abusePolicy.penaltyTtlSec,
+													},
+												},
+											},
+										})
+									}
+								/>
 								<div className="grid gap-4 md:grid-cols-2">
 									<SettingsToggleGroup
 										title="评论"
@@ -375,6 +408,11 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 																				: "approved",
 																		moderation: {
 																			...draft.comments.moderation,
+																			localReviewEnabled:
+																				mode === "akismet_auto"
+																					? draft.comments.moderation
+																							.localReviewEnabled
+																					: false,
 																			mode,
 																			provider:
 																				mode === "akismet_auto" ||
@@ -396,6 +434,29 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 															</option>
 														</select>
 													</Field>
+													<BooleanField
+														label="Akismet 通过后仍需本地审核"
+														description="历史依据不足时进入待审；请先在通知页签配置待审接收人。"
+														checked={
+															draft.comments.moderation.localReviewEnabled ??
+															false
+														}
+														disabled={
+															draft.comments.moderation.mode !== "akismet_auto"
+														}
+														onCheckedChange={(localReviewEnabled) =>
+															setDraft({
+																...draft,
+																comments: {
+																	...draft.comments,
+																	moderation: {
+																		...draft.comments.moderation,
+																		localReviewEnabled,
+																	},
+																},
+															})
+														}
+													/>
 												</div>
 											</SettingsSection>
 											<Field label="验证码模式">
@@ -961,28 +1022,7 @@ export function SiteSettingsPage({ siteKey }: { siteKey?: string }) {
 													<option value="all">全局</option>
 												</select>
 											</Field>
-											<Field label="自动拉黑 TTL（秒）">
-												<Input
-													type="number"
-													min={1}
-													value={draft.comments.abuseGuard.autoBlacklist.ttlSec}
-													onChange={(event) =>
-														setDraft({
-															...draft,
-															comments: {
-																...draft.comments,
-																abuseGuard: {
-																	...draft.comments.abuseGuard,
-																	autoBlacklist: {
-																		...draft.comments.abuseGuard.autoBlacklist,
-																		ttlSec: Number(event.target.value),
-																	},
-																},
-															},
-														})
-													}
-												/>
-											</Field>
+
 											<SettingsSection
 												title="请求元数据"
 												description="原始 IP 和 User-Agent 只用于后台记录、反滥用和解析；公开接口只返回按开关整理后的地区和设备信息。"

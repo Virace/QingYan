@@ -102,12 +102,13 @@ function recordArchive(
 	context: ConversionContext,
 	table: string,
 	row: SourceRow,
+	reason = "retired-backup:source.sqlite",
 ) {
 	context.rowMappings.push({
 		table,
 		sourceId: String(row.id),
 		targetId: null,
-		reason: "retired-backup:source.sqlite",
+		reason,
 	});
 	return null;
 }
@@ -179,6 +180,13 @@ export function transformRow(
 	context: ConversionContext,
 ): SourceRow | null {
 	const row = { ...original };
+	if (table === "captcha_sessions")
+		return recordArchive(
+			context,
+			table,
+			row,
+			"captcha-session-expired:source.sqlite",
+		);
 	if (table === "scheduled_tasks" && context.retiredTaskIds.has(String(row.id)))
 		return recordArchive(context, table, row);
 	if (table === "task_runs" && context.retiredRunIds.has(String(row.id)))

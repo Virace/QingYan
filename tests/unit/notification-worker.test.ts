@@ -4,6 +4,7 @@ import type { AppDatabase } from "../../src/db/client";
 import { createDatabaseClients } from "../../src/db/client";
 import {
 	commenterNotificationPreferences,
+	adminBootstrapState,
 	comments,
 	pageThreads,
 	siteSettings,
@@ -18,6 +19,10 @@ import { CommenterPreferencesRepository } from "../../src/modules/notifications/
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
+import { NotificationTemplateRepository } from "../../src/modules/notifications/templates/repository";
+import { NotificationTemplateResolver } from "../../src/modules/notifications/templates/resolver";
+import { enqueueCommentNotificationIntent } from "../../src/modules/notifications/comment-notification-intent";
+import { captureCommentEventSnapshot } from "../../src/modules/notifications/comment-event-snapshot";
 import { UnsubscribeTokenService } from "../../src/modules/notifications/unsubscribe-token-service";
 import { DatabaseTaskQueue } from "../../src/modules/tasks/database-task-queue";
 import { TaskEventLogRepository } from "../../src/modules/tasks/task-event-log-repository";
@@ -197,6 +202,223 @@ async function createQueuedCommenterReplyTask(
 }
 
 describe("notification worker", () => {
+	it("renders saved backend templates with bounded event content and keeps the same template and context on retry", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const db = fixture.app.db;
+		const repository = new TaskRunRepository(db);
+		const reply = await createQueuedCommenterReplyTask(db, repository);
+		await repository.cancel(reply.task.id, { code: "TEST_NOT_SELECTED" });
+		await db
+			.update(adminBootstrapState)
+			.set({ consolePath: "/private-console" });
+		await db
+			.update(comments)
+			.set({
+				createdAt: "2025-01-02T03:04:05.000Z",
+				contentRaw: "before <script> & 中文\nline",
+			})
+			.where(eq(comments.id, "c_worker_reply"));
+		const queued = await repository.createNotificationTaskWithDelivery({
+			task: {
+				type: "backend_user_comment_pending",
+				siteId: reply.task.siteId,
+				siteKey: "fangyuan",
+				subjectType: "comment",
+				subjectId: "c_worker_reply",
+				payload: {
+					includeCommentContent: "summary",
+					contentRaw: "before <script> & 中文\nline",
+				},
+				payloadSummary: { channel: "email" },
+				maxAttempts: 2,
+			},
+			delivery: {
+				channel: "email",
+				recipientType: "backend_user",
+				recipientAddressSnapshot: "admin@example.test",
+				recipientIdentityKey: "admin",
+				eventFamily: "admin_comment_pending",
+				templateKey: "backend_user.comment.pending",
+			},
+		});
+		const templates = new NotificationTemplateRepository(db);
+		await templates.upsert({
+			key: "backend_comment_pending_email_html",
+			format: "html",
+			subjectTemplate: "saved {{comment.authorName}}",
+			bodyTemplate:
+				'<pre>{{comment.content}}</pre><p>{{time.display}}</p><a href="{{links.adminComment}}">处理评论</a>',
+		});
+		const send = vi
+			.fn()
+			.mockRejectedValueOnce(new NotificationChannelError("temporary", "retry"))
+			.mockResolvedValue({ providerMessageId: "accepted" });
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(db),
+			repository,
+			adapters: { email: { send } },
+			templates: new NotificationTemplateResolver(templates),
+			loadEmailFormat: async () => "html",
+			templateContextBuilder: new NotificationTemplateContextBuilder(
+				db,
+				fixture.app.config.server,
+			),
+			retryDelaySec: 1,
+		});
+		await worker.runNextNotificationTask({ limit: 1 });
+		expect(send).toHaveBeenCalledWith(
+			expect.objectContaining({
+				subject: "saved Reply",
+				format: "html",
+				body: expect.stringContaining("before &lt;script&gt; &amp; 中文\nline"),
+			}),
+		);
+		const body = send.mock.calls[0][0].body as string;
+		expect(body).toContain("2025-01-02 03:04:05 UTC");
+		expect(body).toContain("/qingyan/private-console?");
+		expect(body).toContain("siteKey=fangyuan");
+		expect(body).toContain("commentId=c_worker_reply");
+		await templates.upsert({
+			key: "backend_comment_pending_email_html",
+			format: "html",
+			bodyTemplate: "changed template",
+		});
+		await db
+			.update(comments)
+			.set({ contentRaw: "changed comment" })
+			.where(eq(comments.id, "c_worker_reply"));
+		await worker.runNextNotificationTask({
+			limit: 1,
+			now: new Date(Date.now() + 2000),
+		});
+		expect(send.mock.calls[1][0]).toEqual(send.mock.calls[0][0]);
+		await expect(repository.getRequired(queued.task.id)).resolves.toMatchObject(
+			{ status: "succeeded" },
+		);
+	});
+
+	it("applies none, summary and full content levels to backend comment and parent context", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		const reply = await createQueuedCommenterReplyTask(
+			fixture.app.db,
+			repository,
+		);
+		const builder = new NotificationTemplateContextBuilder(
+			fixture.app.db,
+			fixture.app.config.server,
+		);
+		const content = "文".repeat(520);
+		for (const level of ["none", "summary", "full"] as const) {
+			const context = await builder.build({
+				task: {
+					...reply.task,
+					payload: { includeCommentContent: level, contentRaw: content },
+				},
+				delivery: {
+					...reply.delivery,
+					recipientType: "backend_user",
+					templateKey: "backend_user.comment.pending",
+				},
+			});
+			const comment = context.comment as {
+				content: string;
+				contentNote: string;
+			};
+			expect(comment.content).toBe(
+				level === "none"
+					? ""
+					: level === "full"
+						? content
+						: `${"文".repeat(500)}…`,
+			);
+			if (level === "none")
+				expect((context.parent as { content: string }).content).toBe("");
+			if (level === "summary") expect(comment.contentNote).toContain("截断");
+		}
+		const snapshot = await captureCommentEventSnapshot(
+			fixture.app.db,
+			"c_worker_reply",
+		);
+		await fixture.app.db
+			.delete(comments)
+			.where(eq(comments.id, "c_worker_reply"));
+		const retainedEvent = await builder.build({
+			task: {
+				...reply.task,
+				payload: { commentSnapshot: snapshot, includeCommentContent: "full" },
+			},
+			delivery: {
+				...reply.delivery,
+				recipientType: "backend_user",
+				templateKey: "backend_user.comment.approved",
+			},
+		});
+		expect((retainedEvent.comment as { content: string }).content).toBe(
+			"reply content",
+		);
+	});
+
+	it("commits notification intent with its transaction and retries planning failures", async () => {
+		const fixture = await createTestApp();
+		cleanups.push(fixture.cleanup);
+		const repository = new TaskRunRepository(fixture.app.db);
+		const reply = await createQueuedCommenterReplyTask(
+			fixture.app.db,
+			repository,
+		);
+		await repository.cancel(reply.task.id, { code: "TEST_NOT_SELECTED" });
+		const input = {
+			siteId: reply.task.siteId as number,
+			siteKey: "fangyuan",
+			pageKey: "/posts/worker-reply/",
+			commentId: "c_worker_reply",
+			source: "public_api" as const,
+			status: "pending" as const,
+			previousStatus: null,
+			authorUserId: null,
+			notifyBackend: true,
+			notifyReply: false,
+		};
+		await expect(
+			fixture.app.db.transaction(async (tx) => {
+				await enqueueCommentNotificationIntent(tx, input);
+				throw new Error("rollback comment");
+			}),
+		).rejects.toThrow("rollback comment");
+		expect(
+			(await fixture.app.db.select().from(taskRuns)).filter(
+				(task) => task.type === "comment_notification_intent",
+			),
+		).toHaveLength(0);
+		const intent = await fixture.app.db.transaction((tx) =>
+			enqueueCommentNotificationIntent(tx, input),
+		);
+		const plan = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("temporary planning failure"))
+			.mockResolvedValue(undefined);
+		const worker = new NotificationWorker({
+			queue: new DatabaseTaskQueue(fixture.app.db),
+			repository,
+			planCommentNotification: plan,
+		});
+		await worker.runNextNotificationTask({ limit: 1 });
+		await expect(
+			repository.getRequired(intent?.id ?? ""),
+		).resolves.toMatchObject({ status: "retrying", attempts: 1 });
+		await worker.runNextNotificationTask({
+			limit: 1,
+			now: new Date(Date.now() + 16000),
+		});
+		await expect(
+			repository.getRequired(intent?.id ?? ""),
+		).resolves.toMatchObject({ status: "succeeded" });
+		expect(plan).toHaveBeenCalledTimes(2);
+	});
+
 	it("leaves non-notification tasks queued when claiming work", async () => {
 		const workspace = createTestWorkspace("qingyan-worker-category-");
 		await applyInitialMigration(workspace.databaseUrl);

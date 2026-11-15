@@ -201,6 +201,32 @@ export async function detectUpgradeRuntimeState(
 					"确认后先停止业务写入并完成 PostgreSQL 整实例备份，再执行升级。",
 				],
 			};
+			if (migrations.pending.includes("0001_api_abuse_and_email_policy.sql")) {
+				plan.dbSettingChanges.push(
+					{
+						path: "site_settings.email_policy",
+						action: "add",
+						after: {
+							mode: "allow_all",
+							allowed: [],
+							denied: [],
+							protectedDomains: [],
+						},
+						note: "默认不限制访客邮箱来源；受保护域名需按站点显式配置。",
+					},
+					{
+						path: "site_settings.moderation.localReviewEnabled",
+						action: "add",
+						after: false,
+						note: "保留当前站点审核方式；启用本地后置审核前确认待审邮件接收人。",
+					},
+				);
+				plan.risks.push(
+					"旧验证码会话与验证授权将失效，访客需要重新完成验证；新授权绑定站点与操作且只消费一次。",
+					"历史评论缺少可靠人工审核来源或批准时间时保留未知，不作为新后置审核的充分公开依据。",
+					"新增独立 IP 与短突发额度按默认策略生效，共享出口可在站点设置调整；本地处罚和已确认复犯状态持久保存。",
+				);
+			}
 			return { state: "upgrade_required", plan };
 		}
 		if (!names.has("admin_bootstrap_state") || !names.has("sites"))

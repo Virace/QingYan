@@ -132,6 +132,7 @@ export async function verifyConvertedDatabase(
 						entry.sourceId === String(original.id) &&
 						[
 							"retired-backup:source.sqlite",
+							"captcha-session-expired:source.sqlite",
 							"canonical-metric-identity-merge",
 							"nullable-visitor-metadata-identity-merge",
 						].includes(entry.reason),

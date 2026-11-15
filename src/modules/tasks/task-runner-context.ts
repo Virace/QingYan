@@ -44,6 +44,13 @@ export interface TaskRunnerContext {
 }
 
 export interface TaskRunnerServices {
+	wafSync?: {
+		paused: boolean;
+		execute(
+			input: import("../waf/runtime").WafTaskInput,
+			context?: TaskRunnerContext,
+		): Promise<unknown>;
+	};
 	pageSourceRefresh?: {
 		executeRefresh(
 			input: {

@@ -571,8 +571,8 @@ test("system settings mixed description fields keep switch controls aligned", as
 	await selectSettingsTab(page, "邮件");
 	await ensureSwitchState(page, "系统邮件", true);
 	await expect(page.getByText("SMTP Host", { exact: true })).toBeVisible();
-	await expectFieldRowsAligned(page, ["系统邮件", "SMTP Host"]);
-	await expectFieldControlsNearlyAligned(page, ["系统邮件", "SMTP Host"], 3);
+	await expectFieldRowsAligned(page, ["系统邮件", "评论邮件格式"]);
+	await expectFieldControlsNearlyAligned(page, ["系统邮件", "评论邮件格式"], 3);
 	await expectFieldControlGap(page, "SMTP Host", 14);
 });
 

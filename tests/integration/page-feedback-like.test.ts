@@ -219,7 +219,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: {
 				referer: "http://localhost:4321/post:like",
@@ -266,25 +266,34 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			pageUrl: "https://fangyuan.example.com/posts/like-auto-blacklist/",
 		};
 
-		for (const _ of [1, 2, 3]) {
+		for (let attempt = 0; attempt < 2; attempt += 1) {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/page-feedback/like",
-				headers: {
-					referer: "http://localhost:4321/post:like-auto-blacklist",
-				},
+				headers: { referer: "http://localhost:4321/post:like-auto-blacklist" },
 				payload,
 			});
 			expect(response.statusCode).toBe(200);
+		}
+		for (let attempt = 0; attempt < 10; attempt += 1) {
+			const response = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/page-feedback/like",
+				headers: { referer: "http://localhost:4321/post:like-auto-blacklist" },
+				payload,
+			});
+			expect(response.statusCode).toBe(429);
 		}
 		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([
 			expect.objectContaining({
 				targetType: "ip",
 				matchMode: "exact",
 				source: "auto",
-				reason: "abuse_guard",
+				reason: "rate_limited",
 			}),
 		]);
+		const [savedThread] = await fixture.app.db.select().from(pageThreads);
+		expect(savedThread.pageLikeCount).toBe(2);
 
 		const blocked = await fixture.app.inject({
 			method: "POST",
@@ -371,14 +380,14 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 		});
 		const captchaState = await fixture.app.inject({
 			method: "GET",
-			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:like-threshold",
+			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&action=page_like&pageKey=post:like-threshold",
 			headers: {
 				referer: "http://localhost:4321/post:like-threshold",
 			},
 		});
 		expect(captchaState.statusCode).toBe(200);
-		const visitorCookie = captchaState.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
+		const visitorCookie = captchaState.cookies.find((cookie) =>
+			cookie.name.startsWith("qingyan_security_"),
 		);
 		const cookieValue = visitorCookie?.value ?? "";
 		const challengeId = captchaState.json().challenge.challengeId as string;
@@ -400,7 +409,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
 			cookies: {
-				qingyan_visitor: cookieValue,
+				[visitorCookie?.name ?? "qingyan_security"]: cookieValue,
 			},
 			headers: {
 				referer: "http://localhost:4321/post:like-threshold",
@@ -459,7 +468,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			payload: {
 				siteKey: "default",
@@ -585,7 +594,7 @@ describe("POST /qingyan/api/page-feedback/like", () => {
 			method: "POST",
 			url: "/qingyan/api/page-feedback/like",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: {
 				referer: "http://localhost:4321/post:trusted-like",

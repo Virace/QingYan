@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	adminUsers,
 	captchaSessions,
 	commentRequestMetadata,
 	comments,
@@ -1588,7 +1589,7 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		});
 	});
 
-	it("returns minimal verified author viewer only for logged-in admin", async () => {
+	it("returns current account identity only for an authorized session, independently of the trusted display switch", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 
@@ -1623,6 +1624,10 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 		expect(publicResponse.statusCode).toBe(200);
 		expect(publicResponse.json()).not.toHaveProperty("viewer");
 
+		await fixture.app.db
+			.update(adminUsers)
+			.set({ displayName: "Account Author" })
+			.where(eq(adminUsers.username, "admin"));
 		const { adminCookie } = await loginAsAdmin(fixture.app);
 		const adminResponse = await fixture.app.inject({
 			method: "GET",
@@ -1637,10 +1642,33 @@ describe("GET /qingyan/api/comments/bootstrap", () => {
 
 		expect(adminResponse.statusCode).toBe(200);
 		expect(adminResponse.json().viewer).toEqual({
+			commentAccount: { displayName: "Account Author", canComment: true },
 			verifiedAuthor: {
-				displayName: "Virace",
+				displayName: "Account Author",
 				badgeLabel: "楼主",
 			},
+		});
+		await fixture.app.db
+			.update(siteSettings)
+			.set({
+				verifiedAuthorJson: serializeVerifiedAuthorSettings({
+					enabled: false,
+					displayName: "Virace",
+					email: "owner@example.com",
+					website: "",
+					badgeLabel: "楼主",
+				}),
+			})
+			.where(eq(siteSettings.siteId, site.id));
+		const displayDisabled = await fixture.app.inject({
+			method: "GET",
+			url: "/qingyan/api/comments/bootstrap?siteKey=fangyuan",
+			headers: { referer: "http://localhost:4321/post:viewer-state" },
+			cookies: { qingyan_admin: adminCookie.value },
+		});
+		expect(displayDisabled.statusCode).toBe(200);
+		expect(displayDisabled.json().viewer).toEqual({
+			commentAccount: { displayName: "Account Author", canComment: true },
 		});
 	});
 

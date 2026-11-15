@@ -21,6 +21,8 @@ export interface RequestContext {
 	siteKey?: string;
 	pageKey?: string;
 	visitor?: VisitorIdentity;
+	securityToken?: string;
+	securitySubjectId?: string;
 	ip: string;
 	startedAt: number;
 	userAgent?: string;

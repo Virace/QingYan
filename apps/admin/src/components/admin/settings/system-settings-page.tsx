@@ -1067,6 +1067,26 @@ export function SystemSettingsPage({ siteKey }: { siteKey: string }) {
 											/>
 											{showMailDetails(draft) ? (
 												<>
+													<Field label="评论邮件格式">
+														<select
+															className={inputClass}
+															value={draft.mail.commentFormat}
+															onChange={(event) =>
+																setDraft({
+																	...draft,
+																	mail: {
+																		...draft.mail,
+																		commentFormat: event.target.value as
+																			| "html"
+																			| "text",
+																	},
+																})
+															}
+														>
+															<option value="text">纯文本</option>
+															<option value="html">HTML</option>
+														</select>
+													</Field>
 													<Field label="SMTP Host">
 														<Input
 															value={draft.mail.smtp.host}

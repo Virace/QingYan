@@ -38,7 +38,9 @@ function escapeHtml(value: string): string {
 }
 
 function sanitizeHeader(value: string): string {
-	return value.replace(/[\r\n]+/gu, " ").trim();
+	return Array.from(value.replace(/[\r\n]+/gu, " ").trim())
+		.slice(0, 200)
+		.join("");
 }
 
 function renderTemplate(

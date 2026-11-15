@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, pgTable } from "drizzle-orm/pg-core";
+import { bigint, index, pgTable, integer } from "drizzle-orm/pg-core";
 import { adminUsers } from "./admin-users";
 import { jsonText, exactText as text, utcTimestamp } from "./column-types";
 import { sites } from "./sites";
@@ -24,6 +24,43 @@ export const blacklistRules = pgTable(
 	},
 	(table) => [
 		index("blacklist_rules_target_idx").on(table.targetType, table.targetValue),
+	],
+);
+
+export const securityPenalties = pgTable(
+	"security_penalties",
+	{
+		id: text("id").primaryKey(),
+		siteId: bigint("site_id", { mode: "number" })
+			.notNull()
+			.references(() => sites.id),
+		ip: text("ip").notNull(),
+		scope: text("scope").notNull(),
+		reason: text("reason").notNull(),
+		policyVersion: text("policy_version").notNull(),
+		stateVersion: integer("state_version").notNull().default(1),
+		startedAt: utcTimestamp("started_at").notNull(),
+		expiresAt: utcTimestamp("expires_at").notNull(),
+		releasedAt: utcTimestamp("released_at"),
+		releaseKind: text("release_kind"),
+		releaseReason: text("release_reason"),
+		releasedByUserId: bigint("released_by_user_id", {
+			mode: "number",
+		}).references(() => adminUsers.id),
+		evidenceJson: jsonText("evidence_json").notNull(),
+		sourceRuleId: bigint("source_rule_id", { mode: "number" }).references(
+			() => blacklistRules.id,
+		),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+	},
+	(table) => [
+		index("security_penalties_subject_idx").on(
+			table.siteId,
+			table.ip,
+			table.startedAt,
+		),
 	],
 );
 

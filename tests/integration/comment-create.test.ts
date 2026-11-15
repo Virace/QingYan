@@ -363,8 +363,8 @@ describe("POST /qingyan/api/comments", () => {
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:create-comment",
 			headers: refererFor("post:create-comment"),
 		});
-		const visitorCookie = stateResponse.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
+		const visitorCookie = stateResponse.cookies.find((cookie) =>
+			cookie.name.startsWith("qingyan_security_"),
 		);
 		const challengeId = stateResponse.json().challenge.challengeId as string;
 		const [session] = await fixture.app.db
@@ -385,7 +385,7 @@ describe("POST /qingyan/api/comments", () => {
 			method: "POST",
 			url: "/qingyan/api/comments",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:create-comment"),
 			payload: {
@@ -946,6 +946,7 @@ describe("POST /qingyan/api/comments", () => {
 			captchaMode: "threshold",
 			captchaThresholdWindowSec: 60,
 			captchaThresholdMaxActions: 3,
+			abusePolicyJson: JSON.stringify({ commentBurstMax: 10 }),
 		});
 		await seedActivePage(fixture, "post:threshold-comment");
 
@@ -981,6 +982,11 @@ describe("POST /qingyan/api/comments", () => {
 			url: "/qingyan/api/comments",
 			cookies: {
 				qingyan_visitor: visitorCookie?.value ?? "",
+				...Object.fromEntries(
+					first.cookies
+						.filter((cookie) => cookie.name.startsWith("qingyan_security_"))
+						.map((cookie) => [cookie.name, cookie.value]),
+				),
 			},
 			headers: refererFor("post:threshold-comment"),
 			payload: {
@@ -1066,30 +1072,31 @@ describe("POST /qingyan/api/comments", () => {
 				})
 			).statusCode,
 		).toBe(200);
-		expect(
-			(
-				await fixture.app.inject({
-					method: "POST",
-					url: "/qingyan/api/comments",
-					headers: refererFor("post:auto-blacklist"),
-					payload: makePayload("3"),
-				})
-			).statusCode,
-		).toBe(200);
-
+		for (let attempt = 0; attempt < 10; attempt += 1) {
+			const rejected = await fixture.app.inject({
+				method: "POST",
+				url: "/qingyan/api/comments",
+				headers: refererFor("post:auto-blacklist"),
+				payload: makePayload("rejected-" + attempt),
+			});
+			expect(rejected.statusCode).toBe(429);
+		}
+		expect(await fixture.app.db.select().from(comments)).toHaveLength(2);
+		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([
+			expect.objectContaining({
+				source: "auto",
+				targetType: "ip",
+				reason: "rate_limited",
+			}),
+		]);
 		const blocked = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
 			headers: refererFor("post:auto-blacklist"),
-			payload: makePayload("4"),
+			payload: makePayload("blocked"),
 		});
-
 		expect(blocked.statusCode).toBe(403);
-		expect(blocked.json()).toMatchObject({
-			error: {
-				code: "COMMENT_BLACKLISTED",
-			},
-		});
+		expect(blocked.json().error.code).toBe("COMMENT_BLACKLISTED");
 	});
 
 	it("does not create auto blacklist rules when the abuse guard is disabled", async () => {
@@ -1169,14 +1176,16 @@ describe("POST /qingyan/api/comments", () => {
 			},
 		});
 
-		for (const suffix of ["1", "2", "3"]) {
+		for (const suffix of Array.from({ length: 12 }, (_, index) =>
+			String(index + 1),
+		)) {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/comments",
 				headers: refererFor("post:auto-blacklist-disabled"),
 				payload: makePayload(suffix),
 			});
-			expect(response.statusCode).toBe(200);
+			expect(response.statusCode).toBe(suffix === "1" ? 200 : 429);
 		}
 
 		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([]);

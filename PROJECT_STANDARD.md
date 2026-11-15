@@ -66,9 +66,11 @@ pnpm check:system
 ```
 
 - 数据库测试必须显式设置 `QINGYAN_TEST_DATABASE_URL`，指向隔离 PostgreSQL 测试实例。fixture 账号需有建库权限，仅为本轮生成的 `qingyan_test_<随机值>` 建库并清理，不得指向生产。初始化与命令见 `docs/deployment.md`。
+- 首次检出或缺少 `dist/admin/index.html` 时，先运行 `pnpm build:admin`，再执行 `pnpm test`、`pnpm check` 或 `pnpm check:system`。Admin 启动集成测试会访问真实构建页面，缺少产物时服务按合同返回 `ADMIN_UI_NOT_BUILT`。
 - `pnpm test` 运行 `tests/**/*.test.ts`。定向测试使用上面的 `pnpm exec vitest run --config vitest.config.ts <paths...>`；不要在 `pnpm test` 后加 `--`，当前脚本会把该形式错误地退化为完整测试集。
 - `pnpm test:smoke` 使用隔离 PostgreSQL，通过 Fastify 注入完成验证码、评论、审核和读取的核心链路。
 - `pnpm test:e2e` 启动本地 API 与 Admin Vite 服务，运行 Chromium 流程。
+- Admin E2E 固定一个 worker 串行执行，避免受限容器按宿主 CPU 数启动多个浏览器，导致冷启动与交互累计超过用例期限。
 - `pnpm test:system` 串行运行 API/PostgreSQL 冒烟与 Admin E2E。
 - `pnpm test:updater` 与 `pnpm test:updater:real-git` 需要 Bash；后者还会在临时目录创建真实 Git 仓库。两者不访问真实部署。
 - `pnpm test:installer` 使用 Bash、Git 和 Node，在 `.temp/install-script/` 保留真实本地 Git 仓库、生成的部署文件及日志；验证安装、分离目录和缓存缺失时的更新，Docker/网络边界使用受控替身。

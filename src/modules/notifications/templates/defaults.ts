@@ -44,6 +44,18 @@ const channelMetadata = {
 
 const commonPlaceholders: NotificationTemplatePlaceholder[] = [
 	{
+		path: "time.display",
+		label: "提交时间",
+		description: "评论真实提交时间，使用 UTC 时区。",
+		jsonSupported: true,
+	},
+	{
+		path: "comment.contentNote",
+		label: "正文范围",
+		description: "正文级别或摘要截断说明。",
+		jsonSupported: true,
+	},
+	{
 		path: "site.name",
 		label: "站点名称",
 		description: "当前站点展示名称。",
@@ -105,6 +117,28 @@ const commonPlaceholders: NotificationTemplatePlaceholder[] = [
 	},
 ];
 
+const adminPlaceholders: NotificationTemplatePlaceholder[] = [
+	...commonPlaceholders.filter((item) => item.path !== "links.unsubscribe"),
+	...[
+		["comment.authorEmail", "评论邮箱"],
+		["comment.authorWebsite", "评论者网站"],
+		["comment.authorIdentity", "评论身份"],
+		["comment.status", "审核状态"],
+		["parent.authorName", "回复对象"],
+		["parent.content", "原评论摘要"],
+		["moderation.verdict", "反垃圾结果"],
+		["moderation.reason", "审核说明"],
+		["request.ip", "来源 IP"],
+		["request.userAgent", "浏览器标识"],
+		["request.device", "浏览器及系统"],
+	].map(([path, label]) => ({
+		path,
+		label,
+		description: label,
+		jsonSupported: true,
+	})),
+];
+
 const eventMetadata: Record<
 	string,
 	{
@@ -120,18 +154,14 @@ const eventMetadata: Record<
 		description: "有新评论进入待审核队列时触发，面向站点管理人员。",
 		triggerDescription: "评论提交后进入待审核状态时创建通知任务。",
 		recipientType: "后台站点接收人",
-		placeholders: commonPlaceholders.filter(
-			(item) => item.path !== "links.unsubscribe",
-		),
+		placeholders: adminPlaceholders,
 	},
 	admin_comment_approved: {
 		label: "评论已发布",
 		description: "新评论直接发布时触发，面向站点管理人员。",
 		triggerDescription: "评论提交后直接通过并发布时创建通知任务。",
 		recipientType: "后台站点接收人",
-		placeholders: commonPlaceholders.filter(
-			(item) => item.path !== "links.unsubscribe",
-		),
+		placeholders: adminPlaceholders,
 	},
 	reply_approved: {
 		label: "评论回复已通过",
@@ -207,6 +237,11 @@ function withMetadata(
 	};
 }
 
+const adminText =
+	"站点：{{site.name}}\n页面：{{page.title}}\n评论者：{{comment.authorLabel}}\n邮箱：{{comment.authorEmail}}\n网站：{{comment.authorWebsite}}\n身份：{{comment.authorIdentity}}\n提交时间：{{time.display}}\n状态：{{comment.status}}\n反垃圾结果：{{moderation.verdict}}\n审核说明：{{moderation.reason}}\n\n{{comment.contentNote}}\n{{comment.content}}\n\n回复对象：{{parent.authorName}}\n{{parent.content}}\n\n来源 IP：{{request.ip}}\n浏览器及系统：{{request.device}}\n浏览器标识：{{request.userAgent}}\n\n查看原页面：{{page.url}}\n进入后台处理这条评论：{{links.adminComment}}";
+const adminHtml =
+	'<div style="max-width:640px;margin:auto;font:16px/1.6 sans-serif;overflow-wrap:anywhere"><h2>{{site.name}} · {{comment.status}}</h2><p>{{page.title}}</p><p>评论者：{{comment.authorLabel}}<br>邮箱：{{comment.authorEmail}}<br>网站：{{comment.authorWebsite}}<br>身份：{{comment.authorIdentity}}<br>提交时间：{{time.display}}</p><p>反垃圾结果：{{moderation.verdict}}<br>审核说明：{{moderation.reason}}</p><p>{{comment.contentNote}}</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit">{{comment.content}}</pre><p>回复对象：{{parent.authorName}}</p><blockquote style="white-space:pre-wrap">{{parent.content}}</blockquote><p>来源 IP：{{request.ip}}<br>浏览器及系统：{{request.device}}<br>浏览器标识：{{request.userAgent}}</p><p><a href="{{page.url}}">查看原页面</a></p><p><a href="{{links.adminComment}}">进入后台处理这条评论</a></p></div>';
+
 export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 	withMetadata({
 		key: "backend_comment_pending_email_text",
@@ -215,8 +250,9 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		channel: "email",
 		eventType: "admin_comment_pending",
 		format: "text",
-		subjectTemplate: "[{{site.name}}] 新评论待审核",
-		bodyTemplate: "{{comment.authorName}} 在 {{page.title}} 发表了待审核评论。",
+		subjectTemplate:
+			"[{{site.name}}] 待审核 · {{page.title}} · {{comment.authorLabel}}",
+		bodyTemplate: adminText,
 	}),
 	withMetadata({
 		key: "backend_comment_pending_email_html",
@@ -225,9 +261,9 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		channel: "email",
 		eventType: "admin_comment_pending",
 		format: "html",
-		subjectTemplate: "[{{site.name}}] 新评论待审核",
-		bodyTemplate:
-			"<p>{{comment.authorName}} 在 {{page.title}} 发表了待审核评论。</p>",
+		subjectTemplate:
+			"[{{site.name}}] 待审核 · {{page.title}} · {{comment.authorLabel}}",
+		bodyTemplate: adminHtml,
 	}),
 	withMetadata({
 		key: "backend_comment_approved_email_text",
@@ -236,8 +272,9 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		channel: "email",
 		eventType: "admin_comment_approved",
 		format: "text",
-		subjectTemplate: "[{{site.name}}] 新评论已发布",
-		bodyTemplate: "{{comment.authorName}} 在 {{page.title}} 的评论已发布。",
+		subjectTemplate:
+			"[{{site.name}}] 已发布 · {{page.title}} · {{comment.authorLabel}}",
+		bodyTemplate: adminText,
 	}),
 	withMetadata({
 		key: "backend_comment_approved_email_html",
@@ -246,9 +283,9 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		channel: "email",
 		eventType: "admin_comment_approved",
 		format: "html",
-		subjectTemplate: "[{{site.name}}] 新评论已发布",
-		bodyTemplate:
-			"<p>{{comment.authorName}} 在 {{page.title}} 的评论已发布。</p>",
+		subjectTemplate:
+			"[{{site.name}}] 已发布 · {{page.title}} · {{comment.authorLabel}}",
+		bodyTemplate: adminHtml,
 	}),
 	withMetadata({
 		key: "commenter_reply_approved_email_text",
@@ -259,7 +296,7 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		format: "text",
 		subjectTemplate: "[{{site.name}}] 你的评论有新回复",
 		bodyTemplate:
-			"{{comment.authorLabel}} 在 {{page.title}} 回复了你：\n{{comment.content}}\n\n查看页面：{{page.url}}\n\n如需退订可点击：{{links.unsubscribe}}",
+			"站点：{{site.name}}\n提交时间：{{time.display}}\n\n{{comment.authorLabel}} 在 {{page.title}} 回复了你：\n{{comment.content}}\n\n你原来的评论：\n{{parent.content}}\n\n查看页面：{{page.url}}\n\n退订评论回复提醒：{{links.unsubscribe}}",
 	}),
 	withMetadata({
 		key: "commenter_reply_approved_email_html",
@@ -270,7 +307,7 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		format: "html",
 		subjectTemplate: "[{{site.name}}] 你的评论有新回复",
 		bodyTemplate:
-			'<p>{{comment.authorLabel}} 在 {{page.title}} 回复了你：</p><blockquote>{{comment.content}}</blockquote><p><a href="{{page.url}}">查看页面</a></p><p>如需退订可点击：<a href="{{links.unsubscribe}}">退订评论回复提醒</a></p>',
+			'<div style="max-width:640px;margin:auto;font:16px/1.6 sans-serif;overflow-wrap:anywhere"><h2>{{site.name}} · 你的评论有新回复</h2><p>{{page.title}}<br>提交时间：{{time.display}}</p><p>{{comment.authorLabel}} 回复了你：</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit">{{comment.content}}</pre><p>你原来的评论：</p><blockquote style="white-space:pre-wrap">{{parent.content}}</blockquote><p><a href="{{page.url}}">查看原页面</a></p><p><a href="{{links.unsubscribe}}">退订评论回复提醒</a></p></div>',
 	}),
 	withMetadata({
 		key: "channel_test",
@@ -292,4 +329,28 @@ export const defaultNotificationTemplates: DefaultNotificationTemplate[] = [
 		bodyTemplate:
 			'{"site":{{json site.name}},"page":{{json page.title}},"comment":{{json comment.content}},"url":{{json links.adminComment}}}',
 	}),
+	withMetadata({
+		key: "backend_comment_approved_webhook_json",
+		name: "评论已发布 - Webhook JSON",
+		description: "评论直接发布后，向后台通知 Webhook 发送 JSON 负载。",
+		channel: "webhook",
+		eventType: "admin_comment_approved",
+		format: "json",
+		bodyTemplate:
+			'{"site":{{json site.name}},"page":{{json page.title}},"comment":{{json comment.content}},"url":{{json links.adminComment}}}',
+	}),
+	...(["pending", "approved"] as const).map((event) =>
+		withMetadata({
+			key: `backend_comment_${event}_wxpusher_text`,
+			name: `${event === "pending" ? "待审" : "发布"}评论 - WxPusher`,
+			description: "向站点人员发送评论摘要及处理入口。",
+			channel: "wxpusher",
+			eventType:
+				event === "pending"
+					? "admin_comment_pending"
+					: "admin_comment_approved",
+			format: "text",
+			bodyTemplate: adminText,
+		}),
+	),
 ];

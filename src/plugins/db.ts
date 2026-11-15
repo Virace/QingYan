@@ -12,6 +12,9 @@ import { NotificationTemplateContextBuilder } from "../modules/notifications/not
 import { RuntimeNotificationChannelAdapterFactory } from "../modules/notifications/notification-channel-adapter-factory";
 import { NotificationRuntime } from "../modules/notifications/notification-runtime";
 import { NotificationWorker } from "../modules/notifications/notification-worker";
+import { NotificationTemplateRepository } from "../modules/notifications/templates/repository";
+import { NotificationTemplateResolver } from "../modules/notifications/templates/resolver";
+import { processCommentNotificationIntent } from "../modules/notifications/comment-notification-intent";
 import { fetchPageSourceText } from "../modules/page-registry/source-fetcher";
 import { PageSourceRefreshService } from "../modules/page-registry/source-refresh-service";
 import { PageMetadataRefreshService } from "../modules/page-registry/title-refresh-service";
@@ -31,6 +34,7 @@ import { TaskScheduler } from "../modules/tasks/scheduler";
 import type { TaskRunnerServices } from "../modules/tasks/task-runner-context";
 import { PageSourceRefreshPolicyService } from "../modules/tasks/page-source-refresh-policy";
 import { safeFetchText } from "../modules/shared/server-safe-fetch";
+import { createWafRuntime } from "../modules/waf/runtime";
 
 async function fetchPageTitleHtml(
 	url: string,
@@ -71,6 +75,8 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		);
 	}
 	await fastify.siteRegistry.loadFromDatabase(db);
+	const wafRuntime = await createWafRuntime(db);
+	fastify.decorate("wafRuntime", wafRuntime);
 	const systemSettingsService = new RuntimeSystemSettingsService(db);
 	const taskMetricRollups = new TaskMetricRollupRepository(db);
 	fastify.decorate("taskMetricRollups", taskMetricRollups);
@@ -119,6 +125,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		loadIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 	});
 	const taskRunnerServices: TaskRunnerServices = {
+		wafSync: wafRuntime ?? undefined,
 		pageSourceRefresh: sourceRefresh,
 		pageSourceRefreshPolicy: new PageSourceRefreshPolicyService(
 			db,
@@ -141,7 +148,10 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		conditionEvaluator: new ConditionTriggerEvaluator(taskMetricRollups),
 		failureNotifications: taskFailureNotifications,
 	});
-	if (fastify.backgroundRuntimeAutoStart) taskScheduler.start();
+	if (fastify.backgroundRuntimeAutoStart) {
+		await wafRuntime?.initialize(fastify.siteRegistry);
+		taskScheduler.start();
+	}
 	const taskRunWorker = new TaskRunWorker({
 		taskRuns,
 		runner: new TaskRunner({
@@ -162,6 +172,13 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	const emailReputation = new EmailReputationRepository(db);
 	const notificationRuntime = new NotificationRuntime({
 		worker: new NotificationWorker({
+			planCommentNotification: (input) =>
+				processCommentNotificationIntent(db, input),
+			templates: new NotificationTemplateResolver(
+				new NotificationTemplateRepository(db),
+			),
+			loadEmailFormat: async () =>
+				(await systemSettingsService.getSettings()).mail.commentFormat,
 			queue: new DatabaseTaskQueue(db),
 			repository: taskRuns,
 			logApp: (record) => fastify.loggerManager.logApp(record),
@@ -189,6 +206,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 			templateContextBuilder: new NotificationTemplateContextBuilder(
 				db,
 				fastify.config.server,
+				adminBootstrap.consolePath,
 			),
 		}),
 		onError: (error) => {

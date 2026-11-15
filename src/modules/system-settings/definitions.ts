@@ -123,6 +123,7 @@ export const systemSettingsSchema = z.object({
 	}),
 	mail: z.object({
 		enabled: z.boolean(),
+		commentFormat: z.enum(["html", "text"]).default("text"),
 		smtp: z.object({
 			host: z.string(),
 			port: z.number().int().positive(),
@@ -283,6 +284,7 @@ export const defaultSystemSettings: SystemSettings = {
 	},
 	mail: {
 		enabled: false,
+		commentFormat: "text",
 		smtp: {
 			host: "",
 			port: 465,

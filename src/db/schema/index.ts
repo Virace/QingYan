@@ -20,3 +20,4 @@ export * from "./task-metrics";
 export * from "./task-runs";
 export * from "./upgrades";
 export * from "./visitors";
+export * from "./waf";

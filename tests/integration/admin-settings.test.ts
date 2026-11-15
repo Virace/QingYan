@@ -57,7 +57,7 @@ describe("admin settings", () => {
 					autoBlacklist: {
 						enabled: true,
 						scope: "post",
-						ttlSec: 1800,
+						ttlSec: 86400,
 					},
 				},
 				inputLimits: {

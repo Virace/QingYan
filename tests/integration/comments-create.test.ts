@@ -7,6 +7,8 @@ import {
 	adminUsers,
 	commentModeration,
 	comments,
+	visitors,
+	taskRuns,
 	pageThreads,
 	sitePageRegistry,
 	siteSettings,
@@ -47,6 +49,7 @@ async function createCustomTestApp(options?: {
 	akismetVerdict?: AkismetReviewResult["verdict"];
 	externalAvatar?: boolean;
 }) {
+	let akismetCheckCount = 0;
 	const workspace = createTestWorkspace("qingyan-comments-create-");
 	const databaseUrl = workspace.databaseUrl;
 	await applyCurrentMigrations(databaseUrl);
@@ -114,16 +117,22 @@ async function createCustomTestApp(options?: {
 		startNotificationRuntime: false,
 		akismetClient: options?.akismetVerdict
 			? {
-					commentCheck: async () => ({
-						verdict: options.akismetVerdict ?? "ham",
-						checkedAt: "2026-05-26T10:00:00.000Z",
-					}),
+					commentCheck: async () => {
+						akismetCheckCount += 1;
+						return {
+							verdict: options.akismetVerdict ?? "ham",
+							checkedAt: "2026-05-26T10:00:00.000Z",
+						};
+					},
 				}
 			: undefined,
 	});
 
 	return {
 		app,
+		get akismetCheckCount() {
+			return akismetCheckCount;
+		},
 		async cleanup() {
 			await app.close();
 			await workspace.cleanup();
@@ -150,6 +159,97 @@ async function seedActivePage(fixture: CustomFixture, pageKey: string) {
 }
 
 describe("POST /qingyan/api/comments", () => {
+	it.each([
+		"1",
+		"2026",
+		"１２３",
+		" 1 ２\n3 ",
+	])("rejects numeric-only content %j before creating business records or calling Akismet", async (raw) => {
+		const fixture = await createCustomTestApp({
+			akismetVerdict: "ham",
+			moderation: serializeSiteModerationSettings({
+				mode: "akismet_auto",
+				provider: "akismet",
+				akismet: { failPolicy: "pending", discardBlatantSpam: false },
+			}),
+		});
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "posts/numeric-rejection/");
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: { referer: "http://localhost:4321/posts/numeric-rejection/" },
+			payload: {
+				siteKey: "fangyuan",
+				pageTitle: "Numeric rejection",
+				parentCommentId: null,
+				author: { name: "Visitor", email: "visitor@example.org" },
+				content: { raw },
+			},
+		});
+		expect(response.statusCode).toBe(400);
+		expect(response.json().error.code).toBe("COMMENT_CONTENT_NUMERIC_ONLY");
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(comments)).toEqual([]);
+		expect(
+			await fixture.app.db
+				.select()
+				.from(taskRuns)
+				.where(eq(taskRuns.subjectType, "comment")),
+		).toEqual([]);
+		expect(fixture.akismetCheckCount).toBe(0);
+	});
+
+	it("stores Akismet ham as pending when local review is enabled and history is insufficient", async () => {
+		const fixture = await createCustomTestApp({
+			akismetVerdict: "ham",
+			moderation: serializeSiteModerationSettings({
+				mode: "akismet_auto",
+				provider: "akismet",
+				localReviewEnabled: true,
+				akismet: { failPolicy: "pending", discardBlatantSpam: false },
+			}),
+		});
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "posts/local-review/");
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/posts/local-review/",
+				"user-agent": "local-review-reader",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageTitle: "Local review",
+				parentCommentId: null,
+				author: { name: "Reader", email: "reader@example.org" },
+				content: { raw: "谢谢分享" },
+			},
+		});
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comment.status).toBe("pending");
+		const [moderation] = await fixture.app.db.select().from(commentModeration);
+		expect(moderation).toMatchObject({
+			akismetVerdict: "ham",
+			status: "pending",
+			reason: "local_history_insufficient",
+			provider: "combined",
+		});
+		const [intent] = await fixture.app.db
+			.select()
+			.from(taskRuns)
+			.where(eq(taskRuns.type, "comment_notification_intent"));
+		expect(intent).toMatchObject({
+			subjectId: response.json().comment.id,
+			status: "queued",
+		});
+		expect(JSON.parse(intent.payloadJson)).toMatchObject({
+			status: "pending",
+			notifyBackend: true,
+		});
+	});
 	it("returns a full public comment when an approved visitor comment is created", async () => {
 		const fixture = await createCustomTestApp({
 			require: ["nickname", "email"],

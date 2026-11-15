@@ -7,6 +7,7 @@ import {
 	adminUsers,
 	auditLogs,
 	blacklistRules,
+	securityPenalties,
 	sitePageRegistry,
 	siteSettings,
 	sites,
@@ -108,7 +109,7 @@ async function createSiteAdmin(
 }
 
 describe("admin blacklist", () => {
-	it("lists and deletes auto-created blacklist rules so public writes are unblocked", async () => {
+	it("lists and releases an automatic penalty through deletion so the same visitor can retry", async () => {
 		const fixture = await createTestApp();
 		cleanups.push(fixture.cleanup);
 		await fixture.app.db.update(siteSettings).set({
@@ -118,7 +119,7 @@ describe("admin blacklist", () => {
 			abuseGuardMaxWriteActions: 1,
 			autoBlacklistEnabled: true,
 			autoBlacklistScope: "post",
-			autoBlacklistTtlSec: 1800,
+			abusePolicyJson: JSON.stringify({ penaltyTtlSec: 1800 }),
 		});
 		await seedActivePage(fixture, "post:auto-unblock");
 
@@ -140,21 +141,33 @@ describe("admin blacklist", () => {
 			},
 		});
 
-		for (const suffix of ["1", "2"]) {
+		const first = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: { referer: "http://localhost:4321/post:auto-unblock" },
+			payload: makePayload("first"),
+		});
+		expect(first.statusCode).toBe(200);
+		const visitorCookies = Object.fromEntries(
+			first.cookies.map((cookie) => [cookie.name, cookie.value]),
+		);
+		for (let attempt = 0; attempt < 10; attempt += 1) {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/comments",
+				cookies: visitorCookies,
 				headers: {
 					referer: "http://localhost:4321/post:auto-unblock",
 				},
-				payload: makePayload(suffix),
+				payload: makePayload(`limited-${attempt}`),
 			});
-			expect(response.statusCode).toBe(200);
+			expect(response.statusCode).toBe(429);
 		}
 
 		const blocked = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			cookies: visitorCookies,
 			headers: {
 				referer: "http://localhost:4321/post:auto-unblock",
 			},
@@ -192,7 +205,7 @@ describe("admin blacklist", () => {
 				rule.targetType === "ip" &&
 				rule.matchMode === "exact" &&
 				rule.source === "auto" &&
-				rule.reason === "abuse_guard",
+				rule.reason === "rate_limited",
 		);
 		expect(autoRule).toEqual(
 			expect.objectContaining({
@@ -206,10 +219,26 @@ describe("admin blacklist", () => {
 			...withAdminWriteAuth({ adminCookie, csrfToken }),
 		});
 		expect(deleteResponse.statusCode).toBe(200);
+		const [releasedPenalty] = await fixture.app.db
+			.select()
+			.from(securityPenalties)
+			.where(eq(securityPenalties.sourceRuleId, autoRule?.id ?? 0));
+		expect(releasedPenalty).toMatchObject({
+			releaseKind: "released",
+			releasedAt: expect.any(String),
+			stateVersion: 2,
+		});
+		expect(
+			await fixture.app.db
+				.select()
+				.from(blacklistRules)
+				.where(eq(blacklistRules.id, autoRule?.id ?? 0)),
+		).toHaveLength(1);
 
 		const unblocked = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments",
+			cookies: visitorCookies,
 			headers: {
 				referer: "http://localhost:4321/post:auto-unblock",
 			},

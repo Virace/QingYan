@@ -57,6 +57,11 @@ export const comments = pgTable(
 			.notNull()
 			.default(sql`CURRENT_TIMESTAMP`),
 		deletedAt: utcTimestamp("deleted_at"),
+		approvedAt: utcTimestamp("approved_at"),
+		approvalSource: text("approval_source"),
+		approvedByUserId: bigint("approved_by_user_id", {
+			mode: "number",
+		}).references(() => adminUsers.id),
 	},
 	(table) => [
 		unique("comments_id_thread_unique").on(table.id, table.pageThreadId),
@@ -88,6 +93,11 @@ export const comments = pgTable(
 		index("comments_thread_idx").on(table.pageThreadId),
 		index("comments_parent_idx").on(table.parentId),
 		index("comments_visitor_idx").on(table.visitorId),
+		index("comments_site_email_history_idx").on(
+			table.siteId,
+			table.authorEmailHash,
+			table.approvedAt,
+		),
 	],
 );
 

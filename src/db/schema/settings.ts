@@ -55,6 +55,8 @@ export const siteSettings = pgTable(
 		verifiedAuthorJson: jsonText("verified_author_json"),
 		staffDisplayJson: jsonText("staff_display_json"),
 		moderationJson: jsonText("moderation_json"),
+		emailPolicyJson: jsonText("email_policy_json"),
+		abusePolicyJson: jsonText("abuse_policy_json"),
 		pageRegistryJson: jsonText("page_registry_json"),
 		commenterReplyEmailEnabled: boolean("commenter_reply_email_enabled")
 			.notNull()

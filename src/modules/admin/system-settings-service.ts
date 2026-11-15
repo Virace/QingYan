@@ -256,6 +256,8 @@ export class AdminSystemSettingsService {
 					mail: input.mail
 						? {
 								enabled: input.mail.enabled,
+								commentFormat:
+									input.mail.commentFormat ?? current.mail.commentFormat,
 								smtp: {
 									...current.mail.smtp,
 									...input.mail.smtp,

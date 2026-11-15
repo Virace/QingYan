@@ -21,6 +21,9 @@ import { CommenterPreferencesRepository } from "../../src/modules/notifications/
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { NotificationTemplateContextBuilder } from "../../src/modules/notifications/notification-template-context";
 import { NotificationWorker } from "../../src/modules/notifications/notification-worker";
+import { processCommentNotificationIntent } from "../../src/modules/notifications/comment-notification-intent";
+import { NotificationTemplateRepository } from "../../src/modules/notifications/templates/repository";
+import { NotificationTemplateResolver } from "../../src/modules/notifications/templates/resolver";
 import {
 	SiteNotificationEventsRepository,
 	siteBackendNotificationEventTypes,
@@ -169,6 +172,17 @@ async function postComment(
 	});
 }
 
+async function processNotifications(
+	fixture: Awaited<ReturnType<typeof createTestApp>>,
+) {
+	fixture.app.notificationRuntime.start();
+	try {
+		await fixture.app.notificationRuntime.tick();
+	} finally {
+		await fixture.app.notificationRuntime.stop();
+	}
+}
+
 describe("comment notifications", () => {
 	it.each([
 		{
@@ -218,6 +232,7 @@ describe("comment notifications", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
+		await processNotifications(fixture);
 		const deliveries = await fixture.app.db
 			.select()
 			.from(notificationDeliveries);
@@ -250,7 +265,15 @@ describe("comment notifications", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
+		expect(planner).not.toHaveBeenCalled();
+		await processNotifications(fixture);
 		expect(planner).toHaveBeenCalledOnce();
+		expect(await fixture.app.db.select().from(taskRuns)).toContainEqual(
+			expect.objectContaining({
+				type: "comment_notification_intent",
+				status: "retrying",
+			}),
+		);
 		expect(
 			await fixture.app.db
 				.select({ id: comments.id, contentRaw: comments.contentRaw })
@@ -288,6 +311,7 @@ describe("comment notifications", () => {
 			notifyOnReply: false,
 		});
 		expect(parent.statusCode).toBe(200);
+		await processNotifications(fixture);
 		const initialBackendDeliveries = (
 			await fixture.app.db.select().from(notificationDeliveries)
 		).filter((delivery) => delivery.recipientType === "backend_user");
@@ -306,6 +330,7 @@ describe("comment notifications", () => {
 		});
 
 		expect(reply.statusCode).toBe(200);
+		await processNotifications(fixture);
 		const backendDeliveries = (
 			await fixture.app.db.select().from(notificationDeliveries)
 		).filter((delivery) => delivery.recipientType === "backend_user");
@@ -492,6 +517,7 @@ describe("comment notifications", () => {
 		});
 		expect(reply.statusCode).toBe(200);
 		const replyId = reply.json().comment.id as string;
+		await processNotifications(fixture);
 		expect(
 			(await fixture.app.db.select().from(taskRuns)).filter(
 				(task) => task.type === "reply_approved",
@@ -517,6 +543,7 @@ describe("comment notifications", () => {
 			},
 		});
 		expect(approveAgain.statusCode).toBe(200);
+		await processNotifications(fixture);
 
 		const tasks = await fixture.app.db.select().from(taskRuns);
 		const deliveries = await fixture.app.db
@@ -594,7 +621,12 @@ describe("comment notifications", () => {
 		});
 
 		expect(response.statusCode).toBe(200);
-		expect(await fixture.app.db.select().from(taskRuns)).toHaveLength(1);
+		await processNotifications(fixture);
+		expect(
+			(await fixture.app.db.select().from(taskRuns)).filter(
+				(task) => task.type !== "comment_notification_intent",
+			),
+		).toHaveLength(1);
 		expect(await fixture.app.db.select().from(notificationDeliveries)).toEqual([
 			expect.objectContaining({
 				recipientType: "commenter",
@@ -701,6 +733,11 @@ describe("comment notifications", () => {
 		const worker = new NotificationWorker({
 			queue: new DatabaseTaskQueue(fixture.app.db),
 			repository,
+			planCommentNotification: (input) =>
+				processCommentNotificationIntent(fixture.app.db, input),
+			templates: new NotificationTemplateResolver(
+				new NotificationTemplateRepository(fixture.app.db),
+			),
 			adapters: {
 				email: {
 					async send(input) {
@@ -718,7 +755,9 @@ describe("comment notifications", () => {
 			),
 		});
 
-		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(1);
+		expect(await worker.runNextNotificationTask({ limit: 10 })).toBeGreaterThan(
+			0,
+		);
 		expect(sentMessages).toEqual([
 			expect.objectContaining({
 				to: "parent-worker@example.com",
@@ -729,7 +768,7 @@ describe("comment notifications", () => {
 		expect(sentMessages[0]?.body).toContain(
 			"查看页面：http://localhost:4321/post:worker-unsubscribe",
 		);
-		expect(sentMessages[0]?.body).toContain("如需退订可点击：");
+		expect(sentMessages[0]?.body).toContain("退订评论回复提醒：");
 		expect(sentMessages[0]?.body).toContain(
 			"/qingyan/notifications/unsubscribe?token=",
 		);
@@ -765,7 +804,9 @@ describe("comment notifications", () => {
 		});
 		expect(secondReply.statusCode).toBe(200);
 
-		expect(await worker.runNextNotificationTask({ limit: 1 })).toBe(0);
+		expect(await worker.runNextNotificationTask({ limit: 10 })).toBeGreaterThan(
+			0,
+		);
 		expect(sentMessages).toHaveLength(1);
 		const deliveries = await fixture.app.db
 			.select()

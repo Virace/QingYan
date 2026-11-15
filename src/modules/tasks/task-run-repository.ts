@@ -928,6 +928,29 @@ export class TaskRunRepository {
 		);
 	}
 
+	public async saveNotificationPayload(
+		id: string,
+		claimToken: string | null | undefined,
+		payload: unknown,
+	) {
+		if (!claimToken) return false;
+		const updated = await this.db
+			.update(taskRuns)
+			.set({
+				payloadJson: JSON.stringify(payload),
+				updatedAt: nowIso(),
+			})
+			.where(
+				and(
+					eq(taskRuns.id, id),
+					eq(taskRuns.claimToken, claimToken),
+					eq(taskRuns.status, "running"),
+				),
+			)
+			.returning({ id: taskRuns.id });
+		return updated.length === 1;
+	}
+
 	private async finish(
 		id: string,
 		values: Partial<typeof taskRuns.$inferInsert>,

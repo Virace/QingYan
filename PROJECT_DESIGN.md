@@ -64,6 +64,8 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 - 通知的 Admin 投影只返回业务 workflow、脱敏收件人、尝试次数、安全原因和接受时间；原始 payload、底层异常、provider message id 与 secret 留在受保护的内部持久化/日志边界，不进入评论接口或通知任务视图。
 - 配置 owner 分离：startup config 保存启动必需项；站点/系统设置保存在数据库；secret 通过受控设置或环境 seed 进入持久化边界。
 
+WAF 接入使用 `src/modules/waf/` 的连接、网关 client、日志采集和同步服务；独立 `services/onepanel-gateway/` 只负责官方 API 的固定目标、参数白名单与签名。`waf_sync` 复用现有任务执行与五分钟系统计划，处罚/解除和同步意图在同一事务保存。站点 ACL 规则按字段指纹核对，人工差异暂停自动覆盖；本地绝对到期时间负责上游删除。日志游标、去重、证据缺口和有限保留归应用模块所有，网关不访问面板内部文件。
+
 ## 6. Admin Console
 
 `apps/admin/vite.config.ts` 把 React SPA 构建到 `dist/admin`。服务端根据 `publicPath` 与数据库中的 Admin 入口注入运行时 `basePath` / `apiBase`，并提供静态资源和 SPA shell。
@@ -80,7 +82,9 @@ Admin API client 位于 `apps/admin/src/api/`；页面和组件按内容、设�
 
 ## 8. 安装、升级与恢复
 
-`scripts/install.sh` 负责 Linux/Compose 首次部署，使用预建 PostgreSQL 18 空库与专用账号，不执行备份恢复。默认将运行文件写入 `<父目录>/qingyan/`，源码构建缓存写入 `<父目录>/.qingyan-source/`，也可覆盖源码位置。镜像由源码构建，运行 Compose 只引用版本化本地镜像并挂载 config/data/logs。
+`scripts/install.sh` 负责 Linux/Compose 首次部署，优先复用用户提供连接信息的 PostgreSQL 18 空库与专用账号；未发现实例时可明确选择创建独立数据库容器，不选择连接或创建则取消安装。数据库不属于 QingYan Compose，新建容器只连接专用 Docker 网络，不发布宿主端口；已有 1Panel 数据库通过其受控网络接入。安装器不执行备份恢复。默认将运行文件写入 `<父目录>/qingyan/`，源码构建缓存写入 `<父目录>/.qingyan-source/`，也可覆盖源码位置。
+
+应用与受限 1Panel 网关分别构建版本化镜像。网关使用显式启用的 `onepanel` profile、静态来源网络、独立 Key 与内部凭据，未配置时同步关闭。运行目录的基础 Compose 与 `gateway.compose.json` 叠加，后者从实际 Compose JSON 检查后补充必要服务/网络，不覆盖已有端口、卷与定制。部署状态、两个镜像引用和凭据文件统一快照；数据写入前失败可恢复旧部署，写入开始后沿升级恢复流程保留现场。
 
 分离布局的 Compose 模板和更新器函数由 `install.sh` 维护；安装器通过函数序列化生成运行目录的独立 `update.sh`，源码缓存移除后仍能重新获取并更新。部署元信息位于 `deployment.conf`，镜像引用及自动生成的安装令牌位于权限为 600 的 Compose `.env`；两者均不属于应用 startup config，更新只改镜像字段并保留其他值与权限。仓库内 `scripts/update.sh` 对新布局分发到独立入口，旧混合布局继续使用既有 Git transaction。
 

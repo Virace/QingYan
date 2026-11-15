@@ -228,7 +228,9 @@ describe("admin allowlist", () => {
 			scope: "post",
 		});
 
-		for (const suffix of ["1", "2", "3"]) {
+		for (const suffix of Array.from({ length: 12 }, (_, index) =>
+			String(index + 1),
+		)) {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/comments",
@@ -239,7 +241,7 @@ describe("admin allowlist", () => {
 					`comment-${suffix}`,
 				),
 			});
-			expect(response.statusCode).toBe(200);
+			expect(response.statusCode).toBe(suffix === "1" ? 200 : 429);
 		}
 		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([]);
 	});

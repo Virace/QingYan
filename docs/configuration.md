@@ -201,9 +201,9 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 
 `comments.inputLimits` 会随公开评论 bootstrap 返回到 `data.comments.form.limits`，内容站点前端可用它约束表单长度；服务端仍以数据库中的当前站点设置为准。超过当前站点上限的评论创建、页面点赞等公开写入口会返回字段级 `VALIDATION_FAILED`。硬上限用于防止后台误配置过大的输入，不表示建议前端展示到最大值。
 
-`comments.abuseGuard.enabled=false` 表示关闭 QingYan 应用层的公开写入滥用计数和自动封禁触发；此时部署前方应有 WAF、反向代理、CDN、API 网关或等价基础设施限流。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态、功能开关或输入长度校验。滥用保护的写入计数覆盖评论创建、评论投票和页面点赞等公开写动作。
+`comments.abuseGuard.enabled=false` 关闭 IP 聚合写入累计和自动处罚；独立主体/IP 业务额度与验证码仍执行。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态、功能开关或输入长度校验。滥用保护的写入计数覆盖评论创建、评论投票和页面点赞等公开写动作。
 
-黑名单规则可由后台人工创建，也可由自动黑名单策略创建。解除某个 IP / email / visitor 的封禁应在 Admin Console 删除对应黑名单规则；删除后只解除该规则带来的拒绝，后续请求仍会继续经过页面状态、功能开关、输入长度、验证码、基础限流和滥用保护检查。
+黑名单规则可由后台人工创建，也可由持续同类违规达到阈值后自动创建。安全规则页对自动处罚提供“撤销误判”和“提前解除”，分别排除或保留复犯依据，并重置会立即重触发的当前窗口；本地与面板状态需分别核对。普通首次 429、单次邮箱错误或验证码错误不会直接产生处罚。手工规则仍按规则删除。
 
 白名单规则独立于黑名单规则，支持 IP `exact | cidr`、email `exact | domain`、visitor `exact`。匹配白名单时，QingYan 会跳过对应黑名单拦截，并且不会把该请求计入自动黑名单触发；白名单优先级只服务于黑名单/自动黑名单。白名单不会绕过后台认证、CSRF、页面注册状态、页面交互状态、功能开关、必填字段、输入长度、验证码或基础限流。站点管理员只能管理自己有访问权的站点白名单，站点评论管理员默认不能管理白名单；全局规则只应由系统管理员维护。
 
@@ -211,9 +211,9 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 
 开启 `authoritative` 必须配置至少一个 HTTP/HTTPS 权威 sitemap URL，且 URL origin 必须属于当前站点允许 origin。保存后系统会在任务中心幂等维护一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 为 `page_registry:authoritative_source_refresh:<siteKey>`，payload 中的 `sitemapUrls` 与 `pageRegistry.authoritativeSitemapUrls` 保持一致。当前版本不再保留 legacy source/sourceIds 刷新路径或迁移回填逻辑。
 
-可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台评论者聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
+账号发言的认证依据是有效后台 session、`comments.reply` 与目标站点访问权。提交始终绑定账号当前的昵称、邮箱和网站，不使用表单冒用其他身份。可信作者开关控制可信展示及既有直接发布策略，关闭后仍保留账号发言能力。普通访客无法使用指定作者邮箱或受保护域名。邮箱比较统一 trim、小写和 IDN ASCII 域名规范化。
 
-已验证评论会同时保留评论行上的作者快照和当前站点人员资料。`comments.staffDisplay.nameMode=current_profile` 时，公开评论树对已验证评论展示当前 `comments.verifiedAuthor.displayName`；`snapshot` 时展示评论行保存的 `authorName`。普通访客评论始终展示评论行保存的名称，不会跟随任何邮箱资料。
+已验证评论会同时保留评论行上的作者快照和当前站点人员资料。`comments.staffDisplay.nameMode=current_profile` 时，账号评论展示当前账号昵称，旧站点作者记录展示当前 `comments.verifiedAuthor.displayName`；`snapshot` 时展示评论行保存的 `authorName`。普通访客评论始终展示评论行保存的名称，不会跟随任何邮箱资料。
 
 IP 库路径、下载源、缓存策略和自动更新属于全局运维配置，由系统设置维护；站点设置不再重复提供这些字段。
 
@@ -348,11 +348,15 @@ QingYan 不要求为普通访客建立用户模型。若内容站点希望避免
 
 ## 评论验证码与元数据
 
-公开评论验证码仍按同一站点、同一页面、同一访客维度复用。配置来源从站点的 DB settings 读取：
+公开验证码使用服务端签发的短期安全主体，按站点/主体/操作累计阈值，跨页面生效；独立于访客统计 Cookie。配置来源从站点的 DB settings 读取：
 
 - `never`: 不要求验证码。
 - `always`: bootstrap 阶段直接返回 challenge。
 - `threshold`: 写操作达到阈值后返回 `*_CAPTCHA_REQUIRED`，客户端再拉取 captcha state。
+
+拉取 state/refresh 时通过 `action=comment_create|comment_vote|page_like` 选择操作，默认评论创建。授权验证通过后有效五分钟、仅供对应操作一次提交；并发只能消费一次，事务回滚释放预占，预占最多两分钟。服务端通过站点 Cookie 和 `X-QingYan-Security` 响应头返回安全凭据；无法使用 Cookie 时传回请求头或 `securityToken`，不能用 visitorKey 替代。升级会使旧验证码失效。
+
+“站点设置 > 评论”管理 `comments.emailPolicy` 与 `comments.abusePolicy`。邮箱规则默认合法空策略，支持完整邮箱、精确域名和显式包含子域名；禁止项优先，仅允许模式需要至少一个允许项，草稿预览不保存。自动 Akismet 模式可开启 `moderation.localReviewEnabled`：ham 仍需足够成熟历史或有效人工证据才公开，否则待审并通知。配置与默认参数见 [Admin Console API](admin-console-api.md)。
 
 评论请求环境信息属于用户信息收集。站点应在评论区或隐私说明中声明：提交评论时，本站会记录必要的请求环境信息，包括 IP 地址和浏览器 User-Agent，用于反垃圾、滥用排查、IP 属地与设备类型展示。公开页面不会展示完整 IP 地址或完整 User-Agent。
 
