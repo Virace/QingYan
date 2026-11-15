@@ -28,20 +28,37 @@ export class DatabaseTaskQueue implements TaskQueue {
 		});
 	}
 
-	public async ack(taskId: string, result: unknown): Promise<void> {
-		await this.repository.markSucceeded(taskId, result);
+	public async ack(
+		taskId: string,
+		result: unknown,
+		claimToken?: string | null,
+	): Promise<void> {
+		const completed = await this.repository.markSucceeded(
+			taskId,
+			result,
+			claimToken,
+		);
+		if (completed.applied)
+			await this.repository.finalizeScheduledTaskRun(taskId);
 	}
 
 	public retry(
 		taskId: string,
 		error: unknown,
 		runAfter: string,
+		claimToken?: string | null,
 	): Promise<void> {
-		return this.repository.markRetrying(taskId, error, runAfter).then(() => {});
+		return this.repository
+			.markRetrying(taskId, error, runAfter, claimToken)
+			.then(() => {});
 	}
 
-	public async fail(taskId: string, error: unknown): Promise<void> {
-		await this.repository.markFailed(taskId, error);
+	public async fail(
+		taskId: string,
+		error: unknown,
+		claimToken?: string | null,
+	): Promise<void> {
+		await this.repository.markFailed(taskId, error, claimToken);
 	}
 
 	public async cancel(taskId: string, reason: unknown): Promise<void> {

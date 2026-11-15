@@ -14,7 +14,7 @@ import {
 interface Fixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	scheduledTasks: ScheduledTaskRepository;
 	eventLogs: TaskEventLogRepository;
 	taskRuns: TaskRunRepository;
@@ -24,17 +24,17 @@ interface Fixture {
 
 const fixtures: Fixture[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
 async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-scheduled-tasks-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
 		name: "FangYuan",
@@ -52,7 +52,7 @@ async function createFixture(): Promise<Fixture> {
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		scheduledTasks: new ScheduledTaskRepository(clients.db, {
 			retentionCountMax: 10,
 		}),
@@ -217,5 +217,56 @@ describe("ScheduledTaskRepository", () => {
 				},
 			],
 		});
+	});
+	it("prevents an expired scheduler lease from clearing a newer claim or creating a run", async () => {
+		const { scheduledTasks, taskRuns, adminUserId } = await createFixture();
+		const task = await scheduledTasks.create({
+			name: "lease",
+			type: "page_metadata_refresh",
+			scopeKind: "global",
+			scope: {},
+			enabled: true,
+			scheduleKind: "interval",
+			payload: {},
+			policy: {},
+			trigger: {},
+			nextRunAt: "2026-06-04T10:00:00.000Z",
+			ownerUserId: adminUserId,
+		});
+		const old = await scheduledTasks.claimDue(task.id, {
+			nowIso: "2026-06-04T10:00:00.000Z",
+			workerId: "old",
+			claimExpiresAt: "2026-06-04T10:05:00.000Z",
+		});
+		const current = await scheduledTasks.claimDue(task.id, {
+			nowIso: "2026-06-04T10:06:00.000Z",
+			workerId: "new",
+			claimExpiresAt: "2026-06-04T10:11:00.000Z",
+		});
+		if (!old || !current) throw new Error("Expected scheduler claims");
+		expect(
+			await scheduledTasks.releaseClaim(old, {
+				nextRunAt: null,
+				updatedAt: "2026-06-04T10:06:00.000Z",
+			}),
+		).toBeNull();
+		expect(
+			await taskRuns.createScheduledTaskRunAndAdvance(
+				{
+					scheduledTask: old,
+					trigger: "schedule",
+					triggerSnapshot: {},
+					input: {},
+				},
+				{ nextRunAt: null },
+			),
+		).toBeNull();
+		expect(await scheduledTasks.getRequired(task.id)).toMatchObject({
+			claimWorkerId: "new",
+			claimExpiresAt: "2026-06-04T10:11:00.000Z",
+		});
+		expect(
+			(await taskRuns.listForTaskCenter({ limit: 10, offset: 0 })).totalCount,
+		).toBe(0);
 	});
 });

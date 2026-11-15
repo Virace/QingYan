@@ -9,7 +9,7 @@
 - 运行时完整路径带 `server.publicPath` 前缀，默认是 `/qingyan/api/admin/*`；本文后续用 Admin Console 源码中的相对写法 `/api/admin/*` 表示同一组接口。
 - Base URL 与服务部署地址一致，例如本地开发默认 `http://localhost:4401`。
 - Admin Console Web 使用 same-origin fetch，请求默认携带 cookie：`credentials: "include"`。源码中的 `/api/*` 会通过页面注入的 `__QINGYAN_ADMIN__.apiBase` 解析到当前实例的 `${server.publicPath}/api`。
-- 除 WordPress WXR 上传分析接口外，请求体和响应体默认是 JSON。
+- 请求体和响应体默认是 JSON。
 - 已登录接口使用后台会话 cookie，默认 cookie 名由 `admin.session.cookieName` 配置决定，示例为 `qingyan_admin`。
 - 登录验证码是内置图片验证码，当前后台登录接口接受 `challengeId` 和 `captchaValue`。
 - `POST`、`PUT`、`PATCH`、`DELETE` 写操作需要管理员会话和 CSRF token。登录和 `GET /api/admin/session/me` 会返回 `csrf.header` 与 `csrf.token`，Admin Console 后续写请求会把 token 放入对应 header。
@@ -32,7 +32,6 @@
 - `apps/admin/src/api/session.ts`
 - `apps/admin/src/api/overview.ts`
 - `apps/admin/src/api/admin.ts`
-- `apps/admin/src/api/import-export.ts`
 - `apps/admin/src/api/ops.ts`
 
 ## Session
@@ -170,10 +169,13 @@
 
 分页列出后台评论。
 
+邮件后台链接使用实际 `consolePath`，并携带 `view=comments&siteKey=<站点>&commentId=<评论>`。`commentId` 精确筛选在分页前执行，仍要求目标站点权限；可以定位已转为垃圾或回收站的评论，已永久删除的评论不返回记录。
+
 Query：
 
 ```ts
 {
+	commentId?: string;
   siteKey?: string;
   pageKey?: string;
   status?: "pending" | "approved" | "spam" | "trash";
@@ -316,7 +318,7 @@ Admin Console 仅在详情打开、页面可见且摘要仍为 `processing` 时�
 
 ### `POST /api/admin/comments/{commentId}/reply`
 
-使用当前站点的可信评论作者配置快速回复评论。该接口只能由已登录后台会话调用，创建的回复会直接标记为 `approved`，并在公开评论树中展示当前站点配置的 badge label。
+使用当前有效账号资料回复评论，需要目标站点的 `comments.reply` 权限。回复绑定操作者账号并直接标记为 `approved`；可信作者展示开启时使用站点徽标，关闭时仍可回复且不展示徽标。
 
 请求：
 
@@ -336,7 +338,7 @@ Admin Console 仅在详情打开、页面可见且摘要仍为 `processing` 时�
 }
 ```
 
-若目标评论不存在，返回 `COMMENT_NOT_FOUND`；若该站点未启用可信评论作者，返回 `VERIFIED_AUTHOR_DISABLED`。
+若目标评论不存在，返回 `COMMENT_NOT_FOUND`；账号停用、会话失效或缺少站点权限时拒绝写入。账号昵称、邮箱和网站从当前生效资料读取，表单不能冒用其他身份。
 
 ## Pages, Commenters, Visitors
 
@@ -365,6 +367,8 @@ Admin Console 仅在详情打开、页面可见且摘要仍为 `processing` 时�
 ```
 
 ### `GET /api/admin/pages`
+
+支持按更新时间、创建时间、评论数、访客数、评论人数、点赞数、标题或页面标识排序，并在数据库中分页。标题和页面标识采用 PostgreSQL `C` 排序规则，空标题按空字符串处理。排序值相同时按更新时间降序、记录 ID 降序确定顺序。
 
 页面聚合视图。单项结构：
 
@@ -729,7 +733,13 @@ Query：
 }
 ```
 
-删除黑名单规则是解除自动封禁或人工封禁的后台路径；删除后，匹配该规则的公开写入不再因该规则被拒绝，但仍会继续经过页面状态、功能开关、输入长度、验证码、基础限流和后续滥用保护检查。
+手工黑名单仍删除规则；自动处罚转为提前解除并保留台账，使用下方解除接口可明确区分误判。解除后重置该站点、IP 及其当前安全主体/账号的业务额度、验证码窗口与违规窗口，旧待处理操作失效；之后仍执行正常准入。
+
+### `POST /api/admin/blacklist/{ruleId}/release`
+
+需要 `blacklist.delete` 和目标站点访问权。请求为 `{ kind: "revoked" | "released", reason: string }`，原因必填（最多 500 字符）。`revoked` 撤销误判，不作为后续复犯依据；`released` 提前解除，保留已确认的历史。返回 `{ released: true, kind, expiresAt }`，`expiresAt` 保留原始绝对期限供审计。重复请求不重复增加状态版本。
+
+黑名单列表中的 `penalty` 摘要包含开始/到期、解除时间、解除种类/原因、版本，以及有界的同类违规次数/窗口和复犯标记。只有实际处罚才出现该摘要；WAF 的提交申请、实际状态和同步结果分别从面板同步接口读取。解除本地处罚会产生独立的面板解除意图，面板失败不伪装成已解除。
 
 ## Allowlist
 
@@ -882,6 +892,7 @@ Query：
     moderation: {
       mode: "none" | "akismet_auto" | "manual_with_akismet" | "manual";
       provider: "none" | "akismet";
+      localReviewEnabled: boolean;
       akismet: {
         failPolicy: "pending";
         discardBlatantSpam: boolean;
@@ -982,6 +993,10 @@ Query：
 AdminSettings
 ```
 
+### `PATCH /api/admin/settings/{siteKey}/sections/{section}`
+
+保存单个站点设置分区。`section` 仅接受 `comments`、`engagement`、`notifications`、`pageRegistry`；请求体直接提交该分区的非空字段对象，不再包裹分区名，例如修改评论开关时提交 `{ "enabled": false }`。需要 `site_settings.update` 和目标站点访问权；成功返回完整、已持久化的 `AdminSettings`，字段校验失败返回 `VALIDATION_FAILED + fields[]`。未提交的分区保持原值。
+
 ### `PUT /api/admin/sites/{siteKey}/settings`
 
 更新站点设置。请求至少包含 `comments`、`pageFeedback`、`engagement`、`pageRegistry`、`notifications` 之一；其中内部字段均可局部提交。`engagement.pageLikes.enabled` 是页面点赞的 canonical 开关，`pageFeedback.allowLike` 仅作为过渡显示字段同步。
@@ -1037,6 +1052,7 @@ AdminSettings
     moderation: {
       mode: "none" | "akismet_auto" | "manual_with_akismet" | "manual";
       provider: "none" | "akismet";
+      localReviewEnabled: boolean;
       akismet: {
         failPolicy: "pending";
         discardBlatantSpam: boolean;
@@ -1064,6 +1080,13 @@ AdminSettings
       thresholdWindowSec: number;
       thresholdMaxActions: number;
     };
+    emailPolicy: {
+      mode: "allow_all" | "allow_selected";
+      allowed: EmailRule[];
+      denied: EmailRule[];
+      protectedDomains: Array<{ value: string; includeSubdomains: boolean }>;
+    };
+    abusePolicy: AbusePolicy;
     abuseGuard: {
       enabled: boolean;
       windowSec: number;
@@ -1168,7 +1191,33 @@ AdminSettings
 
 保存时会被后端硬上限截断到安全范围内：作者名 `100`、作者网站 / 页面 URL `4096`、页面标题 `500`、页面 key `1024`、评论正文 `10000`。公开 bootstrap 会在 `data.comments.form.limits` 返回当前生效值；公开写入口超过当前站点上限时返回字段级 `VALIDATION_FAILED`。
 
-`comments.abuseGuard.enabled=false` 会关闭 QingYan 应用层的公开写入滥用计数和自动黑名单触发，适用于实例前方已有更强 WAF、反向代理限流或边缘安全策略的部署。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态或输入校验。`maxWriteActions` 统计评论创建、评论投票和页面点赞等公开写入动作。
+`comments.emailPolicy` 与评论分区原子保存，规则默认为空、`mode="allow_all"`。`EmailRule` 仅支持 `{type:"email",value}` 或 `{type:"domain",value,includeSubdomains}`；域名按 IDN ASCII 及小写规范化，禁止项优先，仅允许模式须至少一个允许项。可选邮箱空白仍按表单必填设置判断。受保护域名和指定作者邮箱要求有效账号、`comments.reply` 与目标站点访问权；账号使用自己的当前资料，不受访客来源允许/禁止项影响。
+
+### `POST /api/admin/settings/{siteKey}/email-policy/preview`
+
+需要 `site_settings.update` 与站点访问权。请求为 `{ email, policy, verifiedAuthorEmail?:string, identity?:"visitor"|"current_account" }`；`policy` 使用完整草稿，`verifiedAuthorEmail` 使用同一评论分区的指定作者邮箱草稿，非空时按邮箱规则校验与规范化，空串表示草稿已清空指定作者邮箱，省略时沿用已保存的指定作者邮箱。内置后台始终提交该草稿字段；邮箱、身份、来源规则或指定作者邮箱变化后，旧预览结果失效。`current_account` 另要求评论权限并仅使用当前会话账号邮箱，请求邮箱或指定作者邮箱不能替代账号身份。返回 `{result:"allowed"|"denied"|"login_required",matchedRule,source:"draft",saved:false}`。预览不写设置，实际提交继续使用已保存规则和指定作者邮箱。
+
+`comments.abusePolicy` 统一拥有独立 IP/突发、验证码成本、持续违规、复犯及保留参数。默认值如下，均可在评论分区调整；它们是初始策略参数，不代表流量样本校准：
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `commentIpMax` | 30 | 评论基础窗口的 IP 总量 |
+| `commentBurstMax` / `ipBurstMax` / `burstWindowSec` | 2 / 12 / 10 | 主体/IP 评论突发额度及秒数 |
+| `ipActionMultiplier` | 6 | 投票/点赞 IP 独立容量相对主体基础额度的倍数 |
+| `captchaRequestMax` / `captchaIpMax` / `captchaWindowSec` | 30 / 180 / 60 | 验证码主体/IP 请求成本窗口 |
+| `violationThreshold` / `violationWindowSec` | 10 / 60 | 同类拒绝升级为处罚所需次数及窗口 |
+| `penaltyTtlSec` / `repeatPenaltyTtlSec` | 86400 / 604800 | 首次/复犯处罚秒数 |
+| `repeatWindowSec` | 2592000 | 复犯判断窗口 |
+| `evidenceRetentionDays` | 90 | 结束后的证据保留天数，至少覆盖复犯窗口 |
+| `syncToWaf` | false | 是否提升有依据的持续超频处罚为站点访问限制 |
+
+`abuseGuard.autoBlacklist.ttlSec` 是首次期限的旧读写别名，读取与 `abusePolicy.penaltyTtlSec` 一致。一次请求先整体预占独立业务维度，提交事务成功后结算；格式、邮箱、验证码拒绝、重复互动及事务回滚释放预占。普通首次 429 不封禁；同站点、IP、同类违规在窗口内持续达到阈值后创建持久处罚。白名单豁免处罚，不豁免业务额度。
+
+`moderation.localReviewEnabled` 仅在 `akismet_auto` 可开启。Akismet 垃圾保持垃圾，故障待审，ham 才执行本地后置；没有足够证据则待审并按最终状态生成通知意图。当前策略使用同站点邮箱、昵称、IP、UA 一致的最多 50 条历史；有效人工批准、至少 30 天且跨两日的成熟批准，或成熟记录的有效站点人员直接回复提供公开依据。近期自动批准、未知旧批准来源、数字正文、删除或撤回批准不提供相应依据。
+
+本地过期处罚在启动时和当前站点每日首次违规处理时最多清理 100 条；只处理已结束且超过保留/复犯期限、没有面板同步关联的记录及其过期自动规则。仍需恢复或解除的面板关联继续保留，由同步维护确认终态后清理。
+
+`comments.abuseGuard.enabled=false` 关闭 IP 聚合写入累计和自动处罚；独立主体/IP 业务额度与验证码仍执行。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态或输入校验。`maxWriteActions` 统计评论创建、评论投票和页面点赞等公开写入动作。
 
 评论通知的 canonical 模型是 `notifications.backend.events[]`，并且请求必须同时提交 `admin_comment_pending` 与 `admin_comment_approved` 两个固定事件。PATCH/PUT 输入中的每个事件使用独立的 `recipientUserIds[]` 与 `externalChannelConfigIds[]`；GET 会把人员解析为 `recipients[]`，同时保留已选的其他发送目标编号。示例：
 
@@ -1392,7 +1441,7 @@ AdminSystemSettings
 
 更新全局系统设置。`logging` 当前为必填；`admin`、`mail`、`notifications`、`captcha`、`ipRegion`、`avatar`、`publicApi` 可按后台表单提交。secret 字段为空时前端会省略，后端保留已有值。
 
-`mail.enabled` 和 `mail.smtp.*` 是 system owner，影响实例级邮件发送能力。站点级通知设置拆分为 `notifications.commenter.replyEmailEnabled` 和 `notifications.backend.enabled`：前者只控制普通评论者回复邮件订阅能力，后者只控制后台用户通知任务创建。
+`mail.enabled`、`mail.smtp.*` 和 `mail.commentFormat` 是 system owner，影响实例级邮件发送能力。`commentFormat` 为 `text | html`，默认 `text`，决定三类评论邮件使用的已保存模板变体及 MIME 格式。模板与安全事件上下文在首次尝试时持久化，重试沿用；退订令牌仅临时签发，不写入任务 payload。站点级通知设置拆分为 `notifications.commenter.replyEmailEnabled` 和 `notifications.backend.enabled`：前者只控制普通评论者回复邮件订阅能力，后者只控制后台用户通知任务创建。
 
 `notifications.delivery.queueBackend` 默认是 `database`。选择 `bullmq` 时需要部署 Redis 并配置相应运行环境；BullMQ 只影响队列后端，不改变 planner、delivery projection、worker 状态模型或任务中心展示。
 
@@ -1443,6 +1492,7 @@ AdminSystemSettings
   };
   mail: {
     enabled: boolean;
+	commentFormat: "text" | "html";
     smtp: {
       host: string;
       port: number;
@@ -1568,6 +1618,25 @@ AdminSystemSettings
   };
 }
 ```
+
+### `PATCH /api/admin/system-settings/sections/{section}`
+
+保存单个系统设置分区，需要 `system_settings.update`。请求体是非空字段对象；服务端从当前已保存设置合并本次字段，再校验、持久化并返回完整的 `AdminSystemSettings`，secret 仍只返回已配置状态。未提交的分区保持原值，校验失败返回 `VALIDATION_FAILED + fields[]`。
+
+| `section` | 请求体对应的设置 |
+| --- | --- |
+| `security` | 可用 `{ admin, security, logging }` 分别提交；直接提交的安全字段合并到 `security` |
+| `rate-limit` | `security.rateLimit` 的内部字段 |
+| `mail` | `mail` 的内部字段，例如 `{ "enabled": true, "smtp": { "host": "smtp.example.test" } }` |
+| `notifications` | `notifications` 的内部字段 |
+| `captcha` | `captcha` 的内部字段 |
+| `avatar` | 可用 `{ avatar, publicApi }` 分别提交；直接提交的头像字段合并到 `avatar` |
+| `ip-region` | `ipRegion` 的内部字段 |
+| `anti-spam` | `antiSpam` 的内部字段 |
+
+对象字段递归合并，提交的数组整列表替换。通知渠道新增、编辑和删除均通过 `notifications` 分区提交 `{ channelConfigs: [...] }`，该数组必须包含需要保留的全部可编辑发送目标；遗漏的已保存目标视为删除，仍被站点通知或任务失败通知引用时返回 `NOTIFICATION_CHANNEL_CONFIG_IN_USE`。`email:default` 可随列表带回，但不会作为可编辑目标保存；省略目标的 secret 字段保留其已有密钥。
+
+Admin Console 的渠道弹窗点击“保存”立即调用此接口，服务端成功后才关闭并更新列表；失败时保留弹窗和输入。渠道保存不依赖设置页另一次“应用更改”。其它设置分区的局部保存只应用对应分区，不提交其它分区尚未应用的草稿。
 
 ### `POST /api/admin/system-settings/notifications/channel-test`
 
@@ -1712,225 +1781,29 @@ AdminSystemSettings
 }
 ```
 
-## Import And Export
+## 已退役的数据操作
 
-### `GET /api/admin/import-export/jobs`
-
-列出导入任务记录。
-
-Query：
-
-```ts
-{
-  siteKey?: string;
-  status?: string;
-  sourceType?: string;
-  limit?: number; // default 20, max 100
-}
-```
-
-响应：
-
-```ts
-{
-  items: ImportJobListItem[];
-  nextCursor: string | null;
-}
-```
-
-### `GET /api/admin/import-export/jobs/{jobId}`
-
-获取单个导入任务记录。
-
-响应：
-
-```ts
-{
-  job: ImportJobListItem;
-}
-```
-
-`ImportJobListItem`：
-
-```ts
-{
-  id: string;
-  siteId: number;
-  sourceType: string;
-  sourceFileName: string;
-  format: string;
-  formatVersion: number;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  appliedAt: string | null;
-  summary: unknown;
-  backup: ImportJobBackup | null;
-  error: unknown;
-}
-```
-
-### `POST /api/admin/import-export/export`
-
-导出 QingYan 站点数据，响应会带 `content-disposition` 下载文件名。
-
-请求：
-
-```ts
-{
-  siteKey: string;
-  format: "qingyan.export.v1";
-  include?: {
-    siteSettings?: boolean;
-    systemSettings?: boolean;
-    pageThreads?: boolean;
-    comments?: boolean;
-    visitors?: boolean;
-    voteRecords?: boolean;
-    pageFeedbackRecords?: boolean;
-    blacklistRules?: boolean;
-  };
-}
-```
-
-### `POST /api/admin/import-export/qingyan/dry-run`
-
-对 QingYan JSON 导入做 dry-run，并创建导入任务。
-
-请求：
-
-```ts
-{
-  siteKey: string;
-  fileName: string;
-  payload: unknown;
-  existingStrategy: "fail_on_existing" | "skip_existing";
-  importMode?: "data_only" | "settings_only" | "full_site";
-  settingsStrategy?: "fail_on_existing" | "replace_settings";
-}
-```
-
-### `POST /api/admin/import-export/qingyan/jobs/{jobId}/apply`
-
-应用 QingYan JSON 导入任务，并在写入前创建数据库备份。
-
-请求：
-
-```ts
-{
-  existingStrategy: "fail_on_existing" | "skip_existing";
-  importMode?: "data_only" | "settings_only" | "full_site";
-  settingsStrategy?: "fail_on_existing" | "replace_settings";
-}
-```
-
-### `POST /api/admin/import-export/wordpress/analyze`
-
-分析 WordPress WXR。Admin Console Web 当前以 XML 文件 body 上传：
-
-- Query 使用除 `xml` 外的 `WordPressAnalyzePayload` 字段。
-- `Content-Type` 为 `application/xml` 或 `text/xml`。
-- Body 为 WXR XML 文本。
-
-Query：
-
-```ts
-{
-  siteKey: string;
-  fileName: string;
-  sourceBasePath?: string;
-  targetDistRoot?: string;
-  pageKeyStrategy?:
-    | "path_without_leading_slash"
-    | "path_with_leading_slash"
-    | "page_url_path"
-    | "custom_template"
-    | "explicit_only";
-  postPathTemplate?: string;
-  pagePathTemplate?: string;
-  mappingJson?: string;
-}
-```
-
-响应包含 `job`、`report` 和 `suggestedMapping`。`report.authorSummary` 会汇总 WXR 作者匹配结果：
-
-```ts
-{
-  totalAuthors: number;
-  staffStrong: number;
-  staffEmailCandidate: number;
-  registeredUnknown: number;
-  visitor: number;
-}
-```
-
-每个 `report.items[].comments[]` 可包含 `authorMatch.kind`：`staff_strong` 表示 `comment_user_id` 匹配 `wp:author_id`；`staff_email_candidate` 表示未登录评论但邮箱匹配 WXR 作者，需要在生成计划前确认；`registered_unknown` 表示有非 0 用户 ID 但 WXR 作者列表没有对应项；`visitor` 表示普通访客评论。`report.htmlContentSummary` 会统计原始评论内容中疑似 HTML 标签的数量和少量示例；当前导入仍按纯文本转义。
-
-### `POST /api/admin/import-export/wordpress/jobs/{jobId}/plan`
-
-把 WordPress analyze job 转换为导入 plan。若 analyze 报告中存在 `staff_email_candidate`，请求必须提供 `authorDecisions`；强匹配 `staff_strong` 会自动进入 `authorIdentity: "verified"`，显式拒绝的邮箱候选会按 `visitor` 导入。
-
-请求：
-
-```ts
-{
-  authorDecisions?: Record<string, "verified" | "visitor">; // key 为 oldCommentId
-}
-```
-
-响应包含 `job` 和 `plan.summary`。
-
-### `POST /api/admin/import-export/jobs/{jobId}/dry-run`
-
-对通用导入任务做 dry-run。
-
-请求：
-
-```ts
-{
-  existingStrategy: "fail_on_existing" | "skip_existing";
-}
-```
-
-### `POST /api/admin/import-export/jobs/{jobId}/apply`
-
-应用通用导入任务，并在写入前创建数据库备份。
-
-请求：
-
-```ts
-{
-  existingStrategy: "fail_on_existing" | "skip_existing";
-}
-```
-
-`ImportJobBackup`：
-
-```ts
-{
-  kind: "import_database_backup";
-  engine: string;
-  strategy: string;
-  createdAt: string;
-  backupDirectory: string;
-  databaseBackupPath?: string;
-  files: Array<{
-    role: "database" | "wal" | "shm" | "metadata";
-    path: string;
-    backupPath: string | null;
-    present: boolean;
-    size: number | null;
-    sha256: string | null;
-  }>;
-  notes: string[];
-}
-```
+`/api/admin/import-export/*`、后台导入导出页面、上传下载和独占 `data.*` / `wordpress_migration.*` 权限已退出。旧 SQLite 迁入由独立离线转换工具承担，不提供这些接口的兼容分支。所有 `backup` 定时任务类型退出，运维整实例备份与升级前备份继续通过停写运维入口执行。
 
 ## Task Scheduler
 
 任务调度中心接口服务内置 Admin Console，不进入公开 OpenAPI。所有写操作需要已登录后台会话和 CSRF token；后端按当前用户的全局管理员、初始管理员、站点管理员、站点评论管理员和站点授权执行 ACL，不以前端隐藏作为权限边界。
 
 任务调度中心只允许后端注册的内置 task type，不支持任意 Shell、Python、JavaScript、SQL、系统命令、容器命令或脚本库任务。
+
+计划任务、运行记录、审计和删除快照四个列表共享以下 query：
+
+```ts
+{
+  limit?: number;  // 默认 200，整数，范围 1–200
+  offset?: number; // 默认 0，非负整数
+  search?: string; // 去除首尾空白，最多 200 字符；空字符串不筛选
+}
+```
+
+搜索不区分大小写，按字面子串匹配，`%` 和 `_` 不作为通配符。站点可见范围、业务筛选和搜索均在数据库分页前应用，`totalCount` 表示全部符合条件且当前用户可见的记录数量，与本页 `items.length` 分开计算。结果按创建时间倒序、ID 倒序排列；删除快照使用删除时间倒序、ID 倒序。超出末页时返回空 `items` 并保留准确的 `totalCount`，非法分页或筛选参数返回 `INVALID_REQUEST`。
+
+Admin Console 显式传入每页条数和偏移，搜索、筛选、站点或评论范围变化后从第一页重新读取；轮询沿用当前查询与页码。
 
 ### `GET /api/admin/tasks/definitions`
 
@@ -1975,7 +1848,6 @@ Query：
 - `page_metadata_refresh`
 - `comment_ip_refresh`
 - `ip_region_update`
-- `backup`
 - `site_settings_action`
 - `blacklist_automation`
 - `daily_site_digest`
@@ -1983,6 +1855,19 @@ Query：
 ### `GET /api/admin/tasks/scheduled`
 
 列出当前用户可见的计划任务定义。非 owner 的站点管理员和站点评论管理员只能看到摘要投影，不能看到 raw payload、policy、trigger 或日志。
+
+除共享 query 外，支持：
+
+```ts
+{
+  type?: string; // 精确任务类型
+  status?: "queued" | "delayed" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "blocked" | "suppressed" | "cancelled";
+  scopeKind?: "global" | "site";
+  visibility?: "owned" | "summary";
+}
+```
+
+`status` 筛选最近运行状态 `lastStatus`。`visibility="owned"` 表示当前会话可管理、返回 `definition` 投影的任务，包含符合权限的系统托管任务；`summary` 表示仅摘要可见的任务。`search` 匹配名称、描述、任务类型（含中文类型名）或负责人用户 ID，不搜索任务 payload。
 
 响应：
 ```ts
@@ -2112,7 +1997,21 @@ Query：
 
 列出任务运行记录。
 
-Query 可传 `commentId`，此时只返回 `subject_type=comment` 且 `subject_id` 匹配的运行记录；可见性仍由当前用户的任务权限和站点范围决定。
+除共享 query 外，支持：
+
+```ts
+{
+  type?: string; // 精确内部任务类型
+  status?: "queued" | "delayed" | "running" | "retrying" | "succeeded" | "failed" | "skipped" | "blocked" | "suppressed" | "cancelled";
+  siteKey?: string;
+  scopeKind?: "global" | "site";
+  commentId?: string;
+}
+```
+
+`scopeKind="global"` 筛选没有 `siteKey` 的运行，`site` 筛选有 `siteKey` 的运行；传入 `siteKey` 时精确匹配该站点。`commentId` 只返回 `subject_type=comment` 且 `subject_id` 匹配的运行记录，可与其余筛选组合；站点权限先于分页执行。
+
+普通任务的 `search` 匹配计划任务名称快照、任务类型（含中文类型名）、跳过原因或阻塞原因。通知任务仅匹配安全的业务流程名称及“邮件通知”“评论通知”，不匹配内部类型、任务 payload、收件地址或原始异常。
 
 评论邮件详情中的“查看任务记录”使用该 query 进入任务中心；Admin Console 应明确显示当前处于评论范围过滤，并允许用户清除范围。通知运行在列表和详情中使用 `workflow`、安全 `deliveries` 与业务文案呈现，不把运行 ID 或底层任务类型显示为用户可见名称。
 
@@ -2186,9 +2085,15 @@ Query：
 
 列出任务相关审计记录。初始管理员和管理员可见全局任务审计；站点用户只能看到其授权站点范围内的任务审计摘要。
 
+支持共享分页与搜索 query。数据库先限定 `task.*` 动作和当前用户可见范围，再搜索、计数和分页；其它后台动作不会占用任务审计的分页额度。站点用户的审计范围还限定 `actorType="admin_user"`。
+
+`search` 匹配动作、操作者类型或 ID、目标类型或 ID、任务名、任务类型（含中文类型名）、站点、运行 ID 或计划任务 ID。响应为 `{ items: TaskAuditItem[], totalCount: number }`；单项只返回审计摘要，不返回任务执行输入、输出或错误详情。
+
 ### `GET /api/admin/tasks/deleted-snapshots`
 
 列出计划任务删除快照。仅初始管理员可访问。
+
+支持共享分页与搜索 query，`search` 匹配快照中的任务名、任务类型（含中文类型名）或删除原因。响应为 `{ items: ScheduledTaskDeletedSnapshot[], totalCount: number }`；保留删除快照的摘要投影，不返回完整原始任务配置。非初始管理员返回 `403 TASK_DELETED_SNAPSHOT_ACCESS_DENIED`，不会先返回可探测的分页总数。
 
 ### `GET /api/admin/tasks/deleted-snapshots/{snapshotId}`
 
@@ -2273,7 +2178,141 @@ Query：
 }
 ```
 
+## WAF sync
+
+### `GET /api/admin/waf`
+
+需要当前站点 `blacklist.read`。Query 为 `siteKey`、`limit`（1–100，默认20）和 `offset`（默认0），权限先于服务端分页应用。
+
+响应包含 `items`、`totalCount`、`limit`、`offset`、`configured`、`paused`、`capabilities` 和 `evidence`。记录投影包括 IP、本地 `localState`（`active/released/expired`）、到期时间、面板 `wafState`（`unknown/present/absent/conflict`）、`syncState`（`pending/synced/failed/conflict`）、安全原因码、最近尝试/确认时间及暂停标志。`present` 表示已核对面板配置存在，不能代替实际访问验证。
+
+`evidence` 为已映射站点的 `{lastPollAt,gapReason}`，未配置时为 `null`。缺口记录最近发现的源保留、分页或时间证据问题，不表示之后所有日志均缺失。原始面板请求、密钥和 Nginx 日志不返回后台。
+
+### `POST /api/admin/waf/{id}/retry|resume|release`
+
+写请求沿用 Admin 会话、CSRF 和站点权限。`retry/resume` 需要 `blacklist.create`；`release` 需要 `blacklist.delete` 和 `{reason}`（1–500字符）。
+
+- `retry` 仅重新请求同步；人工差异暂停时返回 `WAF_REVIEW_REQUIRED`。
+- `resume` 明确确认按当前本地决定恢复同步，可以覆盖该受管规则的面板人工改动；共用出口确认也包含整站影响。
+- `release` 解除本地处罚并复位该来源关联的写入/验证码窗口，再申请面板解除。已有人工差异时保留面板状态，必须核对后恢复同步；维护暂停时只记录决定，维护结束补齐。
+
+响应 `{accepted:true,panelSync:"pending"|"paused"|"review_required"}` 只代表请求已接受，客户端重新读取实际状态。网关不可用、未配置或维护时同步动作返回 `WAF_SYNC_UNAVAILABLE`；本地解除仍可执行。所有动作写入站点审计，面板实际删除只管理受管名称及字段指纹一致的规则。
+
 ## Ops
+
+### `GET /api/admin/ops/delayed-deletions`
+
+分页读取延迟删除记录，需要 `ops.read` 和目标站点访问权；只有全局管理员可以省略 `siteKey` 查看全部站点。
+
+Query：
+
+```ts
+{
+  siteKey?: string;
+  status?: "pending" | "restored" | "hard_deleted"; // 默认 pending
+  limit?: number;  // 默认 20，整数，范围 1–100
+  offset?: number; // 默认 0，非负整数
+}
+```
+
+站点和状态筛选先于分页，结果按创建时间倒序、ID 倒序排列。响应：
+
+```ts
+{
+  items: Array<Omit<DelayedDeletionRecord, "metadataJson"> & {
+    siteKey: string | null;
+    siteName: string | null;
+    pageTitle: string | null;
+    pageUrl: string | null;
+    displayName: string;
+    canRestore: boolean;
+    metadata: unknown;
+  }>;
+  totalCount: number;
+  limit: number;
+  offset: number;
+}
+```
+
+`displayName` 使用页面标题、页面地址或“已删除页面”，批量清空记录显示“清空页面回收站”。`metadata` 是解析后的删除元信息，无有效内容时为 `null`。`canRestore` 要求记录仍为 `pending`、当前时间早于 `hardDeleteAfter`，且至少一个页面当前仍为 `deleted` 并属于这次删除登记。服务端按页面身份、删除时间和最新删除登记核对归属；缺少快照的旧记录只在归属明确时可恢复。已经恢复、重建、重新删除或归属不明的页面不会使旧记录变得可恢复。执行恢复仍需单独通过 `ops.restore` 和站点权限检查。
+
+`DelayedDeletionRecord`：
+
+```ts
+{
+  id: number;
+  resourceType: string;
+  resourceId: string;
+  siteId: number | null;
+  requestedByUserId: number | null;
+  requestedAt: string;
+  hardDeleteAfter: string;
+  restoredByUserId: number | null;
+  restoredAt: string | null;
+  hardDeletedAt: string | null;
+  status: "pending" | "restored" | "hard_deleted";
+  metadataJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### `POST /api/admin/ops/delayed-deletions/{deletionId}/restore`
+
+恢复保留期内的删除记录，需要 `ops.restore`、目标记录的站点访问权和 CSRF token。`deletionId` 必须是正整数，不需要请求体。当前支持单个页面 `page` 和清空页面回收站产生的 `page_trash` 记录；两者均只恢复当前仍为 `deleted` 且属于这次删除登记的页面。批量记录可以恢复其中仍符合条件的页面，`restoredCount` 返回实际恢复数量。
+
+服务端在同一事务中锁定删除记录和候选页面，重新检查待恢复状态、截止时间及页面删除归属，恢复资源并写入 `restored` 状态。列表中的 `canRestore` 不替代执行时核验。成功后返回：
+
+```ts
+{
+  deletion: DelayedDeletionRecord;
+  resource: {
+    resourceType: string;
+    resourceId: string;
+    restoredCount: number;
+  };
+}
+```
+
+`deletion` 是更新后的删除记录，包含 `restoredByUserId`、`restoredAt` 和原始 `metadataJson`，不带 GET 列表的展示字段。恢复成功会写入 `delayed_deletion.restored` 审计；Admin Console 随后重新读取列表和服务端计数。
+
+错误：
+
+- `400 INVALID_REQUEST`：记录 ID 无效。
+- `403 ADMIN_PERMISSION_REQUIRED` / `ADMIN_SITE_ACCESS_REQUIRED`：缺少恢复权限或目标站点访问权。
+- `404 DELAYED_DELETION_NOT_FOUND`：记录不存在。
+- `409 DELAYED_DELETION_NOT_PENDING`：记录已恢复或已永久删除。
+- `409 DELAYED_DELETION_EXPIRED`：当前时间已达到或超过 `hardDeleteAfter`，即使清理尚未执行也不能恢复。
+- `409 DELAYED_DELETION_RESOURCE_UNSUPPORTED`：资源类型不支持恢复。
+- `409 DELAYED_DELETION_RESOURCE_UNAVAILABLE`：单个或批量记录中没有仍属于这次删除登记的可恢复页面，包括页面已不存在、已恢复、重建或重新删除的情况。
+
+### `GET /api/admin/ops/ip-region`
+
+需 `ops.read`。返回当前激活库、最近检查与评论地址统计，手动维护任务通过 `recentJobs` 关联现有任务中心；不再返回独立 `recentRuns` 历史。
+
+```ts
+{
+  databases: Array<{
+    ipVersion: "v4" | "v6";
+    filePath: string | null;
+    fileHash: string | null;
+    sourceUrl: string | null;
+    cachePolicy: string | null;
+    activatedAt: string | null;
+    updatedAt: string;
+    lastCheckedAt: string | null;
+    lastCheckStatus: "success" | "skipped" | "failed" | null;
+    lastCheckReason: string | null;
+    lastCheckError: string | null;
+  }>;
+  commentMetadata: { totalWithIp: number; missingLocation: number; failedLocation: number };
+  recentJobs: TaskRunProjection[];
+}
+```
+
+尚无激活库也可保留最近检查失败；判断激活应同时确认文件路径、hash 与 activatedAt。检查失败不会清除原激活状态。Admin 按稳定状态映射安全提示，不直接展示 lastCheckError 原始异常。
+
+`POST /api/admin/ops/ip-region/update` 与 `POST /api/admin/ops/comment-ip/refresh` 继续创建已有维护任务；执行日志通过任务中心读取。
 
 ### `GET /api/admin/ops/status`
 
@@ -2307,7 +2346,7 @@ Query：
   };
   backup: {
     format: "qingyan.full-backup";
-    provider: "sqlite";
+    provider: "postgresql";
   };
   recovery: {
     manualCommands: string[];
@@ -2422,7 +2461,7 @@ Query：
 
 ### `GET /api/admin/ops/tasks`
 
-任务中心列表。该接口只读取 `task_runs` 投影；导入任务仍由 import-export job API 管理。
+任务中心列表。该接口只读取 `task_runs` 投影；已退役的导入导出和定时备份不再提供执行入口。
 
 Query：
 

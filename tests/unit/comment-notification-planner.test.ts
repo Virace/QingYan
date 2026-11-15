@@ -1,6 +1,5 @@
 import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-
 import { createDatabaseClients } from "../../src/db/client";
 import {
 	commenterNotificationPreferences,
@@ -12,6 +11,7 @@ import {
 	systemSettings,
 	taskRuns,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { CommentNotificationPlanner } from "../../src/modules/notifications/comment-notification-planner";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { EmailReputationRepository } from "../../src/modules/notifications/email-reputation-repository";
@@ -28,21 +28,23 @@ function requireEmailHash(email: string): string {
 	return hash;
 }
 
-function createFixture() {
+async function createFixture() {
 	const workspace = createTestWorkspace("qingyan-notification-planner-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl, {
+		pool: { max: 2 },
+	});
 
 	return {
 		...clients,
-		cleanup() {
-			clients.sqlite.close();
-			workspace.cleanup();
+		async cleanup() {
+			await clients.close();
+			await workspace.cleanup();
 		},
 	};
 }
 
-async function seedThread(fixture: ReturnType<typeof createFixture>) {
+async function seedThread(fixture: Awaited<ReturnType<typeof createFixture>>) {
 	const [site] = await fixture.db
 		.insert(sites)
 		.values({
@@ -60,6 +62,7 @@ async function seedThread(fixture: ReturnType<typeof createFixture>) {
 		.values({
 			siteId: site.id,
 			pageKey: "post:reply-notify",
+			pageKeyHash: hashKey("post:reply-notify"),
 			pageTitle: "Reply Notify",
 			pageUrl: "/posts/reply-notify/",
 			commentCount: 2,
@@ -69,7 +72,9 @@ async function seedThread(fixture: ReturnType<typeof createFixture>) {
 	return { site, thread };
 }
 
-async function seedUsableSystemMail(fixture: ReturnType<typeof createFixture>) {
+async function seedUsableSystemMail(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+) {
 	await fixture.db.insert(systemSettings).values([
 		{ category: "mail", key: "enabled", valueJson: JSON.stringify(true) },
 		{
@@ -85,7 +90,9 @@ async function seedUsableSystemMail(fixture: ReturnType<typeof createFixture>) {
 	]);
 }
 
-async function seedApprovedReply(fixture: ReturnType<typeof createFixture>) {
+async function seedApprovedReply(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+) {
 	const { site, thread } = await seedThread(fixture);
 	await seedUsableSystemMail(fixture);
 	await fixture.db.insert(comments).values([
@@ -126,7 +133,7 @@ async function seedApprovedReply(fixture: ReturnType<typeof createFixture>) {
 
 describe("comment notification planner", () => {
 	it("creates one commenter email task for an approved reply", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			const planner = new CommentNotificationPlanner(fixture.db);
@@ -162,12 +169,12 @@ describe("comment notification planner", () => {
 				}),
 			]);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("records decisions for skipped sources and non-approved replies", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			const planner = new CommentNotificationPlanner(fixture.db);
@@ -218,12 +225,12 @@ describe("comment notification planner", () => {
 				]),
 			);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("does not create commenter tasks when commenter reply email is disabled", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			await fixture.db
@@ -249,12 +256,12 @@ describe("comment notification planner", () => {
 				}),
 			]);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("does not create commenter tasks when system mail is unusable", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			await fixture.db
@@ -285,7 +292,7 @@ describe("comment notification planner", () => {
 				}),
 			]);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
@@ -294,7 +301,7 @@ describe("comment notification planner", () => {
 			name: "unsubscribed",
 			reasonCode: "commenter_unsubscribed",
 			status: "suppressed",
-			prepare: async (fixture: ReturnType<typeof createFixture>) => {
+			prepare: async (fixture: Awaited<ReturnType<typeof createFixture>>) => {
 				await fixture.db
 					.update(commenterNotificationPreferences)
 					.set({
@@ -307,7 +314,7 @@ describe("comment notification planner", () => {
 			name: "staff_parent",
 			reasonCode: "commenter_not_visitor",
 			status: "skipped",
-			prepare: async (fixture: ReturnType<typeof createFixture>) => {
+			prepare: async (fixture: Awaited<ReturnType<typeof createFixture>>) => {
 				await fixture.db
 					.update(comments)
 					.set({ authorIdentity: "staff" })
@@ -318,7 +325,7 @@ describe("comment notification planner", () => {
 			name: "same_email",
 			reasonCode: "same_recipient",
 			status: "skipped",
-			prepare: async (fixture: ReturnType<typeof createFixture>) => {
+			prepare: async (fixture: Awaited<ReturnType<typeof createFixture>>) => {
 				await fixture.db
 					.update(comments)
 					.set({ authorEmail: "parent@example.com" })
@@ -329,7 +336,7 @@ describe("comment notification planner", () => {
 			name: "suppressed",
 			reasonCode: "email_reputation_suppressed",
 			status: "suppressed",
-			prepare: async (fixture: ReturnType<typeof createFixture>) => {
+			prepare: async (fixture: Awaited<ReturnType<typeof createFixture>>) => {
 				const reputation = new EmailReputationRepository(fixture.db);
 				const baseTime = Date.now();
 				for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -343,7 +350,7 @@ describe("comment notification planner", () => {
 			},
 		},
 	])("skips $name recipients", async (testCase) => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			await testCase.prepare(fixture);
@@ -366,12 +373,12 @@ describe("comment notification planner", () => {
 				}),
 			]);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("does not create duplicate tasks for the same reply and recipient", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			const planner = new CommentNotificationPlanner(fixture.db);
@@ -396,12 +403,12 @@ describe("comment notification planner", () => {
 				await fixture.db.select().from(notificationDeliveries),
 			).toHaveLength(1);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("keeps an event-level no-send decision terminal when settings later change", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		try {
 			const { site } = await seedApprovedReply(fixture);
 			const planner = new CommentNotificationPlanner(fixture.db);
@@ -440,7 +447,7 @@ describe("comment notification planner", () => {
 				[],
 			);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 });

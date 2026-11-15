@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 
-import type { AppDatabase } from "../../../db/client";
+import type { DatabaseExecutor } from "../../../db/client";
 import { notificationTemplates } from "../../../db/schema";
 import {
 	defaultNotificationTemplates,
@@ -65,7 +65,7 @@ function defaultByKey(key: string) {
 }
 
 export class NotificationTemplateRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async list(): Promise<NotificationTemplateRecord[]> {
 		const overrides = await this.db.select().from(notificationTemplates);

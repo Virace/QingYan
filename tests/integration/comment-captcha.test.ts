@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	captchaSessions,
 	pageThreads,
@@ -8,6 +7,7 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { decodeSvgDataUrl } from "../support/captcha";
 import { createTestApp } from "../support/test-fixtures";
@@ -34,6 +34,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -59,6 +60,7 @@ describe("comment captcha", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/ignored-captcha/",
+			pageKeyHash: hashKey("/posts/ignored-captcha/"),
 			pageUrl: "/posts/ignored-captcha/",
 			status: "ignored",
 		});
@@ -117,10 +119,12 @@ describe("comment captcha", () => {
 
 		expect(stateResponse.statusCode).toBe(200);
 		expect(
-			stateResponse.cookies.some((cookie) => cookie.name === "qingyan_visitor"),
+			stateResponse.cookies.some((cookie) =>
+				cookie.name.startsWith("qingyan_security_"),
+			),
 		).toBe(true);
-		const visitorCookie = stateResponse.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
+		const visitorCookie = stateResponse.cookies.find((cookie) =>
+			cookie.name.startsWith("qingyan_security_"),
 		);
 		const challengeId = stateResponse.json().challenge.challengeId as string;
 		const [session] = await fixture.app.db
@@ -141,7 +145,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha"),
 			payload: {
@@ -163,7 +167,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha"),
 			payload: {
@@ -196,8 +200,8 @@ describe("comment captcha", () => {
 		});
 		expect(initialState.statusCode).toBe(200);
 
-		const visitorCookie = initialState.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
+		const visitorCookie = initialState.cookies.find((cookie) =>
+			cookie.name.startsWith("qingyan_security_"),
 		);
 		const initialChallenge = initialState.json().challenge as {
 			challengeId: string;
@@ -226,7 +230,7 @@ describe("comment captcha", () => {
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:captcha-refresh",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 		});
@@ -237,7 +241,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/refresh",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 			payload: {
@@ -279,7 +283,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 			payload: {
@@ -301,7 +305,7 @@ describe("comment captcha", () => {
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/verify",
 			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				[visitorCookie?.name ?? "qingyan_security"]: visitorCookie?.value ?? "",
 			},
 			headers: refererFor("post:captcha-refresh"),
 			payload: {

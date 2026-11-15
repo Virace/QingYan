@@ -1,7 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import path from "node:path";
 
 import { parse } from "yaml";
 
@@ -32,13 +31,15 @@ async function readAdminPathFromDatabase(
 	environment: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
 	const config = await loadConfig(configPath, environment);
-	const databaseFile = path.resolve(process.cwd(), config.database.sqlite.file);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const { db, close } = createDatabaseClients(
+		config.database.url,
+		config.database,
+	);
 	try {
 		const [bootstrap] = await db.select().from(adminBootstrapState).limit(1);
 		return bootstrap?.consolePath;
 	} finally {
-		sqlite.close();
+		await close();
 	}
 }
 

@@ -24,7 +24,7 @@ install.url=http://127.0.0.1:4401/qingyan/admin/install
 
 浏览器访问 `/qingyan/admin/` 或 `/qingyan/admin/install` 完成安装。安装 token 由 install page 通过 HttpOnly cookie 处理，不显示在 URL 或页面正文中；脚本化安装仍可显式提交 token。
 
-安装接口会写入 startup config、初始化 SQLite、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/qingyan/admin` 会跳转到安装页 `/qingyan/admin/install`，正常 `/qingyan/api/*` 接口不会注册；安装完成后按 `QINGYAN_INSTALL_TRANSITION_MODE` 切换到正常服务，安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由 `server.publicPath + admin.consolePath` 组成，`admin.consolePath` 本身仍只表示 QingYan 内部后台路径，例如 `/admin` 或 `/hidden-admin`。
+安装接口会写入 startup config、初始化预建空 PostgreSQL 数据库、执行 migrations、写入 admin bootstrap、默认站点、默认 `site_settings`、完整默认 `system_settings`，并在 startup config 同目录写入 `qingyan.installed.lock` 安装锁。安装期间不启用管理员登录，默认后台入口 `/qingyan/admin` 会跳转到安装页 `/qingyan/admin/install`，正常 `/qingyan/api/*` 接口不会注册；安装完成后按 `QINGYAN_INSTALL_TRANSITION_MODE` 切换到正常服务，安装锁存在时不会启动 install app，正常后台中的 `${server.publicPath}${admin.consolePath}/install` 只返回已关闭提示。安装完成后的后台入口由 `server.publicPath + admin.consolePath` 组成，`admin.consolePath` 本身仍只表示 QingYan 内部后台路径，例如 `/admin` 或 `/hidden-admin`。
 
 startup 环境变量会覆盖安装表单中对应字段，并在安装计划中标记来源。secret 环境变量只显示“已配置”；当前支持把 `QINGYAN_SMTP_PASSWORD` 与 `QINGYAN_TURNSTILE_SECRET_KEY` 作为首装 seed 写入 `system_settings`，响应中不会返回明文。如果目标 startup config 已存在但无效，安装器会在替换前创建同目录 `.bak-YYYYMMDDHHmmss` 备份。
 
@@ -55,9 +55,13 @@ server:
   trustProxy: false
 
 database:
-  client: sqlite
-  sqlite:
-    file: ./data/qingyan.db
+  url: postgresql://qingyan:change-me@postgres:5432/qingyan
+  pool:
+    max: 5
+    connectionTimeoutMs: 5000
+    idleTimeoutMs: 30000
+  # tls:
+  #   rejectUnauthorized: true
 
 admin:
   session:
@@ -108,7 +112,15 @@ security:
 
 ### `database`
 
-当前仅支持 SQLite。`database.sqlite.file` 支持相对路径，按进程工作目录解析。
+当前唯一运行后端为 PostgreSQL 18；旧 SQLite 只供独立离线转换读取。
+
+- `database.url` / `QINGYAN_DATABASE_URL` 指向运维预建的数据库及专用账号。目标采用 UTF8、UTC 和 C 比较规则，安装确认前只读检查连接、权限、版本和空目标。
+- URL 整体按 secret 管理；不要在命令行参数、工单、公开计划或日志中粘贴连接 URL。可通过受保护的进程环境注入，安装预览只显示是否配置。
+- `pool.max` 默认 5，`pool.connectionTimeoutMs` 默认 5000，`pool.idleTimeoutMs` 默认 30000。池属于一个应用进程；共享服务器需按所有服务的总连接与内存预算分配。
+- `tls` 为可选对象。远程连接启用后，`rejectUnauthorized` 默认 true，`ca`、`cert`、`key` 接收证书内容；不配置对象时不启用该 TLS 配置。TLS 私钥和证书字段通过受保护配置或对应环境变量提供。
+- 正常启动仅探测结构状态，不自动应用 schema；新装、升级与离线转换共用明确迁移路径。
+
+固定数据库镜像、角色创建示例及测试 fixture 见 [部署指南](deployment.md#postgresql-服务)。
 
 ### `admin.session`
 
@@ -142,7 +154,12 @@ security:
 | `server.publicBaseUrl` | `QINGYAN_PUBLIC_BASE_URL` | 对外公开基础地址 |
 | `server.publicPath` | `QINGYAN_PUBLIC_PATH` | 对外挂载路径，默认 `/qingyan` |
 | `server.trustProxy` | `QINGYAN_TRUST_PROXY` | 是否信任反向代理 |
-| `database.sqlite.file` | `QINGYAN_SQLITE_FILE` | SQLite 文件路径 |
+| `database.url` | `QINGYAN_DATABASE_URL` | PostgreSQL 连接 URL，整体 secret |
+| `database.pool.max` | `QINGYAN_DATABASE_POOL_MAX` | 连接池上限，默认 5 |
+| `database.pool.connectionTimeoutMs` | `QINGYAN_DATABASE_CONNECTION_TIMEOUT_MS` | 获取连接超时，默认 5000 毫秒 |
+| `database.pool.idleTimeoutMs` | `QINGYAN_DATABASE_IDLE_TIMEOUT_MS` | 空闲连接释放，默认 30000 毫秒 |
+| `database.tls.rejectUnauthorized` | `QINGYAN_DATABASE_TLS_REJECT_UNAUTHORIZED` | TLS 证书校验 |
+| `database.tls.ca` / `cert` / `key` | `QINGYAN_DATABASE_TLS_CA` / `QINGYAN_DATABASE_TLS_CERT` / `QINGYAN_DATABASE_TLS_KEY` | TLS 内容，secret |
 | `admin.session.cookieName` | `QINGYAN_ADMIN_SESSION_COOKIE_NAME` | 后台会话 cookie 名 |
 | `admin.session.ttlMinutes` | `QINGYAN_ADMIN_SESSION_TTL_MINUTES` | 首装时写入 `system_settings`，后台会话有效期，单位分钟 |
 | `admin.session.sameSite` | `QINGYAN_ADMIN_SESSION_SAME_SITE` | `strict | lax | none` |
@@ -184,9 +201,9 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 
 `comments.inputLimits` 会随公开评论 bootstrap 返回到 `data.comments.form.limits`，内容站点前端可用它约束表单长度；服务端仍以数据库中的当前站点设置为准。超过当前站点上限的评论创建、页面点赞等公开写入口会返回字段级 `VALIDATION_FAILED`。硬上限用于防止后台误配置过大的输入，不表示建议前端展示到最大值。
 
-`comments.abuseGuard.enabled=false` 表示关闭 QingYan 应用层的公开写入滥用计数和自动封禁触发；此时部署前方应有 WAF、反向代理、CDN、API 网关或等价基础设施限流。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态、功能开关或输入长度校验。滥用保护的写入计数覆盖评论创建、评论投票和页面点赞等公开写动作。
+`comments.abuseGuard.enabled=false` 关闭 IP 聚合写入累计和自动处罚；独立主体/IP 业务额度与验证码仍执行。`comments.abuseGuard.autoBlacklist.enabled=false` 只关闭自动创建黑名单规则，不影响手动黑名单、验证码策略、基础限流、页面状态、功能开关或输入长度校验。滥用保护的写入计数覆盖评论创建、评论投票和页面点赞等公开写动作。
 
-黑名单规则可由后台人工创建，也可由自动黑名单策略创建。解除某个 IP / email / visitor 的封禁应在 Admin Console 删除对应黑名单规则；删除后只解除该规则带来的拒绝，后续请求仍会继续经过页面状态、功能开关、输入长度、验证码、基础限流和滥用保护检查。
+黑名单规则可由后台人工创建，也可由持续同类违规达到阈值后自动创建。安全规则页对自动处罚提供“撤销误判”和“提前解除”，分别排除或保留复犯依据，并重置会立即重触发的当前窗口；本地与面板状态需分别核对。普通首次 429、单次邮箱错误或验证码错误不会直接产生处罚。手工规则仍按规则删除。
 
 白名单规则独立于黑名单规则，支持 IP `exact | cidr`、email `exact | domain`、visitor `exact`。匹配白名单时，QingYan 会跳过对应黑名单拦截，并且不会把该请求计入自动黑名单触发；白名单优先级只服务于黑名单/自动黑名单。白名单不会绕过后台认证、CSRF、页面注册状态、页面交互状态、功能开关、必填字段、输入长度、验证码或基础限流。站点管理员只能管理自己有访问权的站点白名单，站点评论管理员默认不能管理白名单；全局规则只应由系统管理员维护。
 
@@ -194,9 +211,9 @@ Admin Console 中的站点设置和系统设置按 owner 分离：站点级开�
 
 开启 `authoritative` 必须配置至少一个 HTTP/HTTPS 权威 sitemap URL，且 URL origin 必须属于当前站点允许 origin。保存后系统会在任务中心幂等维护一个系统托管受保护的 `page_source_refresh` 任务，`systemKey` 为 `page_registry:authoritative_source_refresh:<siteKey>`，payload 中的 `sitemapUrls` 与 `pageRegistry.authoritativeSitemapUrls` 保持一致。当前版本不再保留 legacy source/sourceIds 刷新路径或迁移回填逻辑。
 
-可信评论作者的认证依据是后台 session cookie，而不是邮箱本身。公开评论接口在检测到有效后台会话时，会使用当前站点配置的 `displayName`、`email`、`website` 创建已验证评论，并按 `badgeLabel` 展示标识；普通访客即使填写相同邮箱，也不会获得该标识，并会被拒绝使用已保留的可信作者邮箱。邮箱比较会按 trim + lower-case 归一化处理，后台评论者聚合、黑名单邮箱目标和可信作者邮箱保留规则都不区分大小写；原始大小写只作为显示或审计信息保留。
+账号发言的认证依据是有效后台 session、`comments.reply` 与目标站点访问权。提交始终绑定账号当前的昵称、邮箱和网站，不使用表单冒用其他身份。可信作者开关控制可信展示及既有直接发布策略，关闭后仍保留账号发言能力。普通访客无法使用指定作者邮箱或受保护域名。邮箱比较统一 trim、小写和 IDN ASCII 域名规范化。
 
-已验证评论会同时保留评论行上的作者快照和当前站点人员资料。`comments.staffDisplay.nameMode=current_profile` 时，公开评论树对已验证评论展示当前 `comments.verifiedAuthor.displayName`；`snapshot` 时展示评论行保存的 `authorName`。普通访客评论始终展示评论行保存的名称，不会跟随任何邮箱资料。
+已验证评论会同时保留评论行上的作者快照和当前站点人员资料。`comments.staffDisplay.nameMode=current_profile` 时，账号评论展示当前账号昵称，旧站点作者记录展示当前 `comments.verifiedAuthor.displayName`；`snapshot` 时展示评论行保存的 `authorName`。普通访客评论始终展示评论行保存的名称，不会跟随任何邮箱资料。
 
 IP 库路径、下载源、缓存策略和自动更新属于全局运维配置，由系统设置维护；站点设置不再重复提供这些字段。
 
@@ -240,7 +257,7 @@ IP 库路径、下载源、缓存策略和自动更新属于全局运维配置�
 
 首装会写入完整默认系统设置，其中后台会话有效期默认 `4320` 分钟（3 天）。若安装表单或 `QINGYAN_ADMIN_SESSION_TTL_MINUTES` 提供了会话有效期，会写入 `system_settings.admin.session.ttlMinutes`，正常运行后可继续在 Admin Console 修改。若存在 `QINGYAN_SMTP_PASSWORD` 或 `QINGYAN_TURNSTILE_SECRET_KEY`，安装器会把对应 secret 覆盖写入 `system_settings` 的 `mail.smtp.password` 或 `captcha.turnstile.secretKey`。安装计划和安装结果只显示来源与“已配置”，不返回明文。
 
-Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 或普通 export 中返回明文；响应只返回 `passwordConfigured`、`secretConfigured`、`appTokenConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
+Admin Console API 会返回 logging、mail、notifications、captcha、ipRegion、avatar 和 publicApi 的 typed 设置。secret 字段不会在 Admin Console API、install plan/apply 中返回明文；响应只返回 `passwordConfigured`、`secretConfigured`、`appTokenConfigured`、`secretKeyConfigured`、`apiKeyConfigured` 或 `captchaKeyConfigured` 这类配置状态。更新 Admin system settings 时，如果请求省略 secret 字段，会保留数据库中已有 secret。
 
 `${server.publicPath}/api/admin/*` 主要服务 QingYan 自带 Admin Console，不作为公开 API 或第三方前端集成合同维护；这些接口可以随内置后台一起调整，不建议第三方站点前端当作公开稳定合同直接依赖。公开 OpenAPI 只描述内容站点前端会直接调用的评论、验证码、页面反馈接口，以及 Web Upgrade Mode 最小接口；Admin Console Web API 单独维护在 `docs/admin-console-api.md`。
 
@@ -287,7 +304,7 @@ Webhook/WxPusher。测试的 `passed` / delivery `sent` 只表示邮件服务商
 - 通知 planner、队列、worker、SMTP、Webhook 或 WxPusher 失败都不应阻断评论创建、审核、后台回复、导入、迁移或任务中心读取。
 - 邮件任务事件按顺序记录创建、尝试、服务商接受、计划重试或终止失败；结构化应用日志使用 `notification.email.sent`、`notification.email.failed` 和 `notification.email.retry_scheduled`。这些记录只包含站点、评论关联、业务流程、稳定分类与安全计数，不写完整地址、正文、Provider Message ID 或原始异常。
 
-Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属于敏感信息。它们不会在 Admin API GET 响应、普通 export、任务 payload 或日志中以明文返回；更新时省略 secret 字段或提交空 `secretConfig` 表示保留已有值。Webhook URL 的 query string 也不会写入收件地址快照，避免把 query token 带入任务中心和日志。
+Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属于敏感信息。它们不会在 Admin API GET 响应、任务 payload 或日志中以明文返回；更新时省略 secret 字段或提交空 `secretConfig` 表示保留已有值。Webhook URL 的 query string 也不会写入收件地址快照，避免把 query token 带入任务中心和日志。
 
 ### 外部头像 URL
 
@@ -311,19 +328,7 @@ Webhook secret、WxPusher app token、SMTP password 和退订明文 token 均属
 - Cravatar：`baseUrl=https://cravatar.cn/avatar`，`hashAlgorithm=md5`，`query=s=160&d=identicon`。参考 [Cravatar API](https://cravatar.com/developer/api)。
 - WeAvatar：`baseUrl=https://weavatar.com/avatar`，按官方文档选择参数，例如 `d=initials&name=Alice` 或 `d=color`。参考 [WeAvatar 文档](https://weavatar.com/doc)。
 
-当前没有运行时代码兼容旧 `avatar.gravatar.*`。历史测试实例如需迁移 SQLite 中已有设置，可先备份数据库，再执行类似 SQL：
-
-```sql
-UPDATE system_settings SET key = 'external.enabled' WHERE category = 'avatar' AND key = 'gravatar.enabled';
-UPDATE system_settings SET key = 'external.baseUrl' WHERE category = 'avatar' AND key = 'gravatar.baseUrl';
-DELETE FROM system_settings WHERE category = 'avatar' AND key IN ('gravatar.size', 'gravatar.defaultImage', 'gravatar.rating', 'gravatar.forceDefault');
-INSERT INTO system_settings (category, key, value_json)
-SELECT 'avatar', 'external.hashAlgorithm', '"sha256"'
-WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE category = 'avatar' AND key = 'external.hashAlgorithm');
-INSERT INTO system_settings (category, key, value_json)
-SELECT 'avatar', 'external.query', '"s=80&d=404&r=g"'
-WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE category = 'avatar' AND key = 'external.query');
-```
+当前只维护 `avatar.external.*` 与 `avatar.display.*`。旧 SQLite 设置由离线转换统一核对；不要对运行中的旧库临时执行手写 SQL 代替转换与升级。
 
 ### 普通评论者资料记忆推荐集成
 
@@ -343,48 +348,25 @@ QingYan 不要求为普通访客建立用户模型。若内容站点希望避免
 
 ## 评论验证码与元数据
 
-公开评论验证码仍按同一站点、同一页面、同一访客维度复用。配置来源从站点的 DB settings 读取：
+公开验证码使用服务端签发的短期安全主体，按站点/主体/操作累计阈值，跨页面生效；独立于访客统计 Cookie。配置来源从站点的 DB settings 读取：
 
 - `never`: 不要求验证码。
 - `always`: bootstrap 阶段直接返回 challenge。
 - `threshold`: 写操作达到阈值后返回 `*_CAPTCHA_REQUIRED`，客户端再拉取 captcha state。
 
+拉取 state/refresh 时通过 `action=comment_create|comment_vote|page_like` 选择操作，默认评论创建。授权验证通过后有效五分钟、仅供对应操作一次提交；并发只能消费一次，事务回滚释放预占，预占最多两分钟。服务端通过站点 Cookie 和 `X-QingYan-Security` 响应头返回安全凭据；无法使用 Cookie 时传回请求头或 `securityToken`，不能用 visitorKey 替代。升级会使旧验证码失效。
+
+“站点设置 > 评论”管理 `comments.emailPolicy` 与 `comments.abusePolicy`。邮箱规则默认合法空策略，支持完整邮箱、精确域名和显式包含子域名；禁止项优先，仅允许模式需要至少一个允许项，草稿预览不保存。自动 Akismet 模式可开启 `moderation.localReviewEnabled`：ham 仍需足够成熟历史或有效人工证据才公开，否则待审并通知。配置与默认参数见 [Admin Console API](admin-console-api.md)。
+
 评论请求环境信息属于用户信息收集。站点应在评论区或隐私说明中声明：提交评论时，本站会记录必要的请求环境信息，包括 IP 地址和浏览器 User-Agent，用于反垃圾、滥用排查、IP 属地与设备类型展示。公开页面不会展示完整 IP 地址或完整 User-Agent。
 
-## 导入导出与迁移
+## 离线转换与恢复
 
-普通迁移推荐携带：
+后台 QingYan/WordPress 导入导出、安装 export 恢复、站点导入导出 CLI 和所有定时备份已撤下。旧 SQLite 配置由启动前检测识别并提示离线转换，不能直接交给 PostgreSQL schema 迁移器。
 
-- startup config
-- SQLite 数据库文件
+SQLite 到 PostgreSQL 使用独立 `pnpm db:convert` 或构建后的 `node dist/modules/database-conversion/main.js`。原始 SQLite、配置、资源和退役历史完整归档；转换核对通过后才生成可切换配置，配置切换使用独立操作。准确参数见 [离线转换与切换](postgresql-conversion.md)。
 
-需要跨实例复制站点时，使用 QingYan export/import。当前 export hard cut 到 `formatVersion: 2`，可包含：
-
-- `site`
-- `siteSettings`
-- `systemSettings`（非 secret 字段）
-- 页面、访客、评论、投票、页面点赞、黑名单数据
-
-导入模式：
-
-- `data_only`: 只导入页面、评论、访客等数据，不修改设置。
-- `settings_only`: 只更新站点和站点设置，不导入评论数据。
-- `full_site`: 同时导入站点、站点设置和数据。
-
-普通 export 不包含 admin session、admin password、install token、进程环境变量、SQLite 文件路径或 server host/port。普通 QingYan export 默认也不包含 system settings secret rows，例如 SMTP password、Turnstile secret、hCaptcha secret、reCAPTCHA API key 和 GeeTest captcha key。需要迁移 secret 时，应使用部署环境变量、重新在 Admin Console 输入，或等待未来 full backup/restore 模式。
-
-普通 QingYan import 不接受 hand-crafted system settings secret rows；dry-run 阶段会直接拒绝。install restore 只接受普通 QingYan 站点级 export JSON，用于首装时恢复站点、评论、页面线程、访客和站点设置；它不能恢复 admin session、admin password、install token、进程环境变量、SQLite 路径、server host/port 或 secret 明文，也不能把普通 export 当作完整实例备份。
-
-Admin 数据管理中的 WordPress WXR 导入和 QingYan JSON 导入在真实 apply 前会创建导入任务记录，并先生成一次数据库级备份。该备份用于保存合并前状态，和普通 QingYan export/import 的用途不同：
-
-- 普通 export/import 面向跨实例业务迁移，格式会排除 session、install token、运行时路径和 secret 明文。
-- 导入前数据库备份面向本实例回退，当前内置实现使用 SQLite backup API 生成主库备份，并在存在时记录 WAL/SHM 现场文件。
-- 任务记录会保存备份的 `engine`、`strategy`、备份目录和文件 metadata，便于之后按运维流程停服务覆盖恢复。
-- 当前内置数据库备份 provider 仅覆盖 SQLite。后续支持 PostgreSQL、MySQL 或 MariaDB 时，会通过独立 provider 或外部备份确认接入，不把普通业务 export 当作完整数据库备份。
-
-WordPress WXR 导入会读取 `wp:author` 和每条评论的 `wp:comment_user_id`。`comment_user_id` 非 0 且能匹配 WXR 作者 ID 时，会作为站点人员强匹配导入为 `author_identity=verified`；`comment_user_id=0` 但评论邮箱与 WXR 作者邮箱归一化后相同，只能作为邮箱候选，必须在 Admin Console 中确认“作为站点人员”或“保留访客”后才能生成导入计划。WXR 作者列表来自导出文件中的文章作者信息，不等同于完整 WordPress 用户表，因此多用户迁移后续仍需要单独设计。
-
-WordPress `comment_content` 当前按纯文本导入和渲染：即使原始内容包含 `<a>` 等 HTML-like 片段，QingYan 也会按文本转义输出。导入分析报告会统计疑似 HTML 评论数量，方便管理员后续人工检查；有限 HTML 白名单或 sanitizer 不在当前迁移默认行为中。
+日常整实例备份与升级前备份共用 PostgreSQL `pg_dump -Fc`，包含配置、安装锁、必要本地资源、版本与 manifest。恢复使用 `pg_restore` 展开备份，由 `psql` 在同一事务内写入预建空目标库、资源路径与恢复收据，再生成独立新配置。同一次恢复中断后可凭恢复目录与数据库收据重试，配置切换单独执行。停写命令与恢复步骤见 [部署指南](deployment.md#备份与恢复)。
 
 ## Upgrade Lifecycle
 
@@ -398,16 +380,16 @@ Web Upgrade Mode 暴露最小接口：
 - `GET /qingyan/api/upgrade/state`: 返回公开脱敏的 UpgradePlan，或 recovery / broken config 状态。
 - `POST /qingyan/api/upgrade/apply`: 需要升级 token 和精确确认文本 `UPGRADE QINGYAN`。
 
-confirmed upgrade 的写入顺序固定为：重新检测状态、创建 partial marker、创建 SQLite 数据库备份和 startup config / UpgradePlan 备份、执行 schema migrations、执行 application upgrades、写入 `__qingyan_upgrades` ledger、成功后清理 partial marker。若备份失败，不写 upgrade ledger；若任一步失败，partial marker 会保留，下次启动进入 `recovery_required`，不会继续启动 normal app。
+confirmed upgrade 的写入顺序固定为：重新检测状态、创建 partial marker、停写后创建 PostgreSQL dump、必要资源和 startup config / UpgradePlan 备份、执行 schema migrations、执行 application upgrades、写入 `__qingyan_upgrades` ledger、成功后清理 partial marker。若备份失败，不写 upgrade ledger；若任一步失败，partial marker 会保留，下次启动进入 `recovery_required`，不会继续启动 normal app。
 
 CLI 仍是底层运维入口：
 
 ```bash
 pnpm qingyan:upgrade -- --dry-run --config config/qingyan.yml
-pnpm qingyan:upgrade -- --apply --config config/qingyan.yml --backup-dir ./backup/upgrade
+qyctl upgrade --yes --service-stopped --config config/qingyan.yml --backup-dir ./backup/upgrade
 ```
 
-`--dry-run` 输出公开脱敏的 UpgradePlan，不写配置、SQLite 或 `__qingyan_upgrades`。`--apply` 仅用于 `upgrade_required` 状态，且必须提供 `--backup-dir`；CLI 和 Web Upgrade Mode 复用同一个升级执行服务。缺 startup config 仍进入 install mode，不进入 upgrade；坏 config 进入 `broken_config`，partial marker 进入 `recovery_required`。
+`--dry-run` 输出公开脱敏的 UpgradePlan，不写配置、数据库或 `__qingyan_upgrades`。写入仅用于 `upgrade_required` 状态，可通过 `--backup-dir` 指定备份目录（省略时使用受保护默认升级备份目录）；CLI 和 Web Upgrade Mode 复用同一个升级执行服务。缺 startup config 仍进入 install mode，不进入 upgrade；坏 config 进入 `broken_config`，partial marker 进入 `recovery_required`。
 
 ### QingYanctl 运维入口
 
@@ -421,11 +403,10 @@ qyctl --version
 qyctl info
 qyctl admin repass
 qyctl admin entrance
-qyctl export default ./site.json
-qyctl import default ./site.json --dry-run
-qyctl backup ./qingyan-full-backup --yes
+qyctl backup ./qingyan-full-backup --yes --service-stopped
 qyctl restore ./qingyan-full-backup.qingyan-backup --dry-run
 qyctl upgrade --dry-run
+qyctl upgrade --recover --yes --service-stopped
 qyctl update check
 qyctl update plan
 qyctl status
@@ -438,7 +419,7 @@ qyctl restart
 
 `qyctl upgrade` 只执行数据升级，不下载或替换程序文件。`qyctl update check` 只检测 `Virace/QingYan` published release，并同时输出当前版本和最新版本。Docker Compose 的实际更新统一运行 `./scripts/update.sh`；脚本负责预检、整站备份、Release 切换、镜像构建、UpgradePlan 确认、数据升级和健康验收。
 
-更新器的 `--network-profile auto|official|cn` 只控制镜像构建阶段的 APT、Corepack、pnpm、Node headers 和 better-sqlite3 下载地址，不改写 Git origin 或 Docker 基础镜像来源。站点级 `export/import` 与整站 `backup/restore` 必须区分：前者是业务数据迁移，后者包含数据库完整备份、配置文件、安装锁和 manifest。
+更新器的 `--network-profile auto|official|cn` 只控制镜像构建阶段的 APT、Corepack 和 pnpm 下载地址，不改写 Git origin 或 Docker 基础镜像来源。完整备份包含数据库 dump、配置文件、安装锁、必要资源和 manifest。容器使用 `--service-stopped` 前必须由 Compose 停止业务服务；该标志表示运维已完成停写，不会替你停止容器。
 
 ### Release 更新规则
 
@@ -473,10 +454,10 @@ QINGYAN_DATABASE_MODE=none
 
 - dev mode 使用显式 dev seed 创建单站点 `default`。
 - dev seed 不从 startup config 的 `sites[]` 派生。
-- DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 SQLite。
+- DB-backed dev mode 会把 `default` site 和默认 `site_settings` 写入 PostgreSQL。
 - dev mode 会临时注入开发管理员账号，默认 `admin / admin`；安装时随机生成或用户设置的管理员用户名、密码不会用于本地 dev 登录。
 - dev mode 保留已安装的后台入口，同时额外开放 `${server.publicPath}/admin/` 作为本地开发别名；非 dev 启动不会开放这个别名。
-- `QINGYAN_DATABASE_MODE=none` 时不连接 SQLite，mock 状态只保存在当前进程内存中。
+- `QINGYAN_DATABASE_MODE=none` 时不连接 PostgreSQL，mock 状态只保存在当前进程内存中。
 - 前端仍然必须显式传 `siteKey: "default"`。
 - 生产环境不会暴露 `${server.publicPath}/api/dev/*`。
 

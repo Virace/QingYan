@@ -1,9 +1,9 @@
 import { requestJson } from "./client";
-import type { TaskRunProjection } from "./tasks";
 import type {
 	CommentEmailDeliveryStatus,
 	CommentEmailDeliverySummary,
 } from "./email-delivery";
+import type { TaskRunProjection } from "./tasks";
 
 export interface Page<T> {
 	items: T[];
@@ -42,6 +42,7 @@ export type ModerationMode =
 
 export interface SiteModerationSettings {
 	mode: ModerationMode;
+	localReviewEnabled?: boolean;
 	provider: "none" | "akismet";
 	akismet: {
 		failPolicy: "pending";
@@ -321,6 +322,15 @@ export interface AdminEngagementSettings {
 }
 
 export interface AdminBlacklistRule {
+	penalty?: {
+		releasedAt: string | null;
+		releaseKind: "released" | "revoked" | null;
+		releaseReason: string | null;
+		stateVersion: number;
+		startedAt: string;
+		expiresAt: string;
+		evidence: { count?: number; windowSec?: number; repeat?: boolean };
+	} | null;
 	id: number;
 	siteId: number | null;
 	scope: "post" | "all";
@@ -419,12 +429,60 @@ export interface AdminGroup {
 	permissions: string[];
 }
 
+export type CommentEmailRule =
+	| { type: "email"; value: string }
+	| { type: "domain"; value: string; includeSubdomains: boolean };
+export interface CommentEmailPolicy {
+	mode: "allow_all" | "allow_selected";
+	allowed: CommentEmailRule[];
+	denied: CommentEmailRule[];
+	protectedDomains: Array<{ value: string; includeSubdomains: boolean }>;
+}
+export interface CommentAbusePolicy {
+	syncToWaf: boolean;
+	commentIpMax: number;
+	commentBurstMax: number;
+	ipBurstMax: number;
+	burstWindowSec: number;
+	ipActionMultiplier: number;
+	captchaWindowSec: number;
+	captchaRequestMax: number;
+	captchaIpMax: number;
+	violationWindowSec: number;
+	violationThreshold: number;
+	penaltyTtlSec: number;
+	repeatPenaltyTtlSec: number;
+	repeatWindowSec: number;
+	evidenceRetentionDays: number;
+}
+export function previewCommentEmailPolicy(
+	siteKey: string,
+	input: {
+		email: string;
+		policy: CommentEmailPolicy;
+		verifiedAuthorEmail?: string;
+		identity: "visitor" | "current_account";
+	},
+) {
+	return requestJson<{
+		result: "allowed" | "login_required" | "denied";
+		matchedRule: { value: string } | null;
+		source: "draft";
+		saved: false;
+	}>(
+		`/api/admin/settings/${encodeURIComponent(siteKey)}/email-policy/preview`,
+		{ method: "POST", body: JSON.stringify(input) },
+	);
+}
+
 export interface AdminSettings {
 	siteKey: string;
 	comments: {
 		enabled: boolean;
 		defaultStatus: "pending" | "approved";
 		moderation: SiteModerationSettings;
+		emailPolicy: CommentEmailPolicy;
+		abusePolicy: CommentAbusePolicy;
 		maxDepth: number;
 		rootLimit: number;
 		identity: {
@@ -647,6 +705,7 @@ export interface AdminSystemSettings {
 	};
 	mail: {
 		enabled: boolean;
+		commentFormat: "html" | "text";
 		smtp: {
 			host: string;
 			port: number;
@@ -772,6 +831,7 @@ function queryString(input: Record<string, string | number | undefined>) {
 }
 
 export function listComments(input: {
+	commentId?: string;
 	siteKey?: string;
 	pageKey?: string;
 	status?: CommentStatus;
@@ -1063,6 +1123,20 @@ export function deleteBlacklist(ruleId: number) {
 			method: "DELETE",
 		},
 	);
+}
+
+export function releaseBlacklist(
+	ruleId: number,
+	input: { kind: "released" | "revoked"; reason: string },
+) {
+	return requestJson<{
+		released: boolean;
+		kind: "released" | "revoked";
+		expiresAt: string;
+	}>(`/api/admin/blacklist/${ruleId}/release`, {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
 }
 
 export function deleteBlacklistTarget(input: {

@@ -5,6 +5,8 @@ import {
 	siteModerationSettingsSchema,
 } from "../comments/moderation-types";
 import { commentInputLimitHardCaps } from "../shared/site-settings-defaults";
+import { emailPolicySchema } from "../comments/email-policy";
+import { abusePolicySchema } from "../comments/abuse-policy";
 import { isSafeHttpUrl, normalizeOrigin } from "../shared/url-policy";
 import {
 	avatarSettingsSchema,
@@ -366,6 +368,7 @@ export const adminProfilePasswordConfirmBodySchema = z.object({
 });
 
 export const adminCommentsQuerySchema = z.object({
+	commentId: z.string().min(1).max(128).optional(),
 	siteKey: z.string().min(1).optional(),
 	pageKey: z.string().min(1).optional(),
 	status: commentStatusSchema.optional(),
@@ -685,6 +688,8 @@ export const adminSettingsBodySchema = z
 				verifiedAuthor: verifiedAuthorSchema.optional(),
 				staffDisplay: staffDisplaySchema.optional(),
 				moderation: siteModerationSettingsSchema.optional(),
+				emailPolicy: emailPolicySchema.optional(),
+				abusePolicy: abusePolicySchema.optional(),
 			})
 			.optional(),
 		pageFeedback: z
@@ -755,6 +760,7 @@ export const adminSystemSettingsBodySchema = z.object({
 	mail: z
 		.object({
 			enabled: z.boolean(),
+			commentFormat: z.enum(["html", "text"]).optional(),
 			smtp: z.object({
 				host: z.string(),
 				port: z.number().int().positive(),

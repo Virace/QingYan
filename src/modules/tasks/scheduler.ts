@@ -1,11 +1,12 @@
+import { canonicalJson } from "../../db/values";
+import type {
+	ConditionEvaluationResult,
+	ConditionTriggerEvaluator,
+} from "./condition-trigger-evaluator";
 import {
 	calculateNextRunAt,
 	validateScheduleDefinition,
 } from "./schedule-calculator";
-import type {
-	ConditionTriggerEvaluator,
-	ConditionEvaluationResult,
-} from "./condition-trigger-evaluator";
 import type {
 	ScheduledTaskRecord,
 	ScheduledTaskRepository,
@@ -41,25 +42,12 @@ const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_CLAIM_LEASE_MS = 5 * 60_000;
 const DEFAULT_STALE_AFTER_MS = 30 * 60_000;
 
-function stableStringify(value: unknown): string {
-	if (Array.isArray(value)) {
-		return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-	}
-	if (value && typeof value === "object") {
-		return `{${Object.entries(value as Record<string, unknown>)
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-			.join(",")}}`;
-	}
-	return JSON.stringify(value);
-}
-
 export function deriveConcurrencyKey(task: ScheduledTaskRecord): string {
 	const policy = task.policy as Partial<{ concurrencyKey: string }> | null;
 	if (policy?.concurrencyKey) {
 		return policy.concurrencyKey;
 	}
-	return `task:${task.type}:${task.scopeKind}:${stableStringify(task.scope)}`;
+	return `task:${task.type}:${task.scopeKind}:${canonicalJson(task.scope)}`;
 }
 
 export class TaskScheduler {
@@ -147,7 +135,7 @@ export class TaskScheduler {
 				continue;
 			}
 			const run = await this.createDueRunFromScheduledTask(claimedTask, now);
-			createdRunIds.push(run.id);
+			if (run) createdRunIds.push(run.id);
 		}
 		return { createdRunIds };
 	}
@@ -157,9 +145,7 @@ export class TaskScheduler {
 		now: Date,
 	): Promise<TaskRunRecord | null> {
 		if (!this.options.conditionEvaluator) {
-			await this.options.scheduledTasks.update(task.id, {
-				claimWorkerId: null,
-				claimExpiresAt: null,
+			await this.options.scheduledTasks.releaseClaim(task, {
 				nextRunAt:
 					calculateNextRunAt({
 						scheduleKind: task.scheduleKind,
@@ -177,19 +163,6 @@ export class TaskScheduler {
 		});
 		if (!evaluation.hit) {
 			await this.appendConditionEvaluationEvent(task, evaluation, now);
-			await this.options.scheduledTasks.update(task.id, {
-				claimWorkerId: null,
-				claimExpiresAt: null,
-				nextRunAt:
-					calculateNextRunAt({
-						scheduleKind: task.scheduleKind,
-						schedulePreset: task.schedulePreset,
-						cronExpression: task.cronExpression,
-						trigger: task.trigger,
-						now,
-					})?.toISOString() ?? null,
-				updatedAt: now.toISOString(),
-			});
 			return null;
 		}
 		return this.createConditionRunFromScheduledTask(task, evaluation, now);
@@ -205,50 +178,6 @@ export class TaskScheduler {
 			cronExpression: task.cronExpression,
 			trigger: task.trigger,
 		});
-		const category =
-			this.options.registry?.get(task.type)?.category ?? "maintenance";
-		const concurrencyKey = deriveConcurrencyKey(task);
-		const blockingRun =
-			await this.options.taskRuns.findRunningByConcurrencyKey(concurrencyKey);
-		const triggerSnapshot = { dueAt: now.toISOString() };
-		const input = task.payload;
-		const run = blockingRun
-			? await this.options.taskRuns.recordLockConflict({
-					scheduledTask: task,
-					trigger: "schedule",
-					triggerSnapshot,
-					input,
-					category,
-					conflictWithRunId: blockingRun.id,
-					conflictWithTaskName:
-						blockingRun.scheduledTaskNameSnapshot ?? blockingRun.type,
-					concurrencyKey,
-				})
-			: await this.options.taskRuns.createScheduledTaskRun({
-					scheduledTask: task,
-					trigger: "schedule",
-					triggerSnapshot,
-					input,
-					category,
-					concurrencyKey,
-					createdAt: now.toISOString(),
-					updatedAt: now.toISOString(),
-				});
-		if (blockingRun) {
-			await this.options.eventLogs.append({
-				taskRunId: run.id,
-				eventType: "lock_conflict",
-				level: "warn",
-				message: "Task run blocked by concurrency lock.",
-				data: {
-					conflictWithRunId: blockingRun.id,
-					concurrencyKey,
-				},
-				visibleToSiteAdmin: true,
-				createdAt: now.toISOString(),
-			});
-			await this.options.failureNotifications?.planForFailedRun(run);
-		}
 		const nextRunAt =
 			task.scheduleKind === "once"
 				? null
@@ -259,16 +188,29 @@ export class TaskScheduler {
 						trigger: task.trigger,
 						now,
 					})?.toISOString() ?? null);
-		await this.options.scheduledTasks.updateAfterRun(task.id, {
-			lastRunAt: now.toISOString(),
-			lastRunId: run.id,
-			lastStatus: run.status,
-			nextRunAt,
-			enabled: task.scheduleKind === "once" ? false : undefined,
-			disabledReason:
-				task.scheduleKind === "once" ? "once_completed" : undefined,
-			updatedAt: now.toISOString(),
-		});
+		const run = await this.options.taskRuns.createScheduledTaskRunAndAdvance(
+			{
+				scheduledTask: task,
+				trigger: "schedule",
+				triggerSnapshot: { dueAt: now.toISOString() },
+				input: task.payload,
+				category:
+					this.options.registry?.get(task.type)?.category ?? "maintenance",
+				concurrencyKey: deriveConcurrencyKey(task),
+				createdAt: now.toISOString(),
+				updatedAt: now.toISOString(),
+			},
+			{
+				nextRunAt,
+				enabled: task.scheduleKind === "once" ? false : undefined,
+				disabledReason:
+					task.scheduleKind === "once" ? "once_completed" : undefined,
+			},
+		);
+		if (!run) return null;
+		if (run.lockConflictWithRunId)
+			await this.options.failureNotifications?.planForFailedRun(run);
+		await this.options.taskRuns.finalizeScheduledTaskRun(run.id);
 		return run;
 	}
 
@@ -277,66 +219,48 @@ export class TaskScheduler {
 		evaluation: ConditionEvaluationResult,
 		now: Date,
 	) {
-		const concurrencyKey = deriveConcurrencyKey(task);
-		const blockingRun =
-			await this.options.taskRuns.findRunningByConcurrencyKey(concurrencyKey);
 		const triggerSnapshot = {
 			...evaluation.snapshot,
 			status: evaluation.status,
 		};
-		const input = task.payload;
-		const category =
-			this.options.registry?.get(task.type)?.category ?? "maintenance";
-		const run = blockingRun
-			? await this.options.taskRuns.recordLockConflict({
-					scheduledTask: task,
-					trigger: "condition",
-					triggerSnapshot,
-					input,
-					category,
-					conflictWithRunId: blockingRun.id,
-					conflictWithTaskName:
-						blockingRun.scheduledTaskNameSnapshot ?? blockingRun.type,
-					concurrencyKey,
-				})
-			: await this.options.taskRuns.createScheduledTaskRun({
-					scheduledTask: task,
-					trigger: "condition",
-					triggerSnapshot,
-					input,
-					category,
-					concurrencyKey,
-					createdAt: now.toISOString(),
-					updatedAt: now.toISOString(),
-				});
+		const run = await this.options.taskRuns.createScheduledTaskRunAndAdvance(
+			{
+				scheduledTask: task,
+				trigger: "condition",
+				triggerSnapshot,
+				input: task.payload,
+				category:
+					this.options.registry?.get(task.type)?.category ?? "maintenance",
+				concurrencyKey: deriveConcurrencyKey(task),
+				createdAt: now.toISOString(),
+				updatedAt: now.toISOString(),
+			},
+			{
+				nextRunAt:
+					calculateNextRunAt({
+						scheduleKind: task.scheduleKind,
+						schedulePreset: task.schedulePreset,
+						cronExpression: task.cronExpression,
+						trigger: task.trigger,
+						now,
+					})?.toISOString() ?? null,
+			},
+		);
+		if (!run) return null;
+		const blocked = Boolean(run.lockConflictWithRunId);
 		await this.options.eventLogs.append({
 			taskRunId: run.id,
-			eventType: blockingRun ? "condition_lock_conflict" : "condition_hit",
-			level: blockingRun ? "warn" : "info",
-			message: blockingRun
-				? "Condition trigger hit but was blocked by concurrency lock."
-				: "Condition trigger created a task run.",
+			eventType: blocked ? "condition_lock_conflict" : "condition_hit",
+			level: blocked ? "warn" : "info",
+			message: blocked
+				? "条件命中，但任务正在执行。"
+				: "条件命中，已创建任务运行。",
 			data: triggerSnapshot,
 			visibleToSiteAdmin: true,
 			createdAt: now.toISOString(),
 		});
-		if (blockingRun) {
-			await this.options.failureNotifications?.planForFailedRun(run);
-		}
-		await this.options.scheduledTasks.updateAfterRun(task.id, {
-			lastRunAt: now.toISOString(),
-			lastRunId: run.id,
-			lastStatus: run.status,
-			nextRunAt:
-				calculateNextRunAt({
-					scheduleKind: task.scheduleKind,
-					schedulePreset: task.schedulePreset,
-					cronExpression: task.cronExpression,
-					trigger: task.trigger,
-					now,
-				})?.toISOString() ?? null,
-			updatedAt: now.toISOString(),
-		});
+		if (blocked) await this.options.failureNotifications?.planForFailedRun(run);
+		await this.options.taskRuns.finalizeScheduledTaskRun(run.id);
 		return run;
 	}
 
@@ -345,17 +269,31 @@ export class TaskScheduler {
 		evaluation: ConditionEvaluationResult,
 		now: Date,
 	) {
-		const syntheticRun = await this.options.taskRuns.createScheduledTaskRun({
-			scheduledTask: task,
-			trigger: "condition_evaluation",
-			triggerSnapshot: evaluation.snapshot,
-			input: task.payload,
-			category:
-				this.options.registry?.get(task.type)?.category ?? "maintenance",
-			status: "skipped",
-			createdAt: now.toISOString(),
-			updatedAt: now.toISOString(),
-		});
+		const syntheticRun =
+			await this.options.taskRuns.createScheduledTaskRunAndAdvance(
+				{
+					scheduledTask: task,
+					trigger: "condition_evaluation",
+					triggerSnapshot: evaluation.snapshot,
+					input: task.payload,
+					category:
+						this.options.registry?.get(task.type)?.category ?? "maintenance",
+					status: "skipped",
+					createdAt: now.toISOString(),
+					updatedAt: now.toISOString(),
+				},
+				{
+					nextRunAt:
+						calculateNextRunAt({
+							scheduleKind: task.scheduleKind,
+							schedulePreset: task.schedulePreset,
+							cronExpression: task.cronExpression,
+							trigger: task.trigger,
+							now,
+						})?.toISOString() ?? null,
+				},
+			);
+		if (!syntheticRun) return;
 		await this.options.taskRuns.markSkipped(
 			syntheticRun.id,
 			`condition_${evaluation.status}`,
@@ -374,6 +312,7 @@ export class TaskScheduler {
 			visibleToSiteAdmin: evaluation.status !== "invalid_expression",
 			createdAt: now.toISOString(),
 		});
+		await this.options.taskRuns.finalizeScheduledTaskRun(syntheticRun.id);
 	}
 
 	public async markStaleRuns(input?: {
@@ -386,20 +325,17 @@ export class TaskScheduler {
 		const staleRuns = await this.options.taskRuns.listStaleRunning(staleBefore);
 		const failedRunIds: string[] = [];
 		for (const run of staleRuns) {
-			const failedRun = await this.options.taskRuns.markFailed(run.id, {
-				code: "TASK_RUN_STALE",
+			const failedRun = await this.options.taskRuns.expireStale(
+				run,
 				staleBefore,
-			});
-			await this.options.eventLogs.append({
-				taskRunId: run.id,
-				eventType: "stale_run_failed",
-				level: "warn",
-				message: "Running task exceeded its lease window.",
-				data: { staleBefore },
-				visibleToSiteAdmin: true,
-				createdAt: now.toISOString(),
-			});
+				{
+					code: "TASK_RUN_STALE",
+					staleBefore,
+				},
+			);
+			if (!failedRun) continue;
 			await this.options.failureNotifications?.planForFailedRun(failedRun);
+			await this.options.taskRuns.finalizeScheduledTaskRun(failedRun.id);
 			failedRunIds.push(run.id);
 		}
 		return { failedRunIds };

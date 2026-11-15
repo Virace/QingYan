@@ -8,15 +8,30 @@ import {
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
-
-import type { AppConfig } from "../../config/types";
+import type { Pool } from "pg";
 import { envMappings } from "../../config/env-mapping";
-import type { SqliteClient } from "../../db/client";
+import type { AppConfig } from "../../config/types";
+import {
+	backupDatabaseResources,
+	databaseIdentity,
+	runPostgresTool,
+} from "../database-backup/postgres-tools";
 import { resolveInstallLockPath } from "../install/state";
+import { resolvePartialUpgradeMarkerPath } from "../upgrade/partial-marker";
+import { detectUpgradeRuntimeState } from "../upgrade/state";
 
 export interface FullBackupFileManifest {
 	path: string;
-	role: "manifest" | "config" | "lock" | "database" | "metadata";
+	role:
+		| "manifest"
+		| "config"
+		| "lock"
+		| "database"
+		| "metadata"
+		| "resource"
+		| "plan";
+	ipVersion?: string;
+	resourceOwner?: "settings" | "state" | "both";
 	size: number;
 	sha256: string;
 }
@@ -27,9 +42,11 @@ export interface FullBackupManifest {
 	createdAt: string;
 	qingyanVersion: string;
 	database: {
-		client: "sqlite";
-		backupStrategy: "sqlite_backup_api";
+		client: "postgresql";
+		backupStrategy: "pg_dump_custom";
+		serverVersion: string;
 		applicationVersion: string;
+		targetIdentity: string;
 		schemaVersion: string | null;
 		upgradeState: string;
 	};
@@ -50,6 +67,8 @@ export interface FullBackupManifest {
 		}>;
 	};
 	files: FullBackupFileManifest[];
+	upgrade?: { fromVersion: string; toVersion: string };
+	success: true;
 }
 
 export interface FullBackupResult {
@@ -81,44 +100,6 @@ function fileManifest(
 	};
 }
 
-function latestMigration(sqlite: SqliteClient): string | null {
-	const table = sqlite
-		.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-		.get("__qingyan_migrations");
-	if (!table) {
-		return null;
-	}
-	const row = sqlite
-		.prepare(
-			"SELECT name FROM __qingyan_migrations ORDER BY applied_at DESC LIMIT 1",
-		)
-		.get() as { name?: string } | undefined;
-	return row?.name ?? null;
-}
-
-function adminConsolePath(sqlite: SqliteClient): string | null {
-	const table = sqlite
-		.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-		.get("admin_bootstrap_state");
-	if (!table) {
-		return null;
-	}
-	const row = sqlite
-		.prepare("SELECT console_path FROM admin_bootstrap_state WHERE id = 1")
-		.get() as { console_path?: string } | undefined;
-	return row?.console_path ?? null;
-}
-
-function latestUpgradeState(sqlite: SqliteClient): string {
-	const table = sqlite
-		.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-		.get("__qingyan_upgrades");
-	if (!table) {
-		return "upgrade_required";
-	}
-	return "normal_current";
-}
-
 function detectedEnvironment(environment: NodeJS.ProcessEnv) {
 	return envMappings
 		.filter((mapping) => environment[mapping.envName] !== undefined)
@@ -135,8 +116,7 @@ export class FullBackupService {
 		private readonly options: {
 			configPath: string;
 			config: AppConfig;
-			databaseFile: string;
-			sqlite: SqliteClient;
+			pool: Pool;
 			packageVersion: string;
 			env?: NodeJS.ProcessEnv;
 			now?: () => Date;
@@ -144,23 +124,45 @@ export class FullBackupService {
 		},
 	) {}
 
-	public buildManifest(files: FullBackupFileManifest[]): FullBackupManifest {
+	public async buildManifest(
+		files: FullBackupFileManifest[],
+	): Promise<FullBackupManifest> {
+		const migration = await this.options.pool.query<{
+			name: string;
+			server_version: string;
+		}>(
+			"SELECT name,current_setting('server_version') AS server_version FROM __qingyan_migrations ORDER BY name DESC LIMIT 1",
+		);
+		const bootstrap = await this.options.pool.query<{ console_path: string }>(
+			"SELECT console_path FROM admin_bootstrap_state WHERE id=1",
+		);
 		return {
 			format: "qingyan.full-backup",
 			formatVersion: 1,
 			createdAt: (this.options.now?.() ?? new Date()).toISOString(),
 			qingyanVersion: this.options.packageVersion,
 			database: {
-				client: "sqlite",
-				backupStrategy: "sqlite_backup_api",
+				client: "postgresql",
+				backupStrategy: "pg_dump_custom",
+				serverVersion: migration.rows[0]?.server_version ?? "unknown",
 				applicationVersion: this.options.packageVersion,
-				schemaVersion: latestMigration(this.options.sqlite),
-				upgradeState: latestUpgradeState(this.options.sqlite),
+				targetIdentity: databaseIdentity(this.options.config.database.url),
+				schemaVersion: migration.rows[0]?.name ?? null,
+				upgradeState: (
+					await detectUpgradeRuntimeState({
+						configPath: this.options.configPath,
+						loadedConfig: this.options.config,
+						currentApplicationVersion: this.options.packageVersion,
+						partialUpgradeMarkerPath: resolvePartialUpgradeMarkerPath(
+							this.options.configPath,
+						),
+					})
+				).state,
 			},
 			config: {
 				path: displayPath(this.options.configPath),
 				publicBaseUrl: this.options.config.server.publicBaseUrl,
-				adminConsolePath: adminConsolePath(this.options.sqlite),
+				adminConsolePath: bootstrap.rows[0]?.console_path ?? null,
 			},
 			service: {
 				unit: this.options.serviceUnit ?? "qingyan.service",
@@ -169,6 +171,7 @@ export class FullBackupService {
 				detected: detectedEnvironment(this.options.env ?? process.env),
 			},
 			files,
+			success: true,
 		};
 	}
 
@@ -178,14 +181,30 @@ export class FullBackupService {
 		const outputDirectory = input.outputPath.endsWith(".qingyan-backup")
 			? input.outputPath
 			: `${input.outputPath}.qingyan-backup`;
+		return this.createBackupPackage({ outputDirectory });
+	}
+
+	public async createBackupPackage(input: {
+		outputDirectory: string;
+		upgrade?: { fromVersion: string; toVersion: string; plan: unknown };
+	}): Promise<FullBackupResult> {
+		const outputDirectory = input.outputDirectory;
 		const configDirectory = path.join(outputDirectory, "config");
 		const databaseDirectory = path.join(outputDirectory, "database");
 		const metadataDirectory = path.join(outputDirectory, "metadata");
-		mkdirSync(configDirectory, { recursive: true });
+		mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
+		mkdirSync(configDirectory, { recursive: true, mode: 0o700 });
 		mkdirSync(databaseDirectory, { recursive: true });
 		mkdirSync(metadataDirectory, { recursive: true });
 
 		const copiedFiles: FullBackupFileManifest[] = [];
+		if (input.upgrade) {
+			const planPath = path.join(outputDirectory, "upgrade-plan.json");
+			writeFileSync(planPath, JSON.stringify(input.upgrade.plan, null, 2), {
+				mode: 0o600,
+			});
+			copiedFiles.push(fileManifest("plan", outputDirectory, planPath));
+		}
 		const configBackupPath = path.join(configDirectory, "qingyan.yml");
 		copyFileSync(this.options.configPath, configBackupPath);
 		copiedFiles.push(fileManifest("config", outputDirectory, configBackupPath));
@@ -200,11 +219,27 @@ export class FullBackupService {
 			copiedFiles.push(fileManifest("lock", outputDirectory, lockBackupPath));
 		}
 
-		const databaseBackupPath = path.join(databaseDirectory, "qingyan.sqlite");
-		await this.options.sqlite.backup(databaseBackupPath);
+		const databaseBackupPath = path.join(databaseDirectory, "qingyan.dump");
+		await runPostgresTool(
+			"pg_dump",
+			["-Fc", "--no-owner", "--no-acl", "--file", databaseBackupPath],
+			this.options.config.database,
+			path.join(configDirectory, "credentials"),
+		);
 		copiedFiles.push(
 			fileManifest("database", outputDirectory, databaseBackupPath),
 		);
+
+		for (const resource of await backupDatabaseResources(
+			this.options.pool,
+			path.join(outputDirectory, "resources"),
+		)) {
+			copiedFiles.push({
+				...fileManifest("resource", outputDirectory, resource.path),
+				ipVersion: resource.ipVersion,
+				resourceOwner: resource.resourceOwner,
+			});
+		}
 
 		const checksumsPath = path.join(metadataDirectory, "checksums.json");
 		writeFileSync(
@@ -214,12 +249,13 @@ export class FullBackupService {
 		);
 		copiedFiles.push(fileManifest("metadata", outputDirectory, checksumsPath));
 
-		const manifest = this.buildManifest(copiedFiles);
+		const manifest = await this.buildManifest(copiedFiles);
+		if (input.upgrade)
+			manifest.upgrade = {
+				fromVersion: input.upgrade.fromVersion,
+				toVersion: input.upgrade.toVersion,
+			};
 		const manifestPath = path.join(outputDirectory, "manifest.json");
-		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-		manifest.files.push(
-			fileManifest("manifest", outputDirectory, manifestPath),
-		);
 		writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 		return {

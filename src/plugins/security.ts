@@ -1,39 +1,47 @@
-import fp from "fastify-plugin";
-import type { FastifyPluginAsync } from "fastify";
 import { and, eq, gte, isNull, or } from "drizzle-orm";
-
-import { sanitizeLogData } from "../logging/redaction";
-import type { AppEventName, LogLevel } from "../logging/types";
-import {
-	matchBlacklistRule,
-	type BlacklistSubject,
-} from "../modules/shared/blacklist-match";
-import {
-	matchAllowlistRule,
-	type AllowlistSubject,
-} from "../modules/shared/allowlist-match";
-import {
-	hashCsrfToken,
-	hashSessionToken,
-} from "../modules/admin/session-utils";
-import type {
-	RateLimitRule,
-	RateLimitSnapshot,
-} from "../modules/shared/rate-limit";
-import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
-import { AppError } from "../modules/shared/errors";
+import type { FastifyPluginAsync } from "fastify";
+import fp from "fastify-plugin";
+import { joinPublicPath, stripPublicPath } from "../config/public-path";
+import type { DatabaseExecutor } from "../db/client";
 import {
 	adminSessions,
 	allowlistRules,
 	auditLogs,
 	blacklistRules,
+	siteSettings,
 } from "../db/schema";
-import { joinPublicPath, stripPublicPath } from "../config/public-path";
+import { sanitizeLogData } from "../logging/redaction";
+import type { AppEventName, LogLevel } from "../logging/types";
+import {
+	hashCsrfToken,
+	hashSessionToken,
+} from "../modules/admin/session-utils";
+import { readAbusePolicy } from "../modules/comments/abuse-policy";
+import { SecuritySubjectService } from "../modules/comments/security-subject";
+import {
+	type WriteAdmissionInput,
+	WriteAdmissionService,
+} from "../modules/comments/write-admission";
+import {
+	type AllowlistSubject,
+	matchAllowlistRule,
+} from "../modules/shared/allowlist-match";
+import {
+	type BlacklistSubject,
+	matchBlacklistRule,
+} from "../modules/shared/blacklist-match";
+import { AppError } from "../modules/shared/errors";
+import type {
+	RateLimitRule,
+	RateLimitSnapshot,
+} from "../modules/shared/rate-limit";
+import { MemoryRateLimitStore } from "../modules/shared/rate-limit";
+import type { WriteQuotaLease } from "../modules/shared/write-quota";
+import type { SystemSettings } from "../modules/system-settings/definitions";
 import {
 	createSystemSettingsDefaults,
 	RuntimeSystemSettingsService,
 } from "../modules/system-settings/service";
-import type { SystemSettings } from "../modules/system-settings/definitions";
 
 type SecuritySettings = SystemSettings["security"];
 
@@ -86,21 +94,35 @@ export interface AuditWriteInput {
 }
 
 export interface SecurityToolkit {
+	reserveWriteQuota(input: WriteAdmissionInput): WriteQuotaLease;
+	recordWriteViolation(input: {
+		siteId: number;
+		siteKey: string;
+		ip?: string;
+		reason: string;
+		visitorKey?: string;
+		email?: string;
+		now?: number;
+	}): Promise<void>;
+	assertWriteCommitAllowed(
+		tx: DatabaseExecutor,
+		input: {
+			siteId: number;
+			siteKey: string;
+			ip?: string;
+			visitorKey?: string;
+			email?: string;
+		},
+	): Promise<void>;
+	resetWriteState(siteKey: string, ip: string): void;
 	assertGlobalFloodAllowed(input: { ip?: string }): Promise<void>;
 	getRateLimitRule<K extends keyof SecuritySettings["rateLimit"]>(
 		key: K,
 	): Promise<SecuritySettings["rateLimit"][K]>;
-	assertNotBlacklisted(input: BlacklistCheckInput): Promise<void>;
-	recordAbuseWriteAction(input: {
-		requestId?: string;
-		siteKey: string;
-		pageKey?: string;
-		ip?: string;
-		rule: RateLimitRule;
-		scope: "post" | "all";
-		ttlSec: number;
-		now?: number;
-	}): Promise<boolean>;
+	assertNotBlacklisted(
+		input: BlacklistCheckInput,
+		database?: DatabaseExecutor,
+	): Promise<void>;
 	consumeRateLimit(input: RateLimitInput): Promise<RateLimitSnapshot>;
 	peekRateLimit(input: RateLimitPeekInput): RateLimitSnapshot;
 	writeAudit(input: AuditWriteInput): Promise<void>;
@@ -152,10 +174,15 @@ function setCorsHeaders(
 	reply.header("Access-Control-Allow-Origin", origin);
 	reply.header("Vary", "Origin");
 	reply.header("Access-Control-Allow-Credentials", "true");
+	reply.header(
+		"Access-Control-Expose-Headers",
+		"X-QingYan-Security, Retry-After",
+	);
 	reply.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
 	reply.header(
 		"Access-Control-Allow-Headers",
-		requestedHeaders || "content-type,x-request-id,x-qingyan-visitor",
+		requestedHeaders ||
+			"content-type,x-request-id,x-qingyan-visitor,x-qingyan-security",
 	);
 }
 
@@ -201,14 +228,17 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		requestScope: "read" | "write",
 	) =>
 		ruleScope === "all" || (ruleScope === "post" && requestScope === "write");
-	const isAllowlisted = async (input: {
-		siteKey?: string;
-		visitorKey?: string;
-		email?: string;
-		ip?: string;
-		requestScope?: "read" | "write";
-		nowIso?: string;
-	}) => {
+	const isAllowlisted = async (
+		input: {
+			siteKey?: string;
+			visitorKey?: string;
+			email?: string;
+			ip?: string;
+			requestScope?: "read" | "write";
+			nowIso?: string;
+		},
+		database: DatabaseExecutor = fastify.db,
+	) => {
 		const subject: AllowlistSubject = {
 			visitorKey: input.visitorKey,
 			email: input.email,
@@ -220,7 +250,7 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 
 		const siteId = fastify.siteRegistry.getRegisteredSite(input.siteKey)?.id;
 		const nowIso = input.nowIso ?? new Date().toISOString();
-		const activeRules = await fastify.db
+		const activeRules = await database
 			.select()
 			.from(allowlistRules)
 			.where(
@@ -254,7 +284,38 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		);
 	};
 
+	const writeAdmission = new WriteAdmissionService(
+		fastify.db,
+		(siteKey, ip, tx, subject) =>
+			isAllowlisted(
+				{
+					siteKey,
+					ip,
+					...subject,
+					requestScope: "write",
+					nowIso: new Date().toISOString(),
+				},
+				tx,
+			),
+	);
 	const security: SecurityToolkit = {
+		reserveWriteQuota: (input) => writeAdmission.reserve(input),
+		recordWriteViolation: (input) => writeAdmission.recordViolation(input),
+		assertWriteCommitAllowed: (tx, input) =>
+			writeAdmission.assertCommitAllowed(tx, input),
+		resetWriteState: (siteKey, ip) => {
+			const subjects = writeAdmission.reset(siteKey, ip);
+			const siteId = fastify.siteRegistry.getRegisteredSite(siteKey)?.id;
+			rateLimitStore.resetPrefix(`captcha-cost-ip:${siteKey}:${ip}`);
+			for (const subject of subjects) {
+				rateLimitStore.resetPrefix(`captcha-cost:${siteKey}:${subject}`);
+				rateLimitStore.resetPrefix(
+					`public:${siteKey}:${subject}:captcha_verify`,
+				);
+				if (siteId)
+					rateLimitStore.resetPrefix(`captcha-threshold:${siteId}:${subject}:`);
+			}
+		},
 		async assertGlobalFloodAllowed({ ip }) {
 			const guard = (await systemSettings.getSecuritySettings())
 				.globalFloodGuard;
@@ -293,7 +354,7 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		async getRateLimitRule(key) {
 			return (await systemSettings.getSecuritySettings()).rateLimit[key];
 		},
-		async assertNotBlacklisted(input) {
+		async assertNotBlacklisted(input, database = fastify.db) {
 			const siteId = fastify.siteRegistry.getRegisteredSite(input.siteKey)?.id;
 			const expiresAfter = new Date().toISOString();
 			const subject: BlacklistSubject = {
@@ -305,19 +366,22 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 				return;
 			}
 			if (
-				await isAllowlisted({
-					siteKey: input.siteKey,
-					visitorKey: input.visitorKey,
-					email: input.email,
-					ip: input.ip,
-					requestScope: input.requestScope,
-					nowIso: expiresAfter,
-				})
+				await isAllowlisted(
+					{
+						siteKey: input.siteKey,
+						visitorKey: input.visitorKey,
+						email: input.email,
+						ip: input.ip,
+						requestScope: input.requestScope,
+						nowIso: expiresAfter,
+					},
+					database,
+				)
 			) {
 				return;
 			}
 
-			const activeRules = await fastify.db
+			const activeRules = await database
 				.select()
 				.from(blacklistRules)
 				.where(
@@ -353,12 +417,13 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 			});
 
 			if (matchedRule) {
-				await recordSecurityMetric("security.blacklist.hit", {
-					siteKey: input.siteKey,
-					scope: matchedRule.scope,
-					targetType: matchedRule.targetType,
-					rule: matchedRule.source,
-				});
+				if (database === fastify.db)
+					await recordSecurityMetric("security.blacklist.hit", {
+						siteKey: input.siteKey,
+						scope: matchedRule.scope,
+						targetType: matchedRule.targetType,
+						rule: matchedRule.source,
+					});
 				await fastify.loggerManager.logApp({
 					level: "warn",
 					channel: "app",
@@ -377,106 +442,18 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 				throw new AppError(403, input.errorCode, input.errorMessage, {
 					targetType: matchedRule.targetType,
 					scope: matchedRule.scope,
+					...(matchedRule.expiresAt
+						? {
+								expiresAt: matchedRule.expiresAt,
+								retryAfterSec: Math.max(
+									1,
+									Math.ceil(
+										(Date.parse(matchedRule.expiresAt) - Date.now()) / 1000,
+									),
+								),
+							}
+						: {}),
 				});
-			}
-		},
-		async recordAbuseWriteAction(input) {
-			if (!input.ip) {
-				return false;
-			}
-			if (
-				await isAllowlisted({
-					siteKey: input.siteKey,
-					ip: input.ip,
-					requestScope: "write",
-					nowIso: new Date(input.now ?? Date.now()).toISOString(),
-				})
-			) {
-				return false;
-			}
-
-			try {
-				rateLimitStore.consume(
-					`abuse:${input.siteKey}:${input.ip}`,
-					input.rule,
-					input.now,
-				);
-				return false;
-			} catch (error) {
-				if (
-					!(error instanceof Error) ||
-					error.message !== "RATE_LIMIT_EXCEEDED"
-				) {
-					throw error;
-				}
-
-				const siteId = fastify.siteRegistry.getRegisteredSite(
-					input.siteKey,
-				)?.id;
-				await recordSecurityMetric("security.rate_limited", {
-					siteKey: input.siteKey,
-					scope: input.scope,
-					targetType: "ip",
-					rule: "abuse_guard",
-				});
-				if (!siteId) {
-					return false;
-				}
-
-				const now = input.now ?? Date.now();
-				const expiresAt = new Date(now + input.ttlSec * 1000).toISOString();
-				const currentIso = new Date(now).toISOString();
-				const [existingRule] = await fastify.db
-					.select()
-					.from(blacklistRules)
-					.where(
-						and(
-							eq(blacklistRules.siteId, siteId),
-							eq(blacklistRules.scope, input.scope),
-							eq(blacklistRules.targetType, "ip"),
-							eq(blacklistRules.targetValue, input.ip),
-							eq(blacklistRules.matchMode, "exact"),
-							or(
-								isNull(blacklistRules.expiresAt),
-								gte(blacklistRules.expiresAt, currentIso),
-							),
-						),
-					)
-					.limit(1);
-
-				if (existingRule) {
-					return false;
-				}
-
-				await fastify.db.insert(blacklistRules).values({
-					siteId,
-					scope: input.scope,
-					targetType: "ip",
-					targetValue: input.ip,
-					matchMode: "exact",
-					source: "auto",
-					reason: "abuse_guard",
-					expiresAt,
-				});
-				await fastify.loggerManager.logApp({
-					level: "warn",
-					channel: "app",
-					event: "security.blacklist.added",
-					requestId: input.requestId,
-					siteKey: input.siteKey,
-					pageKey: input.pageKey,
-					message: "已新增自动黑名单规则",
-					actorType: "system",
-					targetType: "ip",
-					targetId: input.ip,
-					data: {
-						reason: "abuse_guard",
-						scope: input.scope,
-						expiresAt,
-					},
-				});
-
-				return true;
 			}
 		},
 		async consumeRateLimit({
@@ -548,6 +525,8 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 	};
 
 	fastify.decorate("security", security);
+	for (const site of fastify.siteRegistry.listRegisteredSites())
+		await writeAdmission.prune(site.id);
 	fastify.options(
 		joinPublicPath(fastify.config.server.publicPath, "/api/*"),
 		async (request, reply) => {
@@ -603,25 +582,115 @@ const securityPlugin: FastifyPluginAsync = async (fastify) => {
 		) {
 			if (!origin) {
 				if (
-					runtimeSecurity.publicOriginGuard.allowMissingOrigin ||
-					fastify.runtimeOptions.devMode.enabled
+					!runtimeSecurity.publicOriginGuard.allowMissingOrigin &&
+					!fastify.runtimeOptions.devMode.enabled
 				) {
-					return;
+					throw new AppError(
+						403,
+						"PUBLIC_ORIGIN_REQUIRED",
+						"公开写接口需要浏览器来源信息。",
+					);
 				}
-
-				throw new AppError(
-					403,
-					"PUBLIC_ORIGIN_REQUIRED",
-					"公开写接口需要浏览器来源信息。",
-				);
 			}
 
-			if (!site?.allowedOrigins.includes(origin)) {
+			if (origin && !site?.allowedOrigins.includes(origin)) {
 				throw new AppError(
 					403,
 					"PUBLIC_ORIGIN_FORBIDDEN",
 					"请求来源不在站点允许列表中。",
 				);
+			}
+		}
+		if (
+			site &&
+			request.context &&
+			!fastify.devMockService?.ownsSite(site.siteKey) &&
+			(isPublicWriteRequest(request.method, internalPathname) ||
+				internalPathname.startsWith("/api/comments/captcha/") ||
+				internalPathname === "/api/comments/bootstrap")
+		) {
+			if (
+				isPublicWriteRequest(request.method, internalPathname) &&
+				internalPathname !== "/api/comments"
+			)
+				await security.assertNotBlacklisted({
+					siteKey: site.siteKey,
+					ip: request.context.ip,
+					visitorKey: request.context.visitor?.key,
+					requestScope: "write",
+					errorCode: "COMMENT_BLACKLISTED",
+					errorMessage: "当前请求已被拒绝。",
+				});
+			const body =
+				request.body && typeof request.body === "object"
+					? (request.body as Record<string, unknown>)
+					: {};
+			const query =
+				request.query && typeof request.query === "object"
+					? (request.query as Record<string, unknown>)
+					: {};
+			const header = request.headers["x-qingyan-security"];
+			const token =
+				typeof body.securityToken === "string"
+					? body.securityToken
+					: typeof query.securityToken === "string"
+						? query.securityToken
+						: typeof header === "string"
+							? header
+							: request.cookies[`qingyan_security_${site.id}`];
+			const subject = await new SecuritySubjectService(fastify.db).resolve(
+				site.id,
+				token,
+			);
+			request.context.securityToken = subject.token;
+			request.context.securitySubjectId = subject.id;
+			if (request.context.ip)
+				writeAdmission.remember(site.siteKey, request.context.ip, subject.id);
+			reply.setCookie(`qingyan_security_${site.id}`, subject.token, {
+				path: joinPublicPath(fastify.config.server.publicPath, "/"),
+				sameSite: "lax",
+				httpOnly: true,
+				secure: request.protocol === "https",
+				maxAge: 86400,
+			});
+			reply.header("X-QingYan-Security", subject.token);
+			if (internalPathname.startsWith("/api/comments/captcha/")) {
+				const [settings] = await fastify.db
+					.select()
+					.from(siteSettings)
+					.where(eq(siteSettings.siteId, site.id))
+					.limit(1);
+				const policy = readAbusePolicy(settings?.abusePolicyJson);
+				try {
+					await security.consumeRateLimit({
+						key: `captcha-cost:${site.siteKey}:${subject.id}`,
+						rule: {
+							windowSec: policy.captchaWindowSec,
+							maxRequests: policy.captchaRequestMax,
+						},
+						errorCode: "COMMENT_RATE_LIMITED",
+						errorMessage: "验证码操作过于频繁，请稍后再试。",
+					});
+					await security.consumeRateLimit({
+						key: `captcha-cost-ip:${site.siteKey}:${request.context.ip}`,
+						rule: {
+							windowSec: policy.captchaWindowSec,
+							maxRequests: policy.captchaIpMax,
+						},
+						errorCode: "COMMENT_RATE_LIMITED",
+						errorMessage: "验证码操作过于频繁，请稍后再试。",
+					});
+				} catch (error) {
+					if (error instanceof AppError && error.statusCode === 429)
+						await security.recordWriteViolation({
+							siteId: site.id,
+							siteKey: site.siteKey,
+							ip: request.context.ip,
+							visitorKey: request.context.visitor?.key,
+							reason: "rate_limited",
+						});
+					throw error;
+				}
 			}
 		}
 

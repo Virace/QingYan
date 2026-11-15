@@ -1,9 +1,17 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+	boolean,
+	check,
+	index,
+	integer,
+	pgTable,
+	unique,
+} from "drizzle-orm/pg-core";
+import { jsonText, exactText as text, utcTimestamp } from "./column-types";
 
 import { taskRuns } from "./task-runs";
 
-export const taskEventLogs = sqliteTable(
+export const taskEventLogs = pgTable(
 	"task_event_logs",
 	{
 		id: text("id").primaryKey(),
@@ -15,15 +23,20 @@ export const taskEventLogs = sqliteTable(
 		eventType: text("event_type").notNull(),
 		level: text("level").notNull(),
 		message: text("message").notNull(),
-		dataJson: text("data_json"),
-		visibleToSiteAdmin: integer("visible_to_site_admin", {
-			mode: "boolean",
-		})
+		dataJson: jsonText("data_json"),
+		visibleToSiteAdmin: boolean("visible_to_site_admin")
 			.notNull()
 			.default(false),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
+		check("task_event_logs_sequence_nonnegative", sql`${table.sequence} >= 0`),
+		unique("task_event_logs_run_sequence_unique").on(
+			table.taskRunId,
+			table.sequence,
+		),
 		index("task_event_logs_run_sequence_idx").on(
 			table.taskRunId,
 			table.sequence,

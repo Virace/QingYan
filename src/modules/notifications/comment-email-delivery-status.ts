@@ -300,6 +300,11 @@ function classifyDelivery(
 function projectFact(
 	fact: CommentEmailDeliveryFact,
 ): CommentEmailDeliveryItem[] {
+	if (
+		fact.task.type === "comment_notification_intent" &&
+		fact.task.status === "succeeded"
+	)
+		return [];
 	const emailDeliveries = fact.deliveries.filter(
 		(delivery) => delivery.channel === "email",
 	);

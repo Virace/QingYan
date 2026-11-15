@@ -1,29 +1,30 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { stringify } from "yaml";
 import { describe, expect, it } from "vitest";
-
 import { runCli } from "../../src/cli/main";
 import type { CliRuntime } from "../../src/cli/runtime";
-import { createDatabaseClients } from "../../src/db/client";
 import {
 	adminBootstrapState,
+	adminUsers,
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
+import { AdminIdentityService } from "../../src/modules/admin/admin-identity-service";
 import {
 	createPasswordHash,
 	verifyPasswordHash,
 } from "../../src/modules/admin/password-hash";
 import { SystemdServiceController } from "../../src/modules/service-control/systemd-service";
-import {
-	applyInitialMigration,
-	createTestConfig,
-} from "../support/test-fixtures";
+import { createLifecycleFixture } from "../support/lifecycle-fixture";
+import { applyInitialMigration } from "../support/test-fixtures";
+
+const { version: applicationVersion } = JSON.parse(
+	readFileSync(path.resolve("package.json"), "utf8"),
+) as { version: string };
 
 class FakeService extends SystemdServiceController {
 	public calls: string[] = [];
@@ -58,52 +59,27 @@ class FakeService extends SystemdServiceController {
 	}
 }
 
-function createRuntimeFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-cli-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const configPath = path.join(directory, "qingyan.yml");
-	applyInitialMigration(databaseFile);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
-	const config = createTestConfig(databaseFile, path.join(directory, "logs"));
-	writeFileSync(
-		configPath,
-		stringify({
-			server: config.server,
-			database: config.database,
-			admin: { session: config.admin.session },
-			security: config.security,
-		}),
-		"utf-8",
-	);
+async function createRuntimeFixture() {
+	const fixture = await createLifecycleFixture({ empty: true });
+	await applyInitialMigration(fixture.databaseUrl);
 	return {
-		directory,
-		databaseFile,
-		configPath,
-		config,
-		db,
-		sqlite,
+		...fixture,
 		async seedAdmin() {
-			await db.insert(adminBootstrapState).values({
-				id: 1,
+			await new AdminIdentityService(fixture.db).ensureInitialAdmin({
 				consolePath: "/hidden-admin",
 				username: "admin",
 				passwordHash: createPasswordHash("old-password"),
-				passwordRotatedAt: null,
 			});
 		},
 		openRuntime: async (): Promise<CliRuntime> => ({
-			configPath,
-			config,
-			databaseFile,
-			sqlite,
-			db,
+			configPath: fixture.configPath,
+			config: fixture.config,
+			databaseUrl: fixture.databaseUrl,
+			pool: fixture.pool,
+			db: fixture.db,
 			packageVersion: "0.1.0",
-			close() {},
+			async close() {},
 		}),
-		cleanup() {
-			sqlite.close();
-			rmSync(directory, { recursive: true, force: true });
-		},
 	};
 }
 
@@ -128,12 +104,12 @@ describe("qingyanctl core commands", () => {
 
 			expect(result.exitCode).toBe(0);
 			expect(result.output.stderr).toEqual([]);
-			expect(result.output.stdout).toEqual(["QingYan 0.2.5"]);
+			expect(result.output.stdout).toEqual([`QingYan ${applicationVersion}`]);
 		}
 	});
 
 	it("prints user-facing info without password", async () => {
-		const fixture = createRuntimeFixture();
+		const fixture = await createRuntimeFixture();
 		try {
 			await fixture.seedAdmin();
 			const service = new FakeService("running");
@@ -149,12 +125,12 @@ describe("qingyanctl core commands", () => {
 			expect(result.output.stdout.join("\n")).not.toContain("password");
 			expect(result.output.stdout.join("\n")).not.toContain("密码");
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("resets password with stopped service wrapping", async () => {
-		const fixture = createRuntimeFixture();
+		const fixture = await createRuntimeFixture();
 		try {
 			await fixture.seedAdmin();
 			const service = new FakeService("running");
@@ -163,7 +139,7 @@ describe("qingyanctl core commands", () => {
 				openRuntime: fixture.openRuntime,
 				service,
 			});
-			const rows = await fixture.db.select().from(adminBootstrapState);
+			const rows = await fixture.db.select().from(adminUsers);
 			const passwordLine = result.output.stdout.find((line) =>
 				line.startsWith("新密码："),
 			);
@@ -178,12 +154,12 @@ describe("qingyanctl core commands", () => {
 			).toBe(true);
 			expect(service.calls).toEqual(["status", "stop", "start"]);
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("does not echo supplied passwords", async () => {
-		const fixture = createRuntimeFixture();
+		const fixture = await createRuntimeFixture();
 		try {
 			await fixture.seedAdmin();
 			const result = await runCli(["admin", "repass", "new-password"], {
@@ -194,12 +170,12 @@ describe("qingyanctl core commands", () => {
 			expect(result.exitCode).toBe(0);
 			expect(result.output.stdout.join("\n")).not.toContain("new-password");
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
 	it("resets admin entrance", async () => {
-		const fixture = createRuntimeFixture();
+		const fixture = await createRuntimeFixture();
 		try {
 			await fixture.seedAdmin();
 			const result = await runCli(["admin", "entrance", "/new-admin"], {
@@ -212,7 +188,7 @@ describe("qingyanctl core commands", () => {
 			expect(rows[0]?.consolePath).toBe("/new-admin");
 			expect(result.output.stdout.join("\n")).toContain("/new-admin");
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 
@@ -227,7 +203,7 @@ describe("qingyanctl core commands", () => {
 	});
 
 	it("reconciles registered pending page candidates from the CLI", async () => {
-		const fixture = createRuntimeFixture();
+		const fixture = await createRuntimeFixture();
 		try {
 			await fixture.db.insert(sites).values({
 				id: 1,
@@ -238,12 +214,18 @@ describe("qingyanctl core commands", () => {
 			await fixture.db.insert(sitePageRegistry).values({
 				siteId: 1,
 				pageKey: "posts/registered-pending/",
+				pageKeyHash: createHash("sha256")
+					.update("posts/registered-pending/")
+					.digest(),
 				pageUrl: "/posts/registered-pending/",
 				status: "active",
 			});
 			await fixture.db.insert(pendingPageCandidates).values({
 				siteKey: "fangyuan",
 				pageKey: "posts/registered-pending/",
+				pageKeyHash: createHash("sha256")
+					.update("posts/registered-pending/")
+					.digest(),
 				pageUrl: "/posts/registered-pending/",
 				status: "pending",
 				hitCount: 2,
@@ -252,11 +234,17 @@ describe("qingyanctl core commands", () => {
 				{
 					siteKey: "fangyuan",
 					pageKey: "posts/registered-pending/",
+					pageKeyHash: createHash("sha256")
+						.update("posts/registered-pending/")
+						.digest(),
 					fingerprint: "registered-pending:a",
 				},
 				{
 					siteKey: "fangyuan",
 					pageKey: "posts/registered-pending/",
+					pageKeyHash: createHash("sha256")
+						.update("posts/registered-pending/")
+						.digest(),
 					fingerprint: "registered-pending:b",
 				},
 			]);
@@ -299,7 +287,7 @@ describe("qingyanctl core commands", () => {
 			const [candidate] = await fixture.db.select().from(pendingPageCandidates);
 			expect(candidate?.status).toBe("approved");
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
 });

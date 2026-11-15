@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq, isNotNull } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	allowlistRules,
 	blacklistRules,
@@ -8,6 +7,7 @@ import {
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { serializeCommentInputLimits } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
@@ -44,6 +44,7 @@ async function seedPage(
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status,
 	});
@@ -227,7 +228,9 @@ describe("admin allowlist", () => {
 			scope: "post",
 		});
 
-		for (const suffix of ["1", "2", "3"]) {
+		for (const suffix of Array.from({ length: 12 }, (_, index) =>
+			String(index + 1),
+		)) {
 			const response = await fixture.app.inject({
 				method: "POST",
 				url: "/qingyan/api/comments",
@@ -238,7 +241,7 @@ describe("admin allowlist", () => {
 					`comment-${suffix}`,
 				),
 			});
-			expect(response.statusCode).toBe(200);
+			expect(response.statusCode).toBe(suffix === "1" ? 200 : 429);
 		}
 		expect(await fixture.app.db.select().from(blacklistRules)).toEqual([]);
 	});

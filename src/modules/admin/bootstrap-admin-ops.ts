@@ -2,11 +2,15 @@ import { randomBytes } from "node:crypto";
 
 import { eq } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
-import { adminBootstrapState, adminSessions } from "../../db/schema";
+import type { DatabaseExecutor } from "../../db/client";
+import {
+	adminBootstrapState,
+	adminSessions,
+	adminUsers,
+} from "../../db/schema";
 import { assertAdminConsolePath } from "../../config/admin-console-path";
 import { createAdminConsolePath } from "./bootstrap-utils";
-import { createPasswordHash } from "./password-hash";
+import { resetAdminPassword } from "./bootstrap-service";
 
 const PASSWORD_ALPHABET =
 	"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -27,27 +31,31 @@ function createRandomPassword(length: number): string {
 }
 
 export async function readAdminInfo(
-	db: AppDatabase,
+	db: DatabaseExecutor,
 ): Promise<AdminInfo | null> {
 	const [row] = await db
 		.select({
 			consolePath: adminBootstrapState.consolePath,
-			username: adminBootstrapState.username,
-			passwordRotatedAt: adminBootstrapState.passwordRotatedAt,
+			username: adminUsers.username,
+			passwordRotatedAt: adminUsers.passwordRotatedAt,
 		})
 		.from(adminBootstrapState)
+		.innerJoin(
+			adminUsers,
+			eq(adminUsers.id, adminBootstrapState.initialAdminUserId),
+		)
 		.where(eq(adminBootstrapState.id, 1))
 		.limit(1);
 
 	return row ?? null;
 }
 
-export async function clearAdminSessions(db: AppDatabase): Promise<void> {
+export async function clearAdminSessions(db: DatabaseExecutor): Promise<void> {
 	await db.delete(adminSessions);
 }
 
 export async function resetAdminPasswordWithGenerated(
-	db: AppDatabase,
+	db: DatabaseExecutor,
 	input: { password?: string; length?: number } = {},
 ): Promise<{
 	username: string;
@@ -60,14 +68,10 @@ export async function resetAdminPasswordWithGenerated(
 	}
 
 	const password = input.password ?? createRandomPassword(input.length ?? 18);
-	await db
-		.update(adminBootstrapState)
-		.set({
-			passwordHash: createPasswordHash(password),
-			passwordRotatedAt: new Date().toISOString(),
-		})
-		.where(eq(adminBootstrapState.id, 1));
-	await clearAdminSessions(db);
+	await db.transaction(async (tx) => {
+		await resetAdminPassword(tx, password);
+		await clearAdminSessions(tx);
+	});
 
 	return {
 		username: info.username,
@@ -77,7 +81,7 @@ export async function resetAdminPasswordWithGenerated(
 }
 
 export async function resetAdminEntrance(
-	db: AppDatabase,
+	db: DatabaseExecutor,
 	input: { path?: string } = {},
 ): Promise<{ consolePath: string; pathGenerated: boolean }> {
 	const info = await readAdminInfo(db);

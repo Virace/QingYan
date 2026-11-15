@@ -1,10 +1,10 @@
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-
 import type {
 	AdminSettings,
 	AdminSystemSettings,
 	NotificationChannelConfig,
 } from "@/api/admin";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 import {
 	readSettingsTabFromSearch,
@@ -68,7 +68,7 @@ export function buildSystemSettingsSectionPayload(
 		case "security":
 			return {
 				admin: sanitized.admin,
-				security: sanitized.security,
+				security: { ...sanitized.security, rateLimit: undefined },
 				logging: sanitized.logging,
 			};
 		case "rate-limit":
@@ -76,7 +76,7 @@ export function buildSystemSettingsSectionPayload(
 		case "mail":
 			return sanitized.mail;
 		case "notifications":
-			return sanitized.notifications;
+			return { ...sanitized.notifications, channelConfigs: undefined };
 		case "captcha":
 			return sanitized.captcha;
 		case "avatar":
@@ -89,6 +89,175 @@ export function buildSystemSettingsSectionPayload(
 		case "anti-spam":
 			return sanitized.antiSpam;
 	}
+}
+
+export function replaceSiteSettingsSection(
+	draft: AdminSettings,
+	settings: AdminSettings,
+	section: SiteSettingsTab,
+): AdminSettings {
+	const next = { ...draft, [section]: structuredClone(settings[section]) };
+	if (section === "engagement") next.pageFeedback = settings.pageFeedback;
+	return next;
+}
+
+export const systemDraftSections = [...systemSettingsTabs, "channels"] as const;
+export type SystemDraftSection = (typeof systemDraftSections)[number];
+
+export function systemDraftPayload(
+	section: SystemDraftSection,
+	settings: AdminSystemSettings,
+) {
+	return section === "channels"
+		? settings.notifications.channelConfigs
+		: buildSystemSettingsSectionPayload(section, settings);
+}
+
+export function replaceSystemSettingsSection(
+	draft: AdminSystemSettings,
+	settings: AdminSystemSettings,
+	section: SystemDraftSection,
+): AdminSystemSettings {
+	switch (section) {
+		case "security":
+			return {
+				...draft,
+				admin: structuredClone(settings.admin),
+				logging: structuredClone(settings.logging),
+				security: {
+					...structuredClone(settings.security),
+					rateLimit: draft.security.rateLimit,
+				},
+			};
+		case "rate-limit":
+			return {
+				...draft,
+				security: {
+					...draft.security,
+					rateLimit: structuredClone(settings.security.rateLimit),
+				},
+			};
+		case "notifications":
+			return {
+				...draft,
+				notifications: {
+					...structuredClone(settings.notifications),
+					channelConfigs: draft.notifications.channelConfigs,
+				},
+			};
+		case "channels":
+			return {
+				...draft,
+				notifications: {
+					...draft.notifications,
+					channelConfigs: structuredClone(
+						settings.notifications.channelConfigs,
+					),
+				},
+			};
+		case "avatar":
+			return {
+				...draft,
+				avatar: structuredClone(settings.avatar),
+				publicApi: structuredClone(settings.publicApi),
+			};
+		case "ip-region":
+			return { ...draft, ipRegion: structuredClone(settings.ipRegion) };
+		case "anti-spam":
+			return { ...draft, antiSpam: structuredClone(settings.antiSpam) };
+		default:
+			return { ...draft, [section]: structuredClone(settings[section]) };
+	}
+}
+
+export function countSettingsChanges(saved: unknown, draft: unknown): number {
+	if (isSameSettingsPayload(saved, draft)) return 0;
+	if (
+		saved &&
+		draft &&
+		typeof saved === "object" &&
+		typeof draft === "object" &&
+		!Array.isArray(saved) &&
+		!Array.isArray(draft)
+	) {
+		const before = saved as Record<string, unknown>;
+		const after = draft as Record<string, unknown>;
+		return Array.from(
+			new Set([...Object.keys(before), ...Object.keys(after)]),
+		).reduce(
+			(count, key) => count + countSettingsChanges(before[key], after[key]),
+			0,
+		);
+	}
+	return 1;
+}
+
+export function SettingsDraftActions({
+	changeCount,
+	totalDirtySections,
+	pending,
+	saveLabel,
+	onDiscard,
+	additionalChanges,
+}: {
+	changeCount: number;
+	totalDirtySections: number;
+	pending: boolean;
+	saveLabel: string;
+	onDiscard: () => void;
+	additionalChanges?: string;
+}) {
+	return (
+		<div
+			className="sticky bottom-4 z-20 flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border bg-background p-3 md:col-span-2"
+			data-settings-actions
+		>
+			<p className="min-w-0 text-sm" role="status">
+				{changeCount > 0
+					? `当前页签有 ${changeCount} 项未保存更改`
+					: "当前设置已保存"}
+				{totalDirtySections > (changeCount > 0 ? 1 : 0)
+					? `，其他 ${totalDirtySections - (changeCount > 0 ? 1 : 0)} 个页签有未保存更改`
+					: ""}
+				{additionalChanges ? `；${additionalChanges}` : ""}
+			</p>
+			<div className="flex shrink-0 flex-wrap gap-2">
+				<Button
+					type="button"
+					variant="outline"
+					disabled={!changeCount || pending}
+					onClick={onDiscard}
+				>
+					放弃更改
+				</Button>
+				<Button type="submit" disabled={pending}>
+					{pending ? "正在保存" : saveLabel}
+				</Button>
+			</div>
+		</div>
+	);
+}
+
+export function SettingsLoadError({
+	message,
+	pending,
+	onRetry,
+}: {
+	message: string;
+	pending: boolean;
+	onRetry: () => void;
+}) {
+	return (
+		<div
+			className="grid justify-items-start gap-3 rounded-lg border p-4"
+			role="alert"
+		>
+			<p className="text-sm">{message}</p>
+			<Button variant="outline" disabled={pending} onClick={onRetry}>
+				{pending ? "正在重试" : "重试"}
+			</Button>
+		</div>
+	);
 }
 
 export function isSameSettingsPayload(current: unknown, next: unknown) {
@@ -134,7 +303,7 @@ export function replaceSettingsTabQuery(param: string, value: string) {
 	}
 	const url = new URL(window.location.href);
 	url.search = writeSettingsTabToSearch(url.search, { param, value });
-	window.history.replaceState(null, "", url);
+	window.history.replaceState(window.history.state, "", url);
 }
 
 export function SettingsSaveError({

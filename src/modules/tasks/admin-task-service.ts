@@ -1,51 +1,53 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
 
 import type { AppDatabase } from "../../db/client";
 import {
-	auditLogs,
 	adminGroups,
 	adminUserGroups,
-	adminUsers,
 	adminUserSiteAccess,
+	adminUsers,
+	auditLogs,
 } from "../../db/schema";
 import type { AuthenticatedAdminSession } from "../admin/session-service";
 import { toValidationFields } from "../admin/validation-fields";
+import { BackendUserNotificationRecipientsRepository } from "../notifications/backend-user-recipients-repository";
+import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
+import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
 import {
 	AppError,
 	ResourceNotFoundError,
 	ValidationFailedError,
 } from "../shared/errors";
 import type { SiteRegistry } from "../shared/site-registry";
-import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
-import { BackendUserNotificationRecipientsRepository } from "../notifications/backend-user-recipients-repository";
-import {
-	calculateNextRunAt,
-	validateScheduleDefinition,
-} from "./schedule-calculator";
-import { parseTaskFailureRecipientUserId } from "./task-failure-notification-targets";
 import { createBuiltInTaskTypeRegistry } from "./built-in-task-types";
-import type { AnyTaskTypeDefinition } from "./task-type-registry";
-import {
-	isJsonEqual,
-	isRecord,
-	readPath,
-	setPath,
-	protectedOperationReason,
-	type ProtectedTaskOperation,
-} from "./protected-task-policy";
-import {
-	ScheduledTaskRepository,
-	type ScheduledTaskRecord,
-} from "./scheduled-task-repository";
-import { SystemManagedTaskService } from "./system-managed-task-service";
 import {
 	PageSourceRefreshPolicyService,
 	readPageSourceRefreshSiteKey,
 } from "./page-source-refresh-policy";
+import {
+	isJsonEqual,
+	isRecord,
+	type ProtectedTaskOperation,
+	protectedOperationReason,
+	readPath,
+	setPath,
+} from "./protected-task-policy";
+import {
+	calculateNextRunAt,
+	validateScheduleDefinition,
+} from "./schedule-calculator";
+import {
+	type ScheduledTaskRecord,
+	ScheduledTaskRepository,
+} from "./scheduled-task-repository";
+import { SystemManagedTaskService } from "./system-managed-task-service";
+import { TaskAuditRepository } from "./task-audit-repository";
+import { TaskFailureNotificationService } from "./task-failure-notification-service";
+import { parseTaskFailureRecipientUserId } from "./task-failure-notification-targets";
+import type { TaskListQuery } from "./task-list-query";
 import { TaskRunRepository } from "./task-run-repository";
-import type { TaskRunRecord } from "./types";
-import { projectCommentEmailDelivery } from "../notifications/comment-email-delivery-status";
+import type { AnyTaskTypeDefinition } from "./task-type-registry";
 import {
 	canManageScheduledTask,
 	canRunScheduledTask,
@@ -55,6 +57,7 @@ import {
 	projectTaskRunForSession,
 	type TaskVisibilitySession,
 } from "./task-visibility";
+import type { TaskRunRecord, TaskRunStatus } from "./types";
 
 const RETENTION_COUNT_MAX = 30;
 
@@ -201,9 +204,37 @@ export class AdminTaskService {
 		};
 	}
 
-	public async listScheduled(session: AuthenticatedAdminSession) {
+	public async listScheduled(
+		session: AuthenticatedAdminSession,
+		input: TaskListQuery & {
+			type?: string;
+			status?: TaskRunStatus;
+			scopeKind?: string;
+			visibility?: "owned" | "summary";
+		} = {},
+	) {
 		const visibilitySession = toVisibilitySession(session);
-		const items = (await this.scheduledTasks.list({ limit: 200, offset: 0 }))
+		const result = await this.scheduledTasks.listForTaskCenter({
+			...input,
+			searchTypes: this.searchTaskTypes(input.search),
+			access: {
+				isGlobalAdmin: session.isAdmin || session.isInitialAdmin,
+				isSiteAdmin: session.groupKey === "site_admin",
+				userId: session.user.id,
+				siteIds: session.siteIds,
+				canManageProtected:
+					session.permissions.includes("page_registry.update") ||
+					session.permissions.includes("site_settings.update"),
+				deniedUpdateTypes: this.registry
+					.list()
+					.filter(
+						(definition) =>
+							!session.permissions.includes(definition.permissions.update),
+					)
+					.map((definition) => definition.type),
+			},
+		});
+		const items = result.items
 			.map((task) =>
 				projectScheduledTaskForSession(task, {
 					session: visibilitySession,
@@ -211,7 +242,7 @@ export class AdminTaskService {
 				}),
 			)
 			.filter((item) => item !== null);
-		return { items, totalCount: items.length };
+		return { items, totalCount: result.totalCount };
 	}
 
 	public async getScheduled(id: string, session: AuthenticatedAdminSession) {
@@ -397,6 +428,8 @@ export class AdminTaskService {
 			lastRunId: run.id,
 			lastStatus: run.status,
 		});
+		if (run.status === "failed")
+			await new TaskFailureNotificationService(this.db).planForFailedRun(run);
 		await this.taskRuns.pruneScheduledTaskRuns({
 			scheduledTaskId: task.id,
 			retainCount: task.retentionCount,
@@ -733,13 +766,24 @@ export class AdminTaskService {
 
 	public async listRuns(
 		session: AuthenticatedAdminSession,
-		input: { commentId?: string } = {},
+		input: TaskListQuery & {
+			commentId?: string;
+			type?: string;
+			status?: TaskRunStatus;
+			siteKey?: string;
+			scopeKind?: "global" | "site";
+		} = {},
 	) {
 		const result = await this.taskRuns.listForTaskCenter({
+			...input,
 			subjectType: input.commentId ? "comment" : undefined,
 			subjectId: input.commentId,
-			limit: 200,
-			offset: 0,
+			allowedSiteIds:
+				session.isAdmin || session.isInitialAdmin ? undefined : session.siteIds,
+			searchTypes: this.searchTaskTypes(input.search),
+			safeNotificationSearch: true,
+			limit: input.limit ?? 200,
+			offset: input.offset ?? 0,
 		});
 		const visibilitySession = toVisibilitySession(session);
 		const items = result.items
@@ -756,7 +800,7 @@ export class AdminTaskService {
 					: projected;
 			})
 			.filter((item) => item !== null);
-		return { items, totalCount: items.length };
+		return { items, totalCount: result.totalCount };
 	}
 
 	public async getRun(id: string, session: AuthenticatedAdminSession) {
@@ -813,6 +857,7 @@ export class AdminTaskService {
 		await this.writeRunAudit(session, "task.run.cancel", cancelled, {
 			requestId,
 		});
+		await this.taskRuns.finalizeScheduledTaskRun(cancelled.id);
 		const projected = projectTaskRunForSession(cancelled, {
 			session: toVisibilitySession(session),
 		});
@@ -839,6 +884,12 @@ export class AdminTaskService {
 			},
 			runAfter,
 		);
+		if (!retrying.applied)
+			throw new AppError(
+				409,
+				"TASK_LOCK_CONFLICT",
+				"同类任务正在执行，请稍后重试。",
+			);
 		await this.writeRunAudit(session, "task.run.retry", retrying, {
 			requestId,
 		});
@@ -853,30 +904,18 @@ export class AdminTaskService {
 			: projected;
 	}
 
-	public async listAudit(session: AuthenticatedAdminSession) {
-		const rows = await this.db
-			.select()
-			.from(auditLogs)
-			.where(
-				and(
-					session.isAdmin || session.isInitialAdmin
-						? undefined
-						: eq(auditLogs.actorType, "admin_user"),
-				),
-			)
-			.orderBy(desc(auditLogs.createdAt))
-			.limit(200);
-		const visibleRows = rows.filter((row) => {
-			if (!row.action.startsWith("task.")) {
-				return false;
-			}
-			if (session.isAdmin || session.isInitialAdmin) {
-				return true;
-			}
-			return row.siteId !== null && session.siteIds.includes(row.siteId);
+	public async listAudit(
+		session: AuthenticatedAdminSession,
+		input: TaskListQuery = {},
+	) {
+		const result = await new TaskAuditRepository(this.db).list({
+			...input,
+			allowedSiteIds:
+				session.isAdmin || session.isInitialAdmin ? undefined : session.siteIds,
+			searchTypes: this.searchTaskTypes(input.search),
 		});
 		return {
-			items: visibleRows.map((row) => {
+			items: result.items.map((row) => {
 				const payload = this.parseAuditPayload(row.payloadJson);
 				return {
 					id: row.id,
@@ -900,20 +939,33 @@ export class AdminTaskService {
 					createdAt: row.createdAt,
 				};
 			}),
-			totalCount: visibleRows.length,
+			totalCount: result.totalCount,
 		};
 	}
 
-	public async listDeletedSnapshots(session: AuthenticatedAdminSession) {
+	public async listDeletedSnapshots(
+		session: AuthenticatedAdminSession,
+		input: TaskListQuery = {},
+	) {
 		this.assertCanViewDeletedSnapshots(session);
-		const items = await this.scheduledTasks.listDeletedSnapshots({
-			limit: 200,
-			offset: 0,
+		const result = await this.scheduledTasks.listDeletedSnapshotsPage({
+			...input,
+			searchTypes: this.searchTaskTypes(input.search),
 		});
 		return {
-			items: items.map(projectDeletedSnapshotForSession),
-			totalCount: items.length,
+			items: result.items.map(projectDeletedSnapshotForSession),
+			totalCount: result.totalCount,
 		};
+	}
+
+	private searchTaskTypes(search?: string) {
+		const text = search?.trim().toLowerCase();
+		return text
+			? this.registry
+					.list()
+					.filter((definition) => definition.label.toLowerCase().includes(text))
+					.map((definition) => definition.type)
+			: [];
 	}
 
 	public async getDeletedSnapshot(
@@ -1262,24 +1314,9 @@ export class AdminTaskService {
 					userIds: directUserIds,
 				});
 			const directUserIdSet = new Set(directUsers.map((user) => user.id));
-			const legacyRecipientIds = recipientIds.filter(
-				(recipientId) => parseTaskFailureRecipientUserId(recipientId) === null,
-			);
-			const legacyRecipients =
-				legacyRecipientIds.length > 0
-					? await this.notificationRecipients.listSiteRecipients(siteId)
-					: [];
-			const enabledLegacyRecipientIds = new Set(
-				legacyRecipients
-					.filter((recipient) => recipient.enabled)
-					.map((recipient) => recipient.id),
-			);
 			for (const recipientId of recipientIds) {
 				const userId = parseTaskFailureRecipientUserId(recipientId);
-				if (
-					(userId !== null && !directUserIdSet.has(userId)) ||
-					(userId === null && !enabledLegacyRecipientIds.has(recipientId))
-				) {
+				if (userId === null || !directUserIdSet.has(userId)) {
 					fields.push(
 						validationField(
 							"policy.failureNotification.recipientIds",

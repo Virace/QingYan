@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { loadConfig } from "../src/config/load-config";
 import { createDatabaseClients } from "../src/db/client";
 import { IpRegionUpdater } from "../src/modules/comments/metadata/ip-region-updater";
@@ -12,8 +10,10 @@ async function main(): Promise<void> {
 	}
 
 	const config = await loadConfig();
-	const databaseFile = path.resolve(process.cwd(), config.database.sqlite.file);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const { db, close } = createDatabaseClients(
+		config.database.url,
+		config.database,
+	);
 	const updater = new IpRegionUpdater(db);
 	const systemSettings = new RuntimeSystemSettingsService(db);
 
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
 
 		console.log(JSON.stringify({ results }, null, 2));
 	} finally {
-		sqlite.close();
+		await close();
 	}
 }
 

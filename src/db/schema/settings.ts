@@ -1,35 +1,33 @@
 import { sql } from "drizzle-orm";
 import {
+	bigint,
+	boolean,
 	integer,
-	sqliteTable,
-	text,
+	pgTable,
 	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
+import { jsonText, exactText as text, utcTimestamp } from "./column-types";
 
 import { sites } from "./sites";
 
-export const siteSettings = sqliteTable(
+export const siteSettings = pgTable(
 	"site_settings",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		siteId: integer("site_id")
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		siteId: bigint("site_id", { mode: "number" })
 			.notNull()
 			.references(() => sites.id),
-		commentsEnabled: integer("comments_enabled", { mode: "boolean" })
-			.notNull()
-			.default(true),
+		commentsEnabled: boolean("comments_enabled").notNull().default(true),
 		defaultStatus: text("default_status").notNull().default("pending"),
 		maxDepth: integer("max_depth").notNull().default(3),
 		rootLimit: integer("root_limit").notNull().default(20),
-		commentRequireJson: text("comment_require_json")
+		commentRequireJson: jsonText("comment_require_json")
 			.notNull()
 			.default('["nickname","email"]'),
-		allowWebsite: integer("allow_website", { mode: "boolean" })
-			.notNull()
-			.default(true),
-		allowPageLike: integer("allow_page_like", { mode: "boolean" })
-			.notNull()
-			.default(true),
+		allowWebsite: boolean("allow_website").notNull().default(true),
+		allowPageLike: boolean("allow_page_like").notNull().default(true),
 		captchaMode: text("captcha_mode").notNull().default("threshold"),
 		captchaThresholdWindowSec: integer("captcha_threshold_window_sec")
 			.notNull()
@@ -37,51 +35,46 @@ export const siteSettings = sqliteTable(
 		captchaThresholdMaxActions: integer("captcha_threshold_max_actions")
 			.notNull()
 			.default(3),
-		abuseGuardEnabled: integer("abuse_guard_enabled", { mode: "boolean" })
-			.notNull()
-			.default(true),
+		abuseGuardEnabled: boolean("abuse_guard_enabled").notNull().default(true),
 		abuseGuardWindowSec: integer("abuse_guard_window_sec")
 			.notNull()
 			.default(600),
 		abuseGuardMaxWriteActions: integer("abuse_guard_max_write_actions")
 			.notNull()
 			.default(100),
-		autoBlacklistEnabled: integer("auto_blacklist_enabled", {
-			mode: "boolean",
-		})
+		autoBlacklistEnabled: boolean("auto_blacklist_enabled")
 			.notNull()
 			.default(true),
 		autoBlacklistScope: text("auto_blacklist_scope").notNull().default("post"),
 		autoBlacklistTtlSec: integer("auto_blacklist_ttl_sec")
 			.notNull()
 			.default(1800),
-		commentInputLimitsJson: text("comment_input_limits_json"),
-		commentMetadataJson: text("comment_metadata_json"),
-		engagementJson: text("engagement_json"),
-		verifiedAuthorJson: text("verified_author_json"),
-		staffDisplayJson: text("staff_display_json"),
-		moderationJson: text("moderation_json"),
-		pageRegistryJson: text("page_registry_json"),
-		commenterReplyEmailEnabled: integer("commenter_reply_email_enabled", {
-			mode: "boolean",
-		})
+		commentInputLimitsJson: jsonText("comment_input_limits_json"),
+		commentMetadataJson: jsonText("comment_metadata_json"),
+		engagementJson: jsonText("engagement_json"),
+		verifiedAuthorJson: jsonText("verified_author_json"),
+		staffDisplayJson: jsonText("staff_display_json"),
+		moderationJson: jsonText("moderation_json"),
+		emailPolicyJson: jsonText("email_policy_json"),
+		abusePolicyJson: jsonText("abuse_policy_json"),
+		pageRegistryJson: jsonText("page_registry_json"),
+		commenterReplyEmailEnabled: boolean("commenter_reply_email_enabled")
 			.notNull()
 			.default(false),
-		commenterReplyEmailDefaultChecked: integer(
+		commenterReplyEmailDefaultChecked: boolean(
 			"commenter_reply_email_default_checked",
-			{
-				mode: "boolean",
-			},
 		)
 			.notNull()
 			.default(false),
-		backendNotificationsEnabled: integer("backend_notifications_enabled", {
-			mode: "boolean",
-		})
+		backendNotificationsEnabled: boolean("backend_notifications_enabled")
 			.notNull()
 			.default(false),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [uniqueIndex("site_settings_site_id_idx").on(table.siteId)],
 );

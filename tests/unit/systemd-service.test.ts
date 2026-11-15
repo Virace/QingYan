@@ -89,4 +89,35 @@ describe("SystemdServiceController", () => {
 		expect(result).toEqual({ result: "done", wasRunning: false });
 		expect(fake.calls.map((call) => call.args[0])).toEqual(["is-active"]);
 	});
+	it("refuses writes when service state is unknown", async () => {
+		const fake = createRunner([{ code: 1, stdout: "" }]);
+		const controller = new SystemdServiceController({
+			runner: fake.runner,
+			platform: "linux",
+		});
+		let applied = false;
+		await expect(
+			controller.runWithStoppedService(async () => {
+				applied = true;
+			}),
+		).rejects.toThrow("SERVICE_STATE_UNKNOWN");
+		expect(applied).toBe(false);
+		expect(fake.calls.map((call) => call.args[0])).toEqual(["is-active"]);
+	});
+	it("keeps writes stopped when an operation fails", async () => {
+		const fake = createRunner([{ code: 0, stdout: "active\n" }, { code: 0 }]);
+		const controller = new SystemdServiceController({
+			runner: fake.runner,
+			platform: "linux",
+		});
+		await expect(
+			controller.runWithStoppedService(async () => {
+				throw new Error("BACKUP_FAILED");
+			}),
+		).rejects.toThrow("BACKUP_FAILED");
+		expect(fake.calls.map((call) => call.args[0])).toEqual([
+			"is-active",
+			"stop",
+		]);
+	});
 });

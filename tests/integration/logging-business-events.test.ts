@@ -1,21 +1,21 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	captchaSessions,
 	sitePageRegistry,
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
+import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import {
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
 } from "../support/captcha";
-import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -48,6 +48,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -127,9 +128,7 @@ describe("logging business events", () => {
 		});
 		expect(captchaState.statusCode).toBe(200);
 
-		const visitorCookie = captchaState.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
+		const securityToken = captchaState.headers["x-qingyan-security"] as string;
 		const challengeId = captchaState.json().challenge.challengeId as string;
 
 		const invalidVerify = await fixture.app.inject({
@@ -138,9 +137,7 @@ describe("logging business events", () => {
 			headers: {
 				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_failed",
-			},
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				"x-qingyan-security": securityToken,
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -172,9 +169,7 @@ describe("logging business events", () => {
 			headers: {
 				...refererFor("post:logging-events"),
 				"x-request-id": "req_captcha_verified",
-			},
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				"x-qingyan-security": securityToken,
 			},
 			payload: {
 				siteKey: "fangyuan",
@@ -192,9 +187,7 @@ describe("logging business events", () => {
 			headers: {
 				...refererFor("post:logging-events"),
 				"x-request-id": "req_comment_created",
-			},
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+				"x-qingyan-security": securityToken,
 			},
 			payload: {
 				siteKey: "fangyuan",

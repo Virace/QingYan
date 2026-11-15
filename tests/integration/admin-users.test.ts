@@ -1,13 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-	auditLogs,
 	adminGroups,
 	adminSessions,
 	adminUserGroups,
 	adminUserSiteAccess,
 	adminUsers,
+	auditLogs,
 	sites,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
@@ -17,11 +17,11 @@ import {
 	SYSTEM_BUILTIN_GROUP_KEY,
 	SystemPrincipalService,
 } from "../../src/modules/tasks/system-principal";
+import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import {
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
 } from "../support/captcha";
-import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];

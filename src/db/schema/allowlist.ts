@@ -1,26 +1,32 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-
+import { bigint, index, pgTable } from "drizzle-orm/pg-core";
 import { adminUsers } from "./admin-users";
+import { exactText as text, utcTimestamp } from "./column-types";
 import { sites } from "./sites";
 
-export const allowlistRules = sqliteTable(
+export const allowlistRules = pgTable(
 	"allowlist_rules",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		siteId: integer("site_id").references(() => sites.id),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		siteId: bigint("site_id", { mode: "number" }).references(() => sites.id),
 		targetType: text("target_type").notNull(),
 		matchMode: text("match_mode").notNull(),
 		targetValue: text("target_value").notNull(),
 		scope: text("scope").notNull().default("all"),
 		reason: text("reason"),
-		expiresAt: text("expires_at"),
-		createdByUserId: integer("created_by_user_id").references(
-			() => adminUsers.id,
-		),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		deletedAt: text("deleted_at"),
+		expiresAt: utcTimestamp("expires_at"),
+		createdByUserId: bigint("created_by_user_id", {
+			mode: "number",
+		}).references(() => adminUsers.id),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		deletedAt: utcTimestamp("deleted_at"),
 	},
 	(table) => [
 		index("allowlist_rules_site_target_idx").on(

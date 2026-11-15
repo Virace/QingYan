@@ -1,30 +1,24 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-
-import Database from "better-sqlite3";
-
+import { loadConfig } from "../config/load-config";
 import type { AppConfig } from "../config/types";
-import { DatabaseBackupService } from "../modules/database-backup/database-backup-service";
 import {
 	readAdminInfo,
 	resetAdminEntrance,
 	resetAdminPasswordWithGenerated,
 } from "../modules/admin/bootstrap-admin-ops";
-import { QingYanExportService } from "../modules/import-export/qingyan/export-service";
-import { QingYanImportService } from "../modules/import-export/qingyan/import-service";
-import { SystemdServiceController } from "../modules/service-control/systemd-service";
-import { UpgradeService } from "../modules/upgrade/upgrade-service";
 import { FullBackupService } from "../modules/backup/full-backup-service";
 import { RestoreService } from "../modules/backup/restore-service";
 import { GitHubReleaseClient } from "../modules/ops/github-release-client";
 import { OpsStatusService } from "../modules/ops/ops-status-service";
-import { PageRegistryService } from "../modules/page-registry/service";
 import {
+	UpdateCheckService as GitHubUpdateCheckService,
 	type UpdateCheckService,
 	type UpdateCheckState,
-	UpdateCheckService as GitHubUpdateCheckService,
 } from "../modules/ops/update-check-service";
+import { PageRegistryService } from "../modules/page-registry/service";
+import { SystemdServiceController } from "../modules/service-control/systemd-service";
+import { resolvePartialUpgradeMarkerPath } from "../modules/upgrade/partial-marker";
+import { UpgradeService } from "../modules/upgrade/upgrade-service";
 import {
 	openCliRuntime,
 	readPackageVersion,
@@ -64,7 +58,13 @@ function parseArgs(args: string[]): ParsedArgs {
 			continue;
 		}
 		const name = arg.slice(2);
-		if (name === "yes" || name === "dry-run" || name === "help") {
+		if (
+			name === "yes" ||
+			name === "dry-run" ||
+			name === "help" ||
+			name === "recover" ||
+			name === "service-stopped"
+		) {
 			flags.set(name, true);
 			continue;
 		}
@@ -106,19 +106,6 @@ function publicAdminUrl(publicBaseUrl: string, consolePath: string): string {
 	return new URL(consolePath, publicBaseUrl).toString();
 }
 
-function fullExportInclude() {
-	return {
-		siteSettings: true,
-		systemSettings: true,
-		pageThreads: true,
-		comments: true,
-		visitors: true,
-		voteRecords: true,
-		pageFeedbackRecords: true,
-		blacklistRules: true,
-	};
-}
-
 function cliUsage(): string[] {
 	return [
 		"Usage: qyctl <command> [options]",
@@ -129,10 +116,8 @@ function cliUsage(): string[] {
 		"  qyctl info",
 		"  qyctl admin repass [password]",
 		"  qyctl admin entrance [path]",
-		"  qyctl export <site-key> <file>",
-		"  qyctl import <site-key> <file> [--dry-run] [--yes]",
 		"  qyctl backup <file> --yes",
-		"  qyctl restore <file> --dry-run",
+		"  qyctl restore <file> --dry-run | --yes --target-config <file> --output-config <file>",
 		"  qyctl upgrade [--dry-run] [--yes]",
 		"  qyctl update check",
 		"  qyctl update plan",
@@ -173,8 +158,17 @@ async function withRuntime<T>(
 	try {
 		return await action(runtime);
 	} finally {
-		runtime.close();
+		await runtime.close();
 	}
+}
+
+async function withStoppedService<T>(
+	parsed: ParsedArgs,
+	deps: Required<CliDeps>,
+	action: () => Promise<T>,
+): Promise<T> {
+	if (hasFlag(parsed, "service-stopped")) return action();
+	return (await deps.service.runWithStoppedService(action)).result;
 }
 
 async function commandInfo(
@@ -199,7 +193,7 @@ async function commandInfo(
 			deps.output.stdout.push("管理员用户：未初始化");
 		}
 		deps.output.stdout.push(`配置文件：${runtime.configPath}`);
-		deps.output.stdout.push(`数据库：SQLite / ${runtime.databaseFile}`);
+		deps.output.stdout.push("数据库：PostgreSQL（连接信息已隐藏）");
 		deps.output.stdout.push("数据状态：可读取");
 	});
 	return 0;
@@ -214,7 +208,7 @@ async function commandAdmin(
 		throw new Error("Unknown admin command.");
 	}
 	await withRuntime(parsed, deps, async (runtime) => {
-		await deps.service.runWithStoppedService(async () => {
+		await withStoppedService(parsed, deps, async () => {
 			if (action === "repass") {
 				const password = parsed.positionals[2];
 				const result = await resetAdminPasswordWithGenerated(runtime.db, {
@@ -269,75 +263,6 @@ async function commandService(
 	throw new Error("Unknown service command.");
 }
 
-async function commandExport(
-	parsed: ParsedArgs,
-	deps: Required<CliDeps>,
-): Promise<number> {
-	const siteKey = parsed.positionals[1];
-	const file = parsed.positionals[2];
-	if (!siteKey || !file) {
-		throw new Error("Usage: qyctl export <site-key> <file>");
-	}
-	await withRuntime(parsed, deps, async (runtime) => {
-		const service = new QingYanExportService(runtime.sqlite);
-		const payload = service.exportSite({
-			siteKey,
-			include: fullExportInclude(),
-		});
-		await writeFile(file, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
-		deps.output.stdout.push(`站点导出已写入：${path.resolve(file)}`);
-	});
-	return 0;
-}
-
-async function commandImport(
-	parsed: ParsedArgs,
-	deps: Required<CliDeps>,
-): Promise<number> {
-	const siteKey = parsed.positionals[1];
-	const file = parsed.positionals[2];
-	if (!siteKey || !file) {
-		throw new Error("Usage: qyctl import <site-key> <file>");
-	}
-	const payload = JSON.parse(await readFile(file, "utf-8")) as unknown;
-	await withRuntime(parsed, deps, async (runtime) => {
-		const backupService = new DatabaseBackupService({
-			engine: runtime.config.database.client,
-			databaseFile: runtime.databaseFile,
-			sqlite: runtime.sqlite,
-		});
-		const service = new QingYanImportService(runtime.sqlite, backupService);
-		const dryRun = service.createDryRun({
-			siteKey,
-			fileName: path.basename(file),
-			payload,
-			existingStrategy: "fail_on_existing",
-			importMode: "full_site",
-			settingsStrategy: "fail_on_existing",
-		});
-		deps.output.stdout.push(
-			`导入预检：新增评论 ${dryRun.dryRun.summary.willCreateComments}，冲突 ${dryRun.dryRun.summary.conflicts}`,
-		);
-		if (hasFlag(parsed, "dry-run")) {
-			return;
-		}
-		if (!hasFlag(parsed, "yes")) {
-			throw new Error("IMPORT_CONFIRMATION_REQUIRED");
-		}
-		await deps.service.runWithStoppedService(async () => {
-			const result = await service.applyWithBackup(dryRun.job.id, {
-				existingStrategy: "fail_on_existing",
-				importMode: "full_site",
-				settingsStrategy: "fail_on_existing",
-			});
-			deps.output.stdout.push(
-				`导入完成：创建评论 ${result.apply.summary.createdComments}，跳过 ${result.apply.summary.skippedExistingComments}`,
-			);
-		});
-	});
-	return 0;
-}
-
 async function commandUpgrade(
 	parsed: ParsedArgs,
 	deps: Required<CliDeps>,
@@ -354,27 +279,34 @@ async function commandUpgrade(
 			environment: deps.environment,
 		});
 		loadedConfig = runtime.config;
-		runtime.close();
+		await runtime.close();
 	} catch (error) {
 		configError = error;
 	}
-	const databaseFile = loadedConfig
-		? path.resolve(process.cwd(), loadedConfig.database.sqlite.file)
-		: path.resolve(process.cwd(), "config", "qingyan.db");
 	const service = new UpgradeService({
 		configPath,
 		loadedConfig,
 		configError,
-		databaseFile,
-		createSqliteClient: (file) => new Database(file),
 		currentApplicationVersion: readPackageVersion(),
-		partialUpgradeMarkerPath: path.join(
-			path.dirname(databaseFile),
-			"upgrade",
-			"partial-upgrade.json",
-		),
+		partialUpgradeMarkerPath: resolvePartialUpgradeMarkerPath(configPath),
 	});
-	const state = service.publicState();
+	const state = await service.publicState();
+	if (hasFlag(parsed, "recover")) {
+		if (!hasFlag(parsed, "yes"))
+			throw new Error("UPGRADE_CONFIRMATION_REQUIRED");
+		await withStoppedService(parsed, deps, () =>
+			service.recover({ confirm: "UPGRADE QINGYAN" }),
+		);
+		deps.output.stdout.push("升级恢复已完成，请启动服务。");
+		return 0;
+	}
+	if (
+		state.state === "broken_config" &&
+		state.reason === "sqlite_offline_conversion_required"
+	)
+		throw new Error(
+			"SQLITE_OFFLINE_CONVERSION_REQUIRED: 停止旧实例并运行独立 SQLite 转换，核对后再切换 PostgreSQL 配置。",
+		);
 	if (state.state !== "upgrade_required") {
 		deps.output.stdout.push(`升级状态：${state.state}`);
 		return state.state === "broken_config" ||
@@ -389,14 +321,10 @@ async function commandUpgrade(
 	if (!hasFlag(parsed, "yes")) {
 		throw new Error("UPGRADE_CONFIRMATION_REQUIRED");
 	}
-	await deps.service.runWithStoppedService(async () => {
+	await withStoppedService(parsed, deps, async () => {
 		const result = await service.apply({
 			confirm: "UPGRADE QINGYAN",
-			backupDirectory: path.resolve(
-				path.dirname(databaseFile),
-				"backups",
-				"upgrade",
-			),
+			backupDirectory: flagString(parsed, "backup-dir"),
 		});
 		deps.output.stdout.push(JSON.stringify(result, null, 2));
 	});
@@ -415,12 +343,11 @@ async function commandBackup(
 		throw new Error("BACKUP_CONFIRMATION_REQUIRED");
 	}
 	await withRuntime(parsed, deps, async (runtime) => {
-		await deps.service.runWithStoppedService(async () => {
+		await withStoppedService(parsed, deps, async () => {
 			const backup = new FullBackupService({
 				configPath: runtime.configPath,
 				config: runtime.config,
-				databaseFile: runtime.databaseFile,
-				sqlite: runtime.sqlite,
+				pool: runtime.pool,
 				packageVersion: runtime.packageVersion,
 				env: deps.environment,
 			});
@@ -458,7 +385,7 @@ async function commandRestore(
 	const plan = service.plan({ backupPath: file });
 	deps.output.stdout.push(`备份版本：${plan.backupVersion}`);
 	deps.output.stdout.push(`当前程序：${plan.currentVersion}`);
-	deps.output.stdout.push(`数据库：${plan.databaseClient}`);
+	deps.output.stdout.push("数据库：PostgreSQL");
 	deps.output.stdout.push(`配置文件：${plan.configPath}`);
 	deps.output.stdout.push(
 		`恢复后需要升级：${plan.upgradeRequired ? "是" : "否"}`,
@@ -466,7 +393,22 @@ async function commandRestore(
 	if (hasFlag(parsed, "dry-run")) {
 		return 0;
 	}
-	throw new Error("RESTORE_APPLY_NOT_IMPLEMENTED");
+	if (!hasFlag(parsed, "yes")) throw new Error("RESTORE_CONFIRMATION_REQUIRED");
+	const targetConfigPath = flagString(parsed, "target-config");
+	const outputConfigPath = flagString(parsed, "output-config");
+	if (!targetConfigPath || !outputConfigPath)
+		throw new Error("RESTORE_TARGET_CONFIG_REQUIRED");
+	const target = await loadConfig(targetConfigPath, deps.environment);
+	const result = await withStoppedService(parsed, deps, () =>
+		service.apply({
+			backupPath: file,
+			database: target.database,
+			outputConfigPath,
+			confirm: "RESTORE QINGYAN",
+		}),
+	);
+	deps.output.stdout.push(JSON.stringify(result, null, 2));
+	return 0;
 }
 
 async function commandPageRegistry(
@@ -497,7 +439,7 @@ async function commandPageRegistry(
 			deps.output.stdout.push("确认无误后追加 --yes 执行写入。");
 			return;
 		}
-		await deps.service.runWithStoppedService(async () => {
+		await withStoppedService(parsed, deps, async () => {
 			const summary = await service.reconcileRegisteredPendingCandidates(input);
 			deps.output.stdout.push("已登记 pending 页面修复");
 			deps.output.stdout.push("模式：apply");
@@ -614,10 +556,6 @@ export async function runCli(
 			command === "restart"
 		) {
 			exitCode = await commandService(command, fullDeps);
-		} else if (command === "export") {
-			exitCode = await commandExport(parsed, fullDeps);
-		} else if (command === "import") {
-			exitCode = await commandImport(parsed, fullDeps);
 		} else if (command === "upgrade") {
 			exitCode = await commandUpgrade(parsed, fullDeps);
 		} else if (command === "backup") {

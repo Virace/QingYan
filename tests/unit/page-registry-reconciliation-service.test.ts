@@ -1,12 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { createDatabaseClients } from "../../src/db/client";
-import { applyDatabaseMigrations } from "../../src/db/migrations";
 import {
 	pageThreads,
 	pendingPageCandidates,
@@ -14,29 +8,34 @@ import {
 	sitePageRegistry,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { PageRegistryService } from "../../src/modules/page-registry/service";
+import {
+	applyCurrentMigrations,
+	createTestWorkspace,
+} from "../support/test-fixtures";
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
-		cleanup();
+		await cleanup();
 	}
 });
 
-function createFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-page-registry-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const clients = createDatabaseClients(databaseFile);
-	applyDatabaseMigrations(clients.sqlite);
-	cleanups.push(() => {
-		clients.sqlite.close();
-		rmSync(directory, { recursive: true, force: true });
+async function createFixture() {
+	const workspace = createTestWorkspace("qingyan-page-registry-");
+	const databaseUrl = workspace.databaseUrl;
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
+	await applyCurrentMigrations(databaseUrl);
+	cleanups.push(async () => {
+		await clients.close();
+		await workspace.cleanup();
 	});
 	return clients;
 }
 
-async function seedSite(fixture: ReturnType<typeof createFixture>) {
+async function seedSite(fixture: Awaited<ReturnType<typeof createFixture>>) {
 	await fixture.db.insert(sites).values({
 		id: 1,
 		siteKey: "fangyuan",
@@ -48,12 +47,13 @@ async function seedSite(fixture: ReturnType<typeof createFixture>) {
 }
 
 async function seedPendingCandidate(
-	fixture: ReturnType<typeof createFixture>,
+	fixture: Awaited<ReturnType<typeof createFixture>>,
 	pageKey: string,
 ) {
 	await fixture.db.insert(pendingPageCandidates).values({
 		siteKey: "fangyuan",
 		pageKey,
+		pageKeyHash: hashKey(pageKey),
 		pageUrl: `/${pageKey}`,
 		hitCount: 3,
 		status: "pending",
@@ -62,16 +62,19 @@ async function seedPendingCandidate(
 		{
 			siteKey: "fangyuan",
 			pageKey,
+			pageKeyHash: hashKey(pageKey),
 			fingerprint: `${pageKey}:a`,
 		},
 		{
 			siteKey: "fangyuan",
 			pageKey,
+			pageKeyHash: hashKey(pageKey),
 			fingerprint: `${pageKey}:b`,
 		},
 		{
 			siteKey: "fangyuan",
 			pageKey,
+			pageKeyHash: hashKey(pageKey),
 			fingerprint: `${pageKey}:c`,
 		},
 	]);
@@ -79,11 +82,12 @@ async function seedPendingCandidate(
 
 describe("PageRegistryService.reconcileRegisteredPendingCandidates", () => {
 	it("merges registered pending PV into an official page thread once", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
 			pageKey: "posts/registered-pending/",
+			pageKeyHash: hashKey("posts/registered-pending/"),
 			pageUrl: "/posts/registered-pending/",
 			status: "active",
 		});
@@ -129,12 +133,13 @@ describe("PageRegistryService.reconcileRegisteredPendingCandidates", () => {
 	});
 
 	it("does not reconcile pending candidates without an active or stale registry page", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSite(fixture);
 		await seedPendingCandidate(fixture, "posts/missing-registry/");
 		await fixture.db.insert(sitePageRegistry).values({
 			siteId: 1,
 			pageKey: "posts/ignored-registry/",
+			pageKeyHash: hashKey("posts/ignored-registry/"),
 			pageUrl: "/posts/ignored-registry/",
 			status: "ignored",
 		});

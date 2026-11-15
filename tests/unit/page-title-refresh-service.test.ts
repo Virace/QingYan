@@ -1,33 +1,32 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { createDatabaseClients } from "../../src/db/client";
-import { applyDatabaseMigrations } from "../../src/db/migrations";
 import { sitePageRegistry, sites } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { PageMetadataRefreshService } from "../../src/modules/page-registry/title-refresh-service";
 import { AppError } from "../../src/modules/shared/errors";
 import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
+import {
+	applyCurrentMigrations,
+	createTestWorkspace,
+} from "../support/test-fixtures";
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
-		cleanup();
+		await cleanup();
 	}
 });
 
-function createFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-title-refresh-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const clients = createDatabaseClients(databaseFile);
-	applyDatabaseMigrations(clients.sqlite);
-	cleanups.push(() => {
-		clients.sqlite.close();
-		rmSync(directory, { recursive: true, force: true });
+async function createFixture() {
+	const workspace = createTestWorkspace("qingyan-title-refresh-");
+	const databaseUrl = workspace.databaseUrl;
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
+	await applyCurrentMigrations(databaseUrl);
+	cleanups.push(async () => {
+		await clients.close();
+		await workspace.cleanup();
 	});
 	return clients;
 }
@@ -51,7 +50,9 @@ function createTaskContext(): Pick<
 	};
 }
 
-async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
+async function seedSiteAndPages(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+) {
 	await fixture.db.insert(sites).values({
 		id: 1,
 		siteKey: "fangyuan",
@@ -64,6 +65,7 @@ async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
 		{
 			siteId: 1,
 			pageKey: "posts/ok/",
+			pageKeyHash: hashKey("posts/ok/"),
 			pageUrl: "/posts/ok/",
 			title: null,
 			status: "active",
@@ -71,6 +73,7 @@ async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
 		{
 			siteId: 1,
 			pageKey: "posts/missing/",
+			pageKeyHash: hashKey("posts/missing/"),
 			pageUrl: "/posts/missing/",
 			title: null,
 			status: "active",
@@ -78,6 +81,7 @@ async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
 		{
 			siteId: 1,
 			pageKey: "posts/server-error/",
+			pageKeyHash: hashKey("posts/server-error/"),
 			pageUrl: "/posts/server-error/",
 			title: null,
 			status: "active",
@@ -85,6 +89,7 @@ async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
 		{
 			siteId: 1,
 			pageKey: "posts/trash/",
+			pageKeyHash: hashKey("posts/trash/"),
 			pageUrl: "/posts/trash/",
 			title: "Old Trash",
 			status: "trash",
@@ -93,7 +98,7 @@ async function seedSiteAndPages(fixture: ReturnType<typeof createFixture>) {
 }
 
 function createService(
-	fixture: ReturnType<typeof createFixture>,
+	fixture: Awaited<ReturnType<typeof createFixture>>,
 	fetchHtml: (
 		url: string,
 		options: { allowedOrigins: string[]; timeoutMs: number; maxBytes: number },
@@ -112,7 +117,7 @@ function createService(
 
 describe("PageMetadataRefreshService", () => {
 	it("refreshes a page title from same-origin HTML", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSiteAndPages(fixture);
 		const service = createService(fixture, async (url) => {
 			expect(url).toBe("https://example.com/posts/ok/");
@@ -147,7 +152,7 @@ describe("PageMetadataRefreshService", () => {
 	});
 
 	it("marks 404 pages as not_found", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSiteAndPages(fixture);
 		const service = createService(fixture, async () => ({
 			status: 404,
@@ -182,7 +187,7 @@ describe("PageMetadataRefreshService", () => {
 	});
 
 	it("marks non-200 pages as unreachable", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSiteAndPages(fixture);
 		const service = createService(fixture, async () => ({
 			status: 500,
@@ -217,7 +222,7 @@ describe("PageMetadataRefreshService", () => {
 	});
 
 	it("records errors without restoring protected statuses", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSiteAndPages(fixture);
 		const service = createService(fixture, async () => {
 			throw new Error("timeout");
@@ -246,7 +251,7 @@ describe("PageMetadataRefreshService", () => {
 	});
 
 	it("passes task timeout and max bytes to HTML fetch", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSiteAndPages(fixture);
 		const seenOptions: Array<{
 			allowedOrigins: string[];
@@ -283,7 +288,7 @@ describe("PageMetadataRefreshService", () => {
 	});
 
 	it("records safe fetch rejections as title refresh failures", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedSiteAndPages(fixture);
 		const service = createService(fixture, async () => {
 			throw new AppError(

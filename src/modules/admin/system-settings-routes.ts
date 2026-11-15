@@ -22,10 +22,7 @@ import { TaskRunRepository } from "../tasks/task-run-repository";
 import { NotificationChannelTestService } from "../notifications/channel-test-service";
 import { MailTestService } from "../notifications/mail-test-service";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
-import {
-	type NotificationChannelConfigInput,
-	NotificationChannelConfigsRepository,
-} from "../notifications/channel-configs-repository";
+import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
 
 export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 	fastify,
@@ -66,17 +63,8 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 			);
 		}
 
-		const { channelConfigs: nextChannelConfigs, ...notifications } =
-			parsed.data.notifications ?? {};
-		if (nextChannelConfigs) {
-			await channelConfigs.replacePersisted(
-				nextChannelConfigs as NotificationChannelConfigInput[],
-			);
-		}
 		const settings = await service.updateSettings({
 			...parsed.data,
-			notifications:
-				parsed.data.notifications === undefined ? undefined : notifications,
 			requestId: request.context?.requestId,
 			actorUserId: session.user.id,
 		});
@@ -111,37 +99,14 @@ export const adminSystemSettingsRoutes: FastifyPluginAsync = async (
 			);
 		}
 
-		const nextInput = await service.buildSectionPatchInput(
+		const settings = await service.updateSectionSettings(
 			parsedParams.data.section,
 			parsedBody.data,
+			{
+				requestId: request.context?.requestId,
+				actorUserId: session.user.id,
+			},
 		);
-		const { channelConfigs: nextChannelConfigs, ...notifications } =
-			(nextInput.notifications ?? {}) as NonNullable<
-				typeof nextInput.notifications
-			> & {
-				channelConfigs?: NotificationChannelConfigInput[];
-			};
-		if (nextChannelConfigs) {
-			await channelConfigs.replacePersisted(
-				nextChannelConfigs as NotificationChannelConfigInput[],
-			);
-		}
-		const parsedSettings = adminSystemSettingsBodySchema.safeParse({
-			...nextInput,
-			notifications:
-				nextInput.notifications === undefined ? undefined : notifications,
-		});
-		if (!parsedSettings.success) {
-			throw new ValidationFailedError(
-				toValidationFields(parsedSettings.error.issues, nextInput),
-			);
-		}
-
-		const settings = await service.updateSettings({
-			...parsedSettings.data,
-			requestId: request.context?.requestId,
-			actorUserId: session.user.id,
-		});
 		return {
 			...settings,
 			notifications: {

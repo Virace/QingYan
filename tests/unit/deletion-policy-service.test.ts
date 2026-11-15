@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-
 import {
 	adminUsers,
 	delayedDeletions,
@@ -8,6 +7,7 @@ import {
 	sites,
 	systemSettings,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { DeletionPolicyService } from "../../src/modules/admin/deletion-policy-service";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -120,6 +120,7 @@ describe("DeletionPolicyService", () => {
 			await fixture.app.db.insert(sitePageRegistry).values({
 				siteId: site.id,
 				pageKey: "post:restore",
+				pageKeyHash: hashKey("post:restore"),
 				pageUrl: "/post/restore",
 				status: "deleted",
 				deletedAt: "2026-06-01T00:00:00.000Z",
@@ -141,21 +142,71 @@ describe("DeletionPolicyService", () => {
 			}
 
 			const service = new DeletionPolicyService(fixture.app.db);
-			const restored = await service.restoreDeletion({
-				id: record.id,
-				actorUserId: actor.id,
-				now: new Date("2026-06-02T00:00:00.000Z"),
-				restore: async () => {
-					await fixture.app.db
-						.update(sitePageRegistry)
-						.set({
-							status: "active",
-							deletedAt: null,
-						})
-						.where(eq(sitePageRegistry.pageKey, "post:restore"));
-					return 1;
-				},
-			});
+			await expect(
+				service.restoreDeletion({
+					id: record.id,
+					actorUserId: actor.id,
+					now: new Date("2026-06-16T00:00:00.000Z"),
+					restore: async () => {
+						throw new Error("Expired deletion must not be restored");
+					},
+				}),
+			).rejects.toMatchObject({ code: "DELAYED_DELETION_EXPIRED" });
+			await expect(
+				service.restoreDeletion({
+					id: record.id,
+					actorUserId: actor.id,
+					now: new Date("2026-06-02T00:00:00.000Z"),
+					restore: async (_record, db) => {
+						await db
+							.update(sitePageRegistry)
+							.set({ status: "active", deletedAt: null })
+							.where(eq(sitePageRegistry.pageKey, "post:restore"));
+						throw new Error("Restore failed after content update");
+					},
+				}),
+			).rejects.toThrow("Restore failed after content update");
+			const [afterFailure] = await fixture.app.db
+				.select()
+				.from(sitePageRegistry)
+				.where(eq(sitePageRegistry.pageKey, "post:restore"));
+			expect(afterFailure?.status).toBe("deleted");
+			const [pendingRecord] = await fixture.app.db
+				.select()
+				.from(delayedDeletions)
+				.where(eq(delayedDeletions.id, record.id));
+			expect(pendingRecord?.status).toBe("pending");
+			const restore = () =>
+				service.restoreDeletion({
+					id: record.id,
+					actorUserId: actor.id,
+					now: new Date("2026-06-02T00:00:00.000Z"),
+					restore: async (_record, db) => {
+						await db
+							.update(sitePageRegistry)
+							.set({
+								status: "active",
+								deletedAt: null,
+							})
+							.where(eq(sitePageRegistry.pageKey, "post:restore"));
+						return 1;
+					},
+				});
+			const attempts = await Promise.allSettled([restore(), restore()]);
+			expect(
+				attempts.filter((attempt) => attempt.status === "fulfilled"),
+			).toHaveLength(1);
+			const rejected = attempts.find(
+				(attempt) => attempt.status === "rejected",
+			);
+			expect(
+				rejected?.status === "rejected" ? rejected.reason : undefined,
+			).toMatchObject({ code: "DELAYED_DELETION_NOT_PENDING" });
+			const successful = attempts.find(
+				(attempt) => attempt.status === "fulfilled",
+			);
+			const restored =
+				successful?.status === "fulfilled" ? successful.value : undefined;
 
 			expect(restored).toMatchObject({
 				status: "restored",

@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { blacklistRules } from "../../src/db/schema";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { loginAsAdmin } from "../support/admin-login";
 import {
 	decodeSvgDataUrl,
 	getForcedTestCaptchaAnswer,
 	withForcedTestCaptchaAnswer,
 } from "../support/captcha";
-import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
 
 const cleanups: Array<() => Promise<void>> = [];

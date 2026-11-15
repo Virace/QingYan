@@ -1,16 +1,18 @@
 import { sql } from "drizzle-orm";
 import {
+	bigint,
+	check,
 	index,
 	integer,
-	sqliteTable,
-	text,
+	pgTable,
 	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
-
+	uuid,
+} from "drizzle-orm/pg-core";
 import { adminUsers } from "./admin-users";
+import { jsonText, exactText as text, utcTimestamp } from "./column-types";
 import { sites } from "./sites";
 
-export const taskRuns = sqliteTable(
+export const taskRuns = pgTable(
 	"task_runs",
 	{
 		id: text("id").primaryKey(),
@@ -21,47 +23,62 @@ export const taskRuns = sqliteTable(
 		type: text("type").notNull(),
 		category: text("category").notNull(),
 		status: text("status").notNull(),
-		siteId: integer("site_id").references(() => sites.id),
+		siteId: bigint("site_id", { mode: "number" }).references(() => sites.id),
 		siteKey: text("site_key"),
 		scopeKind: text("scope_kind"),
 		trigger: text("trigger"),
-		triggerSnapshotJson: text("trigger_snapshot_json"),
-		scopeJson: text("scope_json"),
-		inputJson: text("input_json"),
-		actionConfigSnapshotJson: text("action_config_snapshot_json"),
+		triggerSnapshotJson: jsonText("trigger_snapshot_json"),
+		scopeJson: jsonText("scope_json"),
+		inputJson: jsonText("input_json"),
+		actionConfigSnapshotJson: jsonText("action_config_snapshot_json"),
 		actorType: text("actor_type"),
 		actorId: text("actor_id"),
 		subjectType: text("subject_type"),
 		subjectId: text("subject_id"),
-		payloadSummaryJson: text("payload_summary_json").notNull(),
-		payloadJson: text("payload_json").notNull(),
-		progressJson: text("progress_json"),
-		resultJson: text("result_json"),
-		errorJson: text("error_json"),
+		payloadSummaryJson: jsonText("payload_summary_json").notNull(),
+		payloadJson: jsonText("payload_json").notNull(),
+		progressJson: jsonText("progress_json"),
+		resultJson: jsonText("result_json"),
+		errorJson: jsonText("error_json"),
 		skipReason: text("skip_reason"),
 		blockReason: text("block_reason"),
 		idempotencyKey: text("idempotency_key"),
-		runAfter: text("run_after"),
+		runAfter: utcTimestamp("run_after"),
 		attempts: integer("attempts").notNull().default(0),
 		maxAttempts: integer("max_attempts").notNull().default(1),
 		retryDelaySec: integer("retry_delay_sec").notNull().default(0),
 		priority: integer("priority").notNull().default(0),
 		concurrencyKey: text("concurrency_key"),
 		workerId: text("worker_id"),
+		claimToken: uuid("claim_token"),
 		lockConflictWithRunId: text("lock_conflict_with_run_id"),
 		lockConflictWithTaskName: text("lock_conflict_with_task_name"),
-		ownerUserIdSnapshot: integer("owner_user_id_snapshot").references(
-			() => adminUsers.id,
-		),
-		createdByUserId: integer("created_by_user_id").references(
-			() => adminUsers.id,
-		),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		startedAt: text("started_at"),
-		finishedAt: text("finished_at"),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		ownerUserIdSnapshot: bigint("owner_user_id_snapshot", {
+			mode: "number",
+		}).references(() => adminUsers.id),
+		createdByUserId: bigint("created_by_user_id", {
+			mode: "number",
+		}).references(() => adminUsers.id),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		startedAt: utcTimestamp("started_at"),
+		finishedAt: utcTimestamp("finished_at"),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
+		check("task_runs_attempts_nonnegative", sql`${table.attempts} >= 0`),
+		check(
+			"task_runs_retry_delay_sec_nonnegative",
+			sql`${table.retryDelaySec} >= 0`,
+		),
+		check(
+			"task_runs_status_check",
+			sql`${table.status} IN ('queued', 'delayed', 'running', 'retrying', 'succeeded', 'failed', 'skipped', 'blocked', 'suppressed', 'cancelled')`,
+		),
+		check("task_runs_max_attempts_positive", sql`${table.maxAttempts} > 0`),
 		index("task_runs_scheduled_task_created_idx").on(
 			table.scheduledTaskId,
 			table.createdAt,
@@ -89,7 +106,7 @@ export const taskRuns = sqliteTable(
 	],
 );
 
-export const notificationDeliveries = sqliteTable(
+export const notificationDeliveries = pgTable(
 	"notification_deliveries",
 	{
 		id: text("id").primaryKey(),
@@ -100,7 +117,7 @@ export const notificationDeliveries = sqliteTable(
 		channelConfigRef: text("channel_config_ref"),
 		channelConfigNameSnapshot: text("channel_config_name_snapshot"),
 		recipientType: text("recipient_type").notNull(),
-		recipientUserId: integer("recipient_user_id").references(
+		recipientUserId: bigint("recipient_user_id", { mode: "number" }).references(
 			() => adminUsers.id,
 		),
 		recipientAddressSnapshot: text("recipient_address_snapshot").notNull(),
@@ -109,9 +126,11 @@ export const notificationDeliveries = sqliteTable(
 		templateKey: text("template_key").notNull(),
 		status: text("status").notNull(),
 		providerMessageId: text("provider_message_id"),
-		lastErrorJson: text("last_error_json"),
-		sentAt: text("sent_at"),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		lastErrorJson: jsonText("last_error_json"),
+		sentAt: utcTimestamp("sent_at"),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
 		index("notification_deliveries_task_run_idx").on(table.taskRunId),

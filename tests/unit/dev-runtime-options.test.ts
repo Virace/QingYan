@@ -3,54 +3,24 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
 import { applyInstall } from "../../src/modules/install/install-service";
-import type { MinimalInstallConfig } from "../../src/modules/install/minimal-config";
+import {
+	createLifecycleFixture,
+	installPayload,
+} from "../support/lifecycle-fixture";
 import { createTestConfig } from "../support/test-fixtures";
 
 async function createInstalledDevWorkspace(adminConsolePath = "/admin") {
-	const directory = mkdtempSync(join(tmpdir(), "qingyan-dev-installed-"));
-	const databaseFile = join(directory, "data", "qingyan.db");
-	const configPath = join(directory, "config", "qingyan.yml");
-	const minimalConfig: MinimalInstallConfig = {
-		configPath,
-		host: "127.0.0.1",
-		port: 4401,
-		publicPath: "/qingyan",
-		token: "install-token",
-		disabled: false,
-		transitionMode: "manual",
-	};
+	const fixture = await createLifecycleFixture({ empty: true });
+	const payload = installPayload(fixture.databaseUrl);
+	payload.admin.consolePath = adminConsolePath;
 	await applyInstall({
-		minimalConfig,
-		payload: {
-			token: "install-token",
-			server: {
-				host: "127.0.0.1",
-				port: 4401,
-				publicBaseUrl: "http://localhost:4401",
-				publicPath: "/qingyan",
-				trustProxy: false,
-			},
-			database: {
-				sqliteFile: databaseFile,
-			},
-			admin: {
-				consolePath: adminConsolePath,
-				username: "admin",
-				password: "adminadmin",
-			},
-			site: {
-				siteKey: "default",
-				name: "Default",
-				allowedOrigins: ["http://localhost:4321"],
-			},
-		},
+		minimalConfig: fixture.minimalConfig,
+		payload,
 		environment: {},
 	});
-
-	return { directory, configPath };
+	return fixture;
 }
 
 describe("resolveRuntimeOptions", () => {
@@ -171,7 +141,7 @@ describe("resolveRuntimeOptions", () => {
 			expect(output).toContain("QingYan Dev Captcha: 1357");
 			expect(output).toContain("QingYan Admin API base: /qingyan/api");
 		} finally {
-			rmSync(workspace.directory, { recursive: true, force: true });
+			await workspace.cleanup();
 		}
 	});
 
@@ -207,7 +177,7 @@ describe("resolveRuntimeOptions", () => {
 			expect(output).toContain("QingYan Admin API base: /qingyan/api");
 			expect(output).not.toContain("QINGYAN_ADMIN_DEV_PATHS");
 		} finally {
-			rmSync(workspace.directory, { recursive: true, force: true });
+			await workspace.cleanup();
 		}
 	});
 

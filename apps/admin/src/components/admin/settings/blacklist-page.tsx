@@ -1,15 +1,17 @@
-import { useState } from "react";
 import { Dialog } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
 	type AdminAllowlistRule,
+	type AdminBlacklistRule,
 	createAllowlistRule,
 	createBlacklist,
 	deleteAllowlistRule,
 	deleteBlacklist,
 	listAllowlistRules,
 	listBlacklist,
+	releaseBlacklist,
 	updateAllowlistRule,
 } from "@/api/admin";
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ import {
 	labelFor,
 	scopeLabels,
 } from "../shared/display-labels";
+import { WafSyncPanel } from "./waf-sync-panel";
 
 type TargetType = "ip" | "email" | "visitor";
 type BlacklistMatchMode = "exact" | "cidr" | "wildcard";
@@ -126,7 +129,10 @@ export function BlacklistPage({ siteKey }: { siteKey?: string }) {
 			</CardHeader>
 			<CardContent>
 				{activeList === "blacklist" ? (
-					<BlacklistRulesPanel siteKey={siteKey} />
+					<div className="space-y-6">
+						<BlacklistRulesPanel siteKey={siteKey} />
+						{siteKey ? <WafSyncPanel key={siteKey} siteKey={siteKey} /> : null}
+					</div>
 				) : (
 					<AllowlistRulesPanel siteKey={siteKey} />
 				)}
@@ -139,6 +145,25 @@ function BlacklistRulesPanel({ siteKey }: { siteKey?: string }) {
 	const queryClient = useQueryClient();
 	const confirm = useAdminConfirmDialog();
 	const [createOpen, setCreateOpen] = useState(false);
+	const [releaseTarget, setReleaseTarget] = useState<AdminBlacklistRule | null>(
+		null,
+	);
+	const [releaseKind, setReleaseKind] = useState<"released" | "revoked">(
+		"released",
+	);
+	const [releaseReason, setReleaseReason] = useState("");
+	const releaseMutation = useMutation({
+		mutationFn: () =>
+			releaseBlacklist(releaseTarget?.id ?? 0, {
+				kind: releaseKind,
+				reason: releaseReason.trim(),
+			}),
+		onSuccess: () => {
+			setReleaseTarget(null);
+			setReleaseReason("");
+			void queryClient.invalidateQueries({ queryKey: ["admin"] });
+		},
+	});
 	const [targetValue, setTargetValue] = useState("");
 	const [reason, setReason] = useState("");
 	const [search, setSearch] = useState("");
@@ -213,24 +238,130 @@ function BlacklistRulesPanel({ siteKey }: { siteKey?: string }) {
 								{labelFor(blacklistTargetTypeLabels, rule.targetType)} /{" "}
 								{labelFor(blacklistMatchModeLabels, rule.matchMode)} /{" "}
 								{labelFor(scopeLabels, rule.scope)}
-								{rule.reason ? ` / ${rule.reason}` : ""}
+								{rule.reason
+									? ` / ${rule.source === "auto" ? (rule.reason === "rate_limited" ? "持续超频" : rule.reason === "abuse_guard" ? "写入过于频繁" : rule.reason === "COMMENT_CONTENT_NUMERIC_ONLY" ? "反复提交纯数字评论" : "持续提交不符合要求的内容") : rule.reason}`
+									: ""}
 								{rule.expiresAt ? ` / ${formatExpiry(rule.expiresAt)}` : ""}
 							</p>
+							{rule.penalty ? (
+								<p className="text-xs text-muted-foreground">
+									{rule.penalty.releaseKind === "revoked"
+										? "已撤销误判"
+										: rule.penalty.releasedAt
+											? "已提前解除"
+											: Date.parse(rule.penalty.expiresAt) <= Date.now()
+												? "限制已到期"
+												: rule.penalty.evidence.repeat
+													? "复犯限制"
+													: "首次限制"}
+									{rule.penalty.evidence.count
+										? ` · ${rule.penalty.evidence.windowSec} 秒内 ${rule.penalty.evidence.count} 次同类违规`
+										: ""}
+									{rule.penalty.releaseReason
+										? ` · ${rule.penalty.releaseReason}`
+										: ""}
+								</p>
+							) : null}
 						</div>
-						<Button
-							type="button"
-							size="sm"
-							variant="destructive"
-							onClick={() => void removeRule(rule.id)}
-						>
-							删除
-						</Button>
+						{rule.penalty ? (
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								disabled={Boolean(rule.penalty.releasedAt)}
+								onClick={() => {
+									setReleaseTarget(rule);
+									setReleaseKind("released");
+									setReleaseReason("");
+									releaseMutation.reset();
+								}}
+							>
+								{rule.penalty.releasedAt ? "已解除" : "解除限制"}
+							</Button>
+						) : (
+							<Button
+								type="button"
+								size="sm"
+								variant="destructive"
+								onClick={() => void removeRule(rule.id)}
+							>
+								删除
+							</Button>
+						)}
 					</div>
 				</div>
 			))}
 			{query.data?.items.length === 0 ? (
 				<EmptyState text="暂无黑名单规则" />
 			) : null}
+			<Dialog.Root
+				open={Boolean(releaseTarget)}
+				onOpenChange={(open) => {
+					if (!open && !releaseMutation.isPending) setReleaseTarget(null);
+				}}
+			>
+				<Dialog.Content maxWidth="520px">
+					<Dialog.Title>解除来源限制</Dialog.Title>
+					<Dialog.Description size="2">
+						{releaseTarget?.targetValue}
+						：提前解除保留已确认的复犯依据；撤销误判会使本次处罚退出复犯判断。
+					</Dialog.Description>
+					<form
+						className="mt-4 grid gap-3"
+						onSubmit={(event) => {
+							event.preventDefault();
+							if (releaseTarget && releaseReason.trim())
+								releaseMutation.mutate();
+						}}
+					>
+						<Field label="处理方式">
+							<select
+								className={inputClass}
+								value={releaseKind}
+								onChange={(event) =>
+									setReleaseKind(event.target.value as typeof releaseKind)
+								}
+							>
+								<option value="released">提前解除</option>
+								<option value="revoked">撤销误判</option>
+							</select>
+						</Field>
+						<Field label="处理原因">
+							<Input
+								value={releaseReason}
+								maxLength={500}
+								required
+								onChange={(event) => setReleaseReason(event.target.value)}
+							/>
+						</Field>
+						{releaseMutation.isError ? (
+							<p role="alert" className="text-sm text-destructive">
+								解除失败，请保留当前内容并重试。
+							</p>
+						) : null}
+						<div className="flex justify-end gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								disabled={releaseMutation.isPending}
+								onClick={() => setReleaseTarget(null)}
+							>
+								取消
+							</Button>
+							<Button
+								type="submit"
+								disabled={!releaseReason.trim() || releaseMutation.isPending}
+							>
+								{releaseMutation.isPending
+									? "正在解除…"
+									: releaseKind === "revoked"
+										? "撤销误判"
+										: "解除限制"}
+							</Button>
+						</div>
+					</form>
+				</Dialog.Content>
+			</Dialog.Root>
 			<Dialog.Root open={createOpen} onOpenChange={setCreateOpen}>
 				<Dialog.Content maxWidth="520px">
 					<Dialog.Title>新增黑名单规则</Dialog.Title>

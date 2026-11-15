@@ -1,12 +1,11 @@
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	adminUsers,
 	notificationChannelConfigs,
 	notificationDeliveries,
 	taskRuns,
 } from "../../src/db/schema";
-import { eq } from "drizzle-orm";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";

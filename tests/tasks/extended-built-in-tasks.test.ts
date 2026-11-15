@@ -1,7 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,30 +5,26 @@ import { createDatabaseClients } from "../../src/db/client";
 import {
 	adminGroups,
 	adminUserGroups,
-	adminUsers,
 	adminUserSiteAccess,
+	adminUsers,
 	notificationChannelConfigs,
 	notificationDeliveries,
 	sites,
 	taskRuns,
 } from "../../src/db/schema";
-import { createBuiltInTaskTypeRegistry } from "../../src/modules/tasks/built-in-task-types";
 import {
-	DefaultBackupTaskService,
-	type BackupTaskPayload,
-} from "../../src/modules/tasks/built-in/backup-task";
+	SiteNotificationEventsRepository,
+	siteBackendNotificationEventTypes,
+} from "../../src/modules/notifications/site-notification-events-repository";
 import {
 	DefaultBlacklistAutomationTaskService,
 	runBlacklistAutomationTask,
 } from "../../src/modules/tasks/built-in/blacklist-automation-task";
 import { DefaultDailySiteDigestTaskService } from "../../src/modules/tasks/built-in/daily-site-digest-task";
 import { DefaultSiteSettingsActionTaskService } from "../../src/modules/tasks/built-in/site-settings-action-task";
-import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
+import { createBuiltInTaskTypeRegistry } from "../../src/modules/tasks/built-in-task-types";
 import { TaskRunRepository } from "../../src/modules/tasks/task-run-repository";
-import {
-	SiteNotificationEventsRepository,
-	siteBackendNotificationEventTypes,
-} from "../../src/modules/notifications/site-notification-events-repository";
+import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
 import {
 	applyInitialMigration,
 	createTestWorkspace,
@@ -69,28 +61,24 @@ function createContext(
 interface DbFixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	siteId: number;
 	adminUserId: number;
 }
 
 const fixtures: DbFixture[] = [];
-const tempDirectories: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
-	}
-	for (const directory of tempDirectories.splice(0)) {
-		rmSync(directory, { recursive: true, force: true });
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
 async function createDbFixture(): Promise<DbFixture> {
 	const workspace = createTestWorkspace("qingyan-extended-built-in-tasks-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	await clients.db.insert(sites).values({
 		siteKey: "fangyuan",
 		name: "FangYuan",
@@ -121,7 +109,7 @@ async function createDbFixture(): Promise<DbFixture> {
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		siteId: site.id,
 		adminUserId: adminUser.id,
 	};
@@ -136,14 +124,7 @@ describe("extended built-in task types", () => {
 			definitions.map((definition) => [definition.type, definition]),
 		);
 
-		expect(byType.get("backup")).toMatchObject({
-			category: "backup",
-			dangerous: false,
-			reuse: {
-				service: "QingYanExportService",
-				method: "exportSite",
-			},
-		});
+		expect(byType.has("backup")).toBe(false);
 		expect(byType.get("site_settings_action")).toMatchObject({
 			category: "system",
 			dangerous: true,
@@ -173,90 +154,6 @@ describe("extended built-in task types", () => {
 				(type) => (byType.has(type) ? [type] : []),
 			),
 		).toEqual([]);
-	});
-
-	it("delegates backup execution to the injected backup service with include options", async () => {
-		const service = {
-			createBackup: vi.fn().mockResolvedValue({ fileName: "backup.json" }),
-		};
-		const context = createContext({ services: { backup: service } });
-		const payload: BackupTaskPayload = {
-			scope: "site",
-			siteKey: "fangyuan",
-			include: {
-				comments: true,
-				pageThreads: true,
-				rawUserAgent: false,
-			},
-			retentionCount: 3,
-		};
-
-		await createBuiltInTaskTypeRegistry()
-			.getRequired("backup")
-			.run(payload, context);
-
-		expect(service.createBackup).toHaveBeenCalledWith({
-			...payload,
-			runId: "task_run_extended",
-		});
-		expect(context.writeEvent).toHaveBeenCalledWith(
-			expect.objectContaining({ eventType: "backup_precondition_checked" }),
-		);
-	});
-
-	it("uses QingYanExportService for site backup output", async () => {
-		const workspaceDirectory = mkdtempSync(
-			path.join(tmpdir(), "qingyan-backup-task-"),
-		);
-		tempDirectories.push(workspaceDirectory);
-		const previousCwd = process.cwd();
-		const exportService = {
-			exportSite: vi.fn().mockReturnValue({
-				createdAt: "2026-06-04T10:00:00.000Z",
-				site: { siteKey: "fangyuan" },
-			}),
-		};
-		const service = new DefaultBackupTaskService({
-			exportService: exportService as never,
-		});
-
-		let result: Awaited<ReturnType<DefaultBackupTaskService["createBackup"]>>;
-		try {
-			process.chdir(workspaceDirectory);
-			result = await service.createBackup({
-				runId: "run_backup",
-				scope: "site",
-				siteKey: "fangyuan",
-				include: {
-					comments: true,
-					pageThreads: false,
-					rawUserAgent: false,
-				},
-				retentionCount: 4,
-			});
-		} finally {
-			process.chdir(previousCwd);
-		}
-
-		expect(exportService.exportSite).toHaveBeenCalledWith({
-			siteKey: "fangyuan",
-			include: {
-				comments: true,
-				pageThreads: false,
-				rawUserAgent: false,
-			},
-		});
-		expect(result).toMatchObject({
-			scope: "site",
-			siteKey: "fangyuan",
-			fileName: "run_backup-fangyuan.qingyan-export.json",
-			size: expect.any(Number),
-			hash: expect.any(String),
-			retentionCount: 4,
-		});
-		expect(result.path).toContain(
-			path.join(workspaceDirectory, "data", "task-backups"),
-		);
 	});
 
 	it("creates a restore task run after applying a temporary site settings action", async () => {

@@ -17,7 +17,6 @@ import type { AppDatabase } from "../../../db/client";
 import {
 	commentRequestMetadata,
 	ipRegionDatabaseState,
-	ipRegionUpdateRuns,
 } from "../../../db/schema";
 import type { SystemSettings } from "../../system-settings/definitions";
 import { parseIpRegionText, type IpRegionSnapshot } from "./ip-region";
@@ -191,7 +190,7 @@ export class IpRegionUpdater {
 		return this.record(ipVersion, {
 			status: "success",
 			sourceUrl: downloaded.sourceUrl,
-			previousHash: previous?.fileHash,
+			previousHash: previous?.fileHash ?? undefined,
 			nextHash: downloaded.fileHash,
 			refreshedComments,
 		});
@@ -356,19 +355,24 @@ export class IpRegionUpdater {
 		input: IpRegionUpdateResult,
 	): Promise<IpRegionUpdateResult> {
 		const timestamp = nowIso();
-		await this.db.insert(ipRegionUpdateRuns).values({
-			ipVersion,
-			sourceUrl: input.sourceUrl,
-			status: input.status,
-			previousHash: input.previousHash,
-			nextHash: input.nextHash,
-			refreshedComments: input.refreshedComments,
-			errorMessage: input.errorMessage,
-			createdAt: timestamp,
+		const check = {
+			lastCheckedAt: timestamp,
+			lastCheckStatus: input.status,
+			lastCheckReason:
+				input.status === "skipped" ? (input.errorMessage ?? "unchanged") : null,
+			lastCheckError:
+				input.status === "failed"
+					? (input.errorMessage ?? "update_failed")
+					: null,
 			updatedAt: timestamp,
-			activatedAt: input.status === "success" ? timestamp : undefined,
-			downloadedAt: input.nextHash ? timestamp : undefined,
-		});
+		};
+		await this.db
+			.insert(ipRegionDatabaseState)
+			.values({ ipVersion, ...check })
+			.onConflictDoUpdate({
+				target: ipRegionDatabaseState.ipVersion,
+				set: check,
+			});
 
 		return input;
 	}

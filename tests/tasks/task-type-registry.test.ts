@@ -7,11 +7,11 @@ describe("built-in task type registry", () => {
 		const registry = createBuiltInTaskTypeRegistry();
 
 		expect(registry.list().map((definition) => definition.type)).toEqual([
+			"waf_sync",
 			"page_source_refresh",
 			"page_metadata_refresh",
 			"comment_ip_refresh",
 			"ip_region_update",
-			"backup",
 			"site_settings_action",
 			"blacklist_automation",
 			"daily_site_digest",
@@ -81,44 +81,8 @@ describe("built-in task type registry", () => {
 		).toThrow(/Invalid task payload/);
 	});
 
-	it("rejects caller-controlled backup output directories", () => {
-		const registry = createBuiltInTaskTypeRegistry();
-
-		expect(() =>
-			registry.validatePayload("backup", {
-				scope: "site",
-				siteKey: "fangyuan",
-				outputDirectory: "C:\\Windows\\Temp",
-			}),
-		).toThrow(/Invalid task payload/);
-		expect(() =>
-			registry.validatePayload("backup", {
-				scope: "site",
-				siteKey: "fangyuan",
-				outputDirectory: "../outside",
-			}),
-		).toThrow(/Invalid task payload/);
-		expect(
-			registry.validatePayload("backup", {
-				scope: "site",
-				siteKey: "fangyuan",
-				include: {
-					siteSettings: true,
-					pageThreads: true,
-					comments: true,
-				},
-				retentionCount: 5,
-			}),
-		).toEqual({
-			scope: "site",
-			siteKey: "fangyuan",
-			include: {
-				siteSettings: true,
-				pageThreads: true,
-				comments: true,
-			},
-			retentionCount: 5,
-		});
+	it("does not expose retired scheduled backup tasks", () => {
+		expect(createBuiltInTaskTypeRegistry().get("backup")).toBeNull();
 	});
 
 	it("documents reuse boundaries for every registered task type", () => {

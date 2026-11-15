@@ -34,9 +34,8 @@ import {
 	renderTurnstileWidgetHtml,
 	verifyTurnstileToken,
 } from "./providers/turnstile-provider";
-import { resolveRequestMetadata } from "./metadata/request-metadata";
-import type { CommentMetadataResolver } from "./metadata/resolver";
 import type { CommentsRepository } from "./repository";
+import { SecuritySubjectService } from "./security-subject";
 import type {
 	CaptchaAction,
 	CommentsWriteRepository,
@@ -99,7 +98,6 @@ export class CaptchaService {
 		private readonly commentsRepository: CommentsRepository,
 		private readonly writeRepository: CommentsWriteRepository,
 		private readonly settingsProvider: CaptchaSettingsProvider,
-		private readonly metadataResolver?: CommentMetadataResolver,
 	) {}
 
 	private async getCaptchaSettings() {
@@ -186,6 +184,8 @@ export class CaptchaService {
 	private buildIdleState(input: {
 		settings: SystemSettings["captcha"];
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
 	}) {
 		return {
 			required: false,
@@ -193,12 +193,15 @@ export class CaptchaService {
 			mode: this.getCurrentHostMode(input.settings),
 			challenge: null,
 			visitorKey: input.visitorKey,
+			securityToken: input.securityToken,
 		};
 	}
 
 	private buildVerifiedState(input: {
 		mode: "inline_value" | "iframe_widget";
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
 	}) {
 		return {
 			required: true,
@@ -206,17 +209,21 @@ export class CaptchaService {
 			mode: input.mode,
 			challenge: null,
 			visitorKey: input.visitorKey,
+			securityToken: input.securityToken,
 		};
 	}
 
 	private async createChallengeSession(input: {
 		siteId: number;
-		visitorId: number;
-		pageThreadId: number;
+		visitorId: number | null;
+		pageThreadId: number | null;
+		subjectId: string;
+		action: CaptchaAction;
 		siteKey: string;
 		pageKey: string;
 		triggeredBy: "always" | "threshold";
 		settings: SystemSettings["captcha"];
+		securityToken: string;
 	}) {
 		const challengeId = this.writeRepository.createCaptchaSessionId();
 		const expiresAt = new Date(
@@ -277,15 +284,23 @@ export class CaptchaService {
 				throw new AppError(500, "CAPTCHA_CONFIG_INVALID", "验证码配置无效。");
 		}
 
+		if (created.publicChallenge.mode === "iframe_widget")
+			created.publicChallenge.iframeSrc += `#securityToken=${encodeURIComponent(input.securityToken)}`;
+		const sessionPayload = JSON.parse(
+			created.challengePayloadJson,
+		) as CaptchaSessionPayload;
+		sessionPayload.publicChallenge = created.publicChallenge;
 		await this.writeRepository.createCaptchaSession({
 			id: challengeId,
 			siteId: input.siteId,
 			visitorId: input.visitorId,
+			subjectId: input.subjectId,
+			action: input.action,
 			pageThreadId: input.pageThreadId,
 			triggeredBy: input.triggeredBy,
 			mode: created.mode,
 			providerKind: created.providerKind,
-			challengePayloadJson: created.challengePayloadJson,
+			challengePayloadJson: JSON.stringify(sessionPayload),
 			expiresAt:
 				created.expiresAt && created.expiresAt.length > 0
 					? created.expiresAt
@@ -301,6 +316,9 @@ export class CaptchaService {
 		pageTitle?: string;
 		pageUrl?: string;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
+		allowDiscoveryPage?: boolean;
 		ip?: string;
 		userAgent?: string;
 	}) {
@@ -308,44 +326,28 @@ export class CaptchaService {
 		if (!site) {
 			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
 		}
-		await this.commentsRepository.assertPageInteractive({
-			siteId: site.id,
-			pageKey: input.pageKey,
-		});
-		const settings = await this.commentsRepository.getSiteSettings(site.id);
-		const metadataConfig = this.commentsRepository.resolveCommentMetadata(
-			settings ?? undefined,
-		);
-		const requestMetadata = await resolveRequestMetadata({
-			resolver: this.metadataResolver,
-			ip: input.ip,
-			userAgent: input.userAgent,
-			metadata: metadataConfig,
-			ipRegion: this.settingsProvider.getIpRegionSettings
-				? await this.settingsProvider.getIpRegionSettings()
-				: undefined,
-		});
-
-		const visitor = await this.commentsRepository.getOrCreateVisitor({
-			siteId: site.id,
-			visitorKey: input.visitorKey,
-			ip: requestMetadata.ip,
-			userAgent: requestMetadata.userAgent,
-			metadata: requestMetadata.snapshot,
-			pageKey: input.pageKey,
-			pageUrl: input.pageUrl,
-		});
-		const thread = await this.commentsRepository.getOrCreatePageThread({
-			siteId: site.id,
-			pageKey: input.pageKey,
-			pageTitle: input.pageTitle,
-			pageUrl: input.pageUrl,
-		});
+		const registryPage = input.allowDiscoveryPage
+			? await this.commentsRepository.getPageRegistryEntry({
+					siteId: site.id,
+					pageKey: input.pageKey,
+				})
+			: undefined;
+		if (!input.allowDiscoveryPage || registryPage)
+			await this.commentsRepository.assertPageInteractive({
+				siteId: site.id,
+				pageKey: input.pageKey,
+			});
+		const subject = await new SecuritySubjectService(
+			this.writeRepository.database,
+		).resolve(site.id, input.securityToken);
+		const visitor = { id: null, visitorKey: subject.id, created: false };
+		const thread = { id: null };
 
 		return {
 			site,
 			visitor,
 			thread,
+			subject,
 		};
 	}
 
@@ -356,6 +358,9 @@ export class CaptchaService {
 		pageUrl?: string;
 		requestId?: string;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
+		allowDiscoveryPage?: boolean;
 		ip?: string;
 		userAgent?: string;
 	}) {
@@ -372,6 +377,8 @@ export class CaptchaService {
 		pageUrl?: string;
 		requestId?: string;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
 		ip?: string;
 		userAgent?: string;
 	}) {
@@ -389,24 +396,30 @@ export class CaptchaService {
 		requestId?: string;
 		refresh: boolean;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
+		allowDiscoveryPage?: boolean;
 		ip?: string;
 		userAgent?: string;
 	}) {
 		const captchaSettings = await this.getCaptchaSettings();
-		const { site, visitor, thread } = await this.resolveContext(input);
+		const { site, visitor, thread, subject } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,
+			subjectId: subject.id,
+			action: input.action ?? "comment_create",
 			pageThreadId: thread.id,
 		});
-		const publicVisitorKey = visitor.created ? visitor.visitorKey : undefined;
+		const publicVisitorKey = undefined;
 		const required = resolveStateMode(activeSession, policy.captchaMode);
 		if (!required) {
 			return this.buildIdleState({
 				settings: captchaSettings,
 				visitorKey: publicVisitorKey,
+				securityToken: subject.token,
 			});
 		}
 
@@ -417,6 +430,7 @@ export class CaptchaService {
 			return this.buildVerifiedState({
 				mode: activeMode,
 				visitorKey: publicVisitorKey,
+				securityToken: subject.token,
 			});
 		}
 
@@ -432,17 +446,21 @@ export class CaptchaService {
 				mode: payload.publicChallenge.mode,
 				challenge: payload.publicChallenge,
 				visitorKey: publicVisitorKey,
+				securityToken: subject.token,
 			};
 		}
 
 		const challenge = await this.createChallengeSession({
 			siteId: site.id,
 			visitorId: visitor.id,
+			subjectId: subject.id,
+			action: input.action ?? "comment_create",
 			pageThreadId: thread.id,
 			siteKey: input.siteKey,
 			pageKey: input.pageKey,
 			triggeredBy: policy.captchaMode === "always" ? "always" : "threshold",
 			settings: captchaSettings,
+			securityToken: subject.token,
 		});
 		await this.security.writeAudit({
 			requestId: input.requestId,
@@ -467,6 +485,7 @@ export class CaptchaService {
 			mode: challenge.mode,
 			challenge,
 			visitorKey: publicVisitorKey,
+			securityToken: subject.token,
 		};
 	}
 
@@ -478,11 +497,12 @@ export class CaptchaService {
 		action: CaptchaAction;
 		requestId?: string;
 		visitorKey?: string;
+		securityToken?: string;
 		ip?: string;
 		userAgent?: string;
 	}) {
 		const captchaSettings = await this.getCaptchaSettings();
-		const { site, visitor, thread } = await this.resolveContext(input);
+		const { site, visitor, thread, subject } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode !== "threshold") {
 			return;
@@ -491,13 +511,15 @@ export class CaptchaService {
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,
+			subjectId: subject.id,
+			action: input.action ?? "comment_create",
 			pageThreadId: thread.id,
 		});
 		if (activeSession) {
 			return;
 		}
 
-		const key = `captcha-threshold:${site.id}:${thread.id}:${visitor.visitorKey}`;
+		const key = `captcha-threshold:${site.id}:${subject.id}:${input.action ?? "comment_create"}`;
 		const snapshot = this.security.peekRateLimit({
 			key,
 			rule: {
@@ -514,11 +536,14 @@ export class CaptchaService {
 			await this.createChallengeSession({
 				siteId: site.id,
 				visitorId: visitor.id,
+				subjectId: subject.id,
+				action: input.action ?? "comment_create",
 				pageThreadId: thread.id,
 				siteKey: input.siteKey,
 				pageKey: input.pageKey,
 				triggeredBy: "threshold",
 				settings: captchaSettings,
+				securityToken: subject.token,
 			});
 			await this.security.writeAudit({
 				requestId: input.requestId,
@@ -563,12 +588,14 @@ export class CaptchaService {
 		value: string;
 		requestId?: string;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
 		ip?: string;
 		userAgent?: string;
 		consumeRateLimit: (key: string) => Promise<void>;
 		checkRateLimit: (key: string) => void | Promise<void>;
 	}) {
-		const { site, visitor, thread } = await this.resolveContext(input);
+		const { site, visitor, thread, subject } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode === "never") {
 			return {
@@ -577,10 +604,10 @@ export class CaptchaService {
 			};
 		}
 
-		const activeSession = await this.writeRepository.getActiveCaptchaSession({
+		const activeSession = await this.writeRepository.getCaptchaSession({
 			siteId: site.id,
-			visitorId: visitor.id,
-			pageThreadId: thread.id,
+			sessionId: input.challengeId,
+			subjectId: subject.id,
 		});
 		if (!activeSession || activeSession.id !== input.challengeId) {
 			throw new AppError(
@@ -658,15 +685,23 @@ export class CaptchaService {
 		pageKey: string;
 		challengeId: string;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
 		ip?: string;
 		userAgent?: string;
 	}) {
 		const captchaSettings = await this.getCaptchaSettings();
-		const { site, visitor, thread } = await this.resolveContext(input);
-		const activeSession = await this.writeRepository.getActiveCaptchaSession({
+		const site = this.commentsRepository.getRegisteredSite(input.siteKey);
+		if (!site)
+			throw new ResourceNotFoundError("SITE_NOT_FOUND", "站点不存在。");
+		await this.commentsRepository.assertPageInteractive({
 			siteId: site.id,
-			visitorId: visitor.id,
-			pageThreadId: thread.id,
+			pageKey: input.pageKey,
+		});
+		const activeSession = await this.writeRepository.getCaptchaSession({
+			siteId: site.id,
+			sessionId: input.challengeId,
+			widgetOnly: true,
 		});
 
 		if (!activeSession || activeSession.id !== input.challengeId) {
@@ -756,15 +791,17 @@ export class CaptchaService {
 		genTime?: string;
 		requestId?: string;
 		visitorKey?: string;
+		securityToken?: string;
+		action?: CaptchaAction;
 		ip?: string;
 		userAgent?: string;
 	}) {
 		const captchaSettings = await this.getCaptchaSettings();
-		const { site, visitor, thread } = await this.resolveContext(input);
-		const activeSession = await this.writeRepository.getActiveCaptchaSession({
+		const { site, visitor, thread, subject } = await this.resolveContext(input);
+		const activeSession = await this.writeRepository.getCaptchaSession({
 			siteId: site.id,
-			visitorId: visitor.id,
-			pageThreadId: thread.id,
+			sessionId: input.challengeId,
+			subjectId: subject.id,
 		});
 
 		if (!activeSession || activeSession.id !== input.challengeId) {
@@ -963,6 +1000,7 @@ export class CaptchaService {
 		action: CaptchaAction;
 		requestId?: string;
 		visitorKey?: string;
+		securityToken?: string;
 		ip?: string;
 		userAgent?: string;
 	}) {
@@ -975,6 +1013,7 @@ export class CaptchaService {
 			value: input.value,
 			requestId: input.requestId,
 			visitorKey: input.visitorKey,
+			securityToken: input.securityToken,
 			ip: input.ip,
 			userAgent: input.userAgent,
 			checkRateLimit: (identityKey) => {
@@ -1006,10 +1045,11 @@ export class CaptchaService {
 		pageKey: string;
 		action: CaptchaAction;
 		visitorKey?: string;
+		securityToken?: string;
 		ip?: string;
 		userAgent?: string;
 	}) {
-		const { site, visitor, thread } = await this.resolveContext(input);
+		const { site, visitor, thread, subject } = await this.resolveContext(input);
 		const policy = await this.resolvePolicy(site.id);
 		if (policy.captchaMode === "never") {
 			return;
@@ -1018,6 +1058,8 @@ export class CaptchaService {
 		const activeSession = await this.writeRepository.getActiveCaptchaSession({
 			siteId: site.id,
 			visitorId: visitor.id,
+			subjectId: subject.id,
+			action: input.action ?? "comment_create",
 			pageThreadId: thread.id,
 		});
 		if (policy.captchaMode === "threshold" && !activeSession) {
@@ -1030,6 +1072,38 @@ export class CaptchaService {
 				"请先完成验证码验证。",
 			);
 		}
+		return this.writeRepository.reserveCaptchaAuthorization(activeSession.id);
+	}
+
+	public async prepareWrite(input: {
+		siteKey: string;
+		pageKey: string;
+		pageTitle?: string;
+		pageUrl?: string;
+		action: CaptchaAction;
+		securityToken?: string;
+		visitorKey?: string;
+		ip?: string;
+		userAgent?: string;
+		requestId?: string;
+		captcha?: { challengeId: string; value: string } | null;
+	}) {
+		const { subject } = await this.resolveContext(input);
+		const resolved = { ...input, securityToken: subject.token };
+		await this.markWriteAction(resolved);
+		if (input.captcha)
+			await this.consumeInlineCaptcha({ ...resolved, ...input.captcha });
+		const authorization = await this.ensureSatisfied(resolved);
+		return {
+			subjectId: subject.id,
+			securityToken: subject.token,
+			authorization,
+		};
+	}
+	public releaseAuthorization(
+		authorization?: import("./write-repository").CaptchaAuthorization,
+	) {
+		return this.writeRepository.releaseCaptchaAuthorization(authorization);
 	}
 
 	public getRateLimitCode(action: CaptchaAction): string {

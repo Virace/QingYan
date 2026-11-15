@@ -1,158 +1,181 @@
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { stringify } from "yaml";
 import { describe, expect, it } from "vitest";
-
 import { runCli } from "../../src/cli/main";
-import type { CliRuntime } from "../../src/cli/runtime";
-import { createDatabaseClients } from "../../src/db/client";
-import { adminBootstrapState } from "../../src/db/schema";
-import { createPasswordHash } from "../../src/modules/admin/password-hash";
+import { FullBackupService } from "../../src/modules/backup/full-backup-service";
+import { RestoreService } from "../../src/modules/backup/restore-service";
 import { SystemdServiceController } from "../../src/modules/service-control/systemd-service";
-import {
-	applyInitialMigration,
-	createTestConfig,
-} from "../support/test-fixtures";
+import { createLifecycleFixture } from "../support/lifecycle-fixture";
 
 class FakeService extends SystemdServiceController {
-	public calls: string[] = [];
-
-	public constructor(private readonly initialState: "running" | "stopped") {
-		super({
-			platform: "linux",
-			runner: async () => ({ code: 0, stdout: "", stderr: "" }),
-		});
-	}
-
-	public override async status() {
+	calls: string[] = [];
+	override async status() {
 		this.calls.push("status");
-		return this.initialState;
+		return "running" as const;
 	}
-
-	public override async stop() {
+	override async stop() {
 		this.calls.push("stop");
 	}
-
-	public override async start() {
+	override async start() {
 		this.calls.push("start");
 	}
 }
-
-function createRuntimeFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-cli-backup-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const configPath = path.join(directory, "qingyan.yml");
-	applyInitialMigration(databaseFile);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
-	const config = createTestConfig(databaseFile, path.join(directory, "logs"));
-	writeFileSync(
-		configPath,
-		stringify({
-			server: config.server,
-			database: config.database,
-			admin: { session: config.admin.session },
-			security: config.security,
-		}),
-		"utf-8",
-	);
-	return {
-		directory,
-		configPath,
-		databaseFile,
-		config,
-		db,
-		sqlite,
-		async seedAdmin() {
-			await db.insert(adminBootstrapState).values({
-				id: 1,
-				consolePath: "/admin",
-				username: "admin",
-				passwordHash: createPasswordHash("password"),
-				passwordRotatedAt: null,
-			});
-		},
-		openRuntime: async (): Promise<CliRuntime> => ({
-			configPath,
-			config,
-			databaseFile,
-			sqlite,
-			db,
-			packageVersion: "0.1.0",
-			close() {},
-		}),
-		cleanup() {
-			sqlite.close();
-			rmSync(directory, { recursive: true, force: true });
-		},
-	};
+function runtime(fixture: Awaited<ReturnType<typeof createLifecycleFixture>>) {
+	return async () => ({
+		configPath: fixture.configPath,
+		config: fixture.config,
+		databaseUrl: fixture.databaseUrl,
+		pool: fixture.pool,
+		db: fixture.db,
+		packageVersion: "0.2.5",
+		async close() {},
+	});
 }
-
-describe("qingyanctl backup and restore commands", () => {
-	it("creates a full backup with service wrapping", async () => {
-		const fixture = createRuntimeFixture();
+describe("CLI PostgreSQL backup and restore", () => {
+	it("wraps a backup in service stop/start and reports a redacted restore preview", async () => {
+		const fixture = await createLifecycleFixture();
 		try {
-			await fixture.seedAdmin();
-			const service = new FakeService("running");
-			const outputPath = path.join(fixture.directory, "backup");
-
-			const result = await runCli(["backup", outputPath, "--yes"], {
-				openRuntime: fixture.openRuntime,
+			const service = new FakeService();
+			const output = path.join(fixture.directory, "cli-backup");
+			const backup = await runCli(["backup", output, "--yes"], {
+				openRuntime: runtime(fixture),
 				service,
-				environment: {
-					QINGYAN_SMTP_PASSWORD: "raw-secret",
-				},
+				environment: {},
 			});
-
-			expect(result.exitCode).toBe(0);
+			expect(backup.exitCode).toBe(0);
 			expect(service.calls).toEqual(["status", "stop", "start"]);
-			expect(existsSync(`${outputPath}.qingyan-backup/manifest.json`)).toBe(
-				true,
+			expect(existsSync(`${output}.qingyan-backup/manifest.json`)).toBe(true);
+			const preview = await runCli([
+				"restore",
+				`${output}.qingyan-backup`,
+				"--dry-run",
+				"--config",
+				fixture.configPath,
+			]);
+			expect(preview.exitCode).toBe(0);
+			expect(preview.output.stdout.join(" ")).toContain("PostgreSQL");
+			expect(preview.output.stdout.join(" ")).not.toContain(
+				fixture.databaseUrl,
 			);
-			expect(result.output.stdout.join("\n")).toContain(
-				"QINGYAN_SMTP_PASSWORD",
-			);
-			expect(result.output.stdout.join("\n")).not.toContain("raw-secret");
 		} finally {
-			fixture.cleanup();
+			await fixture.cleanup();
 		}
 	});
-
-	it("prints restore dry-run plans from a manifest", async () => {
-		const fixture = createRuntimeFixture();
+	it("restores into an empty target, preserves source data and generates a separate target config", async () => {
+		const source = await createLifecycleFixture();
+		const target = await createLifecycleFixture({ empty: true });
 		try {
-			const backupDirectory = path.join(fixture.directory, "manual-backup");
-			rmSync(backupDirectory, { recursive: true, force: true });
-			mkdirSync(backupDirectory, { recursive: true });
-			writeFileSync(
-				path.join(fixture.directory, "unused.txt"),
-				"unused",
-				"utf-8",
-			);
-			await fixture.seedAdmin();
-			const backupResult = await runCli(["backup", backupDirectory, "--yes"], {
-				openRuntime: fixture.openRuntime,
-				service: new FakeService("stopped"),
+			const backup = await new FullBackupService({
+				configPath: source.configPath,
+				config: source.config,
+				pool: source.pool,
+				packageVersion: "0.2.5",
+			}).createBackup({
+				outputPath: path.join(source.directory, "restore-source"),
 			});
-			expect(backupResult.exitCode).toBe(0);
-
-			const result = await runCli([
-				"restore",
-				`${backupDirectory}.qingyan-backup`,
-				"--dry-run",
-			]);
-
-			expect(result.exitCode).toBe(0);
-			expect(result.output.stdout.join("\n")).toContain("备份版本");
-			expect(result.output.stdout.join("\n")).toContain("恢复后需要升级");
+			mkdirSync(path.dirname(target.configPath), { recursive: true });
+			const generated = path.join(
+				path.dirname(target.configPath),
+				"restored.yml",
+			);
+			const service = new RestoreService({
+				currentVersion: "0.2.5",
+				currentConfigPath: source.configPath,
+			});
+			expect(
+				await service.apply({
+					backupPath: backup.outputDirectory,
+					database: target.config.database,
+					outputConfigPath: generated,
+					confirm: "RESTORE QINGYAN",
+				}),
+			).toMatchObject({ configPath: generated, configurationSwitched: false });
+			expect(
+				(await target.pool.query("SELECT site_key,name FROM sites")).rows,
+			).toEqual(
+				(await source.pool.query("SELECT site_key,name FROM sites")).rows,
+			);
+			expect(
+				(
+					await target.pool.query(
+						"SELECT username,password_hash FROM admin_users",
+					)
+				).rows,
+			).toEqual(
+				(
+					await source.pool.query(
+						"SELECT username,password_hash FROM admin_users",
+					)
+				).rows,
+			);
+			expect(readFileSync(source.configPath, "utf8")).toContain(
+				source.databaseUrl,
+			);
+			expect(readFileSync(generated, "utf8")).toContain(target.databaseUrl);
+			await expect(
+				service.apply({
+					backupPath: backup.outputDirectory,
+					database: target.config.database,
+					outputConfigPath: `${generated}.second`,
+					confirm: "RESTORE QINGYAN",
+				}),
+			).rejects.toThrow("RESTORE_TARGET_NOT_EMPTY");
 		} finally {
-			fixture.cleanup();
+			await target.cleanup();
+			await source.cleanup();
+		}
+	});
+	it("rolls back an interrupted custom archive restore without generating target config", async () => {
+		const source = await createLifecycleFixture();
+		const target = await createLifecycleFixture({ empty: true });
+		try {
+			const backup = await new FullBackupService({
+				configPath: source.configPath,
+				config: source.config,
+				pool: source.pool,
+				packageVersion: "0.2.5",
+			}).createBackup({
+				outputPath: path.join(source.directory, "corrupt-restore"),
+			});
+			const dump = backup.manifest.files.find(
+				(file) => file.role === "database",
+			);
+			if (!dump) throw new Error("dump missing");
+			const dumpPath = path.join(backup.outputDirectory, dump.path);
+			const bytes = readFileSync(dumpPath);
+			writeFileSync(
+				dumpPath,
+				bytes.subarray(0, Math.floor(bytes.length * 0.7)),
+			);
+			dump.sha256 = createHash("sha256")
+				.update(readFileSync(dumpPath))
+				.digest("hex");
+			writeFileSync(backup.manifestPath, JSON.stringify(backup.manifest));
+			const configPath = path.join(target.directory, "failed-restored.yml");
+			const restore = new RestoreService({
+				currentVersion: "0.2.5",
+				currentConfigPath: source.configPath,
+			});
+			await expect(
+				restore.apply({
+					backupPath: backup.outputDirectory,
+					database: target.config.database,
+					outputConfigPath: configPath,
+					confirm: "RESTORE QINGYAN",
+				}),
+			).rejects.toThrow("PG_RESTORE_FAILED");
+			expect(
+				(
+					await target.pool.query(
+						"SELECT tablename FROM pg_tables WHERE schemaname='public'",
+					)
+				).rows,
+			).toEqual([]);
+			expect(existsSync(configPath)).toBe(false);
+		} finally {
+			await target.cleanup();
+			await source.cleanup();
 		}
 	});
 });

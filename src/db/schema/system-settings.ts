@@ -1,19 +1,19 @@
 import { sql } from "drizzle-orm";
-import {
-	integer,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { bigint, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { jsonText, exactText as text, utcTimestamp } from "./column-types";
 
-export const systemSettings = sqliteTable(
+export const systemSettings = pgTable(
 	"system_settings",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
 		category: text("category").notNull(),
 		key: text("key").notNull(),
-		valueJson: text("value_json").notNull(),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		valueJson: jsonText("value_json").notNull(),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
 		uniqueIndex("system_settings_category_key_idx").on(

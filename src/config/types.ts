@@ -72,12 +72,31 @@ export const configSchema = z
 			.strict(),
 		database: z
 			.object({
-				client: z.literal("sqlite"),
-				sqlite: z
+				url: z
+					.string()
+					.url()
+					.refine(
+						(value) =>
+							["postgres:", "postgresql:"].includes(new URL(value).protocol),
+						"必须提供 PostgreSQL URL",
+					),
+				pool: z
 					.object({
-						file: z.string().min(1),
+						max: z.number().int().positive().max(100).default(5),
+						connectionTimeoutMs: z.number().int().positive().default(5000),
+						idleTimeoutMs: z.number().int().nonnegative().default(30000),
 					})
-					.strict(),
+					.strict()
+					.default({ max: 5, connectionTimeoutMs: 5000, idleTimeoutMs: 30000 }),
+				tls: z
+					.object({
+						rejectUnauthorized: z.boolean().default(true),
+						ca: z.string().min(1).optional(),
+						cert: z.string().min(1).optional(),
+						key: z.string().min(1).optional(),
+					})
+					.strict()
+					.optional(),
 			})
 			.strict(),
 		admin: startupAdminSchema,

@@ -15,6 +15,8 @@ export interface PartialUpgradeMarker {
 	planPath: string;
 	backupDirectory: string;
 	currentStep: string;
+	targetIdentity?: string;
+	stagedConfigPath?: string;
 	error?: string;
 }
 
@@ -25,6 +27,8 @@ interface WritePartialMarkerInput {
 	planPath: string;
 	backupDirectory: string;
 	currentStep: string;
+	targetIdentity?: string;
+	stagedConfigPath?: string;
 	now?: () => Date;
 }
 
@@ -76,6 +80,8 @@ export function writePartialUpgradeMarker(
 		planPath: input.planPath,
 		backupDirectory: input.backupDirectory,
 		currentStep: input.currentStep,
+		targetIdentity: input.targetIdentity,
+		stagedConfigPath: input.stagedConfigPath,
 	};
 	writeMarker(input.markerPath, marker);
 	return marker;
@@ -98,4 +104,11 @@ export function updatePartialUpgradeMarker(
 
 export function removePartialUpgradeMarker(markerPath: string): void {
 	rmSync(markerPath, { force: true });
+}
+
+export function resolvePartialUpgradeMarkerPath(configPath: string): string {
+	return path.resolve(
+		path.dirname(configPath),
+		"../data/upgrade/partial-upgrade.json",
+	);
 }

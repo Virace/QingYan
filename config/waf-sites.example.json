@@ -1,0 +1,12 @@
+{
+	"sites": [
+		{
+			"siteKey": "default",
+			"websiteId": 1,
+			"websiteKey": "YOUR_WEBSITE_ALIAS",
+			"hosts": ["YOUR_SITE_HOSTNAME"],
+			"autoBanScans": false
+		}
+	],
+	"collectUnknownHosts": false
+}

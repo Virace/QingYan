@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 
 import { EmptyState } from "../shared/admin-ui";
+import { DeletionRecoveryPanel } from "./deletion-recovery-panel";
 
 function StateText({ state }: { state?: string }) {
 	if (state === "normal_current") {
@@ -128,7 +129,13 @@ function UpdatePlanPanel({ plan }: { plan?: UpdatePlan }) {
 	);
 }
 
-export function OpsPage() {
+export function OpsPage({
+	siteKey,
+	canRestore = false,
+}: {
+	siteKey?: string;
+	canRestore?: boolean;
+}) {
 	const restartConfirmId = useId();
 	const [restartConfirm, setRestartConfirm] = useState("");
 	const statusQuery = useQuery({
@@ -161,6 +168,11 @@ export function OpsPage() {
 	const updateCheck = updateCheckMutation.data ?? status?.update.check;
 	return (
 		<div className="flex flex-col gap-4">
+			<DeletionRecoveryPanel
+				key={siteKey ?? "all"}
+				siteKey={siteKey}
+				canRestore={canRestore}
+			/>
 			<Card>
 				<CardHeader>
 					<CardTitle className="text-lg">运维</CardTitle>
@@ -185,8 +197,9 @@ export function OpsPage() {
 							</div>
 							<div className="rounded-md border p-3">
 								<p className="text-xs text-muted-foreground">整站备份</p>
-								<p className="mt-1 text-sm font-medium">
-									{status.backup.format} / {status.backup.provider}
+								<p className="mt-1 text-sm font-medium">PostgreSQL 实例备份</p>
+								<p className="mt-1 text-xs text-muted-foreground">
+									停写后通过运维命令备份与恢复
 								</p>
 							</div>
 							<div className="rounded-md border p-3">

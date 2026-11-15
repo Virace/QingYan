@@ -1,15 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	blacklistRules,
-	commentRequestMetadata,
 	commenterNotificationPreferences,
+	commentRequestMetadata,
 	comments,
 	emailDeliveryReputation,
 	pageThreads,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { hashNotificationEmail } from "../../src/modules/notifications/email-address-policy";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -40,11 +40,13 @@ describe("admin commenters", () => {
 			{
 				siteId: site.id,
 				pageKey: "post:user-1",
+				pageKeyHash: hashKey("post:user-1"),
 				pageTitle: "User One",
 			},
 			{
 				siteId: site.id,
 				pageKey: "post:user-2",
+				pageKeyHash: hashKey("post:user-2"),
 				pageTitle: "User Two",
 			},
 		]);
@@ -310,6 +312,7 @@ describe("admin commenters", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:commenter-empty-ua",
+			pageKeyHash: hashKey("post:commenter-empty-ua"),
 			pageTitle: "Commenter Empty UA",
 		});
 		const [thread] = await fixture.app.db.select().from(pageThreads);

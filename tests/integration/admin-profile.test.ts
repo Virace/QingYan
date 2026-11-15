@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	adminGroups,
+	adminProfileVerificationTokens,
 	adminSessions,
 	adminUserGroups,
 	adminUsers,
-	adminProfileVerificationTokens,
 } from "../../src/db/schema";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { loginAsAdmin, withAdminWriteAuth } from "../support/admin-login";

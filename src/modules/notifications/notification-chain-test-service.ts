@@ -1,8 +1,9 @@
+import { hashKey } from "../../db/values";
 import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	adminUsers,
 	commenterNotificationPreferences,
@@ -185,7 +186,7 @@ export class NotificationChainTestService {
 	private readonly cooldownMs: number;
 
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly options: ChainTestOptions = {},
 	) {
 		this.tasks = new TaskRunRepository(db);
@@ -342,6 +343,7 @@ export class NotificationChainTestService {
 				.values({
 					siteId: context.site.id,
 					pageKey,
+					pageKeyHash: hashKey(pageKey),
 					pageTitle: "QingYan 评论通知链路测试",
 					pageUrl: null,
 					kind: "notification_test",

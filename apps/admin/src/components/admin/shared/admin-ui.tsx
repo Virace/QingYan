@@ -1,5 +1,12 @@
-import type { ReactNode } from "react";
+import {
+	type ComponentProps,
+	cloneElement,
+	isValidElement,
+	type ReactNode,
+	useId,
+} from "react";
 
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -20,25 +27,74 @@ export function Field({
 	children: ReactNode;
 }) {
 	const hasDescription = Boolean(description);
+	const fieldId = useId();
+	const labelId = `${fieldId}-label`;
+	const descriptionId = description ? `${fieldId}-description` : undefined;
+	const errorId = error ? `${fieldId}-error` : undefined;
+	const control =
+		isValidElement<ComponentProps<"input">>(children) &&
+		(children.type === Input ||
+			children.type === "input" ||
+			children.type === "select" ||
+			children.type === "textarea")
+			? children
+			: null;
+	const controlId = control ? (control.props.id ?? fieldId) : undefined;
+	const describedBy =
+		[control?.props["aria-describedby"], descriptionId, errorId]
+			.filter(Boolean)
+			.join(" ") || undefined;
+	const labelContent = (
+		<span id={labelId} className="text-sm font-semibold leading-none">
+			{label}
+		</span>
+	);
 
 	return (
-		<div className="flex flex-col gap-2" data-field-label={label}>
+		<div
+			className="flex flex-col gap-2"
+			data-field-label={label}
+			{...(!control && {
+				role: "group",
+				"aria-labelledby": labelId,
+				"aria-describedby": describedBy,
+			})}
+		>
 			<div
 				className={cn(
 					"grid min-h-[2.375rem]",
 					hasDescription ? "content-start gap-1" : "content-end",
 				)}
 			>
-				<span className="text-sm font-semibold leading-none">{label}</span>
+				{controlId ? (
+					<label htmlFor={controlId} className="block text-sm leading-none">
+						{labelContent}
+					</label>
+				) : (
+					labelContent
+				)}
 				{description ? (
-					<span className="text-xs leading-5 text-muted-foreground">
+					<span
+						id={descriptionId}
+						className="text-xs leading-5 text-muted-foreground"
+					>
 						{description}
 					</span>
 				) : null}
 			</div>
-			{children}
+			{control
+				? cloneElement(control, {
+						id: controlId,
+						"aria-describedby": describedBy,
+						"aria-invalid": error ? true : control.props["aria-invalid"],
+					})
+				: children}
 			{error ? (
-				<p className="text-xs font-medium leading-5 text-destructive">
+				<p
+					id={errorId}
+					role="alert"
+					className="text-xs font-medium leading-5 text-destructive"
+				>
 					{error}
 				</p>
 			) : null}

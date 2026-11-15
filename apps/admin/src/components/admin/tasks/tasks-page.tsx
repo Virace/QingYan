@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
 import { Tabs } from "@radix-ui/themes";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { getSettings, listAdminUsers } from "@/api/admin";
+import { adminUiErrorMessage } from "@/api/client";
 import {
 	cancelTaskRun,
 	createScheduledTask,
@@ -19,14 +20,16 @@ import {
 	listTaskRuns,
 	retryTaskRun,
 	runScheduledTask,
-	updateScheduledTask,
+	type ScheduledTaskListQuery,
 	type ScheduledTaskProjection,
 	type ScheduledTaskWriteInput,
 	type TaskAuditItem,
+	type TaskRunListQuery,
 	type TaskRunProjection,
 	type TaskRunStatus,
+	updateScheduledTask,
 } from "@/api/tasks";
-import { adminUiErrorMessage } from "@/api/client";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -35,7 +38,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 
 import { PaginationControls } from "../shared/admin-pagination";
 import { EmptyState, inputClass } from "../shared/admin-ui";
@@ -69,19 +71,6 @@ function errorMessage(error: unknown, fallback: string): string {
 	return adminUiErrorMessage(error, fallback);
 }
 
-function includesText(value: unknown, search: string): boolean {
-	if (!search) {
-		return true;
-	}
-	return String(value ?? "")
-		.toLowerCase()
-		.includes(search);
-}
-
-function paginate<T>(items: T[], page: number, pageSize: number): T[] {
-	return items.slice(page * pageSize, page * pageSize + pageSize);
-}
-
 export function TasksPage({
 	siteKey,
 	commentId,
@@ -112,6 +101,9 @@ export function TasksPage({
 	const [runSearch, setRunSearch] = useState("");
 	const [runPage, setRunPage] = useState(0);
 	const [runPageSize, setRunPageSize] = useState(defaultPageSize);
+	const [snapshotSearch, setSnapshotSearch] = useState("");
+	const [snapshotPage, setSnapshotPage] = useState(0);
+	const [snapshotPageSize, setSnapshotPageSize] = useState(defaultPageSize);
 	const [auditSearch, setAuditSearch] = useState("");
 	const [auditPage, setAuditPage] = useState(0);
 	const [auditPageSize, setAuditPageSize] = useState(defaultPageSize);
@@ -122,20 +114,52 @@ export function TasksPage({
 		null,
 	);
 	const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
+	const [listScope, setListScope] = useState({ siteKey, commentId });
+	if (listScope.siteKey !== siteKey || listScope.commentId !== commentId) {
+		setListScope({ siteKey, commentId });
+		setDefinitionPage(0);
+		setRunPage(0);
+		setAuditPage(0);
+		setSnapshotPage(0);
+		setSelectedRun(null);
+		if (commentId) setActiveTab("runs");
+	}
 
 	const definitionsQuery = useQuery({
 		queryKey: ["admin", "task-definitions"],
 		queryFn: listTaskDefinitions,
 	});
+	const scheduledInput: ScheduledTaskListQuery = {
+		limit: definitionPageSize,
+		offset: definitionPage * definitionPageSize,
+		search: definitionSearch.trim() || undefined,
+		type: definitionTypeFilter || undefined,
+		status: definitionStatusFilter || undefined,
+		scopeKind: (definitionScopeFilter ||
+			undefined) as ScheduledTaskListQuery["scopeKind"],
+		visibility: (definitionVisibilityFilter ||
+			undefined) as ScheduledTaskListQuery["visibility"],
+	};
+	const runInput: TaskRunListQuery = {
+		limit: runPageSize,
+		offset: runPage * runPageSize,
+		search: runSearch.trim() || undefined,
+		type: runTypeFilter || undefined,
+		status: runStatusFilter || undefined,
+		siteKey: runSiteFilter === "current" ? siteKey || undefined : undefined,
+		scopeKind: runSiteFilter === "global" ? "global" : undefined,
+		commentId: commentId || undefined,
+	};
 	const scheduledQuery = useQuery({
-		queryKey: ["admin", "scheduled-tasks"],
-		queryFn: listScheduledTasks,
-		refetchInterval: 5000,
+		queryKey: ["admin", "scheduled-tasks", scheduledInput],
+		queryFn: () => listScheduledTasks(scheduledInput),
+		refetchInterval: activeTab === "scheduled" ? 5000 : false,
 	});
 	const runsQuery = useQuery({
-		queryKey: ["admin", "task-runs", commentId],
-		queryFn: () => listTaskRuns({ commentId: commentId || undefined }),
+		queryKey: ["admin", "task-runs", runInput],
+		queryFn: () => listTaskRuns(runInput),
 		refetchInterval: (query) =>
+			activeTab === "runs" &&
 			query.state.data?.items.some((run) =>
 				["queued", "delayed", "running", "retrying"].includes(run.status),
 			)
@@ -169,13 +193,23 @@ export function TasksPage({
 				})),
 		[notificationUsersQuery.data?.users, siteKey],
 	);
+	const auditInput = {
+		limit: auditPageSize,
+		offset: auditPage * auditPageSize,
+		search: auditSearch.trim() || undefined,
+	};
+	const snapshotInput = {
+		limit: snapshotPageSize,
+		offset: snapshotPage * snapshotPageSize,
+		search: snapshotSearch.trim() || undefined,
+	};
 	const auditQuery = useQuery({
-		queryKey: ["admin", "task-audit"],
-		queryFn: listTaskAudit,
+		queryKey: ["admin", "task-audit", auditInput],
+		queryFn: () => listTaskAudit(auditInput),
 	});
 	const deletedSnapshotsQuery = useQuery({
-		queryKey: ["admin", "task-deleted-snapshots"],
-		queryFn: listDeletedTaskSnapshots,
+		queryKey: ["admin", "task-deleted-snapshots", snapshotInput],
+		queryFn: () => listDeletedTaskSnapshots(snapshotInput),
 	});
 
 	const invalidateTaskQueries = () => {
@@ -300,108 +334,6 @@ export function TasksPage({
 	const auditItems = auditQuery.data?.items ?? [];
 	const deletedSnapshots = deletedSnapshotsQuery.data?.items ?? [];
 
-	const filteredScheduledTasks = useMemo(() => {
-		const search = definitionSearch.trim().toLowerCase();
-		return scheduledTasks.filter((task) => {
-			if (definitionTypeFilter && task.type !== definitionTypeFilter) {
-				return false;
-			}
-			if (
-				definitionStatusFilter &&
-				task.lastStatus !== definitionStatusFilter
-			) {
-				return false;
-			}
-			if (definitionScopeFilter && task.scopeKind !== definitionScopeFilter) {
-				return false;
-			}
-			if (
-				definitionVisibilityFilter === "owned" &&
-				task.visibility !== "definition"
-			) {
-				return false;
-			}
-			if (
-				definitionVisibilityFilter === "summary" &&
-				task.visibility !== "summary"
-			) {
-				return false;
-			}
-			return (
-				includesText(task.name, search) ||
-				includesText(task.description, search) ||
-				includesText(task.type, search) ||
-				includesText(task.ownerUserId, search)
-			);
-		});
-	}, [
-		definitionScopeFilter,
-		definitionSearch,
-		definitionStatusFilter,
-		definitionTypeFilter,
-		definitionVisibilityFilter,
-		scheduledTasks,
-	]);
-
-	const filteredRuns = useMemo(() => {
-		const search = runSearch.trim().toLowerCase();
-		return taskRuns.filter((run) => {
-			if (runTypeFilter && run.type !== runTypeFilter) {
-				return false;
-			}
-			if (runStatusFilter && run.status !== runStatusFilter) {
-				return false;
-			}
-			if (runSiteFilter === "current" && run.siteKey !== siteKey) {
-				return false;
-			}
-			if (runSiteFilter === "global" && run.siteKey !== null) {
-				return false;
-			}
-			return (
-				includesText(run.scheduledTaskNameSnapshot, search) ||
-				includesText(run.type, search) ||
-				includesText(run.id, search) ||
-				includesText(run.skipReason, search) ||
-				includesText(run.blockReason, search)
-			);
-		});
-	}, [
-		runSearch,
-		runSiteFilter,
-		runStatusFilter,
-		runTypeFilter,
-		siteKey,
-		taskRuns,
-	]);
-	const filteredAuditItems = useMemo(() => {
-		const search = auditSearch.trim().toLowerCase();
-		return auditItems.filter((item) =>
-			[
-				item.action,
-				item.actorType,
-				item.actorId,
-				item.targetType,
-				item.targetId,
-				item.taskType,
-				item.siteKey,
-				item.runId,
-				item.scheduledTaskId,
-			].some((value) => includesText(value, search)),
-		);
-	}, [auditItems, auditSearch]);
-
-	const pagedScheduledTasks = paginate(
-		filteredScheduledTasks,
-		definitionPage,
-		definitionPageSize,
-	);
-	const pagedRuns = paginate(filteredRuns, runPage, runPageSize);
-	const pagedAuditItems = paginate(
-		filteredAuditItems,
-		auditPage,
-		auditPageSize,
-	);
 	const busyTaskId =
 		runMutation.variables ??
 		enableMutation.variables ??
@@ -562,7 +494,7 @@ export function TasksPage({
 										<input
 											className={inputClass}
 											value={definitionSearch}
-											placeholder="名称、描述、类型或 owner"
+											placeholder="名称、描述、类型或负责人"
 											onChange={(event) => {
 												setDefinitionSearch(event.target.value);
 												setDefinitionPage(0);
@@ -649,8 +581,8 @@ export function TasksPage({
 								<PaginationControls
 									limit={definitionPageSize}
 									pageIndex={definitionPage}
-									totalCount={filteredScheduledTasks.length}
-									itemCount={pagedScheduledTasks.length}
+									totalCount={scheduledQuery.data?.totalCount ?? 0}
+									itemCount={scheduledTasks.length}
 									setLimit={(value) => {
 										setDefinitionPageSize(value);
 										setDefinitionPage(0);
@@ -658,7 +590,7 @@ export function TasksPage({
 									setPageIndex={setDefinitionPage}
 								/>
 								<TaskDefinitionTable
-									tasks={pagedScheduledTasks}
+									tasks={scheduledTasks}
 									definitions={definitions}
 									busyTaskId={busyTaskId}
 									highlightTaskId={highlightTaskId}
@@ -773,8 +705,8 @@ export function TasksPage({
 								<PaginationControls
 									limit={runPageSize}
 									pageIndex={runPage}
-									totalCount={filteredRuns.length}
-									itemCount={pagedRuns.length}
+									totalCount={runsQuery.data?.totalCount ?? 0}
+									itemCount={taskRuns.length}
 									setLimit={(value) => {
 										setRunPageSize(value);
 										setRunPage(0);
@@ -782,7 +714,7 @@ export function TasksPage({
 									setPageIndex={setRunPage}
 								/>
 								<TaskRunTable
-									runs={pagedRuns}
+									runs={taskRuns}
 									definitions={definitions}
 									busyRunId={busyRunId}
 									onOpenDetail={setSelectedRun}
@@ -828,8 +760,8 @@ export function TasksPage({
 								<PaginationControls
 									limit={auditPageSize}
 									pageIndex={auditPage}
-									totalCount={filteredAuditItems.length}
-									itemCount={pagedAuditItems.length}
+									totalCount={auditQuery.data?.totalCount ?? 0}
+									itemCount={auditItems.length}
 									setLimit={(value) => {
 										setAuditPageSize(value);
 										setAuditPage(0);
@@ -837,14 +769,39 @@ export function TasksPage({
 									setPageIndex={setAuditPage}
 								/>
 								<TaskAuditTable
-									items={pagedAuditItems}
+									items={auditItems}
 									onOpenRun={(runId) => void openAuditRun(runId)}
 								/>
 								<div className="grid gap-3">
 									<div className="flex items-center justify-between gap-3">
 										<h3 className="text-sm font-semibold">删除快照</h3>
-										<Badge variant="outline">{deletedSnapshots.length}</Badge>
+										<Badge variant="outline">
+											{deletedSnapshotsQuery.data?.totalCount ?? 0}
+										</Badge>
 									</div>
+									<label className="grid max-w-md gap-1 text-sm">
+										<span className="text-muted-foreground">搜索删除快照</span>
+										<input
+											className={inputClass}
+											value={snapshotSearch}
+											placeholder="任务名、类型或删除原因"
+											onChange={(event) => {
+												setSnapshotSearch(event.target.value);
+												setSnapshotPage(0);
+											}}
+										/>
+									</label>
+									<PaginationControls
+										limit={snapshotPageSize}
+										pageIndex={snapshotPage}
+										totalCount={deletedSnapshotsQuery.data?.totalCount ?? 0}
+										itemCount={deletedSnapshots.length}
+										setLimit={(value) => {
+											setSnapshotPageSize(value);
+											setSnapshotPage(0);
+										}}
+										setPageIndex={setSnapshotPage}
+									/>
 									{deletedSnapshots.length === 0 ? (
 										<EmptyState text="暂无删除快照，或当前账号无权查看。" />
 									) : (

@@ -3,7 +3,8 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UPDATE_SCRIPT="$PROJECT_ROOT/scripts/update.sh"
-TEST_ROOT="$(mktemp -d)"
+mkdir -p "$PROJECT_ROOT/.temp/postgresql-migration/lifecycle"
+TEST_ROOT="$(mktemp -d "$PROJECT_ROOT/.temp/postgresql-migration/lifecycle/updater-XXXXXX")"
 FAKE_BIN="$TEST_ROOT/bin"
 FAKE_REPO="$TEST_ROOT/repo"
 CALL_LOG="$TEST_ROOT/calls.log"
@@ -11,7 +12,7 @@ OUTPUT_LOG="$TEST_ROOT/output.log"
 FAKE_STATE_DIR="$TEST_ROOT/state"
 
 cleanup() {
-	rm -rf "$TEST_ROOT"
+	printf '验证文件保留在：%s\n' "$TEST_ROOT"
 }
 trap cleanup EXIT
 
@@ -30,6 +31,14 @@ if [[ "${1:-}" == "status" ]]; then
 	if [[ "${FAKE_SOURCE_DIRTY:-0}" == "1" ]]; then
 		printf ' M src/server.ts\n'
 	fi
+	exit 0
+fi
+if [[ "${1:-}" == "diff" && "${2:-}" == "--name-only" && "${3:-}" == "-z" ]]; then
+	[[ "${FAKE_DEPLOYMENT_DIRTY:-0}" != 1 ]] || printf 'compose.yml\0'
+	exit 0
+fi
+if [[ "${1:-}" == "ls-files" && "${2:-}" == "--others" ]]; then
+	[[ "${FAKE_DEPLOYMENT_DIRTY:-0}" != 1 ]] || printf 'up.sh\0'
 	exit 0
 fi
 if [[ "${1:-}" == "diff" && "${2:-}" == "--name-only" && "${3:-}" == "HEAD" ]]; then
@@ -164,6 +173,7 @@ if [[ "$*" == *"qyctl update check"* ]]; then
 	printf '状态：当前已是最新版本\n'
 	exit 0
 fi
+if [[ "$*" == "compose stop qingyan" || "$*" == "compose start qingyan" || "$*" == "compose exec -T qingyan node "* ]]; then exit 0; fi
 if [[ "$*" == *"qyctl backup"* ]]; then
 	printf 'backup-created\n'
 	exit 0
@@ -260,7 +270,7 @@ if ! run_update_args --network-profile cn > "$OUTPUT_LOG" 2>&1; then
 	exit 1
 fi
 grep -F "网络配置档：cn" "$OUTPUT_LOG" > /dev/null
-grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_NODE_DIST_URL=https://npmmirror.com/mirrors/node --build-arg QINGYAN_BETTER_SQLITE3_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3 qingyan" "$CALL_LOG" > /dev/null
+grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmmirror.com qingyan" "$CALL_LOG" > /dev/null
 
 reset_case
 if ! run_update_args --network-profile official > "$OUTPUT_LOG" 2>&1; then
@@ -268,7 +278,7 @@ if ! run_update_args --network-profile official > "$OUTPUT_LOG" 2>&1; then
 	exit 1
 fi
 grep -F "网络配置档：official" "$OUTPUT_LOG" > /dev/null
-grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://deb.debian.org/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmjs.org --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmjs.org --build-arg QINGYAN_NODE_DIST_URL=https://nodejs.org/download/release --build-arg QINGYAN_BETTER_SQLITE3_BINARY_HOST=https://github.com/WiseLibs/better-sqlite3/releases/download qingyan" "$CALL_LOG" > /dev/null
+grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://deb.debian.org/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmjs.org --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmjs.org qingyan" "$CALL_LOG" > /dev/null
 
 reset_case
 if ! run_update FAKE_CN_NETWORK_FAIL=1 > "$OUTPUT_LOG" 2>&1; then
@@ -320,11 +330,12 @@ if ! run_update > "$OUTPUT_LOG" 2>&1; then
 	exit 1
 fi
 grep -F "网络配置档：auto -> cn" "$OUTPUT_LOG" > /dev/null
-grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_NODE_DIST_URL=https://npmmirror.com/mirrors/node --build-arg QINGYAN_BETTER_SQLITE3_BINARY_HOST=https://registry.npmmirror.com/-/binary/better-sqlite3 qingyan" "$CALL_LOG" > /dev/null
-assert_before "docker compose exec -T qingyan qyctl backup" "git switch --detach v0.2.3"
+grep -F "docker compose --progress plain build --pull --build-arg QINGYAN_APT_MAIN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian --build-arg QINGYAN_COREPACK_NPM_REGISTRY=https://registry.npmmirror.com --build-arg QINGYAN_PNPM_REGISTRY=https://registry.npmmirror.com qingyan" "$CALL_LOG" > /dev/null
+assert_before "docker compose stop qingyan" "docker compose run --rm --no-deps qingyan qyctl backup"
+assert_before "docker compose run --rm --no-deps qingyan qyctl backup" "git switch --detach v0.2.3"
 assert_before "git switch --detach v0.2.3" "docker compose --progress plain build --pull"
-assert_before "docker compose exec -T qingyan qyctl upgrade --dry-run" "docker compose exec -T qingyan qyctl upgrade --yes"
-assert_before "docker compose exec -T qingyan qyctl upgrade --yes" "docker compose restart qingyan"
+assert_before "docker compose exec -T qingyan qyctl upgrade --dry-run" "docker compose run --rm --no-deps qingyan qyctl upgrade --yes"
+assert_before "docker compose run --rm --no-deps qingyan qyctl upgrade --yes" "docker compose restart qingyan"
 grep -F "更新完成" "$OUTPUT_LOG" > /dev/null
 
 reset_case

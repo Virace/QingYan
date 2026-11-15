@@ -54,7 +54,7 @@ export type PublicUpgradePlan = UpgradePlan;
 
 const REDACTED_VALUE = "[redacted]";
 const SECRET_KEY_PATTERN =
-	/(password|secret|token|apikey|api_key|privatekey|private_key|credential)/i;
+	/(password|secret|token|apikey|api_key|privatekey|private_key|credential|connectionString|database\.url|^url$)/i;
 
 function redactJsonValue(value: JsonValue): JsonValue {
 	if (Array.isArray(value)) {

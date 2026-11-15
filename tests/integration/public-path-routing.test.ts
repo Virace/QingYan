@@ -37,6 +37,7 @@ describe("public path routing", () => {
 		expect(prefixedHealthz.json()).toEqual({
 			service: "QingYan",
 			status: "ok",
+			mode: "normal",
 		});
 		expect(rootBootstrap.statusCode).toBe(404);
 		expect(prefixedBootstrap.statusCode).not.toBe(404);

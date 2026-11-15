@@ -24,6 +24,7 @@ export interface TaskLogWriter {
 
 export function createTaskLogWriter(input: {
 	taskRunId: string;
+	claimToken?: string | null;
 	eventLogs: TaskEventLogRepository;
 }): TaskLogWriter {
 	async function write(line: {
@@ -36,6 +37,7 @@ export function createTaskLogWriter(input: {
 	}): Promise<void> {
 		await input.eventLogs.appendLogLine({
 			taskRunId: input.taskRunId,
+			claimToken: input.claimToken,
 			stream: line.stream ?? "system",
 			level: line.level,
 			message: line.message,

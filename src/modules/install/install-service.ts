@@ -1,10 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { eq, sql } from "drizzle-orm";
 import { stringify } from "yaml";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-
 import {
 	applyStartupEnvOverrides,
 	envMappings,
@@ -13,7 +12,8 @@ import { buildPublicUrl } from "../../config/public-path";
 import { configSchema, type StartupConfig } from "../../config/types";
 import { createDatabaseClients } from "../../db/client";
 import { applyDatabaseMigrations } from "../../db/migrations";
-import { adminBootstrapState, siteSettings } from "../../db/schema";
+import { siteSettings } from "../../db/schema";
+import { AdminIdentityService } from "../admin/admin-identity-service";
 import { createAdminConsolePath } from "../admin/bootstrap-utils";
 import {
 	createInitialAdminPassword,
@@ -21,43 +21,22 @@ import {
 } from "../admin/password-hash";
 import { AdminSystemSettingsRepository } from "../admin/system-settings-repository";
 import {
-	parseQingYanExport,
-	type QingYanExport,
-} from "../import-export/qingyan/export-model";
-import type {
-	QingYanApplyResult,
-	QingYanDryRunResult,
-	QingYanExistingStrategy,
-	QingYanImportMode,
-	QingYanSettingsStrategy,
-} from "../import-export/qingyan/import-service";
-import { QingYanImportService } from "../import-export/qingyan/import-service";
-import { InvalidRequestError } from "../shared/errors";
-import { createSiteRegistry } from "../shared/site-registry";
-import {
-	flattenSystemSettings,
-	readSystemSettingsRows,
-	type SystemSettingRow,
-} from "../system-settings/codec";
-import {
-	IpRegionUpdater,
-	type IpRegionUpdateResult,
-	type IpVersion,
-} from "../comments/metadata/ip-region-updater";
-import {
 	normalizeExternalAvatarBaseUrl,
 	validateExternalAvatarQuery,
 } from "../comments/gravatar";
 import {
-	isSafeHttpUrl,
-	normalizeOriginList,
-	sanitizeOptionalSafeHttpUrl,
-} from "../shared/url-policy";
+	type IpRegionUpdateResult,
+	IpRegionUpdater,
+	type IpVersion,
+} from "../comments/metadata/ip-region-updater";
 import {
 	normalizeVerifiedAuthorEmail,
 	serializeVerifiedAuthorSettings,
 	type VerifiedAuthorSettings,
 } from "../comments/verified-author";
+import { databaseIdentity } from "../database-backup/postgres-tools";
+import { AppError } from "../shared/errors";
+import { createSiteRegistry } from "../shared/site-registry";
 import {
 	defaultEngagementSettings,
 	type EngagementSettings,
@@ -65,30 +44,29 @@ import {
 	serializeEngagementSettings,
 } from "../shared/site-settings-defaults";
 import {
+	isSafeHttpUrl,
+	normalizeOriginList,
+	sanitizeOptionalSafeHttpUrl,
+} from "../shared/url-policy";
+import {
+	flattenSystemSettings,
+	readSystemSettingsRows,
+	type SystemSettingRow,
+} from "../system-settings/codec";
+import {
 	createSystemSettingsDefaults,
 	defaultAdminSessionTtlMinutes,
 	type SystemSettings,
 	systemSettingsSchema,
 } from "../system-settings/definitions";
+import {
+	removePartialUpgradeMarker,
+	updatePartialUpgradeMarker,
+	writePartialUpgradeMarker,
+} from "../upgrade/partial-marker";
+import { classifyConnectionError } from "../upgrade/state";
 import type { MinimalInstallConfig } from "./minimal-config";
 import { writeInstallLock } from "./state";
-
-const installRestoreOptionsSchema = z
-	.object({
-		enabled: z.boolean().default(false),
-		fileName: z.string().min(1).default("qingyan-export.json"),
-		payload: z.unknown(),
-		existingStrategy: z
-			.enum(["fail_on_existing", "skip_existing"])
-			.default("fail_on_existing"),
-		importMode: z
-			.enum(["data_only", "settings_only", "full_site"])
-			.default("full_site"),
-		settingsStrategy: z
-			.enum(["fail_on_existing", "replace_settings"])
-			.default("replace_settings"),
-	})
-	.optional();
 
 const installVerifiedAuthorSchema = z
 	.object({
@@ -157,9 +135,7 @@ export const installApplySchema = z.object({
 		publicPath: configSchema.shape.server.shape.publicPath,
 		trustProxy: z.boolean().default(true),
 	}),
-	database: z.object({
-		sqliteFile: z.string().min(1).default("./data/qingyan.db"),
-	}),
+	database: configSchema.shape.database,
 	admin: z.object({
 		consolePath: z.string().min(1).optional(),
 		username: z.string().min(1).optional(),
@@ -197,20 +173,10 @@ export const installApplySchema = z.object({
 		})
 		.optional(),
 	systemSettings: z.unknown().optional(),
-	restore: installRestoreOptionsSchema,
 });
 
 export type InstallApplyInput = z.infer<typeof installApplySchema>;
 type InstallSiteInput = InstallApplyInput["site"];
-type InstallRestoreOptions = {
-	enabled: true;
-	fileName: string;
-	payload: QingYanExport;
-	existingStrategy: QingYanExistingStrategy;
-	importMode: QingYanImportMode;
-	settingsStrategy: QingYanSettingsStrategy;
-	site: InstallSiteInput;
-};
 type InstallSiteSettingsInput = {
 	comments?: {
 		verifiedAuthor: VerifiedAuthorSettings;
@@ -219,12 +185,11 @@ type InstallSiteSettingsInput = {
 };
 type NormalizedInstallInput = Omit<
 	InstallApplyInput,
-	"admin" | "token" | "site" | "restore"
+	"admin" | "token" | "site"
 > & {
 	token?: string;
 	site: InstallSiteInput;
 	siteSettings?: InstallSiteSettingsInput;
-	restore?: InstallRestoreOptions;
 	admin: {
 		consolePath: string;
 		consolePathGenerated: boolean;
@@ -319,7 +284,7 @@ export interface InstallPlan {
 		writes: string[];
 	};
 	database: {
-		sqliteFile: string;
+		url: string;
 		seeds: string[];
 	};
 	admin: {
@@ -333,14 +298,6 @@ export interface InstallPlan {
 		allowedOrigins: string[];
 	};
 	siteSettings?: InstallSiteSettingsInput;
-	restore?: {
-		enabled: true;
-		fileName: string;
-		siteKey: string;
-		importMode: QingYanImportMode;
-		settingsStrategy: QingYanSettingsStrategy;
-		dryRun: QingYanDryRunResult;
-	};
 	systemSettings: Array<{
 		category: string;
 		key: string;
@@ -372,50 +329,12 @@ export interface InstallPlan {
 	warnings: string[];
 }
 
-function parseRestoreOptions(
-	restore: InstallApplyInput["restore"],
-): InstallRestoreOptions | undefined {
-	if (!restore?.enabled) {
-		return undefined;
-	}
-	let payload: QingYanExport;
-	try {
-		payload = parseQingYanExport(restore.payload);
-	} catch (error) {
-		throw new InvalidRequestError({
-			message:
-				error instanceof Error
-					? `无效 QingYan 导出文件：${error.message}`
-					: "无效 QingYan 导出文件。",
-		});
-	}
-	if (payload.scope.siteKey !== payload.data.site.siteKey) {
-		throw new InvalidRequestError({
-			message: "导出文件 scope.siteKey 与 data.site.siteKey 不一致。",
-		});
-	}
-	return {
-		enabled: true,
-		fileName: restore.fileName,
-		payload,
-		existingStrategy: restore.existingStrategy,
-		importMode: restore.importMode,
-		settingsStrategy: restore.settingsStrategy,
-		site: {
-			siteKey: payload.data.site.siteKey,
-			name: payload.data.site.name,
-			allowedOrigins: payload.data.site.allowedOrigins,
-		},
-	};
-}
-
 function normalizeInstallInput(
 	input: InstallApplyInput,
 ): NormalizedInstallInput {
 	const generatedConsolePath = !input.admin.consolePath;
 	const defaultedUsername = !input.admin.username;
 	const generatedPassword = !input.admin.password;
-	const restore = parseRestoreOptions(input.restore);
 	const siteSettingsInput: InstallSiteSettingsInput = {
 		comments: input.siteSettings?.comments?.verifiedAuthor
 			? {
@@ -426,9 +345,8 @@ function normalizeInstallInput(
 	};
 	return {
 		...input,
-		site: restore?.site ?? input.site,
+		site: input.site,
 		siteSettings: siteSettingsInput,
-		restore,
 		admin: {
 			consolePath: input.admin.consolePath ?? createAdminConsolePath(),
 			consolePathGenerated: generatedConsolePath,
@@ -453,12 +371,7 @@ function buildStartupConfig(input: NormalizedInstallInput): StartupConfig {
 			publicPath: input.server.publicPath,
 			trustProxy: input.server.trustProxy,
 		},
-		database: {
-			client: "sqlite",
-			sqlite: {
-				file: input.database.sqliteFile,
-			},
-		},
+		database: input.database,
 		admin: {
 			session: {
 				cookieName: session?.cookieName ?? "qingyan_admin",
@@ -734,9 +647,7 @@ function resolveInstallConfigInput(input: {
 	return {
 		...normalized,
 		server: startupConfig.server,
-		database: {
-			sqliteFile: startupConfig.database.sqlite.file,
-		},
+		database: startupConfig.database,
 		startupConfig,
 		systemSettingSeeds: systemSettings,
 		values: buildValueMeta({
@@ -774,9 +685,7 @@ function buildApplyPayload(
 			publicPath: input.startupConfig.server.publicPath,
 			trustProxy: input.startupConfig.server.trustProxy,
 		},
-		database: {
-			sqliteFile: input.startupConfig.database.sqlite.file,
-		},
+		database: input.startupConfig.database,
 		admin: adminPayload,
 		security: input.startupConfig.security,
 		site: input.site,
@@ -784,16 +693,6 @@ function buildApplyPayload(
 	};
 	if (input.siteSettings) {
 		payload.siteSettings = input.siteSettings;
-	}
-	if (input.restore) {
-		payload.restore = {
-			enabled: true,
-			fileName: input.restore.fileName,
-			payload: input.restore.payload,
-			existingStrategy: input.restore.existingStrategy,
-			importMode: input.restore.importMode,
-			settingsStrategy: input.restore.settingsStrategy,
-		};
 	}
 	return payload;
 }
@@ -814,6 +713,7 @@ function timestampForBackup(): string {
 async function writeStartupConfig(
 	configPath: string,
 	config: StartupConfig,
+	stagedConfigPath?: string,
 ): Promise<string | undefined> {
 	const validated = configSchema.parse(config);
 	await mkdir(path.dirname(configPath), { recursive: true });
@@ -822,59 +722,73 @@ async function writeStartupConfig(
 		backupPath = `${configPath}.bak-${timestampForBackup()}`;
 		await copyFile(configPath, backupPath);
 	}
-	const tmpPath = `${configPath}.${Date.now()}.tmp`;
-	await writeFile(tmpPath, stringify(validated), "utf-8");
+	const tmpPath = stagedConfigPath ?? `${configPath}.${Date.now()}.tmp`;
+	await writeFile(tmpPath, stringify(validated), {
+		encoding: "utf-8",
+		mode: 0o600,
+	});
 	await rename(tmpPath, configPath);
 	return backupPath;
 }
 
 async function seedDatabase(input: {
-	databaseFile: string;
+	database: StartupConfig["database"];
 	admin: NormalizedInstallInput["admin"];
 	site: InstallApplyInput["site"];
 	siteSettings?: InstallSiteSettingsInput;
 	systemSettings: InstallSystemSettingSeed[];
-	restore?: InstallRestoreOptions;
 	ipRegionUpdater?: InstallIpRegionUpdater;
 }): Promise<{
-	restoreApply?: QingYanApplyResult;
 	ipRegionBootstrap: InstallIpRegionBootstrapResult[];
 }> {
-	const { db, sqlite } = createDatabaseClients(input.databaseFile);
+	const { db, pool, close } = createDatabaseClients(
+		input.database.url,
+		input.database,
+	);
 	try {
-		applyDatabaseMigrations(sqlite);
-		const registry = createSiteRegistry();
-		await db.insert(adminBootstrapState).values({
-			id: 1,
-			consolePath: input.admin.consolePath,
-			username: input.admin.username,
-			passwordHash: createPasswordHash(input.admin.password),
-			passwordRotatedAt: null,
+		await applyDatabaseMigrations(pool);
+		await db.transaction(async (tx) => {
+			const registry = createSiteRegistry();
+			await new AdminIdentityService(tx).ensureInitialAdmin({
+				consolePath: input.admin.consolePath,
+				username: input.admin.username,
+				passwordHash: createPasswordHash(input.admin.password),
+			});
+
+			const registeredSite = await registry.seedSiteFromTemplate(
+				tx,
+				input.site,
+			);
+			if (input.siteSettings) {
+				await tx
+					.update(siteSettings)
+					.set({
+						verifiedAuthorJson: input.siteSettings.comments
+							? serializeVerifiedAuthorSettings(
+									input.siteSettings.comments.verifiedAuthor,
+								)
+							: undefined,
+						allowPageLike: input.siteSettings.engagement.pageLikes.enabled,
+						engagementJson: serializeEngagementSettings(
+							input.siteSettings.engagement,
+						),
+					})
+					.where(eq(siteSettings.siteId, registeredSite.id));
+			}
+			const systemSettings = new AdminSystemSettingsRepository(tx);
+			for (const seed of input.systemSettings) {
+				await systemSettings.upsert(seed.category, seed.key, seed.value);
+			}
+			const version = (
+				JSON.parse(readFileSync(path.resolve("package.json"), "utf8")) as {
+					version: string;
+				}
+			).version;
+			await tx.execute(
+				sql`INSERT INTO __qingyan_upgrades(name,to_version,summary_json) VALUES(${`application-version:${version}`},${version},'{}'::jsonb)`,
+			);
 		});
-		const registeredSite = await registry.seedSiteFromTemplate(db, input.site);
-		if (input.siteSettings) {
-			await db
-				.update(siteSettings)
-				.set({
-					verifiedAuthorJson: input.siteSettings.comments
-						? serializeVerifiedAuthorSettings(
-								input.siteSettings.comments.verifiedAuthor,
-							)
-						: undefined,
-					allowPageLike: input.siteSettings.engagement.pageLikes.enabled,
-					engagementJson: serializeEngagementSettings(
-						input.siteSettings.engagement,
-					),
-				})
-				.where(eq(siteSettings.siteId, registeredSite.id));
-		}
-		const systemSettings = new AdminSystemSettingsRepository(db);
-		for (const seed of input.systemSettings) {
-			await systemSettings.upsert(seed.category, seed.key, seed.value);
-		}
-		const restoreApply = input.restore
-			? applyRestoreImport(sqlite, input.restore)
-			: undefined;
+
 		const ipRegionBootstrap = await bootstrapIpRegionDatabase({
 			db,
 			settings: (await new AdminSystemSettingsRepository(
@@ -883,11 +797,10 @@ async function seedDatabase(input: {
 			updater: input.ipRegionUpdater,
 		});
 		return {
-			restoreApply,
 			ipRegionBootstrap,
 		};
 	} finally {
-		sqlite.close();
+		await close();
 	}
 }
 
@@ -910,53 +823,6 @@ async function bootstrapIpRegionDatabase(input: {
 		});
 	}
 	return results;
-}
-
-async function buildRestoreDryRun(
-	restore: InstallRestoreOptions,
-): Promise<QingYanDryRunResult> {
-	const { db, sqlite } = createDatabaseClients(":memory:");
-	try {
-		applyDatabaseMigrations(sqlite);
-		const registry = createSiteRegistry();
-		await registry.seedSiteFromTemplate(db, restore.site);
-		const importService = new QingYanImportService(sqlite);
-		return importService.createDryRun({
-			siteKey: restore.site.siteKey,
-			fileName: restore.fileName,
-			payload: restore.payload,
-			existingStrategy: restore.existingStrategy,
-			importMode: restore.importMode,
-			settingsStrategy: restore.settingsStrategy,
-		}).dryRun;
-	} finally {
-		sqlite.close();
-	}
-}
-
-function applyRestoreImport(
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"],
-	restore: InstallRestoreOptions,
-): QingYanApplyResult {
-	const importService = new QingYanImportService(sqlite);
-	const dryRun = importService.createDryRun({
-		siteKey: restore.site.siteKey,
-		fileName: restore.fileName,
-		payload: restore.payload,
-		existingStrategy: restore.existingStrategy,
-		importMode: restore.importMode,
-		settingsStrategy: restore.settingsStrategy,
-	});
-	if (dryRun.dryRun.summary.conflicts > 0) {
-		throw new InvalidRequestError({
-			message: "恢复计划仍存在冲突，不能执行安装恢复。",
-		});
-	}
-	return importService.apply(dryRun.job.id, {
-		existingStrategy: restore.existingStrategy,
-		importMode: restore.importMode,
-		settingsStrategy: restore.settingsStrategy,
-	}).apply;
 }
 
 export async function buildInstallPlan(input: {
@@ -985,9 +851,7 @@ export async function buildInstallPlan(input: {
 							: readPathValue(resolved.startupConfig, mapping.path),
 					),
 		}));
-	const restoreDryRun = resolved.restore
-		? await buildRestoreDryRun(resolved.restore)
-		: undefined;
+	await inspectInstallDatabase(resolved.startupConfig.database);
 
 	return {
 		config: {
@@ -995,7 +859,7 @@ export async function buildInstallPlan(input: {
 			writes: ["server", "database", "admin.session", "security"],
 		},
 		database: {
-			sqliteFile: resolved.startupConfig.database.sqlite.file,
+			url: "[redacted]",
 			seeds: [
 				"admin_bootstrap_state",
 				"sites",
@@ -1023,17 +887,6 @@ export async function buildInstallPlan(input: {
 					engagement: resolved.siteSettings.engagement,
 				}
 			: undefined,
-		restore:
-			resolved.restore && restoreDryRun
-				? {
-						enabled: true,
-						fileName: resolved.restore.fileName,
-						siteKey: resolved.restore.site.siteKey,
-						importMode: resolved.restore.importMode,
-						settingsStrategy: resolved.restore.settingsStrategy,
-						dryRun: restoreDryRun,
-					}
-				: undefined,
 		systemSettings: resolved.systemSettingSeeds.map((seed) => ({
 			category: seed.category,
 			key: seed.key,
@@ -1048,7 +901,16 @@ export async function buildInstallPlan(input: {
 		),
 		env,
 		values: resolved.values,
-		applyPayload: buildApplyPayload(resolved),
+		applyPayload: {
+			...buildApplyPayload(resolved),
+			database: {
+				...resolved.database,
+				url: "[redacted]",
+				tls: resolved.database.tls
+					? { rejectUnauthorized: resolved.database.tls.rejectUnauthorized }
+					: undefined,
+			},
+		},
 		warnings: [
 			"安装完成后会按安装切换模式进入正常服务；manual 模式需要人工重启 QingYan。",
 			"安装完成后的后台入口由本次写入的 admin bootstrap 决定。",
@@ -1071,29 +933,54 @@ export async function applyInstall(input: {
 		environment: input.environment,
 	});
 	const startupConfig = resolved.startupConfig;
-	const backupPath = await writeStartupConfig(
-		input.minimalConfig.configPath,
-		startupConfig,
+	await inspectInstallDatabase(startupConfig.database);
+	const markerPath = path.resolve(
+		path.dirname(input.minimalConfig.configPath),
+		"../data/upgrade/partial-upgrade.json",
 	);
-	const databaseFile = path.resolve(
-		process.cwd(),
-		startupConfig.database.sqlite.file,
-	);
-	await mkdir(path.dirname(databaseFile), { recursive: true });
+	const stagedConfigPath = `${input.minimalConfig.configPath}.install-staged`;
+	await mkdir(path.dirname(stagedConfigPath), { recursive: true });
+	writePartialUpgradeMarker({
+		markerPath,
+		fromVersion: "not_installed",
+		toVersion: (
+			JSON.parse(readFileSync(path.resolve("package.json"), "utf8")) as {
+				version: string;
+			}
+		).version,
+		stagedConfigPath,
+		planPath: "",
+		backupDirectory: "",
+		currentStep: "install-database",
+		targetIdentity: databaseIdentity(startupConfig.database.url),
+	});
+	await writeFile(stagedConfigPath, stringify(startupConfig), {
+		mode: 0o600,
+		flag: "wx",
+	});
+
 	const seedResult = await seedDatabase({
-		databaseFile,
+		database: startupConfig.database,
 		admin: resolved.admin,
 		site: resolved.site,
 		siteSettings: resolved.siteSettings,
 		systemSettings: resolved.systemSettingSeeds,
-		restore: resolved.restore,
 		ipRegionUpdater: input.ipRegionUpdater,
 	});
+	updatePartialUpgradeMarker(markerPath, { currentStep: "database-completed" });
+	const backupPath = await writeStartupConfig(
+		input.minimalConfig.configPath,
+		startupConfig,
+		stagedConfigPath,
+	);
+
 	const lockPath = await writeInstallLock({
 		configPath: input.minimalConfig.configPath,
-		databasePath: databaseFile,
+		databasePath: "postgresql",
 		adminConsolePath: resolved.admin.consolePath,
 	});
+
+	removePartialUpgradeMarker(markerPath);
 
 	return {
 		adminUrl: buildPublicUrl(
@@ -1104,7 +991,7 @@ export async function applyInstall(input: {
 		username: resolved.admin.username,
 		initialPassword: resolved.admin.password,
 		configPath: input.minimalConfig.configPath,
-		databasePath: databaseFile,
+		databasePath: "postgresql",
 		lockPath,
 		backupPath,
 		systemSettings: resolved.systemSettingSeeds.map((seed) => ({
@@ -1115,17 +1002,50 @@ export async function applyInstall(input: {
 			secret: seed.secret,
 			valuePreview: seed.secret ? "configured" : previewValue(seed.value),
 		})),
-		restore: resolved.restore
-			? {
-					enabled: true,
-					fileName: resolved.restore.fileName,
-					siteKey: resolved.restore.site.siteKey,
-					importMode: resolved.restore.importMode,
-					settingsStrategy: resolved.restore.settingsStrategy,
-					apply: seedResult.restoreApply,
-				}
-			: undefined,
 		ipRegionBootstrap: seedResult.ipRegionBootstrap,
 		restartRequired: true,
 	};
+}
+
+export async function inspectInstallDatabase(
+	database: StartupConfig["database"],
+): Promise<void> {
+	const { pool, close } = createDatabaseClients(database.url, database);
+	try {
+		const result = await pool.query<{
+			version: number;
+			can_create: boolean;
+			count: string;
+		}>(
+			`SELECT current_setting('server_version_num')::int AS version, has_schema_privilege(current_user, 'public', 'CREATE') AS can_create, (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f'))::text AS count`,
+		);
+		const state = result.rows[0];
+		if (!state || state.version < 180000 || state.version >= 190000)
+			throw new AppError(
+				409,
+				"DATABASE_VERSION_UNSUPPORTED",
+				"请使用 PostgreSQL 18 数据库。",
+			);
+		if (!state.can_create)
+			throw new AppError(
+				403,
+				"DATABASE_PERMISSION_DENIED",
+				"请授予应用账号目标数据库 public schema 的创建权限。",
+			);
+		if (Number(state.count) > 0)
+			throw new AppError(
+				409,
+				"DATABASE_TARGET_NOT_EMPTY",
+				"目标数据库已有数据，请选择预建的空数据库。",
+			);
+	} catch (error) {
+		if (error instanceof AppError) throw error;
+		throw new AppError(
+			503,
+			classifyConnectionError(error).toUpperCase(),
+			"数据库连接检查失败，请核对连接、账号和访问权限后重试。",
+		);
+	} finally {
+		await close();
+	}
 }

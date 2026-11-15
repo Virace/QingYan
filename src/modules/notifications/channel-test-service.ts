@@ -14,7 +14,7 @@ export type NotificationChannel = "email" | "webhook" | "wxpusher";
 
 export class NotificationChannelTestService {
 	public constructor(
-		private readonly queue: TaskQueue,
+		_queue: TaskQueue,
 		private readonly repository: TaskRunRepository,
 		private readonly configs: NotificationChannelConfigsRepository,
 		private readonly systemSettings: RuntimeSystemSettingsService,
@@ -32,45 +32,47 @@ export class NotificationChannelTestService {
 		const recipient =
 			input.recipient ??
 			channelTargetSnapshot(config, input.session.user.email);
-		const task = await this.queue.enqueue({
-			type: "channel_test",
-			category: "notification",
-			payload: {
-				channel: config.type,
-				channelConfigId: config.id,
-				channelConfigName: config.name,
-				templateContext: {
-					site: { name: "QingYan" },
-					comment: { content: "channel test" },
+		const { task, delivery } =
+			await this.repository.createNotificationTaskWithDelivery({
+				task: {
+					type: "channel_test",
+					category: "notification",
+					payload: {
+						channel: config.type,
+						channelConfigId: config.id,
+						channelConfigName: config.name,
+						templateContext: {
+							site: { name: "QingYan" },
+							comment: { content: "channel test" },
+						},
+						subjectTemplate: "[{{site.name}}] 通道测试",
+						bodyTemplate: "这是一条 QingYan 通知通道测试消息。",
+						format: config.type === "webhook" ? "json" : "text",
+					},
+					payloadSummary: {
+						channel: config.type,
+						channelConfigId: config.id,
+						channelConfigName: config.name,
+						recipientType: "test",
+						recipientAddressSnapshot: recipient,
+					},
+					siteKey: input.siteKey ?? null,
+					actorType: "admin_user",
+					actorId: String(input.session.user.id),
+					maxAttempts: 1,
 				},
-				subjectTemplate: "[{{site.name}}] 通道测试",
-				bodyTemplate: "这是一条 QingYan 通知通道测试消息。",
-				format: config.type === "webhook" ? "json" : "text",
-			},
-			payloadSummary: {
-				channel: config.type,
-				channelConfigId: config.id,
-				channelConfigName: config.name,
-				recipientType: "test",
-				recipientAddressSnapshot: recipient,
-			},
-			siteKey: input.siteKey ?? null,
-			actorType: "admin_user",
-			actorId: String(input.session.user.id),
-			maxAttempts: 1,
-		});
-		const delivery = await this.repository.createNotificationDelivery({
-			taskRunId: task.id,
-			channel: config.type,
-			channelConfigRef: config.id,
-			channelConfigNameSnapshot: config.name,
-			recipientType: "test",
-			recipientUserId: input.session.user.id,
-			recipientAddressSnapshot: recipient,
-			recipientIdentityKey: recipient,
-			eventFamily: "channel_test",
-			templateKey: "channel_test",
-		});
+				delivery: {
+					channel: config.type,
+					channelConfigRef: config.id,
+					channelConfigNameSnapshot: config.name,
+					recipientType: "test",
+					recipientUserId: input.session.user.id,
+					recipientAddressSnapshot: recipient,
+					recipientIdentityKey: recipient,
+					eventFamily: "channel_test",
+					templateKey: "channel_test",
+				},
+			});
 		return {
 			taskId: task.id,
 			deliveryId: delivery.id,

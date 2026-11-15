@@ -1,22 +1,17 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-
-import type { AppConfig } from "../config/types";
 import { loadConfig, resolveConfigPath } from "../config/load-config";
-import {
-	createDatabaseClients,
-	type AppDatabase,
-	type SqliteClient,
-} from "../db/client";
+import type { AppConfig } from "../config/types";
+import { type AppDatabase, createDatabaseClients } from "../db/client";
 
 export interface CliRuntime {
 	configPath: string;
 	config: AppConfig;
-	databaseFile: string;
-	sqlite: SqliteClient;
+	databaseUrl: string;
+	pool: import("pg").Pool;
 	db: AppDatabase;
 	packageVersion: string;
-	close(): void;
+	close(): Promise<void>;
 }
 
 export function resolveCliConfigPath(
@@ -43,18 +38,18 @@ export async function openCliRuntime(options?: {
 		options?.environment,
 	);
 	const config = await loadConfig(configPath, options?.environment);
-	const databaseFile = path.resolve(process.cwd(), config.database.sqlite.file);
-	const { sqlite, db } = createDatabaseClients(databaseFile);
+	const { pool, db, close } = createDatabaseClients(
+		config.database.url,
+		config.database,
+	);
 
 	return {
 		configPath,
 		config,
-		databaseFile,
-		sqlite,
+		databaseUrl: config.database.url,
+		pool,
 		db,
 		packageVersion: readPackageVersion(),
-		close() {
-			sqlite.close();
-		},
+		close,
 	};
 }

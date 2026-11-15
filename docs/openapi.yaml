@@ -10,6 +10,10 @@ info:
     普通公开请求的页面身份由已允许 `Referer` 的 URL pathname 派生：保留前导 `/`、尾 `/`、大小写和重复斜杠，丢弃 query/hash。请求体或 query 中的 `pageKey` / `pageUrl` 只作为 dev/mock 兼容字段，不作为生产公开运行时身份来源。启用页面来源权威模式后，未登记页面默认返回 inactive payload；配置为 forbidden 或开启 emergency lockdown 时返回 `PAGE_NOT_REGISTERED`，且不会创建 visitor、pending page candidate、PV、captcha 或页面反馈写入。
 
     `/api/admin/*` 属于 QingYan 自带 Admin Console 的管理接口，不进入公开 OpenAPI；这些接口可以随内置后台一起演进。开发者调试或扩展内置后台时可参考 `docs/admin-console-api.md`，但第三方站点前端不建议把它当作公开稳定合同依赖。
+
+    公开写入与验证码使用独立于访客统计的短期安全主体。服务端通过 `X-QingYan-Security` 响应头和站点专用 HttpOnly Cookie 返回凭据；无法使用 Cookie 的接入方可在后续请求的同名请求头或 `securityToken` 字段传回，正文/查询参数优先于请求头，随后才读取 Cookie。跨域响应公开 `X-QingYan-Security` 与 `Retry-After`。凭据不是后台登录身份，不应用作访客资料或业务去重键。
+
+    验证码阈值按站点、安全主体及操作累计，跨页面生效。授权绑定 `comment_create`、`comment_vote` 或 `page_like`，验证通过后五分钟内仅允许一次对应操作；并发提交仅一次成功，业务回滚释放预占。预占最多两分钟，升级后的旧验证码需重新验证。关闭访客记录仍执行相同准入与验证码。
 servers:
   - url: http://localhost:4401
     description: 本地开发默认地址
@@ -146,6 +150,8 @@ paths:
       operationId: getCaptchaState
       parameters:
         - $ref: '#/components/parameters/SiteKey'
+        - $ref: '#/components/parameters/CaptchaAction'
+        - $ref: '#/components/parameters/SecurityTokenHeader'
         - $ref: '#/components/parameters/PageKey'
         - $ref: '#/components/parameters/PageTitleOptional'
         - $ref: '#/components/parameters/PageUrlOptional'
@@ -350,6 +356,19 @@ paths:
           $ref: '#/components/responses/Error409'
 components:
   parameters:
+    SecurityTokenHeader:
+      name: X-QingYan-Security
+      in: header
+      required: false
+      schema:
+        $ref: '#/components/schemas/SecurityToken'
+      description: 服务端签发的站点安全凭据；无法使用站点 Cookie 时传回，不能用 visitorKey 替代。
+    CaptchaAction:
+      name: action
+      in: query
+      required: false
+      schema:
+        $ref: '#/components/schemas/CaptchaAction'
     SiteKey:
       name: siteKey
       in: query
@@ -458,11 +477,25 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     Error429:
       description: 触发频率限制
+      headers:
+        Retry-After:
+          description: 距离可重试时间的秒数，向上取整；已有 details.resetAt 仍使用 Unix 毫秒。
+          schema:
+            type: integer
+            minimum: 0
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    SecurityToken:
+      type: string
+      maxLength: 128
+      description: 短期安全凭据，按敏感信息处理，不进入页面 URL 查询参数或日志。
+    CaptchaAction:
+      type: string
+      enum: [comment_create, comment_vote, page_like]
+      default: comment_create
     HealthzResponse:
       type: object
       required: [service, status]
@@ -484,6 +517,20 @@ components:
           type: string
         requestId:
           type: string
+        recovery:
+          type: object
+          description: 受限操作的恢复信息。429 的 Retry-After 响应头与 retryAfterSec 均使用秒；已有 details.resetAt 保持 Unix 毫秒。
+          required: [reason, helpUrl]
+          properties:
+            reason:
+              type: string
+              enum: [rate_limited, blocked, login_required, email_not_allowed]
+            retryAfterSec:
+              type: integer
+              minimum: 0
+            helpUrl:
+              type: string
+              description: QingYan 同源受限说明页路径，不取代 API JSON 响应。原始评论输入由接入方保留。
         details:
           oneOf:
             - type: object
@@ -1064,6 +1111,16 @@ components:
     BootstrapViewer:
       type: object
       properties:
+        commentAccount:
+          type: object
+          required: [displayName, canComment]
+          properties:
+            displayName:
+              type: string
+            canComment:
+              type: boolean
+              const: true
+          description: 当前有效账号具有目标站点 comments.reply 权限时返回；昵称来自账号当前资料，可信作者展示关闭时仍返回。匿名或无权限会话省略此字段。
         verifiedAuthor:
           type: object
           required: [displayName, badgeLabel]
@@ -1072,7 +1129,7 @@ components:
               type: string
             badgeLabel:
               type: string
-          description: Minimal verified author state for the current admin session. Anonymous visitors omit the viewer object.
+          description: 可信作者展示已开启时返回当前授权账号的生效昵称和站点徽标；提交始终绑定同一账号资料。匿名访问省略 viewer。
     BootstrapResponse:
       type: object
       required:
@@ -1116,6 +1173,8 @@ components:
         - author
         - content
       properties:
+        securityToken:
+          $ref: '#/components/schemas/SecurityToken'
         siteKey:
           type: string
         pageKey:
@@ -1188,6 +1247,8 @@ components:
       type: object
       required: [siteKey, pageKey, choice]
       properties:
+        securityToken:
+          $ref: '#/components/schemas/SecurityToken'
         siteKey:
           type: string
         pageKey:
@@ -1213,6 +1274,10 @@ components:
       type: object
       required: [siteKey, pageKey, challengeId, mode, value]
       properties:
+        action:
+          $ref: '#/components/schemas/CaptchaAction'
+        securityToken:
+          $ref: '#/components/schemas/SecurityToken'
         siteKey:
           type: string
         pageKey:
@@ -1238,6 +1303,10 @@ components:
       type: object
       required: [siteKey, pageKey]
       properties:
+        action:
+          $ref: '#/components/schemas/CaptchaAction'
+        securityToken:
+          $ref: '#/components/schemas/SecurityToken'
         siteKey:
           type: string
         pageKey:
@@ -1260,6 +1329,10 @@ components:
       type: object
       required: [siteKey, pageKey, challengeId]
       properties:
+        action:
+          $ref: '#/components/schemas/CaptchaAction'
+        securityToken:
+          $ref: '#/components/schemas/SecurityToken'
         siteKey:
           type: string
         pageKey:
@@ -1282,6 +1355,8 @@ components:
       type: object
       required: [siteKey, pageKey, pageTitle, pageUrl]
       properties:
+        securityToken:
+          $ref: '#/components/schemas/SecurityToken'
         siteKey:
           type: string
         pageKey:

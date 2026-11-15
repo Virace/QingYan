@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { pageUrlInputSchema } from "../shared/page-url";
 import { commentInputLimitHardCaps } from "../shared/site-settings-defaults";
+import { normalizedEmailSchema } from "./email-policy";
 
 const siteKeyInputSchema = z.string().min(1).max(128);
 const pageKeyInputSchema = z
@@ -20,6 +21,8 @@ export const inlineCaptchaPayloadSchema = z.object({
 
 export const bootstrapQuerySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema.optional(),
 	pageTitle: pageTitleInputSchema.optional(),
 	pageUrl: pageUrlInputSchema.optional(),
@@ -38,6 +41,8 @@ export const threadQuerySchema = bootstrapQuerySchema.pick({
 
 export const createCommentBodySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema.optional(),
 	pageTitle: pageTitleInputSchema,
 	pageUrl: pageUrlInputSchema.optional(),
@@ -49,7 +54,11 @@ export const createCommentBodySchema = z.object({
 			.max(commentInputLimitHardCaps.authorNameMaxLength)
 			.optional()
 			.default(""),
-		email: z.string().trim().max(254).email().optional(),
+		email: z.preprocess(
+			(value) =>
+				typeof value === "string" && value.trim() === "" ? undefined : value,
+			normalizedEmailSchema.optional(),
+		),
 		website: z
 			.string()
 			.trim()
@@ -74,6 +83,8 @@ export const voteCommentParamsSchema = z.object({
 
 export const voteCommentBodySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema.optional(),
 	choice: z.enum(["up", "down"]),
 	captcha: inlineCaptchaPayloadSchema.optional().nullable(),
@@ -81,6 +92,8 @@ export const voteCommentBodySchema = z.object({
 
 export const captchaStateQuerySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema.optional(),
 	pageTitle: pageTitleInputSchema.optional(),
 	pageUrl: pageUrlInputSchema.optional(),
@@ -90,6 +103,8 @@ export const captchaRefreshBodySchema = captchaStateQuerySchema;
 
 export const captchaVerifyBodySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema.optional(),
 	challengeId: z.string().min(1).max(256),
 	mode: z.literal("inline_value"),
@@ -98,12 +113,16 @@ export const captchaVerifyBodySchema = z.object({
 
 export const captchaWidgetQuerySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema,
 	challengeId: z.string().min(1).max(256),
 });
 
 export const captchaCompleteBodySchema = z.object({
 	siteKey: siteKeyInputSchema,
+	securityToken: z.string().min(1).max(128).optional(),
+	action: z.enum(["comment_create", "comment_vote", "page_like"]).optional(),
 	pageKey: pageKeyInputSchema,
 	challengeId: z.string().min(1).max(256),
 	token: z.string().min(1).max(8192).optional(),

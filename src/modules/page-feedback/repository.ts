@@ -1,12 +1,14 @@
 import { and, eq, sql } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import { AppError } from "../shared/errors";
+
+import type { DatabaseExecutor } from "../../db/client";
 import { pageFeedbackRecords, pageThreads } from "../../db/schema";
 
 export class PageFeedbackRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
-	public getDatabase(): AppDatabase {
+	public getDatabase(): DatabaseExecutor {
 		return this.db;
 	}
 
@@ -26,42 +28,49 @@ export class PageFeedbackRepository {
 	}
 
 	public async createLike(pageThreadId: number, visitorId: number) {
-		await this.db.insert(pageFeedbackRecords).values({
-			pageThreadId,
-			visitorId,
+		return this.db.transaction(async (tx) => {
+			const [inserted] = await tx
+				.insert(pageFeedbackRecords)
+				.values({
+					pageThreadId,
+					visitorId,
+				})
+				.onConflictDoNothing({
+					target: [
+						pageFeedbackRecords.pageThreadId,
+						pageFeedbackRecords.visitorId,
+					],
+				})
+				.returning({ id: pageFeedbackRecords.id });
+			if (!inserted)
+				throw new AppError(
+					409,
+					"PAGE_FEEDBACK_ALREADY_LIKED",
+					"你已经点过赞了。",
+				);
+
+			const [thread] = await tx
+				.update(pageThreads)
+				.set({
+					pageLikeCount: sql`${pageThreads.pageLikeCount} + 1`,
+					updatedAt: new Date().toISOString(),
+				})
+				.where(eq(pageThreads.id, pageThreadId))
+				.returning();
+
+			return thread;
 		});
-
-		await this.db
-			.update(pageThreads)
-			.set({
-				pageLikeCount: sql`${pageThreads.pageLikeCount} + 1`,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(pageThreads.id, pageThreadId));
-
-		const [thread] = await this.db
-			.select()
-			.from(pageThreads)
-			.where(eq(pageThreads.id, pageThreadId))
-			.limit(1);
-
-		return thread;
 	}
 
 	public async incrementPageLike(pageThreadId: number) {
-		await this.db
+		const [thread] = await this.db
 			.update(pageThreads)
 			.set({
 				pageLikeCount: sql`${pageThreads.pageLikeCount} + 1`,
 				updatedAt: new Date().toISOString(),
 			})
-			.where(eq(pageThreads.id, pageThreadId));
-
-		const [thread] = await this.db
-			.select()
-			.from(pageThreads)
 			.where(eq(pageThreads.id, pageThreadId))
-			.limit(1);
+			.returning();
 
 		return thread;
 	}

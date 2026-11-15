@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
 
 import { blacklistRules, siteSettings, sites } from "../../src/db/schema";
 import { MemoryRateLimitStore } from "../../src/modules/shared/rate-limit";

@@ -1,11 +1,11 @@
-import type { TaskEventLogRepository } from "./task-event-log-repository";
-import type { TaskRunRepository } from "./task-run-repository";
 import type { ScheduledTaskRepository } from "./scheduled-task-repository";
+import type { TaskEventLogRepository } from "./task-event-log-repository";
+import { createTaskLogWriter } from "./task-log-writer";
+import type { TaskRunRepository } from "./task-run-repository";
 import type {
 	TaskRunnerContext,
 	TaskRunnerServices,
 } from "./task-runner-context";
-import { createTaskLogWriter } from "./task-log-writer";
 import type { TaskTypeRegistry } from "./task-type-registry";
 import type { TaskRunRecord } from "./types";
 
@@ -44,14 +44,24 @@ export class TaskRunner {
 	}
 
 	public async run(runId: string): Promise<void> {
-		const run = await this.options.taskRuns.markRunning(runId, {
-			workerId: this.options.workerId,
-			heartbeatAt: this.now().toISOString(),
-		});
-		await this.runClaimed(run);
+		const run = await this.options.taskRuns.markRunning(
+			runId,
+			{
+				workerId: this.options.workerId,
+				heartbeatAt: this.now().toISOString(),
+			},
+			this.now().toISOString(),
+		);
+		if (run) await this.runClaimed(run);
 	}
 
 	public async runClaimed(run: TaskRunRecord): Promise<void> {
+		if (
+			run.status !== "running" ||
+			!run.claimToken ||
+			!(await this.options.taskRuns.ownsClaim(run.id, run.claimToken))
+		)
+			return;
 		try {
 			const definition = this.options.registry.getRequired(run.type);
 			const payload = definition.payloadSchema.parse(run.input ?? run.payload);
@@ -66,12 +76,14 @@ export class TaskRunner {
 				services: this.options.services ?? {},
 				log: createTaskLogWriter({
 					taskRunId: run.id,
+					claimToken: run.claimToken,
 					eventLogs: this.options.eventLogs,
 				}),
 				now: this.now,
 				writeEvent: async (event) => {
 					await this.options.eventLogs.append({
 						taskRunId: run.id,
+						claimToken: run.claimToken,
 						eventType: event.eventType,
 						level: event.level ?? "info",
 						message: event.message ?? event.eventType,
@@ -80,7 +92,11 @@ export class TaskRunner {
 					});
 				},
 				updateProgress: async (progress) => {
-					await this.options.taskRuns.updateProgress(run.id, progress);
+					await this.options.taskRuns.updateProgress(
+						run.id,
+						progress,
+						run.claimToken,
+					);
 				},
 				writeAudit: () => undefined,
 			};
@@ -88,35 +104,60 @@ export class TaskRunner {
 				? await definition.precondition(payload, context)
 				: "ok";
 			if (precondition === "blocked") {
-				await this.options.taskRuns.markBlocked(run.id, "precondition_blocked");
+				await this.options.taskRuns.markBlocked(
+					run.id,
+					"precondition_blocked",
+					undefined,
+					run.claimToken,
+				);
 				return;
 			}
 			if (precondition === "skipped") {
-				await this.options.taskRuns.markSkipped(run.id, "precondition_skipped");
+				await this.options.taskRuns.markSkipped(
+					run.id,
+					"precondition_skipped",
+					undefined,
+					run.claimToken,
+				);
 				return;
 			}
 			const result = await definition.run(payload, context);
-			await this.options.taskRuns.markSucceeded(run.id, result);
+			await this.options.taskRuns.markSucceeded(run.id, result, run.claimToken);
 		} catch (error) {
 			if (error instanceof TaskRunCancelledError) {
-				await this.options.taskRuns.cancel(run.id, {
-					code: "TASK_RUN_CANCELLED",
-					message: error.message,
-				});
+				await this.options.taskRuns.cancel(
+					run.id,
+					{
+						code: "TASK_RUN_CANCELLED",
+						message: error.message,
+					},
+					run.claimToken,
+				);
 				return;
 			}
 			if (error instanceof TaskRunSuppressedError) {
-				await this.options.taskRuns.markSuppressed(run.id, {
-					code: "TASK_RUN_SUPPRESSED",
-					message: error.message,
-				});
+				await this.options.taskRuns.markSuppressed(
+					run.id,
+					{
+						code: "TASK_RUN_SUPPRESSED",
+						message: error.message,
+					},
+					run.claimToken,
+				);
 				return;
 			}
-			const failedRun = await this.options.taskRuns.markFailed(run.id, {
-				code: "TASK_RUN_FAILED",
-				message: error instanceof Error ? error.message : String(error),
-			});
-			await this.options.failureNotifications?.planForFailedRun(failedRun);
+			const failedRun = await this.options.taskRuns.markFailed(
+				run.id,
+				{
+					code: "TASK_RUN_FAILED",
+					message: error instanceof Error ? error.message : String(error),
+				},
+				run.claimToken,
+			);
+			if (failedRun.applied)
+				await this.options.failureNotifications?.planForFailedRun(failedRun);
+		} finally {
+			await this.options.taskRuns.finalizeScheduledTaskRun(run.id);
 		}
 	}
 }

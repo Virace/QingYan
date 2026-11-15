@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 const authStatePath = path.resolve(
 	process.cwd(),
@@ -23,11 +23,22 @@ async function isLoggedIn(page: Page): Promise<boolean> {
 
 async function login(page: Page): Promise<void> {
 	await page.goto("/qingyan/admin/");
+	await expect(
+		page.getByRole("img", { name: "管理员登录验证码", exact: true }),
+	).toBeVisible();
 	await page.getByLabel("用户名").fill("admin");
 	await page.getByLabel("密码").fill("admin");
 	await page.locator("#admin-captcha").fill("2468");
+	const loginResponse = page.waitForResponse(
+		(response) =>
+			response.request().method() === "POST" &&
+			new URL(response.url()).pathname.endsWith("/api/admin/session/login"),
+	);
 	await page.getByRole("button", { name: "登录后台" }).click();
-	await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
+	expect((await loginResponse).status()).toBe(200);
+	await expect(
+		page.getByRole("button", { name: "退出", exact: true }),
+	).toBeVisible();
 	mkdirSync(path.dirname(authStatePath), { recursive: true });
 	await page.context().storageState({ path: authStatePath });
 }
@@ -560,8 +571,8 @@ test("system settings mixed description fields keep switch controls aligned", as
 	await selectSettingsTab(page, "邮件");
 	await ensureSwitchState(page, "系统邮件", true);
 	await expect(page.getByText("SMTP Host", { exact: true })).toBeVisible();
-	await expectFieldRowsAligned(page, ["系统邮件", "SMTP Host"]);
-	await expectFieldControlsNearlyAligned(page, ["系统邮件", "SMTP Host"], 3);
+	await expectFieldRowsAligned(page, ["系统邮件", "评论邮件格式"]);
+	await expectFieldControlsNearlyAligned(page, ["系统邮件", "评论邮件格式"], 3);
 	await expectFieldControlGap(page, "SMTP Host", 14);
 });
 
@@ -714,8 +725,11 @@ test("site settings save failure hides internal ids while retaining diagnostics"
 		0,
 	);
 	await expect(
-		page.getByText("必须是 JSON boolean，不能使用 0/1。").first(),
+		page.getByText("请重新选择评论投票开关，再保存。").first(),
 	).toBeVisible();
+	await expect(
+		page.getByText("必须是 JSON boolean，不能使用 0/1。"),
+	).toHaveCount(0);
 	await expect
 		.poll(() => apiConsoleErrors.join("\n"))
 		.toContain("req_settings_visible");
@@ -812,6 +826,9 @@ test("system mail disabled hides smtp details without removing site notification
 	await expect(page.getByText("到邮件页签测试").first()).toBeVisible();
 
 	await page.getByRole("button", { name: "站点设置" }).click();
+	const guard = page.getByRole("alertdialog", { name: "放弃未保存的更改？" });
+	if (await guard.isVisible())
+		await guard.getByRole("button", { name: "放弃更改并离开" }).click();
 	await selectSettingsTab(page, "通知");
 	await expect(page.getByRole("heading", { name: "评论通知" })).toBeVisible();
 	await expect(
@@ -839,8 +856,7 @@ test("notification channel workflow uses dialogs and shows created test task", a
 	await expect(channelDialog).toHaveCount(0);
 	await expect(page.getByText(channelName)).toBeVisible();
 
-	await page.getByRole("button", { name: "保存发送服务设置" }).click();
-	await expect(page.getByText("系统设置保存失败")).toHaveCount(0);
+	await page.reload();
 	await selectSettingsTab(page, "发送服务");
 
 	const channelRow = page.locator("tr", { hasText: channelName });
@@ -853,6 +869,169 @@ test("notification channel workflow uses dialogs and shows created test task", a
 		.fill("webhook-target@example.test");
 	await testDialog.getByRole("button", { name: "发送测试通知" }).click();
 	await expect(page.getByText("测试通知已交给")).toBeVisible();
+});
+
+test("saving one site section preserves other tab drafts and guards navigation", async ({
+	page,
+}) => {
+	await openSiteSettings(page);
+	await selectSettingsTab(page, "评论");
+	await ensureSwitchState(page, "评论", true);
+	const contentLimit = page.locator('[data-field-label="评论正文"] input');
+	const initialLimit = await contentLimit.inputValue();
+	const nextLimit = initialLimit === "2222" ? "2333" : "2222";
+	await contentLimit.fill(nextLimit);
+	await selectSettingsTab(page, "访客与计数");
+	const likes = page.getByRole("switch", { name: "页面点赞", exact: true });
+	await likes.click();
+	await page.getByRole("button", { name: "保存访客与计数设置" }).click();
+	await expect(page.getByText("站点设置已保存")).toBeVisible();
+	await selectSettingsTab(page, "评论");
+	await expect(contentLimit).toHaveValue(nextLimit);
+	await expect(page.locator("[data-settings-actions]")).toContainText(
+		"未保存更改",
+	);
+	await page.getByRole("button", { name: "系统设置", exact: true }).click();
+	const guard = page.getByRole("alertdialog", { name: "放弃未保存的更改？" });
+	await expect(guard).toBeVisible();
+	await guard.getByRole("button", { name: "继续编辑" }).click();
+	await expect(contentLimit).toHaveValue(nextLimit);
+	await page
+		.locator("[data-settings-actions]")
+		.getByRole("button", { name: "放弃更改", exact: true })
+		.click();
+	await expect(contentLimit).toHaveValue(initialLimit);
+	await page.getByRole("button", { name: "系统设置", exact: true }).click();
+	await expect(
+		page.getByRole("heading", { name: "系统设置", exact: true }),
+	).toBeVisible();
+});
+
+test("channel save failure retains input and exposes a safe retry", async ({
+	page,
+}) => {
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "发送服务");
+	let shouldFail = true;
+	await page.route(
+		"**/api/admin/system-settings/sections/notifications",
+		async (route) => {
+			if (shouldFail && route.request().method() === "PATCH") {
+				await route.fulfill({
+					status: 500,
+					contentType: "application/json",
+					body: JSON.stringify({
+						error: {
+							code: "INTERNAL_ERROR",
+							message: "内部数据库错误：secret_config_json",
+						},
+					}),
+				});
+				return;
+			}
+			await route.fallback();
+		},
+	);
+	const name = `E2E retry ${Date.now()}`;
+	await page.getByRole("button", { name: "添加 Webhook" }).click();
+	const dialog = page.getByRole("dialog", { name: "添加通知渠道" });
+	await dialog.locator('[data-field-label="名称"] input').fill(name);
+	await dialog
+		.locator('[data-field-label="Webhook URL"] input')
+		.fill("https://example.test/retry");
+	await dialog.getByRole("button", { name: "确认", exact: true }).click();
+	await expect(
+		dialog.getByText("通知渠道保存失败", { exact: true }),
+	).toBeVisible();
+	await expect(dialog.locator('[data-field-label="名称"] input')).toHaveValue(
+		name,
+	);
+	await expect(
+		page.getByText("内部数据库错误：secret_config_json"),
+	).toHaveCount(0);
+	shouldFail = false;
+	await dialog.getByRole("button", { name: "确认", exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	await page.reload();
+	await expect(page.locator("tr", { hasText: name })).toBeVisible();
+	await page
+		.locator("tr", { hasText: name })
+		.getByRole("button", { name: "删除", exact: true })
+		.click();
+	await page
+		.getByRole("alertdialog", { name: "删除通知渠道", exact: true })
+		.getByRole("button", { name: "删除目标", exact: true })
+		.click();
+	await expect(page.locator("tr", { hasText: name })).toHaveCount(0);
+	await page.reload();
+	await expect(page.locator("tr", { hasText: name })).toHaveCount(0);
+});
+
+test("system security save preserves the separate rate limit draft", async ({
+	page,
+}) => {
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "限流");
+	const windowInput = page.locator(
+		'[data-field-label="管理员登录窗口（秒）"] input',
+	);
+	const savedWindow = await windowInput.inputValue();
+	const nextWindow = String(Number(savedWindow) + 1);
+	await windowInput.fill(nextWindow);
+	await selectSettingsTab(page, "后台与安全");
+	const retention = page.locator('[data-field-label="保留天数"] input');
+	await retention.fill(String(Number(await retention.inputValue()) + 1));
+	await page.getByRole("button", { name: "保存后台与安全设置" }).click();
+	await expect(page.getByText("系统设置已保存")).toBeVisible();
+	const savedResponse = await page.request.get(
+		"/qingyan/api/admin/system-settings",
+	);
+	expect(savedResponse.ok()).toBe(true);
+	expect(
+		(await savedResponse.json()).security.rateLimit.adminLogin.windowSec,
+	).toBe(Number(savedWindow));
+	await selectSettingsTab(page, "限流");
+	await expect(windowInput).toHaveValue(nextWindow);
+	await page
+		.locator("[data-settings-actions]")
+		.getByRole("button", { name: "放弃更改", exact: true })
+		.click();
+	await expect(windowInput).toHaveValue(savedWindow);
+});
+
+test("first system settings load failure can retry without a stale form", async ({
+	page,
+}) => {
+	if (!(await isLoggedIn(page))) await login(page);
+	let shouldFail = true;
+	await page.route("**/api/admin/system-settings", async (route) => {
+		if (shouldFail && route.request().method() === "GET") {
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({
+					error: {
+						code: "INTERNAL_ERROR",
+						message: "internal system settings failure",
+					},
+				}),
+			});
+			return;
+		}
+		await route.fallback();
+	});
+	await page.getByRole("button", { name: "系统设置", exact: true }).click();
+	await expect(
+		page.getByRole("alert").filter({ hasText: "系统设置加载失败" }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("button", { name: "保存后台与安全设置" }),
+	).toHaveCount(0);
+	shouldFail = false;
+	await page.getByRole("button", { name: "重试", exact: true }).click();
+	await expect(
+		page.getByRole("heading", { name: "系统设置", exact: true }),
+	).toBeVisible();
 });
 
 test("site notification events use independent recipient selectors", async ({
@@ -925,6 +1104,32 @@ test("notification template editor selects event, shows placeholders and preview
 	await expect(testDialog.getByText("template_test")).toHaveCount(0);
 	await testDialog.getByRole("button", { name: "取消" }).click();
 	await expect(testDialog).toHaveCount(0);
+});
+
+test("template drafts survive system tabs and protect leaving settings", async ({
+	page,
+}) => {
+	await openSystemSettings(page);
+	await selectSettingsTab(page, "发送服务");
+	const body = page.locator('[data-field-label="正文模板"] textarea');
+	const savedBody = await body.inputValue();
+	await body.fill(`${savedBody}\n未保存模板草稿`);
+	await expect(
+		page.getByRole("button", { name: "测试发送", exact: true }),
+	).toBeDisabled();
+	await selectSettingsTab(page, "邮件");
+	await expect(
+		page.getByRole("tab", { name: "发送服务", exact: true }),
+	).toContainText("未保存");
+	await selectSettingsTab(page, "发送服务");
+	await expect(body).toHaveValue(`${savedBody}\n未保存模板草稿`);
+	await page.getByRole("button", { name: "站点设置", exact: true }).click();
+	const guard = page.getByRole("alertdialog", { name: "放弃未保存的更改？" });
+	await expect(guard).toBeVisible();
+	await guard.getByRole("button", { name: "继续编辑" }).click();
+	await expect(body).toHaveValue(`${savedBody}\n未保存模板草稿`);
+	await page.getByRole("button", { name: "放弃模板更改", exact: true }).click();
+	await expect(body).toHaveValue(savedBody);
 });
 
 test("site settings comment group switch hides and restores comment details", async ({
@@ -1102,7 +1307,8 @@ test("ops page renders update plan and upgrade dry-run", async ({ page }) => {
 		await page.getByRole("button", { name: "运维" }).click();
 	}
 	await expect(page.getByRole("heading", { name: "运维" })).toBeVisible();
-	await expect(page.getByText("qingyan.full-backup / sqlite")).toBeVisible();
+	await expect(page.getByText("PostgreSQL 实例备份")).toBeVisible();
+	await expect(page.getByText("停写后通过运维命令备份与恢复")).toBeVisible();
 	await expect(page.getByText("compose-script")).toBeVisible();
 	await expect(page.getByText("更新检测")).toBeVisible();
 	await expect(page.getByText("GitHub Release / Virace/QingYan")).toBeVisible();

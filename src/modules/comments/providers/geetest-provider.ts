@@ -76,6 +76,7 @@ export function renderGeeTestWidgetHtml(input: {
           siteKey: model.commentsSiteKey,
           pageKey: model.pageKey,
           challengeId: model.challengeId,
+          securityToken: new URLSearchParams(location.hash.slice(1)).get("securityToken") || undefined,
           lotNumber: result.lot_number,
           captchaOutput: result.captcha_output,
           passToken: result.pass_token,

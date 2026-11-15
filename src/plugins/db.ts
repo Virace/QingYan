@@ -1,30 +1,24 @@
-import { readFileSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import path from "node:path";
-
 import fp from "fastify-plugin";
 import type { FastifyPluginAsync } from "fastify";
 
-import { resolveConfigPath } from "../config/load-config";
 import { createDatabaseClients } from "../db/client";
-import { applyDatabaseMigrations } from "../db/migrations";
 import { resolveAdminBootstrap } from "../modules/admin/bootstrap-service";
 import { AdminIdentityService } from "../modules/admin/admin-identity-service";
-import { FullBackupService } from "../modules/backup/full-backup-service";
 import { IpRegionAutoUpdateScheduler } from "../modules/comments/metadata/ip-region-scheduler";
 import { CommentIpMaintenanceService } from "../modules/comments/metadata/comment-ip-maintenance-service";
-import { QingYanExportService } from "../modules/import-export/qingyan/export-service";
 import { EmailReputationRepository } from "../modules/notifications/email-reputation-repository";
 import { NotificationChannelConfigsRepository } from "../modules/notifications/channel-configs-repository";
 import { NotificationTemplateContextBuilder } from "../modules/notifications/notification-template-context";
 import { RuntimeNotificationChannelAdapterFactory } from "../modules/notifications/notification-channel-adapter-factory";
 import { NotificationRuntime } from "../modules/notifications/notification-runtime";
 import { NotificationWorker } from "../modules/notifications/notification-worker";
+import { NotificationTemplateRepository } from "../modules/notifications/templates/repository";
+import { NotificationTemplateResolver } from "../modules/notifications/templates/resolver";
+import { processCommentNotificationIntent } from "../modules/notifications/comment-notification-intent";
 import { fetchPageSourceText } from "../modules/page-registry/source-fetcher";
 import { PageSourceRefreshService } from "../modules/page-registry/source-refresh-service";
 import { PageMetadataRefreshService } from "../modules/page-registry/title-refresh-service";
 import { RuntimeSystemSettingsService } from "../modules/system-settings/service";
-import { DefaultBackupTaskService } from "../modules/tasks/built-in/backup-task";
 import { DefaultDailySiteDigestTaskService } from "../modules/tasks/built-in/daily-site-digest-task";
 import { createBuiltInTaskTypeRegistry } from "../modules/tasks/built-in-task-types";
 import { ConditionTriggerEvaluator } from "../modules/tasks/condition-trigger-evaluator";
@@ -40,6 +34,7 @@ import { TaskScheduler } from "../modules/tasks/scheduler";
 import type { TaskRunnerServices } from "../modules/tasks/task-runner-context";
 import { PageSourceRefreshPolicyService } from "../modules/tasks/page-source-refresh-policy";
 import { safeFetchText } from "../modules/shared/server-safe-fetch";
+import { createWafRuntime } from "../modules/waf/runtime";
 
 async function fetchPageTitleHtml(
 	url: string,
@@ -49,35 +44,28 @@ async function fetchPageTitleHtml(
 	return { status: response.status, text: response.text };
 }
 
-function readPackageVersion(): string {
-	const packagePath = path.resolve(process.cwd(), "package.json");
-	try {
-		const packageJson = JSON.parse(readFileSync(packagePath, "utf-8")) as {
-			version?: string;
-		};
-		return packageJson.version ?? "0.0.0";
-	} catch {
-		return "0.0.0";
-	}
-}
-
 const dbPlugin: FastifyPluginAsync = async (fastify) => {
-	const databaseFile = path.resolve(
-		process.cwd(),
-		fastify.config.database.sqlite.file,
-	);
-	await mkdir(path.dirname(databaseFile), { recursive: true });
-
-	const { db, sqlite } = createDatabaseClients(databaseFile);
-	applyDatabaseMigrations(sqlite);
+	const clients = createDatabaseClients(fastify.config.database.url, {
+		pool: fastify.config.database.pool,
+		tls: fastify.config.database.tls,
+	});
+	const { db, pool } = clients;
+	fastify.addHook("onClose", async () => {
+		await clients.close();
+	});
 	fastify.decorate("db", db);
-	fastify.decorate("sqlite", sqlite);
+	fastify.decorate("databasePool", pool);
 	const adminBootstrap = await resolveAdminBootstrap(
 		fastify.config,
 		db,
 		fastify.runtimeOptions,
 	);
-	await new AdminIdentityService(db).ensureInitialAdmin(adminBootstrap);
+	if (adminBootstrap.development) {
+		const user = await new AdminIdentityService(db).ensureInitialAdmin(
+			adminBootstrap,
+		);
+		adminBootstrap.initialAdminUserId = user.id;
+	}
 	fastify.decorate("adminBootstrap", adminBootstrap);
 
 	if (fastify.runtimeOptions.devMode.seed) {
@@ -87,13 +75,15 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		);
 	}
 	await fastify.siteRegistry.loadFromDatabase(db);
+	const wafRuntime = await createWafRuntime(db);
+	fastify.decorate("wafRuntime", wafRuntime);
 	const systemSettingsService = new RuntimeSystemSettingsService(db);
 	const taskMetricRollups = new TaskMetricRollupRepository(db);
 	fastify.decorate("taskMetricRollups", taskMetricRollups);
 	const ipRegionScheduler = new IpRegionAutoUpdateScheduler(db, () =>
 		systemSettingsService.getIpRegionSettings(),
 	);
-	await ipRegionScheduler.start();
+	if (fastify.backgroundRuntimeAutoStart) await ipRegionScheduler.start();
 	const titleRefresh = new PageMetadataRefreshService(db, {
 		fetchHtml: fastify.pageTitleFetchHtml ?? fetchPageTitleHtml,
 	});
@@ -134,17 +124,8 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 	const commentIpMaintenance = new CommentIpMaintenanceService(db, {
 		loadIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 	});
-	const backupTaskService = new DefaultBackupTaskService({
-		exportService: new QingYanExportService(sqlite),
-		fullBackupService: new FullBackupService({
-			configPath: resolveConfigPath(process.env.QINGYAN_CONFIG_PATH),
-			config: fastify.config,
-			databaseFile,
-			sqlite,
-			packageVersion: readPackageVersion(),
-		}),
-	});
 	const taskRunnerServices: TaskRunnerServices = {
+		wafSync: wafRuntime ?? undefined,
 		pageSourceRefresh: sourceRefresh,
 		pageSourceRefreshPolicy: new PageSourceRefreshPolicyService(
 			db,
@@ -152,7 +133,6 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		),
 		pageMetadataRefresh: titleRefresh,
 		commentIpMaintenance,
-		backup: backupTaskService,
 		dailySiteDigest: new DefaultDailySiteDigestTaskService({
 			db,
 			taskRuns,
@@ -168,7 +148,10 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		conditionEvaluator: new ConditionTriggerEvaluator(taskMetricRollups),
 		failureNotifications: taskFailureNotifications,
 	});
-	taskScheduler.start();
+	if (fastify.backgroundRuntimeAutoStart) {
+		await wafRuntime?.initialize(fastify.siteRegistry);
+		taskScheduler.start();
+	}
 	const taskRunWorker = new TaskRunWorker({
 		taskRuns,
 		runner: new TaskRunner({
@@ -185,10 +168,17 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 			excludeCategories: ["notification"],
 		},
 	});
-	taskRunWorker.start();
+	if (fastify.backgroundRuntimeAutoStart) taskRunWorker.start();
 	const emailReputation = new EmailReputationRepository(db);
 	const notificationRuntime = new NotificationRuntime({
 		worker: new NotificationWorker({
+			planCommentNotification: (input) =>
+				processCommentNotificationIntent(db, input),
+			templates: new NotificationTemplateResolver(
+				new NotificationTemplateRepository(db),
+			),
+			loadEmailFormat: async () =>
+				(await systemSettingsService.getSettings()).mail.commentFormat,
 			queue: new DatabaseTaskQueue(db),
 			repository: taskRuns,
 			logApp: (record) => fastify.loggerManager.logApp(record),
@@ -216,6 +206,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 			templateContextBuilder: new NotificationTemplateContextBuilder(
 				db,
 				fastify.config.server,
+				adminBootstrap.consolePath,
 			),
 		}),
 		onError: (error) => {
@@ -223,7 +214,10 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		},
 	});
 	fastify.decorate("notificationRuntime", notificationRuntime);
-	if (fastify.notificationRuntimeAutoStart) {
+	if (
+		fastify.backgroundRuntimeAutoStart &&
+		fastify.notificationRuntimeAutoStart
+	) {
 		notificationRuntime.start();
 	}
 
@@ -231,8 +225,7 @@ const dbPlugin: FastifyPluginAsync = async (fastify) => {
 		await notificationRuntime.stop();
 		await taskRunWorker.stop();
 		await taskScheduler.stop();
-		ipRegionScheduler.stop();
-		sqlite.close();
+		await ipRegionScheduler.stop();
 	});
 };
 
