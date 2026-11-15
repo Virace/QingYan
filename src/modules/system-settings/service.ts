@@ -1,4 +1,4 @@
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { systemSettings } from "../../db/schema";
 import { readSystemSettingsRows, type SystemSettingRow } from "./codec";
 import {
@@ -8,7 +8,7 @@ import {
 
 export class RuntimeSystemSettingsService {
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly defaults?: SystemSettings,
 	) {}
 

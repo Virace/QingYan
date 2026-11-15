@@ -1,12 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { createDatabaseClients } from "../../src/db/client";
-import { applyDatabaseMigrations } from "../../src/db/migrations";
 import {
 	commentRequestMetadata,
 	comments,
@@ -14,25 +8,30 @@ import {
 	pageThreads,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { CommentIpMaintenanceService } from "../../src/modules/comments/metadata/comment-ip-maintenance-service";
 import type { TaskRunnerContext } from "../../src/modules/tasks/task-runner-context";
+import {
+	applyCurrentMigrations,
+	createTestWorkspace,
+} from "../support/test-fixtures";
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
-		cleanup();
+		await cleanup();
 	}
 });
 
-function createFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-maintenance-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const clients = createDatabaseClients(databaseFile);
-	applyDatabaseMigrations(clients.sqlite);
-	cleanups.push(() => {
-		clients.sqlite.close();
-		rmSync(directory, { recursive: true, force: true });
+async function createFixture() {
+	const workspace = createTestWorkspace("qingyan-maintenance-");
+	const databaseUrl = workspace.databaseUrl;
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
+	await applyCurrentMigrations(databaseUrl);
+	cleanups.push(async () => {
+		await clients.close();
+		await workspace.cleanup();
 	});
 	return clients;
 }
@@ -56,7 +55,9 @@ function createTaskContext(): Pick<
 	};
 }
 
-async function seedCommentMetadata(fixture: ReturnType<typeof createFixture>) {
+async function seedCommentMetadata(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+) {
 	await fixture.db.insert(sites).values({
 		id: 1,
 		siteKey: "fangyuan",
@@ -69,6 +70,7 @@ async function seedCommentMetadata(fixture: ReturnType<typeof createFixture>) {
 		id: 1,
 		siteId: 1,
 		pageKey: "post:test",
+		pageKeyHash: hashKey("post:test"),
 		pageUrl: "/post/test",
 	});
 	await fixture.db.insert(comments).values([
@@ -123,7 +125,9 @@ async function seedCommentMetadata(fixture: ReturnType<typeof createFixture>) {
 	});
 }
 
-function createLocationService(fixture: ReturnType<typeof createFixture>) {
+function createLocationService(
+	fixture: Awaited<ReturnType<typeof createFixture>>,
+) {
 	return new CommentIpMaintenanceService(fixture.db, {
 		resolveIp: () => ({
 			country: "中国",
@@ -137,7 +141,7 @@ function createLocationService(fixture: ReturnType<typeof createFixture>) {
 
 describe("CommentIpMaintenanceService", () => {
 	it("refreshes only missing IP locations when scope is missing", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedCommentMetadata(fixture);
 		const service = createLocationService(fixture);
 
@@ -166,7 +170,7 @@ describe("CommentIpMaintenanceService", () => {
 	});
 
 	it("refreshes all matching IP locations without reprocessing updated rows", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedCommentMetadata(fixture);
 		const service = createLocationService(fixture);
 
@@ -188,7 +192,7 @@ describe("CommentIpMaintenanceService", () => {
 	});
 
 	it("passes IP update task timeout to the updater", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedCommentMetadata(fixture);
 		const updates: Array<{
 			ipVersion: string;
@@ -243,7 +247,7 @@ describe("CommentIpMaintenanceService", () => {
 	});
 
 	it("treats missing database hash as stale when location was already updated", async () => {
-		const fixture = createFixture();
+		const fixture = await createFixture();
 		await seedCommentMetadata(fixture);
 		await fixture.db
 			.update(commentRequestMetadata)

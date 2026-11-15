@@ -1,17 +1,16 @@
 import type { FastifyPluginAsync } from "fastify";
-
+import { qingyanCookiePath } from "../../config/public-path";
+import { CaptchaService } from "../comments/captcha-service";
+import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
 import { CommentsRepository } from "../comments/repository";
 import { CommentsWriteRepository } from "../comments/write-repository";
-import { CaptchaService } from "../comments/captcha-service";
 import { InvalidRequestError } from "../shared/errors";
+import { resolvePublicPageContext } from "../shared/page-context";
+import { setPublicVisitorCookie } from "../shared/public-visitor-cookie";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
 import { PageFeedbackRepository } from "./repository";
 import { pageLikeBodySchema } from "./schemas";
 import { PageFeedbackService } from "./service";
-import { RuntimeSystemSettingsService } from "../system-settings/service";
-import { qingyanCookiePath } from "../../config/public-path";
-import { resolvePublicPageContext } from "../shared/page-context";
-import { setPublicVisitorCookie } from "../shared/public-visitor-cookie";
-import { DefaultCommentMetadataResolver } from "../comments/metadata/resolver";
 
 function requireDevPageKey(pageKey?: string): string {
 	if (!pageKey) {
@@ -52,7 +51,6 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			getSettings: () => systemSettingsService.getCaptchaSettings(),
 			getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 		},
-		metadataResolver,
 	);
 	const service = new PageFeedbackService(
 		fastify.security,
@@ -96,6 +94,7 @@ export const pageFeedbackPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			...parsed.data,
 			...pageContext,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});

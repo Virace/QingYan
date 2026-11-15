@@ -1,8 +1,8 @@
-import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import type { DatabaseExecutor } from "../../db/client";
 
 import { AdminRepository } from "./repository";
 import { AdminSessionService } from "./session-service";
@@ -26,7 +26,11 @@ import {
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskRunStatus } from "../tasks/types";
 import { UpgradeService } from "../upgrade/upgrade-service";
-import { requirePermission, requireSiteAccess } from "./authorization";
+import {
+	requirePermission,
+	requireSiteAccess,
+	requireSiteIdAccess,
+} from "./authorization";
 import { DeletionPolicyService } from "./deletion-policy-service";
 
 const ipVersionSchema = z.enum(["v4", "v6"]);
@@ -107,21 +111,16 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.siteRegistry,
 	);
 	const version = readPackageVersion();
-	const databaseFile = path.resolve(
-		process.cwd(),
-		fastify.config.database.sqlite.file,
-	);
+	const configPath = process.env.QINGYAN_CONFIG_PATH ?? "config/qingyan.yml";
 	const upgradeService = new UpgradeService({
-		configPath: process.env.QINGYAN_CONFIG_PATH ?? "config/qingyan.yml",
+		configPath,
 		loadedConfig: fastify.config,
-		databaseFile,
 		currentApplicationVersion: version,
-		partialUpgradeMarkerPath: path.join(
-			path.dirname(databaseFile),
+		partialUpgradeMarkerPath: path.resolve(
+			path.dirname(configPath),
 			"upgrade",
 			"partial-upgrade.json",
 		),
-		createSqliteClient: (file) => new Database(file),
 	});
 	const releaseClient = new GitHubReleaseClient({
 		owner: "Virace",
@@ -147,30 +146,19 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 	});
 	const taskRuns = new TaskRunRepository(fastify.db);
 	const adminTasks = new AdminTaskService(fastify.db, fastify.siteRegistry);
-	const pageRegistryService = new PageRegistryService(fastify.db);
 	const deletionPolicyService = new DeletionPolicyService(fastify.db);
 	const systemSettings = new RuntimeSystemSettingsService(fastify.db);
 	const ipMaintenance = new CommentIpMaintenanceService(fastify.db, {
 		loadIpRegionSettings: () => systemSettings.getIpRegionSettings(),
 	});
 
-	async function hardDeleteDelayedRecord(record: {
-		resourceType: string;
-		resourceId: string;
-		siteId: number | null;
-		metadataJson?: string | null;
-	}) {
-		if (record.resourceType === "page") {
-			return pageRegistryService.hardDeletePage({
-				pageKey: record.resourceId,
-				siteId: record.siteId,
-			});
-		}
-		if (record.resourceType === "page_trash") {
-			return pageRegistryService.hardDeletePages({
-				pageKeys: readDelayedDeletionPageKeys(record.metadataJson),
-				siteId: record.siteId,
-			});
+	async function hardDeleteDelayedRecord(
+		record: Parameters<PageRegistryService["hardDeleteDelayedDeletion"]>[0],
+		db: DatabaseExecutor,
+	) {
+		const pageRegistryService = new PageRegistryService(db);
+		if (["page", "page_trash"].includes(record.resourceType)) {
+			return pageRegistryService.hardDeleteDelayedDeletion(record);
 		}
 		throw new AppError(
 			409,
@@ -179,23 +167,14 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		);
 	}
 
-	async function restoreDelayedRecord(record: {
-		resourceType: string;
-		resourceId: string;
-		siteId: number | null;
-		metadataJson?: string | null;
-	}) {
-		if (record.resourceType === "page") {
-			return pageRegistryService.restoreDeletedPage({
-				pageKey: record.resourceId,
-				siteId: record.siteId,
-			});
-		}
-		if (record.resourceType === "page_trash") {
-			const restoredCount = await pageRegistryService.restoreDeletedPages({
-				pageKeys: readDelayedDeletionPageKeys(record.metadataJson),
-				siteId: record.siteId,
-			});
+	async function restoreDelayedRecord(
+		record: Parameters<PageRegistryService["restoreDelayedDeletion"]>[0],
+		db: DatabaseExecutor,
+	) {
+		const pageRegistryService = new PageRegistryService(db);
+		if (["page", "page_trash"].includes(record.resourceType)) {
+			const restoredCount =
+				await pageRegistryService.restoreDelayedDeletion(record);
 			return {
 				resourceType: record.resourceType,
 				resourceId: record.resourceId,
@@ -207,26 +186,6 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 			"DELAYED_DELETION_RESOURCE_UNSUPPORTED",
 			"延迟删除资源类型暂不支持恢复。",
 		);
-	}
-
-	function readDelayedDeletionPageKeys(metadataJson?: string | null) {
-		if (!metadataJson) {
-			return [];
-		}
-		try {
-			const metadata = JSON.parse(metadataJson) as {
-				pages?: Array<{ pageKey?: unknown }>;
-			};
-			return (
-				metadata.pages
-					?.map((page) => page.pageKey)
-					.filter(
-						(pageKey): pageKey is string => typeof pageKey === "string",
-					) ?? []
-			);
-		} catch {
-			return [];
-		}
 	}
 
 	fastify.get("/status", async (request) => {
@@ -480,9 +439,17 @@ export const adminOpsRoutes: FastifyPluginAsync = async (fastify) => {
 		const deletion = await deletionPolicyService.restoreDeletion({
 			id: parsed.data.deletionId,
 			actorUserId: session.user.id,
-			restore: async (record) => {
-				const resource = await restoreDelayedRecord(record);
+			restore: async (record, db) => {
+				requireSiteIdAccess({ session, siteId: record.siteId });
+				const resource = await restoreDelayedRecord(record, db);
 				restoredCount = resource.restoredCount;
+				if (restoredCount === 0) {
+					throw new AppError(
+						409,
+						"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+						"没有可恢复的页面。",
+					);
+				}
 				return restoredCount;
 			},
 		});

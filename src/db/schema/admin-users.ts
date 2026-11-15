@@ -1,18 +1,21 @@
 import { sql } from "drizzle-orm";
 import {
+	bigint,
+	boolean,
 	index,
-	integer,
-	sqliteTable,
-	text,
+	pgTable,
 	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
+import { exactText as text, utcTimestamp } from "./column-types";
 
 import { sites } from "./sites";
 
-export const adminUsers = sqliteTable(
+export const adminUsers = pgTable(
 	"admin_users",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
 		username: text("username").notNull(),
 		email: text("email").notNull(),
 		passwordHash: text("password_hash").notNull(),
@@ -20,20 +23,20 @@ export const adminUsers = sqliteTable(
 		website: text("website"),
 		avatarUrl: text("avatar_url"),
 		status: text("status").notNull().default("active"),
-		isInitialAdmin: integer("is_initial_admin", { mode: "boolean" })
+		isInitialAdmin: boolean("is_initial_admin").notNull().default(false),
+		passwordChangeRequired: boolean("password_change_required")
 			.notNull()
 			.default(false),
-		passwordChangeRequired: integer("password_change_required", {
-			mode: "boolean",
-		})
+		loginBlockedUntil: utcTimestamp("login_blocked_until"),
+		createdAt: utcTimestamp("created_at")
 			.notNull()
-			.default(false),
-		loginBlockedUntil: text("login_blocked_until"),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		passwordRotatedAt: text("password_rotated_at"),
-		lastLoginAt: text("last_login_at"),
-		deletedAt: text("deleted_at"),
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		passwordRotatedAt: utcTimestamp("password_rotated_at"),
+		lastLoginAt: utcTimestamp("last_login_at"),
+		deletedAt: utcTimestamp("deleted_at"),
 	},
 	(table) => [
 		uniqueIndex("admin_users_username_idx").on(table.username),
@@ -42,33 +45,41 @@ export const adminUsers = sqliteTable(
 	],
 );
 
-export const adminGroups = sqliteTable(
+export const adminGroups = pgTable(
 	"admin_groups",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
 		key: text("key").notNull(),
 		name: text("name").notNull(),
 		description: text("description"),
 		kind: text("kind").notNull().default("system"),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [uniqueIndex("admin_groups_key_idx").on(table.key)],
 );
 
-export const adminUserGroups = sqliteTable(
+export const adminUserGroups = pgTable(
 	"admin_user_groups",
 	{
-		userId: integer("user_id")
-			.notNull()
+		userId: bigint("user_id", { mode: "number" })
+			.primaryKey()
 			.references(() => adminUsers.id),
-		groupId: integer("group_id")
+		groupId: bigint("group_id", { mode: "number" })
 			.notNull()
 			.references(() => adminGroups.id),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		createdByUserId: integer("created_by_user_id").references(
-			() => adminUsers.id,
-		),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		createdByUserId: bigint("created_by_user_id", {
+			mode: "number",
+		}).references(() => adminUsers.id),
 	},
 	(table) => [
 		uniqueIndex("admin_user_groups_user_idx").on(table.userId),
@@ -76,40 +87,24 @@ export const adminUserGroups = sqliteTable(
 	],
 );
 
-export const adminGroupPermissions = sqliteTable(
-	"admin_group_permissions",
-	{
-		groupId: integer("group_id")
-			.notNull()
-			.references(() => adminGroups.id),
-		permissionKey: text("permission_key").notNull(),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		createdByUserId: integer("created_by_user_id").references(
-			() => adminUsers.id,
-		),
-	},
-	(table) => [
-		uniqueIndex("admin_group_permissions_group_permission_idx").on(
-			table.groupId,
-			table.permissionKey,
-		),
-	],
-);
-
-export const adminUserSiteAccess = sqliteTable(
+export const adminUserSiteAccess = pgTable(
 	"admin_user_site_access",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		userId: integer("user_id")
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		userId: bigint("user_id", { mode: "number" })
 			.notNull()
 			.references(() => adminUsers.id),
-		siteId: integer("site_id")
+		siteId: bigint("site_id", { mode: "number" })
 			.notNull()
 			.references(() => sites.id),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		createdByUserId: integer("created_by_user_id").references(
-			() => adminUsers.id,
-		),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		createdByUserId: bigint("created_by_user_id", {
+			mode: "number",
+		}).references(() => adminUsers.id),
 	},
 	(table) => [
 		uniqueIndex("admin_user_site_access_user_site_idx").on(
@@ -120,20 +115,24 @@ export const adminUserSiteAccess = sqliteTable(
 	],
 );
 
-export const adminProfileVerificationTokens = sqliteTable(
+export const adminProfileVerificationTokens = pgTable(
 	"admin_profile_verification_tokens",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
 		purpose: text("purpose").notNull(),
-		userId: integer("user_id")
+		userId: bigint("user_id", { mode: "number" })
 			.notNull()
 			.references(() => adminUsers.id),
 		tokenHash: text("token_hash").notNull(),
 		newEmail: text("new_email"),
 		pendingPasswordHash: text("pending_password_hash"),
-		expiresAt: text("expires_at").notNull(),
-		consumedAt: text("consumed_at"),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		expiresAt: utcTimestamp("expires_at").notNull(),
+		consumedAt: utcTimestamp("consumed_at"),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
 		index("admin_profile_verification_tokens_user_id_idx").on(table.userId),

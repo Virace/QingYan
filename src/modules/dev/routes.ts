@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
-
-import type { AppRuntimeOptions } from "../../config/runtime-options";
 import { qingyanCookiePath } from "../../config/public-path";
+import type { AppRuntimeOptions } from "../../config/runtime-options";
 import { AdminRepository } from "../admin/repository";
 import { AdminSessionService } from "../admin/session-service";
 import { CaptchaService } from "../comments/captcha-service";
@@ -53,7 +52,6 @@ export function registerDatabaseDevRoutes(
 				getSettings: () => systemSettingsService.getCaptchaSettings(),
 				getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 			},
-			app.commentMetadataResolver,
 		),
 		adminSessionService,
 	);

@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { unsubscribeTokens } from "../../db/schema";
 import type { CommenterPreferencesRepository } from "./commenter-preferences-repository";
 import {
@@ -16,7 +16,7 @@ function hashToken(token: string): string {
 
 export class UnsubscribeTokenService {
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly preferences: CommenterPreferencesRepository,
 	) {}
 

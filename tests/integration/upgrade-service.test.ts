@@ -1,333 +1,154 @@
-import Database from "better-sqlite3";
-import {
-	existsSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { stringify } from "yaml";
-
-import { createDatabaseClients } from "../../src/db/client";
+import { databaseIdentity } from "../../src/modules/database-backup/postgres-tools";
+import { writePartialUpgradeMarker } from "../../src/modules/upgrade/partial-marker";
 import {
 	type RegisteredApplicationUpgrade,
 	UpgradeService,
 } from "../../src/modules/upgrade/upgrade-service";
-import {
-	applyV010BaselineMigration,
-	createTestConfig,
-} from "../support/test-fixtures";
+import { createLifecycleFixture } from "../support/lifecycle-fixture";
 
-function createWorkspace() {
-	const directory = mkdtempSync(
-		path.join(tmpdir(), "qingyan-upgrade-service-"),
-	);
-	const databaseFile = path.join(directory, "qingyan.db");
-	const configPath = path.join(directory, "qingyan.yml");
-	const partialMarkerPath = path.join(
-		directory,
-		"data",
-		"upgrade",
-		"partial-upgrade.json",
-	);
-	return {
-		directory,
-		databaseFile,
-		configPath,
-		partialMarkerPath,
-		cleanup() {
-			rmSync(directory, { recursive: true, force: true });
-		},
-	};
-}
-
-function writeConfig(configPath: string, databaseFile: string) {
-	const config = createTestConfig(
-		databaseFile,
-		path.join(path.dirname(configPath), "logs"),
-	);
-	writeFileSync(
-		configPath,
-		stringify({
-			server: config.server,
-			database: config.database,
-			admin: {
-				session: config.admin.session,
-			},
-			security: config.security,
-		}),
-		"utf-8",
-	);
-	return config;
-}
-
-function seedOldDatabase(databaseFile: string) {
-	applyV010BaselineMigration(databaseFile);
-	const sqlite = new Database(databaseFile);
-	try {
-		sqlite.exec(`
-			CREATE TABLE IF NOT EXISTS __qingyan_migrations (
-				name text PRIMARY KEY NOT NULL,
-				applied_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
-			)
-		`);
-		sqlite
-			.prepare("INSERT INTO __qingyan_migrations (name) VALUES (?)")
-			.run("0000_initial.sql");
-		sqlite
-			.prepare(
-				"INSERT INTO __qingyan_upgrades (name, to_version, summary_json) VALUES (?, ?, ?)",
-			)
-			.run("application-version:0.0.1", "0.0.1", "{}");
-		sqlite
-			.prepare(
-				"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
-			)
-			.run("default", "Default", "[]");
-		sqlite
-			.prepare(
-				"INSERT INTO admin_bootstrap_state (id, console_path, username, password_hash) VALUES (?, ?, ?, ?)",
-			)
-			.run(1, "/admin", "admin", "hash");
-	} finally {
-		sqlite.close();
-	}
-}
-
-function seedBaselineDatabaseWithoutLedgers(databaseFile: string) {
-	const sqlite = new Database(databaseFile);
-	try {
-		sqlite.exec(
-			readFileSync(
-				path.resolve(process.cwd(), "drizzle", "0000_initial.sql"),
-				"utf-8",
-			),
-		);
-		sqlite
-			.prepare(
-				"INSERT INTO sites (site_key, name, allowed_origins_json) VALUES (?, ?, ?)",
-			)
-			.run("default", "Default", "[]");
-		sqlite
-			.prepare(
-				"INSERT INTO admin_bootstrap_state (id, console_path, username, password_hash) VALUES (?, ?, ?, ?)",
-			)
-			.run(1, "/admin", "admin", "hash");
-	} finally {
-		sqlite.close();
-	}
-}
-
-function readUpgradeRows(databaseFile: string) {
-	const sqlite = new Database(databaseFile);
-	try {
-		return sqlite
-			.prepare("SELECT name, to_version FROM __qingyan_upgrades ORDER BY name")
-			.all() as Array<{ name: string; to_version: string }>;
-	} finally {
-		sqlite.close();
-	}
-}
-
-describe("UpgradeService", () => {
-	it("creates backup before writing upgrade ledger and clears marker on success", async () => {
-		const workspace = createWorkspace();
-		try {
-			const loadedConfig = writeConfig(
-				workspace.configPath,
-				workspace.databaseFile,
-			);
-			seedOldDatabase(workspace.databaseFile);
-			const service = new UpgradeService({
-				configPath: workspace.configPath,
-				loadedConfig,
-				databaseFile: workspace.databaseFile,
-				currentApplicationVersion: "0.1.0",
-				partialUpgradeMarkerPath: workspace.partialMarkerPath,
-				createSqliteClient: (file) => new Database(file),
-				now: () => new Date("2026-05-07T00:00:00.000Z"),
-			});
-
-			const result = await service.apply({ confirm: "UPGRADE QINGYAN" });
-
-			expect(result).toMatchObject({
-				state: "applied",
-				restartRequired: true,
-				applied: {
-					applicationUpgrades: ["application-version:0.1.0"],
-				},
-			});
-			expect(existsSync(result.backup.backupDirectory)).toBe(true);
-			expect(existsSync(workspace.partialMarkerPath)).toBe(false);
-			expect(readUpgradeRows(workspace.databaseFile)).toEqual([
-				{ name: "application-version:0.0.1", to_version: "0.0.1" },
-				{ name: "application-version:0.1.0", to_version: "0.1.0" },
-			]);
-		} finally {
-			workspace.cleanup();
-		}
+function service(
+	fixture: Awaited<ReturnType<typeof createLifecycleFixture>>,
+	steps: RegisteredApplicationUpgrade[] = [],
+) {
+	return new UpgradeService({
+		configPath: fixture.configPath,
+		loadedConfig: fixture.config,
+		currentApplicationVersion: "0.2.5",
+		partialUpgradeMarkerPath: fixture.markerPath,
+		registeredApplicationUpgrades: steps,
 	});
-
-	it("does not write ledger when backup fails", async () => {
-		const workspace = createWorkspace();
+}
+describe("PostgreSQL UpgradeService", () => {
+	it("backs up before writes and records the application version once", async () => {
+		const fixture = await createLifecycleFixture({ version: "0.2.4" });
 		try {
-			const loadedConfig = writeConfig(
-				workspace.configPath,
-				workspace.databaseFile,
-			);
-			seedOldDatabase(workspace.databaseFile);
-			const service = new UpgradeService({
-				configPath: workspace.configPath,
-				loadedConfig,
-				databaseFile: workspace.databaseFile,
-				currentApplicationVersion: "0.1.0",
-				partialUpgradeMarkerPath: workspace.partialMarkerPath,
-				createSqliteClient: (file) => new Database(file),
-				backupDirectory: workspace.databaseFile,
+			const upgrade = service(fixture);
+			const result = await upgrade.apply({
+				confirm: "UPGRADE QINGYAN",
+				backupDirectory: path.join(fixture.directory, "backup"),
 			});
-
+			expect(result.state).toBe("applied");
+			expect(existsSync(result.backup.databaseBackupPath)).toBe(true);
+			expect(existsSync(fixture.markerPath)).toBe(false);
+			expect(await upgrade.detect()).toEqual({ state: "normal_current" });
+			expect(
+				(
+					await fixture.pool.query(
+						"SELECT name FROM __qingyan_upgrades WHERE name='application-version:0.2.5'",
+					)
+				).rowCount,
+			).toBe(1);
 			await expect(
-				service.apply({ confirm: "UPGRADE QINGYAN" }),
-			).rejects.toThrow();
-			expect(readUpgradeRows(workspace.databaseFile)).toEqual([
-				{ name: "application-version:0.0.1", to_version: "0.0.1" },
-			]);
-			expect(existsSync(workspace.partialMarkerPath)).toBe(true);
-			expect(readFileSync(workspace.partialMarkerPath, "utf-8")).toContain(
-				"backup",
-			);
+				upgrade.apply({ confirm: "UPGRADE QINGYAN" }),
+			).rejects.toThrow("UPGRADE_STATE_INVALID");
 		} finally {
-			workspace.cleanup();
+			await fixture.cleanup();
 		}
 	});
-
-	it("keeps partial marker when application upgrade fails", async () => {
-		const workspace = createWorkspace();
+	it("does not mutate application state when backup fails", async () => {
+		const fixture = await createLifecycleFixture({ version: "0.2.4" });
 		try {
-			const loadedConfig = writeConfig(
-				workspace.configPath,
-				workspace.databaseFile,
-			);
-			seedOldDatabase(workspace.databaseFile);
-			const failingStep: RegisteredApplicationUpgrade = {
-				name: "failing-step",
-				toVersion: "0.1.0",
-				describe: () => ({ name: "failing-step", toVersion: "0.1.0" }),
-				apply: () => {
-					throw new Error("step failed");
-				},
-			};
-			const service = new UpgradeService({
-				configPath: workspace.configPath,
-				loadedConfig,
-				databaseFile: workspace.databaseFile,
-				currentApplicationVersion: "0.1.0",
-				partialUpgradeMarkerPath: workspace.partialMarkerPath,
-				createSqliteClient: (file) => new Database(file),
-				registeredApplicationUpgrades: [failingStep],
-			});
-
+			const blocker = path.join(fixture.directory, "blocker");
+			writeFileSync(blocker, "file");
 			await expect(
-				service.apply({ confirm: "UPGRADE QINGYAN" }),
-			).rejects.toThrow("step failed");
-			expect(existsSync(workspace.partialMarkerPath)).toBe(true);
-			expect(readFileSync(workspace.partialMarkerPath, "utf-8")).toContain(
-				"application-upgrades",
-			);
-		} finally {
-			workspace.cleanup();
-		}
-	});
-
-	it("runs registered application upgrades before writing ledger", async () => {
-		const workspace = createWorkspace();
-		try {
-			const loadedConfig = writeConfig(
-				workspace.configPath,
-				workspace.databaseFile,
-			);
-			seedOldDatabase(workspace.databaseFile);
-			const step: RegisteredApplicationUpgrade = {
-				name: "service-probe",
-				fromVersion: "0.0.1",
-				toVersion: "0.1.0",
-				describe: () => ({
-					name: "service-probe",
-					fromVersion: "0.0.1",
-					toVersion: "0.1.0",
+				service(fixture).apply({
+					confirm: "UPGRADE QINGYAN",
+					backupDirectory: path.join(blocker, "backup"),
 				}),
-				apply: ({ sqlite }) => {
-					sqlite.exec(
-						"CREATE TABLE service_upgrade_probe (id integer primary key)",
-					);
-				},
-			};
-			const service = new UpgradeService({
-				configPath: workspace.configPath,
-				loadedConfig,
-				databaseFile: workspace.databaseFile,
-				currentApplicationVersion: "0.1.0",
-				partialUpgradeMarkerPath: workspace.partialMarkerPath,
-				createSqliteClient: (file) => new Database(file),
-				registeredApplicationUpgrades: [step],
+			).rejects.toThrow();
+			expect(
+				(
+					await fixture.pool.query(
+						"SELECT name FROM __qingyan_upgrades WHERE name='application-version:0.2.5'",
+					)
+				).rowCount,
+			).toBe(0);
+			expect(existsSync(fixture.markerPath)).toBe(true);
+			expect(await service(fixture).detect()).toMatchObject({
+				state: "recovery_required",
 			});
-
-			const result = await service.apply({ confirm: "UPGRADE QINGYAN" });
-			const { sqlite } = createDatabaseClients(workspace.databaseFile);
-			try {
-				expect(
-					sqlite
-						.prepare(
-							"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-						)
-						.get("service_upgrade_probe"),
-				).toBeTruthy();
-			} finally {
-				sqlite.close();
-			}
-			expect(result.applied.applicationUpgrades).toEqual([
-				"application-version:0.1.0",
-				"service-probe",
-			]);
 		} finally {
-			workspace.cleanup();
+			await fixture.cleanup();
 		}
 	});
-
-	it("upgrades complete baseline databases that predate migration and upgrade ledgers", async () => {
-		const workspace = createWorkspace();
+	it("rolls back data and completion ledger together on application step failure", async () => {
+		const fixture = await createLifecycleFixture({ version: "0.2.4" });
 		try {
-			const loadedConfig = writeConfig(
-				workspace.configPath,
-				workspace.databaseFile,
-			);
-			seedBaselineDatabaseWithoutLedgers(workspace.databaseFile);
-			const service = new UpgradeService({
-				configPath: workspace.configPath,
-				loadedConfig,
-				databaseFile: workspace.databaseFile,
-				currentApplicationVersion: "0.1.0",
-				partialUpgradeMarkerPath: workspace.partialMarkerPath,
-				createSqliteClient: (file) => new Database(file),
-				now: () => new Date("2026-05-07T00:00:00.000Z"),
-			});
-
-			const result = await service.apply({ confirm: "UPGRADE QINGYAN" });
-
-			expect(result).toMatchObject({
-				state: "applied",
-				applied: {
-					schemaMigrations: ["schema-migration-ledger"],
-					applicationUpgrades: [],
+			const step: RegisteredApplicationUpgrade = {
+				name: "fixture-failure",
+				toVersion: "0.2.5",
+				describe: () => ({ name: "fixture-failure", toVersion: "0.2.5" }),
+				async apply(context) {
+					await context.db.execute(sql`UPDATE sites SET name='must-rollback'`);
+					throw new Error("APPLICATION_STEP_FAILED");
 				},
-			});
-			expect(existsSync(workspace.partialMarkerPath)).toBe(false);
-			expect(service.detect()).toEqual({ state: "normal_current" });
+			};
+			await expect(
+				service(fixture, [step]).apply({
+					confirm: "UPGRADE QINGYAN",
+					backupDirectory: path.join(fixture.directory, "backup"),
+				}),
+			).rejects.toThrow("APPLICATION_STEP_FAILED");
+			expect(
+				(await fixture.pool.query("SELECT name FROM sites")).rows[0].name,
+			).toBe("Default");
+			expect(
+				(
+					await fixture.pool.query(
+						"SELECT name FROM __qingyan_upgrades WHERE name IN ('application-version:0.2.5','fixture-failure')",
+					)
+				).rowCount,
+			).toBe(0);
+			expect(existsSync(fixture.markerPath)).toBe(true);
 		} finally {
-			workspace.cleanup();
+			await fixture.cleanup();
+		}
+	});
+	it("requires exact confirmation before starting a backup", async () => {
+		const fixture = await createLifecycleFixture({ version: "0.2.4" });
+		try {
+			await expect(service(fixture).apply({ confirm: "yes" })).rejects.toThrow(
+				"UPGRADE_CONFIRMATION_REQUIRED",
+			);
+			expect(existsSync(fixture.markerPath)).toBe(false);
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+	it("finishes a staged configuration switch only for the matching completed database", async () => {
+		const fixture = await createLifecycleFixture();
+		try {
+			const stagedConfigPath = `${fixture.configPath}.staged`;
+			renameSync(fixture.configPath, stagedConfigPath);
+			writePartialUpgradeMarker({
+				markerPath: fixture.markerPath,
+				fromVersion: "not_installed",
+				toVersion: "0.2.5",
+				planPath: "",
+				backupDirectory: "",
+				currentStep: "database-completed",
+				stagedConfigPath,
+				targetIdentity: databaseIdentity(fixture.databaseUrl),
+			});
+			const recovery = new UpgradeService({
+				configPath: fixture.configPath,
+				configError: new Error("config missing"),
+				currentApplicationVersion: "0.2.5",
+				partialUpgradeMarkerPath: fixture.markerPath,
+			});
+			await recovery.recover({ confirm: "UPGRADE QINGYAN" });
+			expect(existsSync(fixture.configPath)).toBe(true);
+			expect(existsSync(stagedConfigPath)).toBe(false);
+			expect(existsSync(fixture.markerPath)).toBe(false);
+			expect(
+				(await fixture.pool.query("SELECT username FROM admin_users")).rows,
+			).toEqual([{ username: "admin" }]);
+		} finally {
+			await fixture.cleanup();
 		}
 	});
 });

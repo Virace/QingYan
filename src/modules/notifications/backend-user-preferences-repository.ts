@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { adminUserNotificationPreferences } from "../../db/schema";
 import type { BackendUserNotificationChannel } from "./backend-user-recipients-repository";
 
@@ -49,7 +49,7 @@ function defaultPreference(
 }
 
 export class BackendUserNotificationPreferencesRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async getPreference(input: {
 		userId: number;
@@ -120,10 +120,7 @@ export class BackendUserNotificationPreferencesRepository {
 				input.pausedUntil === undefined
 					? current.pausedUntil
 					: input.pausedUntil,
-			channelConfigRef:
-				input.channelConfigRef === undefined
-					? channelConfigRef
-					: input.channelConfigRef,
+			channelConfigRef,
 			updatedAt: nowIso,
 		};
 

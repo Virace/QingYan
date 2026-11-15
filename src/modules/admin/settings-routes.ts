@@ -1,5 +1,13 @@
 import type { FastifyPluginAsync } from "fastify";
-
+import { z } from "zod";
+import {
+	emailPolicySchema,
+	evaluateEmailPolicy,
+	normalizedEmailSchema,
+} from "../comments/email-policy";
+import { mergeVerifiedAuthorSettings } from "../comments/verified-author";
+import { ValidationFailedError } from "../shared/errors";
+import { requireSiteAccess } from "./authorization";
 import { AdminManagementService } from "./management-service";
 import { AdminRepository } from "./repository";
 import {
@@ -8,9 +16,7 @@ import {
 	adminSiteSettingsSectionParamsSchema,
 } from "./schemas";
 import { AdminSessionService } from "./session-service";
-import { requireSiteAccess } from "./authorization";
 import { toValidationFields } from "./validation-fields";
-import { ValidationFailedError } from "../shared/errors";
 
 type SiteSettingsUpdateInput = Parameters<
 	AdminManagementService["updateSettings"]
@@ -29,6 +35,65 @@ export const adminSettingsRoutes: FastifyPluginAsync = async (fastify) => {
 		fastify.siteRegistry,
 		repository,
 	);
+
+	fastify.post("/:siteKey/email-policy/preview", async (request) => {
+		const session = await sessionService.requireSession(request);
+		const params = z
+			.object({ siteKey: z.string().min(1) })
+			.parse(request.params);
+		const site = requireSiteAccess({
+			session,
+			siteRegistry: fastify.siteRegistry,
+			siteKey: params.siteKey,
+			permission: "site_settings.update",
+		});
+		const parsed = z
+			.object({
+				email: normalizedEmailSchema,
+				policy: emailPolicySchema,
+				verifiedAuthorEmail: z
+					.union([z.literal(""), normalizedEmailSchema])
+					.optional(),
+				identity: z.enum(["visitor", "current_account"]).default("visitor"),
+			})
+			.safeParse(request.body);
+		if (!parsed.success)
+			throw new ValidationFailedError(
+				toValidationFields(parsed.error.issues, request.body),
+			);
+		if (!site)
+			throw new ValidationFailedError([
+				{ path: "siteKey", code: "invalid_value", message: "请选择有效站点。" },
+			]);
+		const settings = await repository.getSiteSettings(site.id);
+		const hasAccountAccess =
+			session.permissions.includes("comments.reply") &&
+			(session.isAdmin || session.siteIds.includes(site.id));
+		if (parsed.data.identity === "current_account")
+			requireSiteAccess({
+				session,
+				siteRegistry: fastify.siteRegistry,
+				siteKey: params.siteKey,
+				permission: "comments.reply",
+			});
+		return {
+			...evaluateEmailPolicy({
+				email:
+					parsed.data.identity === "current_account"
+						? session.user.email
+						: parsed.data.email,
+				policy: parsed.data.policy,
+				reservedEmail:
+					parsed.data.verifiedAuthorEmail ??
+					(mergeVerifiedAuthorSettings(settings?.verifiedAuthorJson).email ||
+						undefined),
+				authenticated:
+					parsed.data.identity === "current_account" && hasAccountAccess,
+			}),
+			source: "draft",
+			saved: false,
+		};
+	});
 
 	fastify.patch("/:siteKey/sections/:section", async (request) => {
 		const session = await sessionService.requireSession(request);

@@ -14,6 +14,13 @@ import {
 	validateExternalAvatarQuery,
 } from "../comments/gravatar";
 import type { AdminSystemSettingsRepository } from "./system-settings-repository";
+import { adminSystemSettingsBodySchema } from "./schemas";
+import { toValidationFields } from "./validation-fields";
+import { ValidationFailedError } from "../shared/errors";
+import {
+	type NotificationChannelConfigInput,
+	NotificationChannelConfigsRepository,
+} from "../notifications/channel-configs-repository";
 
 type AdminSystemSettingsInput = {
 	admin?: {
@@ -36,6 +43,9 @@ type AdminSystemSettingsInput = {
 	};
 	notifications?: {
 		delivery?: Partial<SystemSettings["notifications"]["delivery"]>;
+		channelConfigs?: (Omit<NotificationChannelConfigInput, "type"> & {
+			type: "email" | NotificationChannelConfigInput["type"];
+		})[];
 		webhook?: {
 			enabled?: boolean;
 			url?: string;
@@ -87,6 +97,20 @@ export type AdminSystemSettingsSection =
 	| "ip-region"
 	| "anti-spam";
 
+const SECTION_CATEGORIES: Record<
+	AdminSystemSettingsSection,
+	(keyof SystemSettings)[]
+> = {
+	security: ["admin", "security", "logging"],
+	"rate-limit": ["security"],
+	mail: ["mail"],
+	notifications: ["notifications"],
+	captcha: ["captcha"],
+	avatar: ["avatar", "publicApi"],
+	"ip-region": ["ipRegion"],
+	"anti-spam": ["antiSpam"],
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -127,11 +151,11 @@ export class AdminSystemSettingsService {
 		};
 	}
 
-	public async buildSectionPatchInput(
+	private buildSectionPatchInput(
+		current: SystemSettings,
 		section: AdminSystemSettingsSection,
 		patch: Record<string, unknown>,
-	): Promise<AdminSystemSettingsInput> {
-		const current = await this.readCurrentSettings();
+	): AdminSystemSettingsInput {
 		const next = structuredClone(current);
 
 		switch (section) {
@@ -177,130 +201,197 @@ export class AdminSystemSettingsService {
 				break;
 		}
 
-		return next;
+		return {
+			logging: next.logging,
+			...Object.fromEntries(
+				SECTION_CATEGORIES[section].map((category) => [
+					category,
+					next[category],
+				]),
+			),
+		};
 	}
 
 	public async updateSettings(input: AdminSystemSettingsInput) {
-		const current = await this.readCurrentSettings();
-		const patch: SystemSettings = {
-			...current,
-			admin: input.admin
-				? {
-						...current.admin,
-						...input.admin,
-					}
-				: current.admin,
-			security: input.security ?? current.security,
-			logging: input.logging,
-			mail: input.mail
-				? {
-						enabled: input.mail.enabled,
-						smtp: {
-							...current.mail.smtp,
-							...input.mail.smtp,
-						},
-					}
-				: current.mail,
-			notifications: input.notifications
-				? {
-						delivery: {
-							...current.notifications.delivery,
-							...input.notifications.delivery,
-						},
-						webhook: {
-							...current.notifications.webhook,
-							...input.notifications.webhook,
-						},
-						wxpusher: {
-							...current.notifications.wxpusher,
-							...input.notifications.wxpusher,
-						},
-					}
-				: current.notifications,
-			captcha: input.captcha
-				? {
-						...current.captcha,
-						provider: input.captcha.provider,
-						image: input.captcha.image,
-						turnstile: {
-							...current.captcha.turnstile,
-							...input.captcha.turnstile,
-						},
-						hcaptcha: {
-							...current.captcha.hcaptcha,
-							...input.captcha.hcaptcha,
-						},
-						recaptcha: {
-							...current.captcha.recaptcha,
-							...input.captcha.recaptcha,
-						},
-						geetest: {
-							...current.captcha.geetest,
-							...input.captcha.geetest,
-						},
-					}
-				: current.captcha,
-			ipRegion: input.ipRegion ?? current.ipRegion,
-			avatar: input.avatar
-				? {
-						external: {
-							enabled: input.avatar.external.enabled,
-							baseUrl: normalizeExternalAvatarBaseUrl(
-								input.avatar.external.baseUrl,
-							),
-							hashAlgorithm: input.avatar.external.hashAlgorithm,
-							query: validateExternalAvatarQuery(input.avatar.external.query),
-						},
-						display: {
-							shape: input.avatar.display.shape,
-							sizePx: input.avatar.display.sizePx,
-						},
-					}
-				: current.avatar,
-			publicApi: input.publicApi ?? current.publicApi,
-			antiSpam: input.antiSpam
-				? {
-						akismet: {
-							...current.antiSpam.akismet,
-							...input.antiSpam.akismet,
-						},
-					}
-				: current.antiSpam,
-		};
-		const next = preserveConfiguredSecrets(current, patch);
+		return this.saveSettings(() => input, input);
+	}
 
-		for (const row of flattenSystemSettings(next)) {
-			await this.repository.upsert(row.category, row.key, row.value);
-		}
+	public async updateSectionSettings(
+		section: AdminSystemSettingsSection,
+		patch: Record<string, unknown>,
+		context: Pick<AdminSystemSettingsInput, "requestId" | "actorUserId">,
+	) {
+		return this.saveSettings(
+			(current) => this.buildSectionPatchInput(current, section, patch),
+			context,
+		);
+	}
+
+	private async saveSettings(
+		buildInput: (current: SystemSettings) => AdminSystemSettingsInput,
+		context: Pick<AdminSystemSettingsInput, "requestId" | "actorUserId">,
+	) {
+		const savedInput = await this.repository.transaction(
+			async (repository, tx) => {
+				const rows = (await repository.listAll()) as SystemSettingRow[];
+				const current = readSystemSettingsRows(rows, this.defaults);
+				const rawInput = buildInput(current);
+				const parsed = adminSystemSettingsBodySchema.safeParse(rawInput);
+				if (!parsed.success) {
+					throw new ValidationFailedError(
+						toValidationFields(parsed.error.issues, rawInput),
+					);
+				}
+				const input = { ...parsed.data, ...context };
+				const patch: SystemSettings = {
+					...current,
+					admin: input.admin
+						? {
+								...current.admin,
+								...input.admin,
+							}
+						: current.admin,
+					security: input.security ?? current.security,
+					logging: input.logging,
+					mail: input.mail
+						? {
+								enabled: input.mail.enabled,
+								commentFormat:
+									input.mail.commentFormat ?? current.mail.commentFormat,
+								smtp: {
+									...current.mail.smtp,
+									...input.mail.smtp,
+								},
+							}
+						: current.mail,
+					notifications: input.notifications
+						? {
+								delivery: {
+									...current.notifications.delivery,
+									...input.notifications.delivery,
+								},
+								webhook: {
+									...current.notifications.webhook,
+									...input.notifications.webhook,
+								},
+								wxpusher: {
+									...current.notifications.wxpusher,
+									...input.notifications.wxpusher,
+								},
+							}
+						: current.notifications,
+					captcha: input.captcha
+						? {
+								...current.captcha,
+								provider: input.captcha.provider,
+								image: input.captcha.image,
+								turnstile: {
+									...current.captcha.turnstile,
+									...input.captcha.turnstile,
+								},
+								hcaptcha: {
+									...current.captcha.hcaptcha,
+									...input.captcha.hcaptcha,
+								},
+								recaptcha: {
+									...current.captcha.recaptcha,
+									...input.captcha.recaptcha,
+								},
+								geetest: {
+									...current.captcha.geetest,
+									...input.captcha.geetest,
+								},
+							}
+						: current.captcha,
+					ipRegion: input.ipRegion ?? current.ipRegion,
+					avatar: input.avatar
+						? {
+								external: {
+									enabled: input.avatar.external.enabled,
+									baseUrl: normalizeExternalAvatarBaseUrl(
+										input.avatar.external.baseUrl,
+									),
+									hashAlgorithm: input.avatar.external.hashAlgorithm,
+									query: validateExternalAvatarQuery(
+										input.avatar.external.query,
+									),
+								},
+								display: {
+									shape: input.avatar.display.shape,
+									sizePx: input.avatar.display.sizePx,
+								},
+							}
+						: current.avatar,
+					publicApi: input.publicApi ?? current.publicApi,
+					antiSpam: input.antiSpam
+						? {
+								akismet: {
+									...current.antiSpam.akismet,
+									...input.antiSpam.akismet,
+								},
+							}
+						: current.antiSpam,
+				};
+				const next = preserveConfiguredSecrets(current, patch);
+
+				const currentValues = new Map(
+					flattenSystemSettings(current).map((row) => [
+						`${row.category}.${row.key}`,
+						JSON.stringify(row.value),
+					]),
+				);
+				for (const row of flattenSystemSettings(next)) {
+					if (
+						currentValues.get(`${row.category}.${row.key}`) !==
+						JSON.stringify(row.value)
+					) {
+						await repository.upsert(row.category, row.key, row.value);
+					}
+				}
+				if (input.notifications?.channelConfigs) {
+					await new NotificationChannelConfigsRepository(tx).replacePersisted(
+						input.notifications.channelConfigs.filter(
+							(config): config is NotificationChannelConfigInput =>
+								config.type !== "email",
+						),
+					);
+				}
+				await repository.writeAudit({
+					actorType: input.actorUserId ? "admin_user" : "system",
+					actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+					action: "system.settings.updated",
+					targetType: "system_settings",
+					targetId: "global",
+					payload: {
+						admin: input.admin,
+						security: input.security,
+						logging: input.logging,
+						mail: input.mail ? maskSystemSettings(next).mail : undefined,
+						notifications: maskSystemSettings(next).notifications,
+						captcha: input.captcha
+							? maskSystemSettings(next).captcha
+							: undefined,
+						ipRegion: input.ipRegion,
+						avatar: input.avatar,
+						publicApi: input.publicApi,
+						antiSpam: input.antiSpam
+							? maskSystemSettings(next).antiSpam
+							: undefined,
+					},
+				});
+				return input;
+			},
+		);
 		await this.loggerManager.reloadRuntimeSettings();
 		await this.loggerManager.logApp({
 			level: "info",
 			channel: "app",
 			event: "system.logging.updated",
-			requestId: input.requestId,
+			requestId: context.requestId,
 			message: "系统设置已更新",
-			actorType: input.actorUserId ? "admin_user" : "system",
-			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
-			data: input.logging,
-		});
-		await this.repository.writeAudit({
-			actorType: input.actorUserId ? "admin_user" : "system",
-			actorId: input.actorUserId ? String(input.actorUserId) : undefined,
-			action: "system.settings.updated",
-			targetType: "system_settings",
-			targetId: "global",
-			payload: {
-				admin: input.admin,
-				security: input.security,
-				logging: input.logging,
-				mail: input.mail ? maskSystemSettings(next).mail : undefined,
-				notifications: maskSystemSettings(next).notifications,
-				captcha: input.captcha,
-				ipRegion: input.ipRegion,
-				avatar: input.avatar,
-				publicApi: input.publicApi,
-				antiSpam: input.antiSpam,
-			},
+			actorType: context.actorUserId ? "admin_user" : "system",
+			actorId: context.actorUserId ? String(context.actorUserId) : undefined,
+			data: savedInput.logging,
 		});
 
 		return this.getSettings();

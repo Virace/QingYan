@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { loadConfig } from "../src/config/load-config";
 import { createDatabaseClients } from "../src/db/client";
 import {
@@ -163,8 +161,10 @@ function mergeCommentMetadataSettings(
 async function main(): Promise<void> {
 	const { scope, dryRun } = parseArgs(process.argv.slice(2));
 	const config = await loadConfig();
-	const databaseFile = path.resolve(process.cwd(), config.database.sqlite.file);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const { db, close } = createDatabaseClients(
+		config.database.url,
+		config.database,
+	);
 	const resolver = new DefaultCommentMetadataResolver();
 	const systemSettings = new RuntimeSystemSettingsService(db);
 	const ipRegion = await systemSettings.getIpRegionSettings();
@@ -289,7 +289,7 @@ async function main(): Promise<void> {
 		}
 	} finally {
 		resolver.close();
-		sqlite.close();
+		await close();
 	}
 
 	console.log("request metadata backfill completed");

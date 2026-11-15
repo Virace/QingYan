@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { sitePageRegistry, sites } from "../../db/schema";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
 import type { TaskRunnerContext } from "../tasks/task-runner-context";
@@ -124,7 +124,7 @@ function failureStatus(current: string, statusCode: number | null): PageStatus {
 
 export class PageMetadataRefreshService {
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly options: PageMetadataRefreshOptions,
 	) {}
 

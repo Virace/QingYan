@@ -127,9 +127,13 @@ export class AdminSessionService {
 		const expiresAt = new Date(
 			Date.now() + ttlMinutes * 60 * 1000,
 		).toISOString();
-		const user = await this.usersRepository.getUserByUsername(
-			this.adminBootstrap.username,
-		);
+		const user = this.adminBootstrap.initialAdminUserId
+			? await this.usersRepository.getUserById(
+					this.adminBootstrap.initialAdminUserId,
+				)
+			: await this.usersRepository.getUserByUsername(
+					this.adminBootstrap.username,
+				);
 		if (!user) {
 			throw new AppError(401, "ADMIN_AUTH_REQUIRED", "需要管理员登录。");
 		}
@@ -313,12 +317,21 @@ export class AdminSessionService {
 			});
 		}
 
-		const user = await this.usersRepository.getUserByUsername(input.username);
+		const development = this.adminBootstrap.development === true;
+		const user =
+			development && this.adminBootstrap.initialAdminUserId
+				? await this.usersRepository.getUserById(
+						this.adminBootstrap.initialAdminUserId,
+					)
+				: await this.usersRepository.getUserByUsername(input.username);
 		const isValid =
 			Boolean(user) &&
 			user?.status === "active" &&
 			!user.deletedAt &&
-			verifyPasswordHash(input.password, user.passwordHash);
+			(development
+				? input.username === this.adminBootstrap.username &&
+					verifyPasswordHash(input.password, this.adminBootstrap.passwordHash)
+				: verifyPasswordHash(input.password, user.passwordHash));
 		if (!isValid || !user) {
 			await this.recordFailedLogin({
 				code: "ADMIN_CREDENTIALS_INVALID",

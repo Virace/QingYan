@@ -61,5 +61,13 @@ describe("global flood guard", () => {
 				code: "GLOBAL_RATE_LIMITED",
 			},
 		});
+		const recovery = blocked.json().error.recovery;
+		expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+		expect(Number(blocked.headers["retry-after"])).toBeLessThanOrEqual(10);
+		expect(recovery.retryAfterSec).toBe(Number(blocked.headers["retry-after"]));
+		const explanation = await fixture.app.inject(recovery.helpUrl);
+		expect(explanation.statusCode).toBe(200);
+		expect(explanation.headers["content-type"]).toContain("text/html");
+		expect(explanation.body).toContain("操作过于频繁");
 	});
 });

@@ -20,6 +20,11 @@ function previewContext() {
 			authorLabel: "Alice",
 			badgeLabel: "",
 			content: "这是一条用于模板预览的评论。",
+			contentNote: "正文摘要",
+			authorEmail: "alice@example.test",
+			authorWebsite: "未提供",
+			authorIdentity: "访客",
+			status: "待审核",
 		},
 		parent: {
 			authorName: "Bob",
@@ -30,7 +35,19 @@ function previewContext() {
 			unsubscribe:
 				"https://qingyan.example.test/notifications/unsubscribe?token=preview",
 		},
-		time: { iso: new Date("2026-06-02T10:00:00.000Z").toISOString() },
+		moderation: {
+			verdict: "未识别为垃圾",
+			reason: "本站采用人工审核，等待站点人员处理。",
+		},
+		request: {
+			ip: "192.0.2.1",
+			device: "Firefox / Windows",
+			userAgent: "示例浏览器",
+		},
+		time: {
+			iso: new Date("2026-06-02T10:00:00.000Z").toISOString(),
+			display: "2026-06-02 10:00:00 UTC",
+		},
 	};
 }
 

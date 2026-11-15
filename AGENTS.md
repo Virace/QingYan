@@ -71,5 +71,5 @@ Superpowers 过程文档出现在仓库内，应迁移到仓库外目录后删�
 - release 后升级状态至少区分：`not_installed`、`normal_current`、`upgrade_required`、`recovery_required`、`broken_config`。
 - install mode 只处理 `not_installed`；upgrade mode 只处理 `upgrade_required`。即使复用 minimal app 能力，也不能把 Web upgrade 复用成 `/admin/install` 语义。
 - confirmed upgrade 必须先生成公开脱敏的 `UpgradePlan`，再执行；计划至少说明 schema migrations、application upgrades、配置改动、DB settings 改动、secret 处理、备份路径和风险。
-- confirmed upgrade 写入前必须备份 startup config、SQLite DB、WAL/SHM 和 UpgradePlan；未来 PostgreSQL/MySQL 场景可要求用户先做外部 DB 备份，但 UpgradePlan 必须明确提示。
+- confirmed upgrade 写入前必须停写并完成 PostgreSQL custom dump、startup config、必要资源和 UpgradePlan 的统一可恢复备份包。首次 SQLite 离线转换保留一致快照与完整原库归档；WAL/SHM 仅作为诊断材料，恢复使用独立一致快照。
 - application upgrade 需要使用 `__qingyan_upgrades` 或等价 ledger 记录 step 名称、来源版本、目标版本、应用时间和 JSON 摘要。

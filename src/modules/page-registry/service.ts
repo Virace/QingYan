@@ -1,14 +1,18 @@
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notExists, or, sql } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
+import { hashKey, toSafeInteger } from "../../db/values";
 import {
 	pageThreads,
+	type delayedDeletions,
 	pendingPageCandidates,
 	pendingPageViewSessions,
 	sitePageRegistry,
 	sites,
 } from "../../db/schema";
+import { assertPageKeyAvailable, lockPageKey } from "../shared/page-key";
 import { AppError, ResourceNotFoundError } from "../shared/errors";
+import { findDelayedDeletionPages } from "./deletion-state";
 
 type ReconcileRegisteredPendingCandidatesInput = {
 	siteKey?: string;
@@ -25,7 +29,7 @@ type ReconcileRegisteredPendingCandidatesSummary = {
 };
 
 export class PageRegistryService {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async listPendingCandidates(input: {
 		siteKey?: string;
@@ -36,32 +40,71 @@ export class PageRegistryService {
 	}) {
 		const searchValue = input.search ? `%${input.search}%` : undefined;
 		const status = input.status ?? "pending";
-		const rows = await this.db
+		const whereClause = and(
+			input.siteKey
+				? eq(pendingPageCandidates.siteKey, input.siteKey)
+				: undefined,
+			eq(pendingPageCandidates.status, status),
+			searchValue
+				? or(
+						sql`${pendingPageCandidates.pageKey} COLLATE "C" ILIKE ${searchValue} ESCAPE ''`,
+						sql`${pendingPageCandidates.pageUrl} COLLATE "C" ILIKE ${searchValue} ESCAPE ''`,
+					)
+				: undefined,
+			status === "pending"
+				? notExists(
+						this.db
+							.select({ id: sitePageRegistry.id })
+							.from(sitePageRegistry)
+							.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
+							.where(
+								and(
+									eq(sites.siteKey, pendingPageCandidates.siteKey),
+									eq(
+										sitePageRegistry.pageKeyHash,
+										pendingPageCandidates.pageKeyHash,
+									),
+									eq(sitePageRegistry.pageKey, pendingPageCandidates.pageKey),
+									or(
+										eq(sitePageRegistry.status, "active"),
+										eq(sitePageRegistry.status, "stale"),
+									),
+								),
+							),
+					)
+				: undefined,
+		);
+		const candidateCount = this.db
+			.select({
+				totalCount: sql`COUNT(*)`.mapWith(toSafeInteger).as("total_count"),
+			})
+			.from(pendingPageCandidates)
+			.where(whereClause)
+			.as("pending_candidate_count");
+		const candidatePage = this.db
 			.select()
 			.from(pendingPageCandidates)
-			.where(
-				and(
-					input.siteKey
-						? eq(pendingPageCandidates.siteKey, input.siteKey)
-						: undefined,
-					eq(pendingPageCandidates.status, status),
-					searchValue
-						? or(
-								like(pendingPageCandidates.pageKey, searchValue),
-								like(pendingPageCandidates.pageUrl, searchValue),
-							)
-						: undefined,
-				),
+			.where(whereClause)
+			.orderBy(
+				desc(pendingPageCandidates.updatedAt),
+				desc(pendingPageCandidates.id),
 			)
-			.orderBy(desc(pendingPageCandidates.updatedAt));
-		const filteredRows =
-			status === "pending"
-				? await this.excludeRegisteredPendingCandidates(rows)
-				: rows;
-
+			.limit(input.limit)
+			.offset(input.offset)
+			.as("pending_candidate_page");
+		// 空页仍保留总数，计数与分页结果共享同一查询快照。
+		const rows = await this.db
+			.select()
+			.from(candidatePage)
+			.rightJoin(candidateCount, sql`true`)
+			.orderBy(desc(candidatePage.updatedAt), desc(candidatePage.id));
 		return {
-			items: filteredRows.slice(input.offset, input.offset + input.limit),
-			totalCount: filteredRows.length,
+			items: rows.flatMap(({ pending_candidate_page: candidate }) => {
+				if (!candidate) return [];
+				const { pageKeyHash: _pageKeyHash, ...record } = candidate;
+				return [record];
+			}),
+			totalCount: rows[0]?.pending_candidate_count.totalCount ?? 0,
 		};
 	}
 
@@ -82,7 +125,10 @@ export class PageRegistryService {
 		const pageKeyFilter = input.pageKeys
 			? or(
 					...input.pageKeys.map((pageKey) =>
-						eq(pendingPageCandidates.pageKey, pageKey),
+						and(
+							eq(pendingPageCandidates.pageKeyHash, hashKey(pageKey)),
+							eq(pendingPageCandidates.pageKey, pageKey),
+						),
 					),
 				)
 			: undefined;
@@ -101,7 +147,10 @@ export class PageRegistryService {
 				sitePageRegistry,
 				and(
 					eq(sitePageRegistry.siteId, sites.id),
-					eq(sitePageRegistry.pageKey, pendingPageCandidates.pageKey),
+					and(
+						eq(sitePageRegistry.pageKeyHash, pendingPageCandidates.pageKeyHash),
+						eq(sitePageRegistry.pageKey, pendingPageCandidates.pageKey),
+					),
 				),
 			)
 			.where(
@@ -128,17 +177,23 @@ export class PageRegistryService {
 				.where(
 					and(
 						eq(pendingPageViewSessions.siteKey, row.siteKey),
-						eq(pendingPageViewSessions.pageKey, row.pageKey),
+						and(
+							eq(pendingPageViewSessions.pageKeyHash, hashKey(row.pageKey)),
+							eq(pendingPageViewSessions.pageKey, row.pageKey),
+						),
 					),
 				);
-			const mergedPageViews = Number(pendingCountRow?.value ?? 0);
+			const mergedPageViews = toSafeInteger(pendingCountRow?.value ?? 0);
 			const [thread] = await this.db
 				.select()
 				.from(pageThreads)
 				.where(
 					and(
 						eq(pageThreads.siteId, row.siteId),
-						eq(pageThreads.pageKey, row.pageKey),
+						and(
+							eq(pageThreads.pageKeyHash, hashKey(row.pageKey)),
+							eq(pageThreads.pageKey, row.pageKey),
+						),
 					),
 				)
 				.limit(1);
@@ -155,34 +210,13 @@ export class PageRegistryService {
 				continue;
 			}
 
-			const nowIso = new Date().toISOString();
-			const pageUrl = row.registryPageUrl || row.candidatePageUrl;
-			if (thread) {
-				await this.db
-					.update(pageThreads)
-					.set({
-						pageUrl,
-						pageViewCount: sql`${pageThreads.pageViewCount} + ${mergedPageViews}`,
-						updatedAt: nowIso,
-					})
-					.where(eq(pageThreads.id, thread.id));
-			} else {
-				await this.db.insert(pageThreads).values({
-					siteId: row.siteId,
-					pageKey: row.pageKey,
-					pageUrl,
-					pageViewCount: mergedPageViews,
-					updatedAt: nowIso,
-				});
-			}
-
-			await this.db
-				.update(pendingPageCandidates)
-				.set({
-					status: "approved",
-					updatedAt: nowIso,
-				})
-				.where(eq(pendingPageCandidates.id, row.candidateId));
+			await this.approvePendingCandidateForSite({
+				siteId: row.siteId,
+				siteKey: row.siteKey,
+				pageKey: row.pageKey,
+				pageUrl: row.registryPageUrl || row.candidatePageUrl,
+				candidateId: row.candidateId,
+			});
 		}
 
 		return summary;
@@ -199,7 +233,10 @@ export class PageRegistryService {
 			.where(
 				and(
 					eq(pendingPageCandidates.siteKey, input.siteKey),
-					eq(pendingPageCandidates.pageKey, input.pageKey),
+					and(
+						eq(pendingPageCandidates.pageKeyHash, hashKey(input.pageKey)),
+						eq(pendingPageCandidates.pageKey, input.pageKey),
+					),
 				),
 			)
 			.limit(1);
@@ -231,75 +268,144 @@ export class PageRegistryService {
 		pageUrl: string;
 		candidateId?: number;
 	}) {
-		const nowIso = new Date().toISOString();
-		const [pendingCountRow] = await this.db
-			.select({ value: sql<number>`COUNT(*)` })
-			.from(pendingPageViewSessions)
-			.where(
-				and(
-					eq(pendingPageViewSessions.siteKey, input.siteKey),
-					eq(pendingPageViewSessions.pageKey, input.pageKey),
-				),
+		return this.db.transaction(async (tx) => {
+			await lockPageKey(tx, input.siteId, input.pageKey);
+			await lockPageKey(tx, input.siteKey, input.pageKey);
+			await assertPageKeyAvailable(
+				tx,
+				"page_threads",
+				input.siteId,
+				input.pageKey,
 			);
-		const mergedPageViews = Number(pendingCountRow?.value ?? 0);
+			await assertPageKeyAvailable(
+				tx,
+				"site_page_registry",
+				input.siteId,
+				input.pageKey,
+			);
+			const [candidate] = await tx
+				.select()
+				.from(pendingPageCandidates)
+				.where(
+					and(
+						eq(pendingPageCandidates.siteKey, input.siteKey),
+						and(
+							eq(pendingPageCandidates.pageKeyHash, hashKey(input.pageKey)),
+							eq(pendingPageCandidates.pageKey, input.pageKey),
+						),
+					),
+				)
+				.for("update");
+			if (
+				input.candidateId !== undefined &&
+				(!candidate ||
+					candidate.id !== input.candidateId ||
+					candidate.status !== "pending")
+			) {
+				throw new AppError(
+					409,
+					"PENDING_PAGE_NOT_PENDING",
+					"待审页面状态不可放行。",
+				);
+			}
+			const nowIso = new Date().toISOString();
+			const [pendingCountRow] = await tx
+				.select({ value: sql<string>`COUNT(*)` })
+				.from(pendingPageViewSessions)
+				.where(
+					and(
+						eq(pendingPageViewSessions.siteKey, input.siteKey),
+						and(
+							eq(pendingPageViewSessions.pageKeyHash, hashKey(input.pageKey)),
+							eq(pendingPageViewSessions.pageKey, input.pageKey),
+						),
+					),
+				);
+			const [existingThread] = await tx
+				.select({ id: pageThreads.id })
+				.from(pageThreads)
+				.where(
+					and(
+						eq(pageThreads.siteId, input.siteId),
+						and(
+							eq(pageThreads.pageKeyHash, hashKey(input.pageKey)),
+							eq(pageThreads.pageKey, input.pageKey),
+						),
+					),
+				);
+			const mergedPageViews =
+				candidate?.status === "pending" || (!candidate && !existingThread)
+					? toSafeInteger(pendingCountRow?.value ?? 0)
+					: 0;
 
-		await this.db
-			.insert(sitePageRegistry)
-			.values({
-				siteId: input.siteId,
-				pageKey: input.pageKey,
-				pageUrl: input.pageUrl,
-				status: "active",
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.onConflictDoUpdate({
-				target: [sitePageRegistry.siteId, sitePageRegistry.pageKey],
-				set: {
+			await tx
+				.insert(sitePageRegistry)
+				.values({
+					siteId: input.siteId,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
 					pageUrl: input.pageUrl,
 					status: "active",
 					lastSeenAt: nowIso,
-					trashedAt: null,
-					deletedAt: null,
-					updatedAt: nowIso,
-				},
-			});
-
-		await this.db
-			.insert(pageThreads)
-			.values({
-				siteId: input.siteId,
-				pageKey: input.pageKey,
-				pageUrl: input.pageUrl,
-				pageViewCount: mergedPageViews,
-				updatedAt: nowIso,
-			})
-			.onConflictDoUpdate({
-				target: [pageThreads.siteId, pageThreads.pageKey],
-				set: {
-					pageUrl: input.pageUrl,
-					pageViewCount: sql`${pageThreads.pageViewCount} + ${mergedPageViews}`,
-					updatedAt: nowIso,
-				},
-			});
-
-		if (input.candidateId !== undefined) {
-			await this.db
-				.update(pendingPageCandidates)
-				.set({
-					status: "approved",
 					updatedAt: nowIso,
 				})
-				.where(eq(pendingPageCandidates.id, input.candidateId));
-		}
+				.onConflictDoUpdate({
+					target: [sitePageRegistry.siteId, sitePageRegistry.pageKeyHash],
+					setWhere: and(
+						eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+						eq(sitePageRegistry.pageKey, input.pageKey),
+					),
+					set: {
+						pageUrl: input.pageUrl,
+						status: "active",
+						lastSeenAt: nowIso,
+						trashedAt: null,
+						deletedAt: null,
+						updatedAt: nowIso,
+					},
+				});
 
-		return {
-			siteKey: input.siteKey,
-			pageKey: input.pageKey,
-			pageUrl: input.pageUrl,
-			status: "active",
-			mergedPageViews,
-		};
+			await tx
+				.insert(pageThreads)
+				.values({
+					siteId: input.siteId,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
+					pageUrl: input.pageUrl,
+					pageViewCount: mergedPageViews,
+					updatedAt: nowIso,
+				})
+				.onConflictDoUpdate({
+					target: [pageThreads.siteId, pageThreads.pageKeyHash],
+					setWhere: and(
+						eq(pageThreads.pageKeyHash, hashKey(input.pageKey)),
+						eq(pageThreads.pageKey, input.pageKey),
+					),
+					set: {
+						pageUrl: input.pageUrl,
+						pageViewCount: sql`${pageThreads.pageViewCount} + ${mergedPageViews}`,
+						updatedAt: nowIso,
+					},
+				});
+
+			if (candidate?.status === "pending") {
+				await tx
+					.update(pendingPageCandidates)
+					.set({
+						status: "approved",
+						updatedAt: nowIso,
+					})
+					.where(eq(pendingPageCandidates.id, candidate.id));
+			}
+
+			return {
+				siteKey: input.siteKey,
+				pageKey: input.pageKey,
+				pageUrl: input.pageUrl,
+				status: "active",
+				mergedPageViews,
+			};
+		});
 	}
 
 	public async approvePendingCandidateIfPending(input: {
@@ -314,7 +420,10 @@ export class PageRegistryService {
 			.where(
 				and(
 					eq(pendingPageCandidates.siteKey, input.siteKey),
-					eq(pendingPageCandidates.pageKey, input.pageKey),
+					and(
+						eq(pendingPageCandidates.pageKeyHash, hashKey(input.pageKey)),
+						eq(pendingPageCandidates.pageKey, input.pageKey),
+					),
 					eq(pendingPageCandidates.status, "pending"),
 				),
 			)
@@ -357,51 +466,68 @@ export class PageRegistryService {
 		pageKey: string;
 		reason?: string;
 	}) {
-		const nowIso = new Date().toISOString();
-		const candidate = await this.getPendingCandidate(input);
-		await this.db
-			.update(pendingPageCandidates)
-			.set({
-				status: "ignored",
-				lastRejectReason: input.reason ?? null,
-				updatedAt: nowIso,
-			})
-			.where(eq(pendingPageCandidates.id, candidate.id));
-		await this.db
-			.insert(sitePageRegistry)
-			.values({
-				siteId: input.siteId,
-				pageKey: input.pageKey,
-				pageUrl: candidate.pageUrl,
-				title: null,
-				status: "ignored",
-				lastSeenAt: nowIso,
-				updatedAt: nowIso,
-			})
-			.onConflictDoUpdate({
-				target: [sitePageRegistry.siteId, sitePageRegistry.pageKey],
-				set: {
+		return this.db.transaction(async (tx) => {
+			await lockPageKey(tx, input.siteId, input.pageKey);
+			await assertPageKeyAvailable(
+				tx,
+				"site_page_registry",
+				input.siteId,
+				input.pageKey,
+			);
+
+			const nowIso = new Date().toISOString();
+			const candidate = await new PageRegistryService(tx).getPendingCandidate(
+				input,
+			);
+			await tx
+				.update(pendingPageCandidates)
+				.set({
+					status: "ignored",
+					lastRejectReason: input.reason ?? null,
+					updatedAt: nowIso,
+				})
+				.where(eq(pendingPageCandidates.id, candidate.id));
+			await tx
+				.insert(sitePageRegistry)
+				.values({
+					siteId: input.siteId,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
 					pageUrl: candidate.pageUrl,
+					title: null,
 					status: "ignored",
 					lastSeenAt: nowIso,
 					updatedAt: nowIso,
-				},
-			});
+				})
+				.onConflictDoUpdate({
+					target: [sitePageRegistry.siteId, sitePageRegistry.pageKeyHash],
+					setWhere: and(
+						eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+						eq(sitePageRegistry.pageKey, input.pageKey),
+					),
+					set: {
+						pageUrl: candidate.pageUrl,
+						status: "ignored",
+						lastSeenAt: nowIso,
+						updatedAt: nowIso,
+					},
+				});
 
-		return {
-			candidate: {
-				...candidate,
-				status: "ignored",
-				lastRejectReason: input.reason ?? null,
-				updatedAt: nowIso,
-			},
-			page: {
-				siteKey: input.siteKey,
-				pageKey: input.pageKey,
-				pageUrl: candidate.pageUrl,
-				status: "ignored",
-			},
-		};
+			return {
+				candidate: {
+					...candidate,
+					status: "ignored",
+					lastRejectReason: input.reason ?? null,
+					updatedAt: nowIso,
+				},
+				page: {
+					siteKey: input.siteKey,
+					pageKey: input.pageKey,
+					pageUrl: candidate.pageUrl,
+					status: "ignored",
+				},
+			};
+		});
 	}
 
 	public async trashPage(input: {
@@ -435,22 +561,20 @@ export class PageRegistryService {
 			eq(sitePageRegistry.status, "trash"),
 		);
 		const rows = await this.db
-			.select({
+			.update(sitePageRegistry)
+			.set({
+				status: "deleted",
+				deletedAt: nowIso,
+				updatedAt: nowIso,
+			})
+			.where(whereClause)
+			.returning({
+				id: sitePageRegistry.id,
+				siteId: sitePageRegistry.siteId,
 				pageKey: sitePageRegistry.pageKey,
 				pageUrl: sitePageRegistry.pageUrl,
-			})
-			.from(sitePageRegistry)
-			.where(whereClause);
-		if (rows.length > 0) {
-			await this.db
-				.update(sitePageRegistry)
-				.set({
-					status: "deleted",
-					deletedAt: nowIso,
-					updatedAt: nowIso,
-				})
-				.where(whereClause);
-		}
+				deletedAt: sitePageRegistry.deletedAt,
+			});
 
 		return {
 			deletedCount: rows.length,
@@ -458,47 +582,51 @@ export class PageRegistryService {
 		};
 	}
 
-	public async restoreDeletedPage(input: {
-		pageKey: string;
-		siteId?: number | null;
-		siteKey?: string;
-	}) {
-		const page = await this.setPageLifecycle(
-			{
-				...input,
-				siteId: input.siteId ?? undefined,
-			},
-			"active",
-		);
-		return {
-			...page,
-			restoredCount: 1,
-		};
+	public async restoreDelayedDeletion(
+		record: typeof delayedDeletions.$inferSelect,
+	) {
+		const pages =
+			(await findDelayedDeletionPages(this.db, [record], true)).get(
+				record.id,
+			) ?? [];
+		if (pages.length === 0)
+			throw new AppError(
+				409,
+				"DELAYED_DELETION_RESOURCE_UNAVAILABLE",
+				"原删除内容已不可恢复。",
+			);
+		await this.db
+			.update(sitePageRegistry)
+			.set({
+				status: "active",
+				deletedAt: null,
+				trashedAt: null,
+				updatedAt: new Date().toISOString(),
+			})
+			.where(
+				inArray(
+					sitePageRegistry.id,
+					pages.map((page) => page.id),
+				),
+			);
+		return pages.length;
 	}
 
-	public async restoreDeletedPages(input: {
-		pageKeys: string[];
-		siteId?: number | null;
-	}) {
-		if (input.pageKeys.length === 0) {
-			return 0;
-		}
-		let restoredCount = 0;
-		for (const pageKey of input.pageKeys) {
-			try {
-				await this.restoreDeletedPage({
-					pageKey,
-					siteId: input.siteId,
-				});
-				restoredCount += 1;
-			} catch (error) {
-				if (error instanceof ResourceNotFoundError) {
-					continue;
-				}
-				throw error;
-			}
-		}
-		return restoredCount;
+	public async hardDeleteDelayedDeletion(
+		record: typeof delayedDeletions.$inferSelect,
+	) {
+		const pages =
+			(await findDelayedDeletionPages(this.db, [record], true)).get(
+				record.id,
+			) ?? [];
+		if (pages.length === 0) return 0;
+		await this.db.delete(sitePageRegistry).where(
+			inArray(
+				sitePageRegistry.id,
+				pages.map((page) => page.id),
+			),
+		);
+		return pages.length;
 	}
 
 	public async hardDeletePage(input: {
@@ -546,7 +674,10 @@ export class PageRegistryService {
 			.where(
 				and(
 					eq(pendingPageCandidates.siteKey, input.siteKey),
-					eq(pendingPageCandidates.pageKey, input.pageKey),
+					and(
+						eq(pendingPageCandidates.pageKeyHash, hashKey(input.pageKey)),
+						eq(pendingPageCandidates.pageKey, input.pageKey),
+					),
 				),
 			)
 			.limit(1);
@@ -556,34 +687,8 @@ export class PageRegistryService {
 				"待审页面不存在。",
 			);
 		}
-		return candidate;
-	}
-
-	private async excludeRegisteredPendingCandidates(
-		rows: Array<typeof pendingPageCandidates.$inferSelect>,
-	) {
-		const filteredRows: Array<typeof pendingPageCandidates.$inferSelect> = [];
-		for (const row of rows) {
-			const [registeredPage] = await this.db
-				.select({ id: sitePageRegistry.id })
-				.from(sitePageRegistry)
-				.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
-				.where(
-					and(
-						eq(sites.siteKey, row.siteKey),
-						eq(sitePageRegistry.pageKey, row.pageKey),
-						or(
-							eq(sitePageRegistry.status, "active"),
-							eq(sitePageRegistry.status, "stale"),
-						),
-					),
-				)
-				.limit(1);
-			if (!registeredPage) {
-				filteredRows.push(row);
-			}
-		}
-		return filteredRows;
+		const { pageKeyHash: _pageKeyHash, ...record } = candidate;
+		return record;
 	}
 
 	private async setPageLifecycle(
@@ -610,6 +715,15 @@ export class PageRegistryService {
 			trashedAt: status === "trash" ? nowIso : null,
 			deletedAt: status === "deleted" ? nowIso : null,
 			updatedAt: nowIso,
+			deletionSnapshot:
+				status === "deleted"
+					? {
+							id: page.id,
+							siteId: page.siteId,
+							pageKey: page.pageKey,
+							deletedAt: nowIso,
+						}
+					: undefined,
 		};
 	}
 
@@ -627,7 +741,10 @@ export class PageRegistryService {
 			.where(
 				and(
 					input.siteId ? eq(sitePageRegistry.siteId, input.siteId) : undefined,
-					eq(sitePageRegistry.pageKey, input.pageKey),
+					and(
+						eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+						eq(sitePageRegistry.pageKey, input.pageKey),
+					),
 				),
 			)
 			.limit(1);

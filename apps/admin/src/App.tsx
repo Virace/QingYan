@@ -1,4 +1,3 @@
-import { useEffect, useMemo, useState } from "react";
 import {
 	MutationCache,
 	QueryCache,
@@ -6,14 +5,16 @@ import {
 	QueryClientProvider,
 	useQuery,
 } from "@tanstack/react-query";
-import { toast, Toaster } from "sonner";
+import { useEffect, useMemo, useState } from "react";
+import { Toaster, toast } from "sonner";
 
-import { adminUiErrorMessage, ApiError, logAdminApiError } from "@/api/client";
+import { ApiError, adminUiErrorMessage, logAdminApiError } from "@/api/client";
 import { fetchAdminMe } from "@/api/session";
-import { AdminShell } from "@/components/admin/shell/admin-shell";
-import { AdminConfirmDialogProvider } from "@/components/admin/shared/confirm-dialog";
 import { LoginPage } from "@/components/admin/auth/login-page";
 import { PasswordChangePage } from "@/components/admin/auth/password-change-page";
+import { AdminNavigationGuardProvider } from "@/components/admin/shared/admin-navigation-guard";
+import { AdminConfirmDialogProvider } from "@/components/admin/shared/confirm-dialog";
+import { AdminShell } from "@/components/admin/shell/admin-shell";
 import {
 	Card,
 	CardDescription,
@@ -162,10 +163,12 @@ export default function App() {
 	return (
 		<QueryClientProvider client={queryClient}>
 			<AdminConfirmDialogProvider>
-				<AppContent
-					authenticated={authenticated}
-					setAuthenticated={setAuthenticated}
-				/>
+				<AdminNavigationGuardProvider>
+					<AppContent
+						authenticated={authenticated}
+						setAuthenticated={setAuthenticated}
+					/>
+				</AdminNavigationGuardProvider>
 			</AdminConfirmDialogProvider>
 			<Toaster richColors position="top-right" theme={resolvedTheme} />
 		</QueryClientProvider>

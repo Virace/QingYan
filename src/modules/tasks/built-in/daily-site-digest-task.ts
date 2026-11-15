@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 import type { AppDatabase } from "../../../db/client";
 import { sites } from "../../../db/schema";
@@ -133,53 +133,55 @@ export class DefaultDailySiteDigestTaskService
 			recipientAddress: string;
 			identityKey: string;
 		}) => {
-			const notificationRun = await this.taskRuns.create({
-				type: "daily_site_digest",
-				category: "notification",
-				siteId: site.id,
-				siteKey: input.siteKey,
-				subjectType: "site",
-				subjectId: input.siteKey,
-				idempotencyKey: [
-					"daily_site_digest",
-					input.siteKey,
-					target.identityKey,
-					input.now.toISOString().slice(0, 10),
-				].join(":"),
-				payloadSummary: {
-					siteKey: input.siteKey,
-					userId: target.recipientUserId,
-					channel: target.config.type,
-					channelConfigId: target.config.id,
-					activity,
-				},
-				payload: {
-					format: target.config.type === "webhook" ? "json" : "text",
-					templateContext: {
-						site: { name: input.siteKey, key: input.siteKey },
-						time: { iso: input.now.toISOString() },
-						digest: { activity },
+			const notification =
+				await this.taskRuns.createNotificationTaskWithDelivery({
+					task: {
+						type: "daily_site_digest",
+						category: "notification",
+						siteId: site.id,
+						siteKey: input.siteKey,
+						subjectType: "site",
+						subjectId: input.siteKey,
+						idempotencyKey: [
+							"daily_site_digest",
+							input.siteKey,
+							target.identityKey,
+							input.now.toISOString().slice(0, 10),
+						].join(":"),
+						payloadSummary: {
+							siteKey: input.siteKey,
+							userId: target.recipientUserId,
+							channel: target.config.type,
+							channelConfigId: target.config.id,
+							activity,
+						},
+						payload: {
+							format: target.config.type === "webhook" ? "json" : "text",
+							templateContext: {
+								site: { name: input.siteKey, key: input.siteKey },
+								time: { iso: input.now.toISOString() },
+								digest: { activity },
+							},
+							subjectTemplate: `[${input.siteKey}] QingYan 每日摘要`,
+							bodyTemplate:
+								target.config.type === "webhook"
+									? JSON.stringify({ siteKey: input.siteKey, activity })
+									: `评论 {{digest.activity.comments}} / 回复 {{digest.activity.replies}} / PV {{digest.activity.pageViews}} / 点赞 {{digest.activity.pageLikes}} / 未知页面 {{digest.activity.unknownPages}} / 任务失败 {{digest.activity.taskFailures}}`,
+						},
 					},
-					subjectTemplate: `[${input.siteKey}] QingYan 每日摘要`,
-					bodyTemplate:
-						target.config.type === "webhook"
-							? JSON.stringify({ siteKey: input.siteKey, activity })
-							: `评论 {{digest.activity.comments}} / 回复 {{digest.activity.replies}} / PV {{digest.activity.pageViews}} / 点赞 {{digest.activity.pageLikes}} / 未知页面 {{digest.activity.unknownPages}} / 任务失败 {{digest.activity.taskFailures}}`,
-				},
-			});
-			await this.taskRuns.createDelivery({
-				taskRunId: notificationRun.id,
-				channel: target.config.type,
-				channelConfigRef: target.config.id,
-				channelConfigNameSnapshot: target.config.name,
-				recipientType: target.recipientType,
-				recipientUserId: target.recipientUserId,
-				recipientAddressSnapshot: target.recipientAddress,
-				recipientIdentityKey: target.identityKey,
-				eventFamily: "daily_site_digest",
-				templateKey: "daily_site_digest",
-			});
-			created.push(notificationRun.id);
+					delivery: {
+						channel: target.config.type,
+						channelConfigRef: target.config.id,
+						channelConfigNameSnapshot: target.config.name,
+						recipientType: target.recipientType,
+						recipientUserId: target.recipientUserId,
+						recipientAddressSnapshot: target.recipientAddress,
+						recipientIdentityKey: target.identityKey,
+						eventFamily: "daily_site_digest",
+						templateKey: "daily_site_digest",
+					},
+				});
+			created.push(notification.task.id);
 		};
 
 		for (const recipient of recipientByUserId.values()) {

@@ -35,12 +35,6 @@ export type AdminPermission =
 	| "allowlist.create"
 	| "allowlist.update"
 	| "allowlist.delete"
-	| "data.export"
-	| "data.import"
-	| "data.import_apply"
-	| "wordpress_migration.analyze"
-	| "wordpress_migration.plan"
-	| "wordpress_migration.apply"
 	| "tasks.read"
 	| "tasks.schedule.create"
 	| "tasks.schedule.update"
@@ -114,12 +108,6 @@ export const allAdminPermissions: AdminPermission[] = [
 	"allowlist.create",
 	"allowlist.update",
 	"allowlist.delete",
-	"data.export",
-	"data.import",
-	"data.import_apply",
-	"wordpress_migration.analyze",
-	"wordpress_migration.plan",
-	"wordpress_migration.apply",
 	"tasks.read",
 	"tasks.schedule.create",
 	"tasks.schedule.update",

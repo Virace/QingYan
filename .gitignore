@@ -14,8 +14,12 @@ pnpm-debug.log*
 
 data/
 logs/
+gateway/
+.env
+gateway.compose.json
 config/qingyan.yml
 config/qingyan.local.yml
+config/waf-sites.json
 config/*.installed.lock
 *.db
 *.db-shm

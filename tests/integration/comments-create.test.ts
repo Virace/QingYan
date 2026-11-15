@@ -1,36 +1,36 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../../src/app";
 import { createDatabaseClients } from "../../src/db/client";
 import {
 	adminUsers,
 	commentModeration,
 	comments,
+	visitors,
+	taskRuns,
 	pageThreads,
 	sitePageRegistry,
 	siteSettings,
 	sites,
 	systemSettings,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
+import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
+import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
 import {
 	serializeStaffDisplaySettings,
 	serializeVerifiedAuthorSettings,
 } from "../../src/modules/comments/verified-author";
-import { serializeSiteModerationSettings } from "../../src/modules/comments/moderation-types";
-import type { AkismetReviewResult } from "../../src/modules/comments/akismet-client";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
+import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 import { loginAsAdmin } from "../support/admin-login";
 import {
 	applyCurrentMigrations,
 	createTestConfig,
+	createTestWorkspace,
 	defaultTestSite,
 } from "../support/test-fixtures";
-import { createSiteRegistry } from "../../src/modules/shared/site-registry";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -49,14 +49,15 @@ async function createCustomTestApp(options?: {
 	akismetVerdict?: AkismetReviewResult["verdict"];
 	externalAvatar?: boolean;
 }) {
-	const directory = mkdtempSync(
-		path.join(tmpdir(), "qingyan-comments-create-"),
-	);
-	const databaseFile = path.join(directory, "qingyan.db");
-	applyCurrentMigrations(databaseFile);
+	let akismetCheckCount = 0;
+	const workspace = createTestWorkspace("qingyan-comments-create-");
+	const databaseUrl = workspace.databaseUrl;
+	await applyCurrentMigrations(databaseUrl);
 
-	const config = createTestConfig(databaseFile);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const config = createTestConfig(databaseUrl);
+	const { db, close } = createDatabaseClients(databaseUrl, {
+		pool: { max: 2 },
+	});
 	try {
 		await createSiteRegistry().seedSiteFromTemplate(db, defaultTestSite);
 		const [site] = await db
@@ -109,26 +110,32 @@ async function createCustomTestApp(options?: {
 			]);
 		}
 	} finally {
-		sqlite.close();
+		await close();
 	}
 
 	const app = await buildApp(config, undefined, {
 		startNotificationRuntime: false,
 		akismetClient: options?.akismetVerdict
 			? {
-					commentCheck: async () => ({
-						verdict: options.akismetVerdict ?? "ham",
-						checkedAt: "2026-05-26T10:00:00.000Z",
-					}),
+					commentCheck: async () => {
+						akismetCheckCount += 1;
+						return {
+							verdict: options.akismetVerdict ?? "ham",
+							checkedAt: "2026-05-26T10:00:00.000Z",
+						};
+					},
 				}
 			: undefined,
 	});
 
 	return {
 		app,
+		get akismetCheckCount() {
+			return akismetCheckCount;
+		},
 		async cleanup() {
 			await app.close();
-			rmSync(directory, { recursive: true, force: true });
+			await workspace.cleanup();
 		},
 	};
 }
@@ -145,12 +152,104 @@ async function seedActivePage(fixture: CustomFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
 }
 
 describe("POST /qingyan/api/comments", () => {
+	it.each([
+		"1",
+		"2026",
+		"１２３",
+		" 1 ２\n3 ",
+	])("rejects numeric-only content %j before creating business records or calling Akismet", async (raw) => {
+		const fixture = await createCustomTestApp({
+			akismetVerdict: "ham",
+			moderation: serializeSiteModerationSettings({
+				mode: "akismet_auto",
+				provider: "akismet",
+				akismet: { failPolicy: "pending", discardBlatantSpam: false },
+			}),
+		});
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "posts/numeric-rejection/");
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: { referer: "http://localhost:4321/posts/numeric-rejection/" },
+			payload: {
+				siteKey: "fangyuan",
+				pageTitle: "Numeric rejection",
+				parentCommentId: null,
+				author: { name: "Visitor", email: "visitor@example.org" },
+				content: { raw },
+			},
+		});
+		expect(response.statusCode).toBe(400);
+		expect(response.json().error.code).toBe("COMMENT_CONTENT_NUMERIC_ONLY");
+		expect(await fixture.app.db.select().from(pageThreads)).toEqual([]);
+		expect(await fixture.app.db.select().from(visitors)).toEqual([]);
+		expect(await fixture.app.db.select().from(comments)).toEqual([]);
+		expect(
+			await fixture.app.db
+				.select()
+				.from(taskRuns)
+				.where(eq(taskRuns.subjectType, "comment")),
+		).toEqual([]);
+		expect(fixture.akismetCheckCount).toBe(0);
+	});
+
+	it("stores Akismet ham as pending when local review is enabled and history is insufficient", async () => {
+		const fixture = await createCustomTestApp({
+			akismetVerdict: "ham",
+			moderation: serializeSiteModerationSettings({
+				mode: "akismet_auto",
+				provider: "akismet",
+				localReviewEnabled: true,
+				akismet: { failPolicy: "pending", discardBlatantSpam: false },
+			}),
+		});
+		cleanups.push(fixture.cleanup);
+		await seedActivePage(fixture, "posts/local-review/");
+		const response = await fixture.app.inject({
+			method: "POST",
+			url: "/qingyan/api/comments",
+			headers: {
+				referer: "http://localhost:4321/posts/local-review/",
+				"user-agent": "local-review-reader",
+			},
+			payload: {
+				siteKey: "fangyuan",
+				pageTitle: "Local review",
+				parentCommentId: null,
+				author: { name: "Reader", email: "reader@example.org" },
+				content: { raw: "谢谢分享" },
+			},
+		});
+		expect(response.statusCode).toBe(200);
+		expect(response.json().comment.status).toBe("pending");
+		const [moderation] = await fixture.app.db.select().from(commentModeration);
+		expect(moderation).toMatchObject({
+			akismetVerdict: "ham",
+			status: "pending",
+			reason: "local_history_insufficient",
+			provider: "combined",
+		});
+		const [intent] = await fixture.app.db
+			.select()
+			.from(taskRuns)
+			.where(eq(taskRuns.type, "comment_notification_intent"));
+		expect(intent).toMatchObject({
+			subjectId: response.json().comment.id,
+			status: "queued",
+		});
+		expect(JSON.parse(intent.payloadJson)).toMatchObject({
+			status: "pending",
+			notifyBackend: true,
+		});
+	});
 	it("returns a full public comment when an approved visitor comment is created", async () => {
 		const fixture = await createCustomTestApp({
 			require: ["nickname", "email"],

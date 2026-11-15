@@ -26,7 +26,7 @@ export interface OpsStatus {
 	};
 	backup: {
 		format: "qingyan.full-backup";
-		provider: "sqlite";
+		provider: "postgresql";
 	};
 	recovery: {
 		manualCommands: string[];
@@ -120,6 +120,46 @@ export function restartService(input: { confirm: string }) {
 	);
 }
 
+export type DelayedDeletionStatus = "pending" | "restored" | "hard_deleted";
+
+export interface DelayedDeletion {
+	id: number;
+	resourceType: string;
+	displayName: string;
+	siteKey: string | null;
+	siteName: string | null;
+	requestedAt: string;
+	hardDeleteAfter: string;
+	restoredAt: string | null;
+	status: DelayedDeletionStatus;
+	canRestore: boolean;
+}
+
+export function listDelayedDeletions(input: {
+	siteKey?: string;
+	status: DelayedDeletionStatus;
+	limit: number;
+	offset: number;
+}) {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(input)) {
+		if (value !== undefined) params.set(key, String(value));
+	}
+	return requestJson<{
+		items: DelayedDeletion[];
+		totalCount: number;
+		limit: number;
+		offset: number;
+	}>(`/api/admin/ops/delayed-deletions?${params}`);
+}
+
+export function restoreDelayedDeletion(id: number) {
+	return requestJson<{ resource: { restoredCount: number } }>(
+		`/api/admin/ops/delayed-deletions/${id}/restore`,
+		{ method: "POST" },
+	);
+}
+
 export type IpVersion = "v4" | "v6";
 
 export interface TaskQueueState {
@@ -149,19 +189,16 @@ export interface TaskExecutionOptions {
 export interface IpRegionMaintenanceStatus {
 	databases: Array<{
 		ipVersion: IpVersion;
-		filePath: string;
-		fileHash: string;
+		filePath: string | null;
+		fileHash: string | null;
 		sourceUrl: string | null;
-		cachePolicy: string;
-		activatedAt: string;
+		cachePolicy: string | null;
+		activatedAt: string | null;
 		updatedAt: string;
-	}>;
-	recentRuns: Array<{
-		ipVersion: IpVersion;
-		status: string;
-		refreshedComments: number;
-		errorMessage: string | null;
-		createdAt: string;
+		lastCheckedAt: string | null;
+		lastCheckStatus: "success" | "skipped" | "failed" | null;
+		lastCheckReason: string | null;
+		lastCheckError: string | null;
 	}>;
 	commentMetadata: {
 		totalWithIp: number;

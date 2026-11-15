@@ -1,26 +1,27 @@
 import { sql } from "drizzle-orm";
-import {
-	index,
-	integer,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { bigint, index, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { exactText as text, utcTimestamp } from "./column-types";
 
 import { pageThreads } from "./page-threads";
 import { visitors } from "./visitors";
 
-export const pageViewSessions = sqliteTable(
+export const pageViewSessions = pgTable(
 	"page_view_sessions",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		pageThreadId: integer("page_thread_id")
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		pageThreadId: bigint("page_thread_id", { mode: "number" })
 			.notNull()
 			.references(() => pageThreads.id),
-		visitorId: integer("visitor_id").references(() => visitors.id),
+		visitorId: bigint("visitor_id", { mode: "number" }).references(
+			() => visitors.id,
+		),
 		fingerprint: text("fingerprint").notNull(),
-		seenAt: text("seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		seenAt: utcTimestamp("seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
 		uniqueIndex("page_view_sessions_thread_fingerprint_idx").on(
@@ -30,17 +31,21 @@ export const pageViewSessions = sqliteTable(
 	],
 );
 
-export const pageFeedbackRecords = sqliteTable(
+export const pageFeedbackRecords = pgTable(
 	"page_feedback_records",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		pageThreadId: integer("page_thread_id")
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		pageThreadId: bigint("page_thread_id", { mode: "number" })
 			.notNull()
 			.references(() => pageThreads.id),
-		visitorId: integer("visitor_id")
+		visitorId: bigint("visitor_id", { mode: "number" })
 			.notNull()
 			.references(() => visitors.id),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
 		uniqueIndex("page_feedback_records_thread_visitor_idx").on(

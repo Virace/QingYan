@@ -41,9 +41,11 @@ import {
 export function PagesPage({
 	siteKey,
 	openComments,
+	canReadOps = false,
 }: {
 	siteKey?: string;
 	openComments: (input: { pageKey?: string; search?: string }) => void;
+	canReadOps?: boolean;
 }) {
 	const [search, setSearch] = useState("");
 	const [status, setStatus] = useState<PageStatusFilter>("all");
@@ -199,6 +201,18 @@ export function PagesPage({
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				{status === "deleted" && canReadOps ? (
+					<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
+						<span>恢复窗口内的已删除页面可在运维中找回。</span>
+						<Button variant="outline" size="sm" asChild>
+							<a
+								href={`?view=ops${siteKey ? `&siteKey=${encodeURIComponent(siteKey)}` : ""}#deletion-recovery`}
+							>
+								查看删除恢复
+							</a>
+						</Button>
+					</div>
+				) : null}
 				<ResourceFilters
 					search={search}
 					setSearch={(value) => {
@@ -210,6 +224,7 @@ export function PagesPage({
 				<label className="grid gap-1 text-sm md:max-w-xs">
 					<span className="text-muted-foreground">页面状态</span>
 					<select
+						aria-label="页面状态"
 						className={inputClass}
 						value={status}
 						onChange={(event) => {

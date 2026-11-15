@@ -1,7 +1,6 @@
-import Database from "better-sqlite3";
-import type { FastifyInstance } from "fastify";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { FastifyInstance } from "fastify";
 
 import { buildApp } from "./app";
 import { buildPublicUrl } from "./config/public-path";
@@ -11,9 +10,9 @@ import {
 	type InstallTransition,
 } from "./modules/install/install-app";
 import {
+	type MinimalInstallConfig,
 	resolveInstallUrl,
 	resolveMinimalInstallConfig,
-	type MinimalInstallConfig,
 } from "./modules/install/minimal-config";
 import { resolveInstallState } from "./modules/install/state";
 import { createUpgradeAppLaunch } from "./modules/upgrade/upgrade-app";
@@ -104,7 +103,6 @@ async function resolveCurrentStartupMode(
 		partialUpgradeMarkerPath: partialUpgradeMarkerPath(
 			minimalInstallConfig.configPath,
 		),
-		createSqliteClient: (file) => new Database(file),
 	});
 }
 
@@ -157,12 +155,10 @@ export async function main(): Promise<void> {
 				configPath: minimalInstallConfig.configPath,
 				loadedConfig: startupMode.config,
 				configError: startupMode.configError,
-				databaseFile: startupMode.databaseFile,
 				currentApplicationVersion: readPackageVersion(),
 				partialUpgradeMarkerPath: partialUpgradeMarkerPath(
 					minimalInstallConfig.configPath,
 				),
-				createSqliteClient: (file) => new Database(file),
 			});
 			activeApp = upgradeLaunch.app;
 			const listenConfig = startupMode.config?.server ?? minimalInstallConfig;
@@ -234,6 +230,18 @@ export async function main(): Promise<void> {
 			}
 		},
 	});
+
+	let closing: Promise<void> | undefined;
+	const close = () => {
+		closing ??= activeApp?.close() ?? Promise.resolve();
+		return closing;
+	};
+	for (const signal of ["SIGTERM", "SIGINT"] as const)
+		process.once(signal, () => {
+			void close().catch(() => {
+				process.exitCode = 1;
+			});
+		});
 
 	await lifecycle.start();
 }

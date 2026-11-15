@@ -12,30 +12,30 @@ import {
 interface Fixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	repository: TaskRunRepository;
 	queue: DatabaseTaskQueue;
 }
 
 const fixtures: Fixture[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
-function createFixture(): Fixture {
+async function createFixture(): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-runs-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	const repository = new TaskRunRepository(clients.db);
 	const queue = new DatabaseTaskQueue(clients.db);
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		repository,
 		queue,
 	};
@@ -45,7 +45,7 @@ function createFixture(): Fixture {
 
 describe("task run repository and database queue", () => {
 	it("serializes task run JSON fields and delivery recipient snapshots", async () => {
-		const { repository } = createFixture();
+		const { repository } = await createFixture();
 		const task = await repository.create({
 			type: "notification.reply_approved",
 			category: "notification",
@@ -105,7 +105,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("commits notification delivery and parent state together and rejects cross-task outcomes", async () => {
-		const { repository } = createFixture();
+		const { repository } = await createFixture();
 		const first = await repository.createNotificationTaskWithDelivery({
 			task: {
 				type: "reply_approved",
@@ -144,9 +144,12 @@ describe("task run repository and database queue", () => {
 			throw new Error("Expected notification deliveries");
 		}
 
+		const claimed = await repository.markRunning(first.task.id);
+		if (!claimed) throw new Error("Expected claimed task");
 		await expect(
 			repository.completeNotificationAttempt({
 				taskId: first.task.id,
+				claimToken: claimed.claimToken,
 				outcomes: [
 					{
 						deliveryId: second.delivery.id,
@@ -159,7 +162,7 @@ describe("task run repository and database queue", () => {
 			}),
 		).rejects.toThrow("does not belong to task");
 		expect(await repository.getRequired(first.task.id)).toMatchObject({
-			status: "queued",
+			status: "running",
 			attempts: 0,
 		});
 		expect(
@@ -170,6 +173,7 @@ describe("task run repository and database queue", () => {
 
 		await repository.completeNotificationAttempt({
 			taskId: first.task.id,
+			claimToken: claimed.claimToken,
 			outcomes: [
 				{
 					deliveryId: first.delivery.id,
@@ -193,7 +197,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("uses idempotency keys to return the existing task run", async () => {
-		const { repository } = createFixture();
+		const { repository } = await createFixture();
 
 		const first = await repository.create({
 			type: "notification.admin_comment_pending",
@@ -221,7 +225,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("enqueues immediate and delayed task runs", async () => {
-		const { queue } = createFixture();
+		const { queue } = await createFixture();
 
 		const queued = await queue.enqueue({
 			type: "notification.admin_comment_pending",
@@ -245,7 +249,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("claims due task runs and marks them running", async () => {
-		const { queue } = createFixture();
+		const { queue } = await createFixture();
 		await queue.enqueue({
 			type: "notification.admin_comment_pending",
 			category: "notification",
@@ -275,7 +279,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("scopes runnable claims by task category", async () => {
-		const { repository } = createFixture();
+		const { repository } = await createFixture();
 		const notification = await repository.create({
 			type: "notification.channel_test",
 			category: "notification",
@@ -307,7 +311,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("retries task runs and then records final failures", async () => {
-		const { queue, repository } = createFixture();
+		const { queue, repository } = await createFixture();
 		const task = await queue.enqueue({
 			type: "notification.reply_approved",
 			category: "notification",
@@ -315,7 +319,7 @@ describe("task run repository and database queue", () => {
 			payload: { commentId: "reply_1" },
 			maxAttempts: 2,
 		});
-		await queue.claim("worker-1", {
+		const [firstClaim] = await queue.claim("worker-1", {
 			nowIso: "2026-06-02T00:00:00.000Z",
 			limit: 1,
 		});
@@ -324,12 +328,21 @@ describe("task run repository and database queue", () => {
 			task.id,
 			{ code: "TEMPORARY_FAILURE" },
 			"2026-06-02T00:05:00.000Z",
+			firstClaim.claimToken,
 		);
 		const retryingTask = await repository.getRequired(task.id);
-		await queue.fail(task.id, {
-			code: "SMTP_REJECTED",
-			message: "mailbox unavailable",
+		const [retryClaim] = await queue.claim("worker-1", {
+			nowIso: "2026-06-02T00:05:00.000Z",
+			limit: 1,
 		});
+		await queue.fail(
+			task.id,
+			{
+				code: "SMTP_REJECTED",
+				message: "mailbox unavailable",
+			},
+			retryClaim.claimToken,
+		);
 		const failed = await repository.getRequired(task.id);
 
 		expect(retrying).toBeUndefined();
@@ -351,7 +364,7 @@ describe("task run repository and database queue", () => {
 	});
 
 	it("acks, suppresses, and cancels task runs", async () => {
-		const { queue, repository } = createFixture();
+		const { queue, repository } = await createFixture();
 		const success = await queue.enqueue({
 			type: "notification.channel_test",
 			category: "notification",
@@ -371,8 +384,14 @@ describe("task run repository and database queue", () => {
 			payload: { commentId: "comment_2" },
 		});
 
+		const successClaim = await repository.markRunning(success.id);
+		if (!successClaim) throw new Error("Expected claimed task");
 		expect(
-			await queue.ack(success.id, { providerMessageId: "smtp-1" }),
+			await queue.ack(
+				success.id,
+				{ providerMessageId: "smtp-1" },
+				successClaim.claimToken,
+			),
 		).toBeUndefined();
 		expect(await repository.getRequired(success.id)).toMatchObject({
 			status: "succeeded",

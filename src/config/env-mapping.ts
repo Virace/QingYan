@@ -1,5 +1,5 @@
-import type { StartupConfig } from "./types";
 import { setPathValue } from "../modules/shared/object-path";
+import type { StartupConfig } from "./types";
 
 type EnvValueKind = "string" | "number" | "boolean" | "sameSite";
 
@@ -60,14 +60,49 @@ export const envMappings: EnvMapping[] = [
 		restartRequired: true,
 	},
 	{
-		path: "database.sqlite.file",
-		envName: "QINGYAN_SQLITE_FILE",
+		path: "database.url",
+		envName: "QINGYAN_DATABASE_URL",
 		category: "startup",
 		valueKind: "string",
-		secret: false,
-		readable: true,
+		secret: true,
+		readable: false,
 		restartRequired: true,
 	},
+	...[
+		["database.pool.max", "QINGYAN_DATABASE_POOL_MAX", "number", false],
+		[
+			"database.pool.connectionTimeoutMs",
+			"QINGYAN_DATABASE_CONNECTION_TIMEOUT_MS",
+			"number",
+			false,
+		],
+		[
+			"database.pool.idleTimeoutMs",
+			"QINGYAN_DATABASE_IDLE_TIMEOUT_MS",
+			"number",
+			false,
+		],
+		[
+			"database.tls.rejectUnauthorized",
+			"QINGYAN_DATABASE_TLS_REJECT_UNAUTHORIZED",
+			"boolean",
+			false,
+		],
+		["database.tls.ca", "QINGYAN_DATABASE_TLS_CA", "string", true],
+		["database.tls.cert", "QINGYAN_DATABASE_TLS_CERT", "string", true],
+		["database.tls.key", "QINGYAN_DATABASE_TLS_KEY", "string", true],
+	].map(
+		([path, envName, valueKind, secret]) =>
+			({
+				path,
+				envName,
+				valueKind,
+				secret,
+				category: "startup",
+				readable: !secret,
+				restartRequired: true,
+			}) as EnvMapping,
+	),
 	{
 		path: "admin.session.cookieName",
 		envName: "QINGYAN_ADMIN_SESSION_COOKIE_NAME",

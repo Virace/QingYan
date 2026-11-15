@@ -3,12 +3,12 @@ import { isIP } from "node:net";
 import { and, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import Ip2Region from "ts-ip2region2";
 
+import { toSafeInteger } from "../../../db/values";
 import type { AppDatabase } from "../../../db/client";
 import {
 	commentRequestMetadata,
 	comments,
 	ipRegionDatabaseState,
-	ipRegionUpdateRuns,
 	sites,
 } from "../../../db/schema";
 import type { SystemSettings } from "../../system-settings/definitions";
@@ -56,7 +56,7 @@ function ipVersionSql(ipVersions: IpVersion[]) {
 	if (wantsV6) {
 		return sql`${commentRequestMetadata.authorIp} LIKE '%:%'`;
 	}
-	return sql`0`;
+	return sql`false`;
 }
 
 function resolveIpVersion(ip: string): IpVersion {
@@ -78,11 +78,6 @@ export class CommentIpMaintenanceService {
 
 	public async getStatus() {
 		const states = await this.db.select().from(ipRegionDatabaseState);
-		const recentRuns = await this.db
-			.select()
-			.from(ipRegionUpdateRuns)
-			.orderBy(sql`${ipRegionUpdateRuns.createdAt} DESC`)
-			.limit(10);
 		const [totalWithIp] = await this.db
 			.select({ count: sql<number>`COUNT(*)` })
 			.from(commentRequestMetadata)
@@ -108,11 +103,10 @@ export class CommentIpMaintenanceService {
 
 		return {
 			databases: states,
-			recentRuns,
 			commentMetadata: {
-				totalWithIp: totalWithIp?.count ?? 0,
-				missingLocation: missingLocation?.count ?? 0,
-				failedLocation: failedLocation?.count ?? 0,
+				totalWithIp: toSafeInteger(totalWithIp?.count ?? 0),
+				missingLocation: toSafeInteger(missingLocation?.count ?? 0),
+				failedLocation: toSafeInteger(failedLocation?.count ?? 0),
 			},
 		};
 	}
@@ -176,7 +170,11 @@ export class CommentIpMaintenanceService {
 	) {
 		const states = await this.db.select().from(ipRegionDatabaseState);
 		const hashByVersion = new Map(
-			states.map((state) => [state.ipVersion as IpVersion, state.fileHash]),
+			states.flatMap((state) =>
+				state.fileHash
+					? [[state.ipVersion as IpVersion, state.fileHash] as const]
+					: [],
+			),
 		);
 		let processed = 0;
 		let refreshed = 0;
@@ -320,7 +318,7 @@ export class CommentIpMaintenanceService {
 			.from(ipRegionDatabaseState)
 			.where(eq(ipRegionDatabaseState.ipVersion, ipVersion))
 			.limit(1);
-		if (!state) {
+		if (!state?.filePath) {
 			throw new Error(`missing_${ipVersion}_database`);
 		}
 		const searcher = new Ip2Region(state.filePath, {

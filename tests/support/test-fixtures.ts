@@ -1,8 +1,7 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import path from "node:path";
-
-import Database from "better-sqlite3";
+import { Pool } from "pg";
 
 import { buildApp } from "../../src/app";
 import { resolveRuntimeOptions } from "../../src/config/runtime-options";
@@ -22,80 +21,102 @@ import {
 export interface TestWorkspace {
 	directory: string;
 	databaseFile: string;
+	databaseUrl: string;
 	configPath: string;
 	logsDirectory: string;
-	cleanup: () => void;
+	cleanup: () => Promise<void>;
+}
+
+function testServerUrl(): URL {
+	const value = process.env.QINGYAN_TEST_DATABASE_URL;
+	if (!value)
+		throw new Error(
+			"QINGYAN_TEST_DATABASE_URL must point to an isolated PostgreSQL test server.",
+		);
+	return new URL(value);
 }
 
 export function createTestWorkspace(prefix = "qingyan-"): TestWorkspace {
-	const directory = mkdtempSync(path.join(tmpdir(), prefix));
-	const databaseFile = path.join(directory, "qingyan.db");
-	const configPath = path.join(directory, "config", "qingyan.yml");
-	const logsDirectory = path.join(directory, "logs");
-
+	const root = path.resolve(
+		process.cwd(),
+		".temp/postgresql-migration/testing/workspaces",
+	);
+	mkdirSync(root, { recursive: true });
+	const directory = mkdtempSync(path.join(root, prefix));
+	const databaseName = `qingyan_test_${randomUUID().replaceAll("-", "")}`;
+	const databaseUrl = testServerUrl();
+	databaseUrl.pathname = `/${databaseName}`;
 	return {
 		directory,
-		databaseFile,
-		configPath,
-		logsDirectory,
-		cleanup() {
-			rmSync(directory, { recursive: true, force: true });
+		databaseFile: path.join(directory, "source.sqlite"),
+		databaseUrl: databaseUrl.toString(),
+		configPath: path.join(directory, "config", "qingyan.yml"),
+		logsDirectory: path.join(directory, "logs"),
+		async cleanup() {
+			const pool = new Pool({
+				connectionString: testServerUrl().toString(),
+				max: 1,
+			});
+			try {
+				await pool.query(
+					`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
+				);
+			} finally {
+				await pool.end();
+			}
 		},
 	};
 }
 
-export function applyInitialMigration(databaseFile: string): void {
-	const sqlite = new Database(databaseFile);
-	const migrationDirectory = path.resolve(process.cwd(), "drizzle");
-	const migrationFiles = readdirSync(migrationDirectory)
-		.filter((fileName) => fileName.endsWith(".sql"))
-		.sort();
-
-	try {
-		for (const fileName of migrationFiles) {
-			const sql = readFileSync(
-				path.join(migrationDirectory, fileName),
-				"utf-8",
-			);
-			sqlite.exec(sql);
-		}
-	} finally {
-		sqlite.close();
-	}
+export async function applyInitialMigration(
+	databaseUrl: string,
+): Promise<void> {
+	await applyCurrentMigrations(databaseUrl);
 }
 
-export function applyV010BaselineMigration(databaseFile: string): void {
-	const sqlite = new Database(databaseFile);
+export async function ensureTestDatabase(databaseUrl: string): Promise<void> {
+	const name = new URL(databaseUrl).pathname.slice(1);
+	if (!/^qingyan_test_[a-f0-9]{32}$/.test(name))
+		throw new Error("Fixture database name is not owned by this test.");
+	const admin = new Pool({
+		connectionString: testServerUrl().toString(),
+		max: 1,
+	});
 	try {
-		sqlite.exec(
-			readFileSync(
-				path.resolve(process.cwd(), "drizzle", "0000_initial.sql"),
-				"utf-8",
-			),
+		const exists = await admin.query(
+			"SELECT 1 FROM pg_database WHERE datname = $1",
+			[name],
 		);
+		if (exists.rowCount === 0)
+			await admin.query(
+				`CREATE DATABASE "${name}" ENCODING 'UTF8' TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'`,
+			);
 	} finally {
-		sqlite.close();
+		await admin.end();
 	}
 }
 
-export function applyCurrentMigrations(databaseFile: string): void {
-	const sqlite = new Database(databaseFile);
+export async function applyCurrentMigrations(
+	databaseUrl: string,
+): Promise<void> {
+	await ensureTestDatabase(databaseUrl);
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
 	try {
-		applyDatabaseMigrations(sqlite);
+		await applyDatabaseMigrations(clients.pool);
 	} finally {
-		sqlite.close();
+		await clients.close();
 	}
 }
 
 async function seedTestSite(
-	databaseFile: string,
+	databaseUrl: string,
 	site: SiteSeed,
 ): Promise<void> {
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
 	try {
-		await createSiteRegistry().seedSiteFromTemplate(db, site);
+		await createSiteRegistry().seedSiteFromTemplate(clients.db, site);
 	} finally {
-		sqlite.close();
+		await clients.close();
 	}
 }
 
@@ -106,7 +127,7 @@ export const defaultTestSite: SiteSeed = {
 };
 
 export function createTestConfig(
-	databaseFile: string,
+	databaseUrl: string,
 	logsDirectory = "./logs",
 ): AppConfig {
 	return {
@@ -118,10 +139,8 @@ export function createTestConfig(
 			trustProxy: false,
 		},
 		database: {
-			client: "sqlite",
-			sqlite: {
-				file: databaseFile,
-			},
+			url: databaseUrl,
+			pool: { max: 2, connectionTimeoutMs: 5000, idleTimeoutMs: 30000 },
 		},
 		admin: {
 			console: {
@@ -208,10 +227,10 @@ export async function createTestApp(options?: {
 	adminProfileEmailSender?: AdminProfileEmailSender;
 }) {
 	const workspace = createTestWorkspace();
-	applyCurrentMigrations(workspace.databaseFile);
+	await applyCurrentMigrations(workspace.databaseUrl);
 
 	const baseConfig = createTestConfig(
-		workspace.databaseFile,
+		workspace.databaseUrl,
 		workspace.logsDirectory,
 	);
 	options?.mutateConfig?.(baseConfig);
@@ -223,7 +242,7 @@ export async function createTestApp(options?: {
 		if (!site) {
 			throw new Error("Test fixture requires a default site seed.");
 		}
-		await seedTestSite(workspace.databaseFile, site);
+		await seedTestSite(workspace.databaseUrl, site);
 	}
 	const resolved = resolveRuntimeOptions(baseConfig, {
 		QINGYAN_DEV_MODE: options?.devMode ? "true" : "false",
@@ -245,12 +264,13 @@ export async function createTestApp(options?: {
 
 	return {
 		app,
-		databaseFile: workspace.databaseFile,
+		databaseUrl: workspace.databaseUrl,
+		pool: app.databasePool,
 		logsDirectory: workspace.logsDirectory,
 		runtimeOptions: resolved.runtimeOptions,
 		async cleanup() {
 			await app.close();
-			workspace.cleanup();
+			await workspace.cleanup();
 		},
 	};
 }

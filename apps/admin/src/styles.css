@@ -30,6 +30,10 @@
 }
 
 :root {
+	--admin-motion-fast: 150ms;
+	--admin-motion: 220ms;
+	--admin-motion-exit: 110ms;
+	--admin-ease: cubic-bezier(0.22, 1, 0.36, 1);
 	--radius: 0.5rem;
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0 0);
@@ -50,6 +54,226 @@
 	--border: oklch(0.922 0 0);
 	--input: oklch(0.922 0 0);
 	--ring: oklch(0.708 0 0);
+}
+
+.admin-header {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+}
+
+.admin-header-selectors {
+	display: grid;
+	grid-column: 1 / -1;
+	grid-row: 2;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.admin-header-actions {
+	grid-column: 2;
+	grid-row: 1;
+}
+
+.rt-TabsRoot,
+.rt-TabsContent {
+	min-width: 0;
+	max-width: 100%;
+}
+
+@media (min-width: 768px) {
+	.admin-header {
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		min-height: 64px;
+	}
+
+	.admin-header-selectors {
+		grid-column: 2;
+		grid-row: 1;
+		grid-template-columns: auto;
+	}
+
+	.admin-header-actions {
+		grid-column: 3;
+	}
+}
+
+:where(
+	button,
+	[role="button"],
+	input,
+	textarea,
+	select,
+	[role="tab"],
+	.rt-BaseButton,
+	.rt-DropdownMenuItem
+) {
+	transition-property:
+		color, background-color, border-color, box-shadow, opacity, transform;
+	transition-duration: var(--admin-motion-fast);
+	transition-timing-function: var(--admin-ease);
+}
+
+:where(button, .rt-BaseButton):active:not(
+	:disabled,
+	[data-disabled],
+	[role="switch"],
+	[role="tab"]
+) {
+	transform: translateY(1px) scale(0.98);
+}
+
+@media (hover: hover) {
+	.admin-nav-item:hover {
+		transform: translateX(2px);
+	}
+}
+
+.admin-nav-item[aria-current="page"] {
+	box-shadow: inset 2px 0 0 var(--foreground);
+}
+
+.rt-SwitchRoot::before,
+.rt-SwitchThumb {
+	transition-duration: var(--admin-motion);
+	transition-timing-function: var(--admin-ease);
+}
+
+.admin-page-enter,
+[role="tabpanel"][data-state="active"],
+.admin-content-enter {
+	animation: admin-content-in var(--admin-motion) var(--admin-ease);
+}
+
+:is(.rt-DialogContent, .rt-AlertDialogContent)[data-state="open"] {
+	animation: admin-dialog-in var(--admin-motion) var(--admin-ease);
+}
+
+:is(.rt-DialogContent, .rt-AlertDialogContent)[data-state="closed"] {
+	animation: admin-dialog-out var(--admin-motion-fast) var(--admin-ease);
+}
+
+:is(.rt-DialogOverlay, .rt-AlertDialogOverlay)[data-state="open"] {
+	animation: admin-fade-in var(--admin-motion) var(--admin-ease);
+}
+
+:is(.rt-DialogOverlay, .rt-AlertDialogOverlay)[data-state="closed"] {
+	animation: admin-fade-out var(--admin-motion-fast) var(--admin-ease);
+}
+
+:is(
+	.rt-DropdownMenuContent,
+	.rt-PopoverContent,
+	.rt-TooltipContent
+)[data-state="open"],
+.rt-TooltipContent[data-state="delayed-open"] {
+	animation: admin-menu-in var(--admin-motion-fast) var(--admin-ease);
+	transform-origin: var(--radix-popper-transform-origin);
+}
+
+:is(
+	.rt-DropdownMenuContent,
+	.rt-PopoverContent,
+	.rt-TooltipContent
+)[data-state="closed"] {
+	animation: admin-fade-out var(--admin-motion-exit) var(--admin-ease);
+}
+
+details[open] > :not(summary) {
+	animation: admin-content-in var(--admin-motion) var(--admin-ease);
+}
+
+summary {
+	transition: color var(--admin-motion-fast) var(--admin-ease);
+}
+
+:where([role="alert"], .admin-feedback-enter) {
+	animation: admin-fade-in var(--admin-motion) var(--admin-ease);
+}
+
+@keyframes admin-content-in {
+	from {
+		opacity: 0.65;
+		transform: translateY(5px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes admin-dialog-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+@keyframes admin-dialog-out {
+	from {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+	to {
+		opacity: 0;
+		transform: translateY(4px) scale(0.99);
+	}
+}
+
+@keyframes admin-menu-in {
+	from {
+		opacity: 0;
+		transform: translateY(-3px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+@keyframes admin-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes admin-fade-out {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--admin-motion-fast: 0ms;
+		--admin-motion: 0ms;
+		--admin-motion-exit: 0ms;
+	}
+
+	.animate-spin {
+		animation: none;
+	}
+
+	:where(button, .rt-BaseButton):active:not(
+		:disabled,
+		[data-disabled],
+		[role="switch"],
+		[role="tab"]
+	),
+	.admin-nav-item:hover {
+		transform: none;
+	}
 }
 
 .dark {

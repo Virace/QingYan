@@ -21,6 +21,7 @@ import { adminUiRoutes } from "./modules/admin/ui-routes";
 import { adminCommentersRoutes } from "./modules/admin/commenters-routes";
 import { adminVisitorsRoutes } from "./modules/admin/visitors-routes";
 import { adminUsersRoutes } from "./modules/admin/admin-users-routes";
+import { adminWafRoutes } from "./modules/admin/waf-routes";
 import { commentsAdminRoutes } from "./modules/comments/admin-routes";
 import type { AkismetClient } from "./modules/comments/akismet-client";
 import { captchaWidgetRoutes } from "./modules/comments/captcha-widget-routes";
@@ -29,7 +30,6 @@ import { commentsPublicRoutes } from "./modules/comments/public-routes";
 import { createDevMemoryRoutes } from "./modules/dev/memory-routes";
 import { DevMockService } from "./modules/dev/mock-service";
 import { registerDatabaseDevRoutes } from "./modules/dev/routes";
-import { adminImportExportRoutes } from "./modules/import-export/admin-routes";
 import { pageFeedbackPublicRoutes } from "./modules/page-feedback/public-routes";
 import type { fetchPageSourceText } from "./modules/page-registry/source-fetcher";
 import type { EmailSender } from "./modules/notifications/channels/email-channel";
@@ -38,6 +38,7 @@ import { notificationsPublicRoutes } from "./modules/notifications/public-routes
 import type { ServiceControlController } from "./modules/service-control/systemd-service";
 import { buildErrorResponse } from "./modules/shared/error-response";
 import { AppError } from "./modules/shared/errors";
+import { registerRestrictionRoutes } from "./modules/shared/restriction-routes";
 import { createSiteRegistry } from "./modules/shared/site-registry";
 import { loadOpenApiDocument, renderOpenApiHtml } from "./openapi/load-openapi";
 import cookiePlugin from "./plugins/cookie";
@@ -61,6 +62,7 @@ interface BuildAppOptions {
 	emailSender?: EmailSender;
 	adminProfileEmailSender?: AdminProfileEmailSender;
 	startNotificationRuntime?: boolean;
+	startBackgroundRuntime?: boolean;
 }
 
 function registerBaseRoutes(
@@ -68,10 +70,18 @@ function registerBaseRoutes(
 	openApi: OpenApiDocument,
 	publicPath: string,
 ): void {
-	app.get(joinPublicPath(publicPath, "/healthz"), async () => ({
-		service: "QingYan",
-		status: "ok",
-	}));
+	registerRestrictionRoutes(app, publicPath);
+	app.get(joinPublicPath(publicPath, "/healthz"), async (_, reply) => {
+		try {
+			const query = { text: "SELECT 1", query_timeout: 5000 };
+			if (app.databasePool) await app.databasePool.query(query);
+			return { service: "QingYan", status: "ok", mode: "normal" };
+		} catch {
+			return reply
+				.code(503)
+				.send({ service: "QingYan", status: "unavailable", mode: "normal" });
+		}
+	});
 	app.get(joinPublicPath(publicPath, "/openapi.yaml"), async (_, reply) =>
 		reply.type("application/yaml; charset=utf-8").send(openApi.yamlText),
 	);
@@ -137,6 +147,10 @@ export async function buildApp(
 		"notificationRuntimeAutoStart",
 		options.startNotificationRuntime ?? true,
 	);
+	app.decorate(
+		"backgroundRuntimeAutoStart",
+		options.startBackgroundRuntime ?? true,
+	);
 	if (options.akismetClient) {
 		app.decorate("akismetClient", options.akismetClient);
 	}
@@ -191,7 +205,9 @@ export async function buildApp(
 		}
 
 		if (error instanceof AppError) {
-			const response = buildErrorResponse(error, requestId);
+			const response = buildErrorResponse(error, requestId, publicPath);
+			if (response.retryAfterSec !== undefined)
+				reply.header("Retry-After", String(response.retryAfterSec));
 			return reply.status(response.statusCode).send(response.body);
 		}
 
@@ -316,6 +332,9 @@ export async function buildApp(
 	await app.register(adminBlacklistRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/blacklist"),
 	});
+	await app.register(adminWafRoutes, {
+		prefix: joinPublicPath(publicPath, "/api/admin/waf"),
+	});
 	await app.register(adminAllowlistRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/allowlist"),
 	});
@@ -336,9 +355,6 @@ export async function buildApp(
 	});
 	await app.register(adminProfileRoutes, {
 		prefix: joinPublicPath(publicPath, "/api/admin/profile"),
-	});
-	await app.register(adminImportExportRoutes, {
-		prefix: joinPublicPath(publicPath, "/api/admin/import-export"),
 	});
 
 	return app;

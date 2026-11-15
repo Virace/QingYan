@@ -1,24 +1,27 @@
 import {
 	and,
+	asc,
 	count,
 	desc,
 	eq,
 	gte,
+	ilike,
 	inArray,
 	isNotNull,
 	isNull,
-	like,
 	or,
+	type SQL,
 	sql,
 } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	adminSessions,
 	allowlistRules,
 	blacklistRules,
 	commenterNotificationPreferences,
 	commentRequestMetadata,
+	commentReviewEvents,
 	comments,
 	emailDeliveryReputation,
 	pageThreads,
@@ -29,6 +32,9 @@ import {
 	visitorRequestMetadata,
 	visitors,
 } from "../../db/schema";
+import { enqueueCommentNotificationIntent } from "../notifications/comment-notification-intent";
+import { requireCommentAccount } from "../comments/account-identity";
+import { AbuseRepository } from "../comments/abuse-repository";
 import { buildExternalAvatarUrl } from "../comments/gravatar";
 import type { CommentStatus } from "../comments/moderation-types";
 import { NotificationChannelConfigsRepository } from "../notifications/channel-configs-repository";
@@ -408,27 +414,10 @@ function parseEngagementSettings(payload?: string | null): EngagementSettings {
 	return mergeEngagementSettings(payload);
 }
 
-function comparePageSortValue(
-	left: AdminPageItem,
-	right: AdminPageItem,
-	sortBy: AdminPageSortBy,
-) {
-	if (sortBy === "title") {
-		return (left.pageTitle ?? "").localeCompare(right.pageTitle ?? "");
-	}
-	if (sortBy === "pageKey") {
-		return left.pageKey.localeCompare(right.pageKey);
-	}
-	if (sortBy === "createdAt" || sortBy === "updatedAt") {
-		return (left[sortBy] ?? "").localeCompare(right[sortBy] ?? "");
-	}
-	return Number(left[sortBy] ?? 0) - Number(right[sortBy] ?? 0);
-}
-
 export class AdminRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
-	public get database(): AppDatabase {
+	public get database(): DatabaseExecutor {
 		return this.db;
 	}
 
@@ -636,6 +625,7 @@ export class AdminRepository {
 	}
 
 	public async listComments(input: {
+		commentId?: string;
 		siteId?: number;
 		pageKey?: string;
 		status?: CommentStatus;
@@ -645,8 +635,11 @@ export class AdminRepository {
 		limit: number;
 		offset: number;
 	}) {
-		const hasExplicitStatusFilter = Boolean(input.status || input.statusGroup);
+		const hasExplicitStatusFilter = Boolean(
+			input.commentId || input.status || input.statusGroup,
+		);
 		const conditions = [
+			input.commentId ? eq(comments.id, input.commentId) : undefined,
 			input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 			eq(pageThreads.kind, "public"),
 			input.status ? eq(comments.status, input.status) : undefined,
@@ -666,8 +659,8 @@ export class AdminRepository {
 			input.search === undefined
 				? undefined
 				: or(
-						like(comments.authorName, `%${input.search}%`),
-						like(comments.contentRaw, `%${input.search}%`),
+						ilike(comments.authorName, `%${input.search}%`),
+						ilike(comments.contentRaw, `%${input.search}%`),
 						emailHash ? eq(comments.authorEmailHash, emailHash) : undefined,
 					);
 
@@ -866,10 +859,46 @@ export class AdminRepository {
 		offset: number;
 	}) {
 		const searchValue = input.search ? `%${input.search}%` : undefined;
-		const rows = await this.db
+		const conditions = and(
+			input.siteId ? eq(sitePageRegistry.siteId, input.siteId) : undefined,
+			input.status ? eq(sitePageRegistry.status, input.status) : undefined,
+			searchValue
+				? or(
+						ilike(sitePageRegistry.pageKey, searchValue),
+						ilike(sitePageRegistry.title, searchValue),
+						ilike(sitePageRegistry.pageUrl, searchValue),
+					)
+				: undefined,
+		);
+		const visitorCount = sql<number>`(
+			SELECT count(DISTINCT ${pageViewSessions.visitorId})
+			FROM ${pageViewSessions}
+			WHERE ${pageViewSessions.pageThreadId} = ${pageThreads.id}
+		)`
+			.mapWith(Number)
+			.as("visitor_count");
+		const commenterCount = sql<number>`(
+			SELECT count(DISTINCT ${comments.authorEmail})
+			FROM ${comments}
+			WHERE ${comments.pageThreadId} = ${pageThreads.id}
+			AND ${comments.deletedAt} IS NULL
+		)`
+			.mapWith(Number)
+			.as("commenter_count");
+		const sortColumns = {
+			updatedAt: sitePageRegistry.updatedAt,
+			createdAt: sitePageRegistry.createdAt,
+			commentCount: sql`coalesce(${pageThreads.commentCount}, 0)`,
+			visitorCount,
+			commenterCount,
+			pageLikeCount: sql`coalesce(${pageThreads.pageLikeCount}, 0)`,
+			title: sql`coalesce(${sitePageRegistry.title}, ${pageThreads.pageTitle}, '')`,
+			pageKey: sitePageRegistry.pageKey,
+		};
+		const order = input.sortOrder === "asc" ? asc : desc;
+		const pageRows = this.db
 			.select({
 				id: sitePageRegistry.id,
-				pageThreadId: pageThreads.id,
 				siteId: sitePageRegistry.siteId,
 				siteKey: sites.siteKey,
 				allowedOriginsJson: sites.allowedOriginsJson,
@@ -886,11 +915,15 @@ export class AdminRepository {
 				deletedAt: sitePageRegistry.deletedAt,
 				createdAt: sitePageRegistry.createdAt,
 				threadPageTitle: pageThreads.pageTitle,
-				threadPageUrl: pageThreads.pageUrl,
+				threadPageUrl: sql<string | null>`${pageThreads.pageUrl}`.as(
+					"thread_page_url",
+				),
 				commentCount: pageThreads.commentCount,
 				rootCommentCount: pageThreads.rootCommentCount,
 				pageLikeCount: pageThreads.pageLikeCount,
 				updatedAt: sitePageRegistry.updatedAt,
+				visitorCount,
+				commenterCount,
 			})
 			.from(sitePageRegistry)
 			.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
@@ -899,133 +932,81 @@ export class AdminRepository {
 				pageThreads,
 				and(
 					eq(pageThreads.siteId, sitePageRegistry.siteId),
+					eq(pageThreads.pageKeyHash, sitePageRegistry.pageKeyHash),
 					eq(pageThreads.pageKey, sitePageRegistry.pageKey),
 					eq(pageThreads.kind, "public"),
 				),
 			)
-			.where(
-				and(
-					input.siteId ? eq(sitePageRegistry.siteId, input.siteId) : undefined,
-					input.status ? eq(sitePageRegistry.status, input.status) : undefined,
-					searchValue
-						? or(
-								like(sitePageRegistry.pageKey, searchValue),
-								like(sitePageRegistry.title, searchValue),
-								like(sitePageRegistry.pageUrl, searchValue),
-							)
-						: undefined,
-				),
+			.where(conditions)
+			.orderBy(
+				order(sortColumns[input.sortBy]),
+				desc(sitePageRegistry.updatedAt),
+				desc(sitePageRegistry.id),
 			)
-			.orderBy(desc(sitePageRegistry.updatedAt));
-
-		const pageThreadIds = rows
-			.map((row) => row.pageThreadId)
-			.filter((id): id is number => id !== null);
-		if (pageThreadIds.length === 0) {
-			const items: AdminPageItem[] = rows.map((row) => ({
-				siteKey: row.siteKey,
-				pageKey: row.pageKey,
-				status: row.status,
-				pageTitle: row.pageTitle ?? row.threadPageTitle,
-				pageUrl: resolvePublicPageUrl(
-					row.pageUrl ?? row.threadPageUrl,
-					parseStringArray(row.allowedOriginsJson),
-				),
-				commentCount: 0,
-				rootCommentCount: 0,
-				pageLikeCount: 0,
-				updatedAt: row.updatedAt,
-				createdAt: row.createdAt,
-				trashedAt: row.trashedAt,
-				deletedAt: row.deletedAt,
-				titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
-				titleRefreshedAt: row.titleRefreshedAt,
-				titleRefreshStatusCode: row.titleRefreshStatusCode,
-				titleRefreshError: row.titleRefreshError,
-				visitorCount: 0,
-				commenterCount: 0,
-				engagement: buildAdminEngagementSummary(
-					parseEngagementSettings(row.engagementJson),
-				),
-			}));
-			const direction = input.sortOrder === "asc" ? 1 : -1;
-			const sortedItems = items.sort(
-				(left, right) =>
-					comparePageSortValue(left, right, input.sortBy) * direction,
+			.limit(input.limit)
+			.offset(input.offset)
+			.as("paged_pages");
+		const totals = this.db
+			.select({ totalCount: count().as("total_count") })
+			.from(sitePageRegistry)
+			.innerJoin(sites, eq(sites.id, sitePageRegistry.siteId))
+			.innerJoin(siteSettings, eq(siteSettings.siteId, sitePageRegistry.siteId))
+			.where(conditions)
+			.as("page_totals");
+		const pageSortColumns = {
+			updatedAt: pageRows.updatedAt,
+			createdAt: pageRows.createdAt,
+			commentCount: sql`coalesce(${pageRows.commentCount}, 0)`,
+			visitorCount: pageRows.visitorCount,
+			commenterCount: pageRows.commenterCount,
+			pageLikeCount: sql`coalesce(${pageRows.pageLikeCount}, 0)`,
+			title: sql`coalesce(${pageRows.pageTitle}, ${pageRows.threadPageTitle}, '')`,
+			pageKey: pageRows.pageKey,
+		};
+		const rows = await this.db
+			.select()
+			.from(pageRows)
+			.rightJoin(totals, sql`true`)
+			.orderBy(
+				order(pageSortColumns[input.sortBy]),
+				desc(pageRows.updatedAt),
+				desc(pageRows.id),
 			);
-			return {
-				items: sortedItems.slice(input.offset, input.offset + input.limit),
-				totalCount: sortedItems.length,
-			};
-		}
-
-		const visitorCounts = toCountMap(
-			await this.db
-				.select({
-					key: pageViewSessions.pageThreadId,
-					value: sql<number>`COUNT(DISTINCT ${pageViewSessions.visitorId})`,
-				})
-				.from(pageViewSessions)
-				.where(inArray(pageViewSessions.pageThreadId, pageThreadIds))
-				.groupBy(pageViewSessions.pageThreadId),
-		);
-		const commenterCounts = toCountMap(
-			await this.db
-				.select({
-					key: comments.pageThreadId,
-					value: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
-				})
-				.from(comments)
-				.where(
-					and(
-						inArray(comments.pageThreadId, pageThreadIds),
-						isNull(comments.deletedAt),
-						isNotNull(comments.authorEmail),
-					),
-				)
-				.groupBy(comments.pageThreadId),
-		);
-
-		const items: AdminPageItem[] = rows.map((row) => ({
-			siteKey: row.siteKey,
-			pageKey: row.pageKey,
-			status: row.status,
-			pageTitle: row.pageTitle ?? row.threadPageTitle,
-			pageUrl: resolvePublicPageUrl(
-				row.pageUrl ?? row.threadPageUrl,
-				parseStringArray(row.allowedOriginsJson),
-			),
-			commentCount: row.commentCount ?? 0,
-			rootCommentCount: row.rootCommentCount ?? 0,
-			pageLikeCount: row.pageLikeCount ?? 0,
-			updatedAt: row.updatedAt,
-			createdAt: row.createdAt,
-			trashedAt: row.trashedAt,
-			deletedAt: row.deletedAt,
-			titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
-			titleRefreshedAt: row.titleRefreshedAt,
-			titleRefreshStatusCode: row.titleRefreshStatusCode,
-			titleRefreshError: row.titleRefreshError,
-			visitorCount:
-				row.pageThreadId === null
-					? 0
-					: (visitorCounts.get(row.pageThreadId) ?? 0),
-			commenterCount:
-				row.pageThreadId === null
-					? 0
-					: (commenterCounts.get(row.pageThreadId) ?? 0),
-			engagement: buildAdminEngagementSummary(
-				parseEngagementSettings(row.engagementJson),
-			),
-		}));
-		const direction = input.sortOrder === "asc" ? 1 : -1;
-		const sortedItems = items.sort(
-			(left, right) =>
-				comparePageSortValue(left, right, input.sortBy) * direction,
+		const items: AdminPageItem[] = rows.flatMap(({ paged_pages: row }) =>
+			row
+				? [
+						{
+							siteKey: row.siteKey,
+							pageKey: row.pageKey,
+							status: row.status,
+							pageTitle: row.pageTitle ?? row.threadPageTitle,
+							pageUrl: resolvePublicPageUrl(
+								row.pageUrl ?? row.threadPageUrl,
+								parseStringArray(row.allowedOriginsJson),
+							),
+							commentCount: row.commentCount ?? 0,
+							rootCommentCount: row.rootCommentCount ?? 0,
+							pageLikeCount: row.pageLikeCount ?? 0,
+							updatedAt: row.updatedAt,
+							createdAt: row.createdAt,
+							trashedAt: row.trashedAt,
+							deletedAt: row.deletedAt,
+							titleRefreshAttemptedAt: row.titleRefreshAttemptedAt,
+							titleRefreshedAt: row.titleRefreshedAt,
+							titleRefreshStatusCode: row.titleRefreshStatusCode,
+							titleRefreshError: row.titleRefreshError,
+							visitorCount: row.visitorCount,
+							commenterCount: row.commenterCount,
+							engagement: buildAdminEngagementSummary(
+								parseEngagementSettings(row.engagementJson),
+							),
+						},
+					]
+				: [],
 		);
 		return {
-			items: sortedItems.slice(input.offset, input.offset + input.limit),
-			totalCount: sortedItems.length,
+			items,
+			totalCount: rows[0]?.page_totals.totalCount ?? 0,
 		};
 	}
 
@@ -1042,16 +1023,16 @@ export class AdminRepository {
 		const rows = await this.db
 			.select({
 				email: normalizedEmail,
-				emailVariantsJson: sql<string>`json_group_array(DISTINCT ${comments.authorEmail})`,
-				namesJson: sql<string>`json_group_array(DISTINCT ${comments.authorName})`,
+				emailVariantsJson: sql<string>`jsonb_agg(${comments.authorEmail} ORDER BY ${comments.createdAt}, ${comments.id})`,
+				namesJson: sql<string>`jsonb_agg(${comments.authorName} ORDER BY ${comments.createdAt}, ${comments.id})`,
 				commentCount: count(),
 				pendingCount: sql<number>`SUM(CASE WHEN ${comments.status} = 'pending' THEN 1 ELSE 0 END)`,
 				approvedCount: sql<number>`SUM(CASE WHEN ${comments.status} = 'approved' THEN 1 ELSE 0 END)`,
 				lastCommentAt: sql<string>`MAX(${comments.createdAt})`,
 				pageCount: sql<number>`COUNT(DISTINCT ${comments.pageThreadId})`,
 				siteCount: sql<number>`COUNT(DISTINCT ${comments.siteId})`,
-				ipsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorIp})`,
-				userAgentsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorUserAgent})`,
+				ipsJson: sql<string>`jsonb_agg(${commentRequestMetadata.authorIp} ORDER BY ${comments.createdAt}, ${comments.id})`,
+				userAgentsJson: sql<string>`jsonb_agg(${commentRequestMetadata.authorUserAgent} ORDER BY ${comments.createdAt}, ${comments.id})`,
 			})
 			.from(comments)
 			.innerJoin(pageThreads, eq(pageThreads.id, comments.pageThreadId))
@@ -1067,8 +1048,8 @@ export class AdminRepository {
 					input.siteId ? eq(comments.siteId, input.siteId) : undefined,
 					searchValue
 						? or(
-								like(normalizedEmail, searchValue),
-								like(comments.authorName, searchValue),
+								ilike(normalizedEmail, searchValue),
+								ilike(comments.authorName, searchValue),
 							)
 						: undefined,
 				),
@@ -1080,7 +1061,7 @@ export class AdminRepository {
 		);
 		const items = rows
 			.map((row) => {
-				const ips = parseStringArray(row.ipsJson);
+				const ips = Array.from(new Set(parseStringArray(row.ipsJson)));
 				const emailBlacklisted = emailRules.some((rule) =>
 					matchBlacklistRule(
 						{
@@ -1094,8 +1075,10 @@ export class AdminRepository {
 
 				return {
 					email: row.email ?? "",
-					emailVariants: parseStringArray(row.emailVariantsJson),
-					names: parseStringArray(row.namesJson),
+					emailVariants: Array.from(
+						new Set(parseStringArray(row.emailVariantsJson)),
+					),
+					names: Array.from(new Set(parseStringArray(row.namesJson))),
 					commentCount: Number(row.commentCount ?? 0),
 					pendingCount: Number(row.pendingCount ?? 0),
 					approvedCount: Number(row.approvedCount ?? 0),
@@ -1103,7 +1086,7 @@ export class AdminRepository {
 					pageCount: Number(row.pageCount ?? 0),
 					siteCount: Number(row.siteCount ?? 0),
 					ips,
-					userAgents: parseStringArray(row.userAgentsJson),
+					userAgents: Array.from(new Set(parseStringArray(row.userAgentsJson))),
 					blacklist: {
 						email: emailBlacklisted,
 					},
@@ -1267,6 +1250,117 @@ export class AdminRepository {
 		const pageUrlValue = input.pageUrl ? `%${input.pageUrl}%` : undefined;
 		const deviceValue = input.device ? `%${input.device}%` : undefined;
 		const locationValue = input.location ? `%${input.location}%` : undefined;
+		const filters = and(
+			input.siteId ? eq(visitors.siteId, input.siteId) : undefined,
+			searchValue
+				? or(
+						sql`${visitors.visitorKey} ILIKE ${searchValue} ESCAPE ''`,
+						sql`${visitors.lastIp} ILIKE ${searchValue} ESCAPE ''`,
+						sql`${visitors.lastUserAgent} ILIKE ${searchValue} ESCAPE ''`,
+						sql`${visitors.lastSeenPageUrl} ILIKE ${searchValue} ESCAPE ''`,
+					)
+				: undefined,
+			ipValue
+				? or(
+						sql`${visitors.lastIp} ILIKE ${ipValue} ESCAPE ''`,
+						sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.ip ILIKE ${ipValue} ESCAPE ''
+								)`,
+					)
+				: undefined,
+			userAgentValue
+				? or(
+						sql`${visitors.lastUserAgent} ILIKE ${userAgentValue} ESCAPE ''`,
+						sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.user_agent ILIKE ${userAgentValue} ESCAPE ''
+								)`,
+					)
+				: undefined,
+			pageUrlValue
+				? or(
+						sql`${visitors.lastSeenPageUrl} ILIKE ${pageUrlValue} ESCAPE ''`,
+						sql`EXISTS (
+									SELECT 1 FROM visitor_request_metadata
+									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+									AND visitor_request_metadata.last_seen_page_url ILIKE ${pageUrlValue} ESCAPE ''
+								)`,
+					)
+				: undefined,
+			deviceValue
+				? sql`EXISTS (
+								SELECT 1 FROM visitor_request_metadata
+								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+								AND (
+									visitor_request_metadata.device_browser ILIKE ${deviceValue} ESCAPE ''
+									OR visitor_request_metadata.device_os ILIKE ${deviceValue} ESCAPE ''
+									OR visitor_request_metadata.device_type ILIKE ${deviceValue} ESCAPE ''
+								)
+							)`
+				: undefined,
+			locationValue
+				? sql`EXISTS (
+								SELECT 1 FROM visitor_request_metadata
+								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
+								AND (
+									visitor_request_metadata.ip_country ILIKE ${locationValue} ESCAPE ''
+									OR visitor_request_metadata.ip_region ILIKE ${locationValue} ESCAPE ''
+									OR visitor_request_metadata.ip_city ILIKE ${locationValue} ESCAPE ''
+									OR visitor_request_metadata.ip_isp ILIKE ${locationValue} ESCAPE ''
+								)
+							)`
+				: undefined,
+		);
+		const visitorRules = await this.listActiveBlacklistRules(
+			"visitor",
+			input.siteId,
+		);
+		const ipRules = await this.listActiveBlacklistRules("ip", input.siteId);
+		const effectiveIp = sql<string | null>`COALESCE(visitors.last_ip, (
+			SELECT ip FROM visitor_request_metadata
+			WHERE visitor_id = visitors.id
+			ORDER BY last_seen_at DESC LIMIT 1
+		))`;
+		let blacklistFilter: SQL | undefined;
+		if (input.blacklist) {
+			const visitorMatch = sql`${visitors.visitorKey} = ANY(${sql.param(visitorRules.map((rule) => rule.targetValue))}::text[])`;
+			const exactIps = ipRules
+				.filter((rule) => rule.matchMode !== "cidr" && rule.targetValue)
+				.map((rule) => rule.targetValue);
+			const cidrRules = ipRules.filter((rule) => rule.matchMode === "cidr");
+			if (input.blacklist !== "visitor" && cidrRules.length > 0) {
+				const candidateIps = await this.db
+					.selectDistinct({ ip: effectiveIp })
+					.from(visitors)
+					.where(filters);
+				for (const { ip } of candidateIps) {
+					if (
+						ip &&
+						cidrRules.some((rule) => matchBlacklistRule(rule, { ip }))
+					) {
+						exactIps.push(ip);
+					}
+				}
+			}
+			const ipMatch = sql`COALESCE(${effectiveIp} = ANY(${sql.param(exactIps)}::text[]), false)`;
+			blacklistFilter =
+				input.blacklist === "any"
+					? or(ipMatch, visitorMatch)
+					: input.blacklist === "ip"
+						? ipMatch
+						: input.blacklist === "visitor"
+							? visitorMatch
+							: sql`NOT (${ipMatch} OR ${visitorMatch})`;
+		}
+		const where = and(filters, blacklistFilter);
+		const [total] = await this.db
+			.select({ value: count() })
+			.from(visitors)
+			.where(where);
+		const totalCount = Number(total?.value ?? 0);
 		const rows = await this.db
 			.select({
 				id: visitors.id,
@@ -1283,79 +1377,16 @@ export class AdminRepository {
 			})
 			.from(visitors)
 			.innerJoin(sites, eq(sites.id, visitors.siteId))
-			.where(
-				and(
-					input.siteId ? eq(visitors.siteId, input.siteId) : undefined,
-					searchValue
-						? or(
-								like(visitors.visitorKey, searchValue),
-								like(visitors.lastIp, searchValue),
-								like(visitors.lastUserAgent, searchValue),
-								like(visitors.lastSeenPageUrl, searchValue),
-							)
-						: undefined,
-					ipValue
-						? or(
-								like(visitors.lastIp, ipValue),
-								sql`EXISTS (
-									SELECT 1 FROM visitor_request_metadata
-									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
-									AND visitor_request_metadata.ip LIKE ${ipValue}
-								)`,
-							)
-						: undefined,
-					userAgentValue
-						? or(
-								like(visitors.lastUserAgent, userAgentValue),
-								sql`EXISTS (
-									SELECT 1 FROM visitor_request_metadata
-									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
-									AND visitor_request_metadata.user_agent LIKE ${userAgentValue}
-								)`,
-							)
-						: undefined,
-					pageUrlValue
-						? or(
-								like(visitors.lastSeenPageUrl, pageUrlValue),
-								sql`EXISTS (
-									SELECT 1 FROM visitor_request_metadata
-									WHERE visitor_request_metadata.visitor_id = ${visitors.id}
-									AND visitor_request_metadata.last_seen_page_url LIKE ${pageUrlValue}
-								)`,
-							)
-						: undefined,
-					deviceValue
-						? sql`EXISTS (
-								SELECT 1 FROM visitor_request_metadata
-								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
-								AND (
-									visitor_request_metadata.device_browser LIKE ${deviceValue}
-									OR visitor_request_metadata.device_os LIKE ${deviceValue}
-									OR visitor_request_metadata.device_type LIKE ${deviceValue}
-								)
-							)`
-						: undefined,
-					locationValue
-						? sql`EXISTS (
-								SELECT 1 FROM visitor_request_metadata
-								WHERE visitor_request_metadata.visitor_id = ${visitors.id}
-								AND (
-									visitor_request_metadata.ip_country LIKE ${locationValue}
-									OR visitor_request_metadata.ip_region LIKE ${locationValue}
-									OR visitor_request_metadata.ip_city LIKE ${locationValue}
-									OR visitor_request_metadata.ip_isp LIKE ${locationValue}
-								)
-							)`
-						: undefined,
-				),
-			)
-			.orderBy(desc(visitors.lastSeenAt));
+			.where(where)
+			.orderBy(desc(visitors.lastSeenAt), desc(visitors.id))
+			.limit(input.limit)
+			.offset(input.offset);
 
 		const visitorIds = rows.map((row) => row.id);
 		if (visitorIds.length === 0) {
 			return {
 				items: [],
-				totalCount: 0,
+				totalCount,
 			};
 		}
 
@@ -1364,9 +1395,9 @@ export class AdminRepository {
 				visitorId: comments.visitorId,
 				commentCount: count(),
 				emailCount: sql<number>`COUNT(DISTINCT ${comments.authorEmail})`,
-				emailsJson: sql<string>`json_group_array(DISTINCT ${comments.authorEmail})`,
-				ipsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorIp})`,
-				userAgentsJson: sql<string>`json_group_array(DISTINCT ${commentRequestMetadata.authorUserAgent})`,
+				emailsJson: sql<string>`jsonb_agg(${comments.authorEmail} ORDER BY ${comments.createdAt}, ${comments.id})`,
+				ipsJson: sql<string>`jsonb_agg(${commentRequestMetadata.authorIp} ORDER BY ${comments.createdAt}, ${comments.id})`,
+				userAgentsJson: sql<string>`jsonb_agg(${commentRequestMetadata.authorUserAgent} ORDER BY ${comments.createdAt}, ${comments.id})`,
 			})
 			.from(comments)
 			.leftJoin(
@@ -1414,9 +1445,9 @@ export class AdminRepository {
 			commentStatsMap.set(row.visitorId, {
 				commentCount: Number(row.commentCount ?? 0),
 				emailCount: Number(row.emailCount ?? 0),
-				emails: parseStringArray(row.emailsJson),
-				ips: parseStringArray(row.ipsJson),
-				userAgents: parseStringArray(row.userAgentsJson),
+				emails: Array.from(new Set(parseStringArray(row.emailsJson))),
+				ips: Array.from(new Set(parseStringArray(row.ipsJson))),
+				userAgents: Array.from(new Set(parseStringArray(row.userAgentsJson))),
 			});
 		}
 		const metadataByVisitorId = new Map<number, RequestMetaAggregateSource[]>();
@@ -1475,11 +1506,6 @@ export class AdminRepository {
 			}
 		}
 
-		const visitorRules = await this.listActiveBlacklistRules(
-			"visitor",
-			input.siteId,
-		);
-		const ipRules = await this.listActiveBlacklistRules("ip", input.siteId);
 		const items = rows.map((row) => {
 			const commentStats = commentStatsMap.get(row.id);
 			const ips = commentStats?.ips ?? [];
@@ -1538,22 +1564,9 @@ export class AdminRepository {
 				blacklist,
 			};
 		});
-		const filteredItems =
-			input.blacklist === "any"
-				? items.filter((item) => item.blacklist.ip || item.blacklist.visitor)
-				: input.blacklist === "ip"
-					? items.filter((item) => item.blacklist.ip)
-					: input.blacklist === "visitor"
-						? items.filter((item) => item.blacklist.visitor)
-						: input.blacklist === "none"
-							? items.filter(
-									(item) => !item.blacklist.ip && !item.blacklist.visitor,
-								)
-							: items;
-
 		return {
-			items: filteredItems.slice(input.offset, input.offset + input.limit),
-			totalCount: filteredItems.length,
+			items,
+			totalCount,
 		};
 	}
 
@@ -1777,23 +1790,93 @@ export class AdminRepository {
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
+			actorUserId?: number;
 		},
 	) {
-		await this.db
-			.update(comments)
-			.set({
-				status: input.status,
-				isPinned: input.isPinned,
-				isFolded: input.isFolded,
-				contentRaw: input.contentRaw,
-				contentHtml: input.contentRaw
-					? renderCommentHtml(input.contentRaw)
-					: undefined,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(comments.id, commentId));
-
-		return this.getCommentById(commentId);
+		return this.db.transaction(async (tx) => {
+			const [previous] = await tx
+				.select()
+				.from(comments)
+				.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+				.for("update")
+				.limit(1);
+			if (!previous) return undefined;
+			const status = input.status ?? (previous.status as CommentStatus);
+			const contentChanged =
+				input.contentRaw !== undefined &&
+				input.contentRaw !== previous.contentRaw;
+			const changed = status !== previous.status || contentChanged;
+			const nowIso = new Date().toISOString();
+			if (input.actorUserId && changed)
+				await requireCommentAccount(tx, input.actorUserId, previous.siteId);
+			const approval = changed
+				? {
+						approvedAt:
+							status === "approved" && input.actorUserId ? nowIso : null,
+						approvalSource:
+							status === "approved" && input.actorUserId ? "manual" : null,
+						approvedByUserId:
+							status === "approved" ? (input.actorUserId ?? null) : null,
+					}
+				: {};
+			await tx
+				.update(comments)
+				.set({
+					status,
+					isPinned: input.isPinned,
+					isFolded: input.isFolded,
+					contentRaw: input.contentRaw,
+					contentHtml:
+						input.contentRaw !== undefined
+							? renderCommentHtml(input.contentRaw)
+							: undefined,
+					updatedAt: nowIso,
+					...approval,
+				})
+				.where(eq(comments.id, commentId));
+			if (changed) {
+				await tx.insert(commentReviewEvents).values({
+					commentId,
+					actorUserId: input.actorUserId,
+					previousStatus: previous.status,
+					status,
+					contentChanged,
+					effectiveAt: nowIso,
+				});
+				const [site] = await tx
+					.select()
+					.from(sites)
+					.where(eq(sites.id, previous.siteId))
+					.limit(1);
+				const [thread] = await tx
+					.select()
+					.from(pageThreads)
+					.where(eq(pageThreads.id, previous.pageThreadId))
+					.limit(1);
+				if (site && thread)
+					await enqueueCommentNotificationIntent(tx, {
+						source: "admin_moderation",
+						siteId: previous.siteId,
+						siteKey: site.siteKey,
+						commentId,
+						pageKey: thread.pageKey,
+						status: status as CommentStatus,
+						previousStatus: previous.status as CommentStatus,
+						authorUserId: previous.authorUserId,
+						contentRaw: input.contentRaw ?? previous.contentRaw,
+						createdAt: previous.createdAt,
+						actorType: input.actorUserId ? "admin_user" : "system",
+						actorId: input.actorUserId ? String(input.actorUserId) : undefined,
+						notifyBackend: true,
+						notifyReply: Boolean(
+							previous.parentId &&
+								previous.status !== "approved" &&
+								status === "approved",
+						),
+					});
+			}
+			return new AdminRepository(tx).getCommentById(commentId);
+		});
 	}
 
 	public async bulkUpdateComments(
@@ -1803,37 +1886,23 @@ export class AdminRepository {
 			isPinned?: boolean;
 			isFolded?: boolean;
 			contentRaw?: string;
+			actorUserId?: number;
 		},
 	) {
-		if (commentIds.length === 0) {
-			return [];
-		}
-
-		await this.db
-			.update(comments)
-			.set({
-				status: input.status,
-				isPinned: input.isPinned,
-				isFolded: input.isFolded,
-				contentRaw: input.contentRaw,
-				contentHtml: input.contentRaw
-					? renderCommentHtml(input.contentRaw)
-					: undefined,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
-
-		const updatedComments = await this.db
-			.select()
-			.from(comments)
-			.where(and(inArray(comments.id, commentIds), isNull(comments.deletedAt)));
-		const updatedById = new Map(
-			updatedComments.map((comment) => [comment.id, comment]),
-		);
-
-		return commentIds.flatMap((commentId) => {
-			const comment = updatedById.get(commentId);
-			return comment ? [comment] : [];
+		return this.db.transaction(async (tx) => {
+			const updated: Array<
+				NonNullable<Awaited<ReturnType<AdminRepository["getCommentById"]>>>
+			> = [];
+			const repository = new AdminRepository(tx);
+			for (const commentId of [...new Set(commentIds)].sort()) {
+				const comment = await repository.updateComment(commentId, input);
+				if (comment) updated.push(comment);
+			}
+			const byId = new Map(updated.map((comment) => [comment.id, comment]));
+			return commentIds.flatMap((id) => {
+				const comment = byId.get(id);
+				return comment ? [comment] : [];
+			});
 		});
 	}
 
@@ -1874,41 +1943,42 @@ export class AdminRepository {
 	}
 
 	public async permanentlyDeleteComment(commentId: string) {
-		const existingComment = await this.getCommentById(commentId);
-		if (!existingComment || existingComment.deletedAt) {
-			return existingComment;
-		}
-
-		await this.db
-			.update(comments)
-			.set({
-				deletedAt: new Date().toISOString(),
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(comments.id, commentId));
-
-		if (existingComment.parentId) {
-			await this.db
+		return this.db.transaction(async (transaction) => {
+			const now = new Date().toISOString();
+			const [deletedComment] = await transaction
 				.update(comments)
 				.set({
-					replyCount: sql`MAX(${comments.replyCount} - 1, 0)`,
-					updatedAt: new Date().toISOString(),
+					deletedAt: now,
+					updatedAt: now,
 				})
-				.where(eq(comments.id, existingComment.parentId));
-		}
+				.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+				.returning();
+			if (!deletedComment) {
+				return new AdminRepository(transaction).getCommentById(commentId);
+			}
 
-		await this.db
-			.update(pageThreads)
-			.set({
-				commentCount: sql`MAX(${pageThreads.commentCount} - 1, 0)`,
-				rootCommentCount: existingComment.parentId
-					? sql`${pageThreads.rootCommentCount}`
-					: sql`MAX(${pageThreads.rootCommentCount} - 1, 0)`,
-				updatedAt: new Date().toISOString(),
-			})
-			.where(eq(pageThreads.id, existingComment.pageThreadId));
+			if (deletedComment.parentId) {
+				await transaction
+					.update(comments)
+					.set({
+						replyCount: sql`GREATEST(${comments.replyCount} - 1, 0)`,
+						updatedAt: now,
+					})
+					.where(eq(comments.id, deletedComment.parentId));
+			}
 
-		return this.getCommentById(commentId);
+			await transaction
+				.update(pageThreads)
+				.set({
+					commentCount: sql`GREATEST(${pageThreads.commentCount} - 1, 0)`,
+					rootCommentCount: deletedComment.parentId
+						? sql`${pageThreads.rootCommentCount}`
+						: sql`GREATEST(${pageThreads.rootCommentCount} - 1, 0)`,
+					updatedAt: now,
+				})
+				.where(eq(pageThreads.id, deletedComment.pageThreadId));
+			return deletedComment;
+		});
 	}
 
 	public async clearTrash(siteId?: number) {
@@ -1941,10 +2011,10 @@ export class AdminRepository {
 			input.siteId ? eq(blacklistRules.siteId, input.siteId) : undefined,
 			searchValue
 				? or(
-						like(blacklistRules.targetValue, searchValue),
-						like(blacklistRules.reason, searchValue),
-						like(blacklistRules.targetType, searchValue),
-						like(blacklistRules.matchMode, searchValue),
+						ilike(blacklistRules.targetValue, searchValue),
+						ilike(blacklistRules.reason, searchValue),
+						ilike(blacklistRules.targetType, searchValue),
+						ilike(blacklistRules.matchMode, searchValue),
 					)
 				: undefined,
 		);
@@ -2011,7 +2081,13 @@ export class AdminRepository {
 			return undefined;
 		}
 
-		await this.db.delete(blacklistRules).where(eq(blacklistRules.id, ruleId));
+		const penalty = await new AbuseRepository(this.db).release({
+			ruleId,
+			kind: "released",
+			reason: "管理员提前解除",
+		});
+		if (!penalty)
+			await this.db.delete(blacklistRules).where(eq(blacklistRules.id, ruleId));
 		return rule;
 	}
 
@@ -2051,12 +2127,7 @@ export class AdminRepository {
 			return [];
 		}
 
-		await this.db.delete(blacklistRules).where(
-			inArray(
-				blacklistRules.id,
-				rules.map((rule) => rule.id),
-			),
-		);
+		for (const rule of rules) await this.deleteBlacklistRule(rule.id);
 
 		return rules;
 	}
@@ -2077,10 +2148,10 @@ export class AdminRepository {
 				: undefined,
 			searchValue
 				? or(
-						like(allowlistRules.targetValue, searchValue),
-						like(allowlistRules.reason, searchValue),
-						like(allowlistRules.targetType, searchValue),
-						like(allowlistRules.matchMode, searchValue),
+						ilike(allowlistRules.targetValue, searchValue),
+						ilike(allowlistRules.reason, searchValue),
+						ilike(allowlistRules.targetType, searchValue),
+						ilike(allowlistRules.matchMode, searchValue),
 					)
 				: undefined,
 		);
@@ -2245,6 +2316,8 @@ export class AdminRepository {
 			verifiedAuthorJson?: string;
 			staffDisplayJson?: string;
 			moderationJson?: string;
+			emailPolicyJson?: string;
+			abusePolicyJson?: string;
 			pageRegistryJson?: string;
 			engagementJson?: string;
 			commenterReplyEmailEnabled?: boolean;
@@ -2275,6 +2348,8 @@ export class AdminRepository {
 			verifiedAuthorJson: input.verifiedAuthorJson,
 			staffDisplayJson: input.staffDisplayJson,
 			moderationJson: input.moderationJson,
+			emailPolicyJson: input.emailPolicyJson,
+			abusePolicyJson: input.abusePolicyJson,
 			pageRegistryJson: input.pageRegistryJson,
 			engagementJson: input.engagementJson,
 			commenterReplyEmailEnabled: input.commenterReplyEmailEnabled,
@@ -2291,12 +2366,11 @@ export class AdminRepository {
 					events: notificationEvents,
 				},
 				{
-					beforeReplace: (transaction) => {
-						transaction
+					beforeReplace: async (transaction) => {
+						await transaction
 							.update(siteSettings)
 							.set(values)
-							.where(eq(siteSettings.siteId, siteId))
-							.run();
+							.where(eq(siteSettings.siteId, siteId));
 					},
 				},
 			);

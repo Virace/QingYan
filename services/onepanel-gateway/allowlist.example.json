@@ -1,0 +1,384 @@
+{
+	"listen": {
+		"host": "0.0.0.0",
+		"port": 4402
+	},
+	"upstreamBaseUrl": "http://172.30.251.1:9999",
+	"upstreamApiKeyFile": "/run/secrets/onepanel-api-key",
+	"upstreamNode": "local",
+	"clients": [
+		{
+			"id": "qingyan",
+			"tokenFile": "/run/qingyan-gateway/qingyan-gateway-token",
+			"allowedRouteIds": [
+				"panel-api-available",
+				"panel-release-info",
+				"waf-status",
+				"waf-log-search",
+				"waf-websites",
+				"waf-acl-search",
+				"waf-acl-create",
+				"waf-acl-update",
+				"waf-acl-delete"
+			]
+		}
+	],
+	"routes": [
+		{
+			"id": "panel-api-available",
+			"method": "GET",
+			"path": "/api/v2/core/settings/search/available",
+			"purpose": "检查面板 API 鉴权和连通性"
+		},
+		{
+			"id": "panel-release-info",
+			"method": "GET",
+			"path": "/api/v2/core/settings/upgrade",
+			"purpose": "读取面板可用发布版本信息，不代表当前安装版本"
+		},
+		{
+			"id": "waf-status",
+			"method": "GET",
+			"path": "/api/v2/xpack/waf/status",
+			"purpose": "读取 WAF 与 OpenResty 运行状态"
+		},
+		{
+			"id": "waf-log-search",
+			"method": "POST",
+			"path": "/api/v2/xpack/waf/log/search",
+			"purpose": "读取明确授权站点的 WAF 事件；修改 websiteKey 枚举后使用",
+			"body": {
+				"type": "object",
+				"required": ["page", "pageSize", "websiteKey", "action", "execRules"],
+				"fields": {
+					"page": {
+						"type": "integer",
+						"min": 1,
+						"max": 1000000
+					},
+					"pageSize": {
+						"type": "integer",
+						"min": 1,
+						"max": 100
+					},
+					"websiteKey": {
+						"type": "string",
+						"values": ["YOUR_WEBSITE_ALIAS"]
+					},
+					"action": {
+						"type": "string",
+						"values": ["all"]
+					},
+					"execRules": {
+						"type": "array",
+						"maxItems": 0,
+						"items": {
+							"type": "string"
+						}
+					}
+				}
+			}
+		},
+		{
+			"id": "waf-websites",
+			"method": "GET",
+			"path": "/api/v2/xpack/waf/websites",
+			"purpose": "核对已配置站点 ID 与别名"
+		},
+		{
+			"id": "waf-acl-search",
+			"method": "POST",
+			"path": "/api/v2/xpack/waf/rule/acl/search",
+			"purpose": "查询明确站点内的受管 ACL",
+			"body": {
+				"type": "object",
+				"required": ["page", "pageSize", "name", "websiteID"],
+				"fields": {
+					"page": {
+						"type": "integer",
+						"min": 1,
+						"max": 1000000
+					},
+					"pageSize": {
+						"type": "integer",
+						"min": 1,
+						"max": 100
+					},
+					"name": {
+						"type": "string",
+						"prefix": "qingyan-",
+						"format": "name",
+						"maxLength": 128
+					},
+					"websiteID": {
+						"type": "integer",
+						"min": 1,
+						"max": 1
+					}
+				}
+			}
+		},
+		{
+			"id": "waf-acl-create",
+			"method": "POST",
+			"path": "/api/v2/xpack/waf/rule/acl/create",
+			"purpose": "维护明确站点内的受管单一 IP 拒绝规则",
+			"body": {
+				"type": "object",
+				"required": [
+					"name",
+					"state",
+					"description",
+					"rule",
+					"conditions",
+					"ipBlock",
+					"ipBlockTime",
+					"websiteKey",
+					"code",
+					"action",
+					"type",
+					"res",
+					"websiteID",
+					"expireTime",
+					"unit"
+				],
+				"fields": {
+					"name": {
+						"type": "string",
+						"prefix": "qingyan-",
+						"format": "name",
+						"maxLength": 128
+					},
+					"state": {
+						"type": "string",
+						"values": ["on"]
+					},
+					"description": {
+						"type": "string",
+						"prefix": "QingYan managed penalty ",
+						"maxLength": 500
+					},
+					"rule": {
+						"type": "string",
+						"values": [""]
+					},
+					"conditions": {
+						"type": "array",
+						"minItems": 1,
+						"maxItems": 1,
+						"items": {
+							"type": "object",
+							"required": ["field", "pattern", "rule", "name"],
+							"fields": {
+								"field": {
+									"type": "string",
+									"values": ["IP"]
+								},
+								"pattern": {
+									"type": "string",
+									"values": ["eq"]
+								},
+								"rule": {
+									"type": "string",
+									"format": "ip"
+								},
+								"name": {
+									"type": "string",
+									"values": [""]
+								}
+							}
+						}
+					},
+					"ipBlock": {
+						"type": "string",
+						"values": ["off"]
+					},
+					"ipBlockTime": {
+						"type": "integer",
+						"min": 600,
+						"max": 600
+					},
+					"websiteKey": {
+						"type": "string",
+						"values": ["YOUR_WEBSITE_ALIAS"]
+					},
+					"code": {
+						"type": "integer",
+						"min": 403,
+						"max": 403
+					},
+					"action": {
+						"type": "string",
+						"values": ["deny"]
+					},
+					"type": {
+						"type": "string",
+						"values": ["acl"]
+					},
+					"res": {
+						"type": "string",
+						"values": [""]
+					},
+					"websiteID": {
+						"type": "integer",
+						"min": 1,
+						"max": 1
+					},
+					"expireTime": {
+						"type": "integer",
+						"min": 24,
+						"max": 24
+					},
+					"unit": {
+						"type": "string",
+						"values": ["h"]
+					}
+				}
+			}
+		},
+		{
+			"id": "waf-acl-update",
+			"method": "POST",
+			"path": "/api/v2/xpack/waf/rule/acl/update",
+			"purpose": "维护明确站点内的受管单一 IP 拒绝规则",
+			"body": {
+				"type": "object",
+				"required": [
+					"name",
+					"state",
+					"description",
+					"rule",
+					"conditions",
+					"ipBlock",
+					"ipBlockTime",
+					"websiteKey",
+					"code",
+					"action",
+					"type",
+					"res",
+					"websiteID",
+					"expireTime",
+					"unit"
+				],
+				"fields": {
+					"name": {
+						"type": "string",
+						"prefix": "qingyan-",
+						"format": "name",
+						"maxLength": 128
+					},
+					"state": {
+						"type": "string",
+						"values": ["on"]
+					},
+					"description": {
+						"type": "string",
+						"prefix": "QingYan managed penalty ",
+						"maxLength": 500
+					},
+					"rule": {
+						"type": "string",
+						"values": [""]
+					},
+					"conditions": {
+						"type": "array",
+						"minItems": 1,
+						"maxItems": 1,
+						"items": {
+							"type": "object",
+							"required": ["field", "pattern", "rule", "name"],
+							"fields": {
+								"field": {
+									"type": "string",
+									"values": ["IP"]
+								},
+								"pattern": {
+									"type": "string",
+									"values": ["eq"]
+								},
+								"rule": {
+									"type": "string",
+									"format": "ip"
+								},
+								"name": {
+									"type": "string",
+									"values": [""]
+								}
+							}
+						}
+					},
+					"ipBlock": {
+						"type": "string",
+						"values": ["off"]
+					},
+					"ipBlockTime": {
+						"type": "integer",
+						"min": 600,
+						"max": 600
+					},
+					"websiteKey": {
+						"type": "string",
+						"values": ["YOUR_WEBSITE_ALIAS"]
+					},
+					"code": {
+						"type": "integer",
+						"min": 403,
+						"max": 403
+					},
+					"action": {
+						"type": "string",
+						"values": ["deny"]
+					},
+					"type": {
+						"type": "string",
+						"values": ["acl"]
+					},
+					"res": {
+						"type": "string",
+						"values": [""]
+					},
+					"websiteID": {
+						"type": "integer",
+						"min": 1,
+						"max": 1
+					},
+					"expireTime": {
+						"type": "integer",
+						"min": 24,
+						"max": 24
+					},
+					"unit": {
+						"type": "string",
+						"values": ["h"]
+					}
+				}
+			}
+		},
+		{
+			"id": "waf-acl-delete",
+			"method": "POST",
+			"path": "/api/v2/xpack/waf/rule/acl/delete",
+			"purpose": "解除明确站点内的受管 ACL",
+			"body": {
+				"type": "object",
+				"required": ["name", "websiteID"],
+				"fields": {
+					"name": {
+						"type": "string",
+						"prefix": "qingyan-",
+						"format": "name",
+						"maxLength": 128
+					},
+					"websiteID": {
+						"type": "integer",
+						"min": 1,
+						"max": 1
+					}
+				}
+			}
+		}
+	],
+	"requestTimeoutMs": 10000,
+	"maxRequestBytes": 262144,
+	"maxResponseBytes": 4194304
+}

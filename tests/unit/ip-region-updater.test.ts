@@ -1,46 +1,46 @@
-import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
-
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { createDatabaseClients } from "../../src/db/client";
 import {
 	commentRequestMetadata,
 	comments,
 	ipRegionDatabaseState,
-	ipRegionUpdateRuns,
 	pageThreads,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
+import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
+import { IpRegionAutoUpdateScheduler } from "../../src/modules/comments/metadata/ip-region-scheduler";
 import {
 	calculateFileHash,
 	IpRegionUpdater,
 } from "../../src/modules/comments/metadata/ip-region-updater";
-import { IpRegionAutoUpdateScheduler } from "../../src/modules/comments/metadata/ip-region-scheduler";
-import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
-import { RuntimeSystemSettingsService } from "../../src/modules/system-settings/service";
-import { applyInitialMigration } from "../support/test-fixtures";
 import { defaultSystemSettings } from "../../src/modules/system-settings/definitions";
+import { RuntimeSystemSettingsService } from "../../src/modules/system-settings/service";
+import {
+	applyInitialMigration,
+	createTestWorkspace,
+} from "../support/test-fixtures";
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const cleanup of cleanups.splice(0)) {
-		cleanup();
+		await cleanup();
 	}
 });
 
 async function createFixture() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-ip-region-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	applyInitialMigration(databaseFile);
-	const clients = createDatabaseClients(databaseFile);
-	cleanups.push(() => {
-		clients.sqlite.close();
-		rmSync(directory, { recursive: true, force: true });
+	const workspace = createTestWorkspace("qingyan-ip-region-");
+	const directory = workspace.directory;
+	const databaseUrl = workspace.databaseUrl;
+	await applyInitialMigration(databaseUrl);
+	const clients = createDatabaseClients(databaseUrl, { pool: { max: 2 } });
+	cleanups.push(async () => {
+		await clients.close();
+		await workspace.cleanup();
 	});
 
 	return {
@@ -77,7 +77,7 @@ describe("IpRegionUpdater", () => {
 		);
 	});
 
-	it("records skipped runs when ip region is disabled", async () => {
+	it("records the latest check when ip region is disabled", async () => {
 		const fixture = await createFixture();
 		if (!fixture.config) {
 			throw new Error("Expected ip region config");
@@ -96,15 +96,15 @@ describe("IpRegionUpdater", () => {
 			refreshedComments: 0,
 			errorMessage: "ip_region_disabled",
 		});
-		const [run] = await fixture.db.select().from(ipRegionUpdateRuns);
-		expect(run).toMatchObject({
+		const [state] = await fixture.db.select().from(ipRegionDatabaseState);
+		expect(state).toMatchObject({
 			ipVersion: "v4",
-			status: "skipped",
-			errorMessage: "ip_region_disabled",
+			lastCheckStatus: "skipped",
+			lastCheckReason: "ip_region_disabled",
 		});
 	});
 
-	it("records skipped runs when downloaded hash is unchanged", async () => {
+	it("records the latest check when downloaded hash is unchanged", async () => {
 		const fixture = await createFixture();
 		if (!fixture.config) {
 			throw new Error("Expected ip region config");
@@ -156,6 +156,7 @@ describe("IpRegionUpdater", () => {
 		await fixture.db.insert(pageThreads).values({
 			siteId: 1,
 			pageKey: "post:ip-region",
+			pageKeyHash: hashKey("post:ip-region"),
 			pageTitle: "IP Region",
 			pageUrl: "/posts/ip-region/",
 		});

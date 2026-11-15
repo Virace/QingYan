@@ -1,11 +1,12 @@
-import { eq, inArray, ne } from "drizzle-orm";
+import { eq, inArray, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	notificationChannelConfigs,
+	scheduledTasks,
 	siteNotificationEventChannels,
-	siteNotificationRecipientRoutes,
+	taskRuns,
 } from "../../db/schema";
 import { AppError } from "../shared/errors";
 
@@ -93,7 +94,7 @@ function serializeRuntimeChannelConfig(
 }
 
 export class NotificationChannelConfigsRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
 
 	public async list(): Promise<NotificationChannelConfigRecord[]> {
 		const rows = await this.db.select().from(notificationChannelConfigs);
@@ -155,6 +156,15 @@ export class NotificationChannelConfigsRepository {
 	}
 
 	public async replacePersisted(input: NotificationChannelConfigInput[]) {
+		return this.db.transaction(async (tx) => {
+			await tx.execute(sql`select pg_advisory_xact_lock(174007, 3)`);
+			return new NotificationChannelConfigsRepository(tx).replaceInTransaction(
+				input,
+			);
+		});
+	}
+
+	private async replaceInTransaction(input: NotificationChannelConfigInput[]) {
 		const nowIso = new Date().toISOString();
 		const existingRows = await this.db
 			.select({
@@ -176,34 +186,51 @@ export class NotificationChannelConfigsRepository {
 					id !== defaultEmailChannelConfig.id && !nextPersistedIds.has(id),
 			);
 		if (deletedIds.length > 0) {
-			const [legacyReferencedRows, eventReferencedRows] = await Promise.all([
+			const eventReferencedRows = await this.db
+				.select({
+					channelConfigId: siteNotificationEventChannels.channelConfigId,
+				})
+				.from(siteNotificationEventChannels)
+				.where(
+					inArray(siteNotificationEventChannels.channelConfigId, deletedIds),
+				);
+			const referencedIds = Array.from(
+				new Set(eventReferencedRows.map((row) => row.channelConfigId)),
+			);
+			const [schedules, activeRuns] = await Promise.all([
 				this.db
-					.select({
-						channelConfigId: siteNotificationRecipientRoutes.channelConfigId,
-					})
-					.from(siteNotificationRecipientRoutes)
-					.where(
-						inArray(
-							siteNotificationRecipientRoutes.channelConfigId,
-							deletedIds,
-						),
-					),
+					.select({ policy: scheduledTasks.policyJson })
+					.from(scheduledTasks)
+					.where(isNull(scheduledTasks.deletedAt)),
 				this.db
-					.select({
-						channelConfigId: siteNotificationEventChannels.channelConfigId,
-					})
-					.from(siteNotificationEventChannels)
+					.select({ snapshot: taskRuns.actionConfigSnapshotJson })
+					.from(taskRuns)
 					.where(
-						inArray(siteNotificationEventChannels.channelConfigId, deletedIds),
+						inArray(taskRuns.status, [
+							"queued",
+							"delayed",
+							"running",
+							"retrying",
+						]),
 					),
 			]);
-			const referencedIds = Array.from(
-				new Set(
-					[...legacyReferencedRows, ...eventReferencedRows].map(
-						(row) => row.channelConfigId,
-					),
-				),
-			);
+			const policies = [
+				...schedules.map((row) => parseJsonObject(row.policy)),
+				...activeRuns.map((row) => parseJsonObject(row.snapshot).policy),
+			];
+			for (const policy of policies) {
+				if (!policy || typeof policy !== "object") continue;
+				const notification = (policy as Record<string, unknown>)
+					.failureNotification;
+				if (!notification || typeof notification !== "object") continue;
+				const rule = notification as Record<string, unknown>;
+				if (rule.enabled !== true || !Array.isArray(rule.channelConfigIds))
+					continue;
+				for (const id of deletedIds) {
+					if (rule.channelConfigIds.includes(id) && !referencedIds.includes(id))
+						referencedIds.push(id);
+				}
+			}
 			if (referencedIds.length > 0) {
 				throw new AppError(
 					400,
@@ -232,9 +259,11 @@ export class NotificationChannelConfigsRepository {
 				updatedAt: nowIso,
 			})
 			.onConflictDoNothing();
-		await this.db
-			.delete(notificationChannelConfigs)
-			.where(ne(notificationChannelConfigs.id, defaultEmailChannelConfig.id));
+		if (deletedIds.length > 0) {
+			await this.db
+				.delete(notificationChannelConfigs)
+				.where(inArray(notificationChannelConfigs.id, deletedIds));
+		}
 		const values = input.map((config) => {
 			const id =
 				config.id && config.id !== defaultEmailChannelConfig.id
@@ -258,7 +287,21 @@ export class NotificationChannelConfigsRepository {
 			};
 		});
 		if (values.length > 0) {
-			await this.db.insert(notificationChannelConfigs).values(values);
+			await this.db
+				.insert(notificationChannelConfigs)
+				.values(values)
+				.onConflictDoUpdate({
+					target: notificationChannelConfigs.id,
+					set: {
+						type: sql`excluded.type`,
+						name: sql`excluded.name`,
+						description: sql`excluded.description`,
+						enabled: sql`excluded.enabled`,
+						configJson: sql`excluded.config_json`,
+						secretConfigJson: sql`excluded.secret_config_json`,
+						updatedAt: nowIso,
+					},
+				});
 		}
 		return this.list();
 	}

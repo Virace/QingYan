@@ -80,85 +80,84 @@ export class MailTestService {
 		}
 
 		const recipient = input.recipient ?? input.session.user.email;
-		const task = await this.repository.create({
-			type: "mail_test",
-			category: "notification",
-			payload: {
-				channel: "email",
-				channelConfigId: "email:default",
-				templateContext: {
-					site: { name: "QingYan" },
+		const { task, delivery } =
+			await this.repository.createNotificationTaskWithDelivery({
+				task: {
+					type: "mail_test",
+					category: "notification",
+					payload: {
+						channel: "email",
+						channelConfigId: "email:default",
+						templateContext: {
+							site: { name: "QingYan" },
+						},
+						subjectTemplate: "[QingYan] 邮件测试",
+						bodyTemplate: "这是一封 QingYan SMTP 测试邮件。",
+						format: "text",
+					},
+					payloadSummary: {
+						channel: "email",
+						channelConfigId: "email:default",
+						channelConfigName: "默认邮件",
+						recipientType: "test",
+						recipientAddressSnapshot: recipient,
+					},
+					actorType: "admin_user",
+					actorId: String(input.session.user.id),
+					maxAttempts: 1,
 				},
-				subjectTemplate: "[QingYan] 邮件测试",
-				bodyTemplate: "这是一封 QingYan SMTP 测试邮件。",
-				format: "text",
-			},
-			payloadSummary: {
-				channel: "email",
-				channelConfigId: "email:default",
-				channelConfigName: "默认邮件",
-				recipientType: "test",
-				recipientAddressSnapshot: recipient,
-			},
-			actorType: "admin_user",
-			actorId: String(input.session.user.id),
-			maxAttempts: 1,
-		});
-		const delivery = await this.repository.createNotificationDelivery({
-			taskRunId: task.id,
-			channel: "email",
-			channelConfigRef: "email:default",
-			channelConfigNameSnapshot: "默认邮件",
-			recipientType: "test",
-			recipientUserId: input.session.user.id,
-			recipientAddressSnapshot: recipient,
-			recipientIdentityKey: recipient,
-			eventFamily: "mail_test",
-			templateKey: "mail_test",
-		});
+				delivery: {
+					channel: "email",
+					channelConfigRef: "email:default",
+					channelConfigNameSnapshot: "默认邮件",
+					recipientType: "test",
+					recipientUserId: input.session.user.id,
+					recipientAddressSnapshot: recipient,
+					recipientIdentityKey: recipient,
+					eventFamily: "mail_test",
+					templateKey: "mail_test",
+				},
+			});
 
-		await this.repository.markRunning(task.id);
+		const claim = await this.repository.markRunning(task.id);
+		if (!claim?.claimToken)
+			throw new AppError(
+				409,
+				"MAIL_TEST_ALREADY_CLAIMED",
+				"邮件测试已开始，请查看投递结果。",
+			);
 		const channel = new EmailNotificationChannel(
 			settings.mail,
 			input.sender ?? createNodemailerSmtpSender(settings.mail.smtp),
 		);
+		let result: Awaited<ReturnType<EmailNotificationChannel["send"]>>;
 		try {
-			const result = await channel.send({
+			result = await channel.send({
 				to: recipient,
 				subject: "[QingYan] 邮件测试",
 				body: "这是一封 QingYan SMTP 测试邮件。",
 				format: "text",
 			});
-			await this.repository.markDeliverySent({
-				id: delivery.id,
-				providerMessageId: result.providerMessageId,
-			});
-			await this.repository.markSucceeded(task.id, {
-				status: "sent",
-				deliveryId: delivery.id,
-				channel: "email",
-				recipient,
-				providerMessageId: result.providerMessageId ?? null,
-			});
-			return {
-				status: "sent" as const,
-				taskId: task.id,
-				deliveryId: delivery.id,
-				channel: "email" as const,
-				recipient,
-				providerMessageId: result.providerMessageId ?? undefined,
-				message: "测试邮件已发送。",
-			};
 		} catch (error) {
 			const classified = sanitizeSmtpError(
 				classifySmtpError(error),
 				settings.mail.smtp.password,
 			);
-			await this.repository.markDeliveryFailed({
-				id: delivery.id,
-				error: classified,
+			await this.repository.completeNotificationAttempt({
+				taskId: task.id,
+				claimToken: claim.claimToken,
+				outcomes: [
+					{ deliveryId: delivery.id, status: "failed", error: classified },
+				],
+				next: { status: "failed", error: classified },
+				events: [
+					{
+						eventType: "notification.email.failed",
+						level: "error",
+						message: "测试邮件投递失败。",
+					},
+				],
 			});
-			await this.repository.markFailed(task.id, classified);
 			throw mailTestFailed({
 				taskId: task.id,
 				deliveryId: delivery.id,
@@ -166,5 +165,43 @@ export class MailTestService {
 				error: classified,
 			});
 		}
+		await this.repository.completeNotificationAttempt({
+			taskId: task.id,
+			claimToken: claim.claimToken,
+			outcomes: [
+				{
+					deliveryId: delivery.id,
+					status: "sent",
+					providerMessageId: result.providerMessageId,
+					sentAt: new Date().toISOString(),
+				},
+			],
+			next: {
+				status: "succeeded",
+				result: {
+					status: "sent",
+					deliveryId: delivery.id,
+					channel: "email",
+					recipient,
+					providerMessageId: result.providerMessageId ?? null,
+				},
+			},
+			events: [
+				{
+					eventType: "notification.email.accepted",
+					level: "info",
+					message: "邮件服务商已接受测试邮件。",
+				},
+			],
+		});
+		return {
+			status: "sent" as const,
+			taskId: task.id,
+			deliveryId: delivery.id,
+			channel: "email" as const,
+			recipient,
+			providerMessageId: result.providerMessageId ?? undefined,
+			message: "测试邮件已发送。",
+		};
 	}
 }

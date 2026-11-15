@@ -1,11 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-
-import { AdminRepository } from "./repository";
-import { AdminSessionService } from "./session-service";
 import { InvalidRequestError } from "../shared/errors";
 import { AdminTaskService } from "../tasks/admin-task-service";
 import { TaskEventLogRepository } from "../tasks/task-event-log-repository";
+import { AdminRepository } from "./repository";
+import { AdminSessionService } from "./session-service";
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
 const runIdParamsSchema = z.object({ id: z.string().min(1) });
@@ -13,8 +12,35 @@ const logsQuerySchema = z.object({
 	afterSequence: z.coerce.number().int().min(0).optional(),
 	limit: z.coerce.number().int().min(1).max(500).default(100),
 });
-const runsQuerySchema = z.object({
+const listQuerySchema = z.object({
+	limit: z.coerce.number().int().min(1).max(200).default(200),
+	offset: z.coerce.number().int().min(0).default(0),
+	search: z.string().trim().max(200).optional(),
+});
+const runStatusSchema = z.enum([
+	"queued",
+	"delayed",
+	"running",
+	"retrying",
+	"succeeded",
+	"failed",
+	"skipped",
+	"blocked",
+	"suppressed",
+	"cancelled",
+]);
+const scheduledQuerySchema = listQuerySchema.extend({
+	type: z.string().min(1).optional(),
+	status: runStatusSchema.optional(),
+	scopeKind: z.enum(["global", "site"]).optional(),
+	visibility: z.enum(["owned", "summary"]).optional(),
+});
+const runsQuerySchema = listQuerySchema.extend({
 	commentId: z.string().min(1).optional(),
+	type: z.string().min(1).optional(),
+	status: runStatusSchema.optional(),
+	siteKey: z.string().min(1).optional(),
+	scopeKind: z.enum(["global", "site"]).optional(),
 });
 const transferOwnerSchema = z.object({
 	ownerUserId: z.number().int().positive(),
@@ -57,17 +83,26 @@ export const adminTasksRoutes: FastifyPluginAsync = async (fastify) => {
 
 	fastify.get("/scheduled", async (request) => {
 		const session = await sessionService.requireSession(request);
-		return service.listScheduled(session);
+		return service.listScheduled(
+			session,
+			parseParams(scheduledQuerySchema, request.query ?? {}),
+		);
 	});
 
 	fastify.get("/audit", async (request) => {
 		const session = await sessionService.requireSession(request);
-		return service.listAudit(session);
+		return service.listAudit(
+			session,
+			parseParams(listQuerySchema, request.query ?? {}),
+		);
 	});
 
 	fastify.get("/deleted-snapshots", async (request) => {
 		const session = await sessionService.requireSession(request);
-		return service.listDeletedSnapshots(session);
+		return service.listDeletedSnapshots(
+			session,
+			parseParams(listQuerySchema, request.query ?? {}),
+		);
 	});
 
 	fastify.get("/deleted-snapshots/:id", async (request) => {
@@ -169,7 +204,7 @@ export const adminTasksRoutes: FastifyPluginAsync = async (fastify) => {
 
 	fastify.get("/runs", async (request) => {
 		const session = await sessionService.requireSession(request);
-		const query = runsQuerySchema.parse(request.query ?? {});
+		const query = parseParams(runsQuerySchema, request.query ?? {});
 		return service.listRuns(session, query);
 	});
 

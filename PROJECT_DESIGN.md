@@ -13,7 +13,7 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 | `src/server.ts` | 解析 install/upgrade/normal 启动状态并管理进程生命周期 |
 | `src/app.ts` | 组合正常模式 Fastify plugins、基础路由和 feature routes |
 | `src/config/` | startup config、环境变量、public path 与 dev runtime options |
-| `src/db/`、`drizzle/` | SQLite 客户端、schema、迁移执行与已发布 SQL |
+| `src/db/`、`drizzle/` | PostgreSQL Pool、pg-core schema、迁移执行；已发布 SQLite SQL 冻结保留 |
 | `src/modules/` | 按 admin、comments、notifications、tasks、install、upgrade 等稳定能力组织业务 |
 | `src/plugins/` | DB、安全、request context、日志、cookie 的 Fastify 生命周期装配 |
 | `apps/admin/` | React Admin Console、API client、页面/组件与 Vite 构建 |
@@ -23,7 +23,7 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 
 ## 3. 启动与组合
 
-`src/server.ts` 先根据安装锁、startup config、SQLite 版本和 partial marker 解析状态：
+`src/server.ts` 先根据安装锁、startup config、PostgreSQL 结构/应用版本和 partial marker 解析状态：
 
 - `not_installed` 启动 minimal install app；
 - `upgrade_required` 启动 Web Upgrade Mode；
@@ -39,7 +39,7 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 5. 在 `${publicPath}/api/admin/*` 下注册内置 Admin 能力。
 6. 通过 DB plugin 装配站点 registry、任务 scheduler/worker、通知 runtime 和外部 adapters。
 
-内存 dev mode 是受限分支：它不连接 SQLite，只注册内存 mock 与 dev 控制面，不代表生产持久化行为。
+内存 dev mode 是受限分支：它不连接 PostgreSQL，只注册内存 mock 与 dev 控制面，不代表生产持久化行为。
 
 ## 4. 请求与错误数据流
 
@@ -48,7 +48,7 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 1. request context 生成/传播 request ID，并识别站点、页面和访问元数据。
 2. 安全 plugin 执行 Origin、身份、ACL、限流、黑白名单或审计边界。
 3. feature route 使用 Zod/明确 schema 校验输入并调用 service。
-4. service 执行业务规则，repository 通过 Drizzle/SQLite 读写状态；外部发送或抓取通过 adapter。
+4. service 执行业务规则，repository 通过 Drizzle/PostgreSQL 读写状态；外部发送或抓取通过 adapter。
 5. presenter/route 只返回边界模型，不直接暴露数据库行或内部任务 payload。
 6. `AppError` 转换为稳定 HTTP 状态、错误码、安全 message 和 request ID；未知异常写入脱敏日志并返回 `INTERNAL_ERROR`。
 
@@ -56,13 +56,15 @@ QingYan 是自部署、API-first 的评论与对话基础设施。一个 Node.js
 
 ## 5. 持久化、任务与通知
 
-- SQLite/Drizzle 是当前正式持久化边界；启动时 `applyDatabaseMigrations(...)` 使用 `__qingyan_migrations` ledger 应用版本 SQL。
+- PostgreSQL/Drizzle 是当前正式持久化边界；启动时 `applyDatabaseMigrations(...)` 使用 `__qingyan_migrations` ledger 应用版本 SQL。
 - 站点、页面、评论、访问元数据、Admin 身份、settings、任务、通知投递和 upgrade ledger 分属明确 schema 模块。
-- `task_runs` 是可审计任务状态中心；scheduler 创建到期运行，worker 通过锁/lease 认领并写入进度、结果、错误和 event log。通知任务创建时，`task_runs`、`notification_deliveries` 与首条 task event 在一个 SQLite 事务内落库；一次外部发送完成后，delivery 结果、父任务终态/重试态与对应 task events 也在一个事务内提交，网络 I/O 不进入数据库事务。
-- 默认 queue backend 为数据库。BullMQ 可传递消息，但 task/delivery 的业务状态仍持久化在 SQLite。
+- `task_runs` 是可审计任务状态中心；scheduler 创建到期运行，worker 通过锁/lease 认领并写入进度、结果、错误和 event log。通知任务创建时，`task_runs`、`notification_deliveries` 与首条 task event 在一个 PostgreSQL 事务内落库；一次外部发送完成后，delivery 结果、父任务终态/重试态与对应 task events 也在一个事务内提交，网络 I/O 不进入数据库事务。
+- 默认 queue backend 为数据库。BullMQ 可传递消息，但 task/delivery 的业务状态仍持久化在 PostgreSQL。
 - 通知 planner 决定事件与接收人，queue 创建工作，worker 选择 channel adapter，delivery/reputation/event log 记录可诊断结果。评论邮件即使决定不发送，也会写入终态 decision task 作为业务事实；评论列表、评论邮件明细和任务详情通过同一聚合器把任务与投递映射为 `accepted | failed | processing | not_sent | unknown`，对评论页列表使用固定次数的批量查询。
 - 通知的 Admin 投影只返回业务 workflow、脱敏收件人、尝试次数、安全原因和接受时间；原始 payload、底层异常、provider message id 与 secret 留在受保护的内部持久化/日志边界，不进入评论接口或通知任务视图。
 - 配置 owner 分离：startup config 保存启动必需项；站点/系统设置保存在数据库；secret 通过受控设置或环境 seed 进入持久化边界。
+
+WAF 接入使用 `src/modules/waf/` 的连接、网关 client、日志采集和同步服务；独立 `services/onepanel-gateway/` 只负责官方 API 的固定目标、参数白名单与签名。`waf_sync` 复用现有任务执行与五分钟系统计划，处罚/解除和同步意图在同一事务保存。站点 ACL 规则按字段指纹核对，人工差异暂停自动覆盖；本地绝对到期时间负责上游删除。日志游标、去重、证据缺口和有限保留归应用模块所有，网关不访问面板内部文件。
 
 ## 6. Admin Console
 
@@ -76,20 +78,26 @@ Admin API client 位于 `apps/admin/src/api/`；页面和组件按内容、设�
 - 公开 route schema、presenter 和 `tests/integration/public-api-contract.test.ts` 必须与 OpenAPI 同步。
 - Admin API 是内置 code-first 合同，开发说明维护在 `docs/admin-console-api.md`。
 - startup YAML 与环境变量边界维护在 `config/qingyan.example.yml`、`src/config/` 和 `docs/configuration.md`。
-- Docker/Compose、CLI、backup/export 与 updater 都是运维合同；修改参数、输出或恢复语义时必须同步文档和系统测试。
+- Docker/Compose、CLI、backup/restore、独立转换与 updater 都是运维合同；修改参数、输出或恢复语义时必须同步文档和系统测试。
 
 ## 8. 安装、升级与恢复
 
-`scripts/install.sh` 负责 Linux/Compose 首次部署，保留当前只有 SQLite 的数据库菜单，不执行备份恢复。默认将运行文件写入 `<父目录>/qingyan/`，源码构建缓存写入 `<父目录>/.qingyan-source/`，也可覆盖源码位置。镜像由源码构建，运行 Compose 只引用版本化本地镜像并挂载 config/data/logs。
+`scripts/install.sh` 负责 Linux/Compose 首次部署，优先复用用户提供连接信息的 PostgreSQL 18 空库与专用账号；未发现实例时可明确选择创建独立数据库容器，不选择连接或创建则取消安装。数据库不属于 QingYan Compose，新建容器只连接专用 Docker 网络，不发布宿主端口；已有 1Panel 数据库通过其受控网络接入。安装器不执行备份恢复。默认将运行文件写入 `<父目录>/qingyan/`，源码构建缓存写入 `<父目录>/.qingyan-source/`，也可覆盖源码位置。
+
+应用与受限 1Panel 网关分别构建版本化镜像。网关使用显式启用的 `onepanel` profile、静态来源网络、独立 Key 与内部凭据，未配置时同步关闭。运行目录的基础 Compose 与 `gateway.compose.json` 叠加，后者从实际 Compose JSON 检查后补充必要服务/网络，不覆盖已有端口、卷与定制。部署状态、两个镜像引用和凭据文件统一快照；数据写入前失败可恢复旧部署，写入开始后沿升级恢复流程保留现场。
 
 分离布局的 Compose 模板和更新器函数由 `install.sh` 维护；安装器通过函数序列化生成运行目录的独立 `update.sh`，源码缓存移除后仍能重新获取并更新。部署元信息位于 `deployment.conf`，镜像引用及自动生成的安装令牌位于权限为 600 的 Compose `.env`；两者均不属于应用 startup config，更新只改镜像字段并保留其他值与权限。仓库内 `scripts/update.sh` 对新布局分发到独立入口，旧混合布局继续使用既有 Git transaction。
 
-install app 只处理全新实例，完成后写 startup config、SQLite、Admin bootstrap、默认 settings 和安装锁。release 后升级先生成脱敏 `UpgradePlan`，在写入前备份 config、SQLite/WAL/SHM 和计划，再按 migration 与 application step 执行并写入 upgrade ledger。
+install app 只处理全新实例，完成后写 startup config、PostgreSQL 基线、Admin bootstrap、默认 settings 和安装锁。release 后升级先生成脱敏 `UpgradePlan`，在写入前备份 config、PostgreSQL dump、必要资源 和计划，再按 migration 与 application step 执行并写入 upgrade ledger。
 
 升级失败保留 partial marker 并进入 `recovery_required`，不得继续启动正常服务。CLI 与 Web Upgrade Mode 复用同一升级服务；Web 层不调用 shell 或 `systemctl`。
 
+SQLite 旧配置在新配置完整解析前识别，进入离线转换交接。独立 `database-conversion` 命令以只读一致快照为源，将有效数据迁入空 PostgreSQL，完整旧库连同退役历史归档，核对完成后另行切换配置。后台导入导出、安装 export 恢复、定时备份和独立 IP 更新历史退出；IP 当前激活与最近检查保存在 state，手动执行复用任务日志。
+
+运维备份与升级前备份共用 PostgreSQL `pg_dump -Fc`；恢复先校验配置并准备资源，再由 `pg_restore --no-owner --no-acl --exit-on-error --file` 展开备份，使用 `psql --single-transaction` 将数据库、资源路径和恢复收据一并写入预建空目标库。配置发布失败或进程中断后，同一恢复命令凭专属恢复目录和数据库收据补完；生成新配置但不自动切换。
+
 ## 9. 尚未决定
 
-- PostgreSQL/MySQL、多实例共享存储和水平扩展不在当前支持范围。决定这些能力前需要明确部署拓扑、事务/锁语义、备份责任和迁移兼容窗口。
+- 多实例共享本地资源和水平扩展不在当前支持范围；PostgreSQL 可远程连接，当前仍按单服务部署验收。
 - 公开 API 的下一版本化方式尚未触发。只有出现无法通过向后兼容扩展完成的真实需求时，才评估路径版本、媒体类型或其他策略。
 - 真实外部 Redis、SMTP、Webhook/WxPusher 和生产反向代理的统一 CI 环境尚未建立；当前由显式环境测试与部署验收承担。

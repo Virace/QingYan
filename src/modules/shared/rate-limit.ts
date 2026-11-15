@@ -83,4 +83,8 @@ export class MemoryRateLimitStore {
 			}
 		}
 	}
+	public resetPrefix(prefix: string): void {
+		for (const key of this.buckets.keys())
+			if (key.startsWith(prefix)) this.buckets.delete(key);
+	}
 }

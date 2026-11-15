@@ -329,12 +329,9 @@ describe("admin site notification recipients", () => {
 			siteKeys: ["fangyuan"],
 		});
 		const adminAuth = await loginAsAdmin(fixture.app);
-		fixture.app.sqlite.exec(`
-			CREATE TRIGGER fail_site_notification_people_insert
-			BEFORE INSERT ON site_notification_event_recipients
-			BEGIN
-				SELECT RAISE(ABORT, 'forced notification people failure');
-			END;
+		await fixture.pool.query(`
+			CREATE FUNCTION fail_site_notification_people_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced notification people failure'; END $$;
+CREATE TRIGGER fail_site_notification_people_insert BEFORE INSERT ON site_notification_event_recipients FOR EACH ROW EXECUTE FUNCTION fail_site_notification_people_insert();
 		`);
 
 		const payload = recipientsPayload(recipient.id);

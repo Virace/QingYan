@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import { createDatabaseClients } from "../../src/db/client";
-import { adminBootstrapState, adminSessions } from "../../src/db/schema";
+import {
+	adminBootstrapState,
+	adminSessions,
+	adminUsers,
+} from "../../src/db/schema";
 import {
 	clearAdminSessions,
 	readAdminInfo,
@@ -16,23 +16,34 @@ import {
 	createPasswordHash,
 	verifyPasswordHash,
 } from "../../src/modules/admin/password-hash";
-import { applyInitialMigration } from "../support/test-fixtures";
+import {
+	applyInitialMigration,
+	createTestWorkspace,
+} from "../support/test-fixtures";
 
-function createWorkspace() {
-	const directory = mkdtempSync(path.join(tmpdir(), "qingyan-admin-ops-"));
-	const databaseFile = path.join(directory, "qingyan.db");
-	applyInitialMigration(databaseFile);
-	const { db, sqlite } = createDatabaseClients(databaseFile);
+async function createWorkspace() {
+	const workspace = createTestWorkspace("qingyan-admin-ops-");
+	await applyInitialMigration(workspace.databaseUrl);
+	const { db, close } = createDatabaseClients(workspace.databaseUrl, {
+		pool: { max: 2 },
+	});
 	return {
 		db,
-		sqlite,
 		async seed() {
+			const [user] = await db
+				.insert(adminUsers)
+				.values({
+					username: "admin",
+					email: "admin@example.test",
+					displayName: "Admin",
+					passwordHash: createPasswordHash("old-password"),
+					isInitialAdmin: true,
+				})
+				.returning();
 			await db.insert(adminBootstrapState).values({
 				id: 1,
 				consolePath: "/admin",
-				username: "admin",
-				passwordHash: createPasswordHash("old-password"),
-				passwordRotatedAt: null,
+				initialAdminUserId: user.id,
 			});
 			await db.insert(adminSessions).values({
 				id: "session_1",
@@ -40,16 +51,16 @@ function createWorkspace() {
 				expiresAt: new Date(Date.now() + 1000).toISOString(),
 			});
 		},
-		close() {
-			sqlite.close();
-			rmSync(directory, { recursive: true, force: true });
+		async close() {
+			await close();
+			await workspace.cleanup();
 		},
 	};
 }
 
 describe("admin bootstrap ops", () => {
 	it("reads admin bootstrap info", async () => {
-		const workspace = createWorkspace();
+		const workspace = await createWorkspace();
 		try {
 			await workspace.seed();
 
@@ -59,17 +70,17 @@ describe("admin bootstrap ops", () => {
 				passwordRotatedAt: null,
 			});
 		} finally {
-			workspace.close();
+			await workspace.close();
 		}
 	});
 
 	it("generates an 18 character password and clears sessions", async () => {
-		const workspace = createWorkspace();
+		const workspace = await createWorkspace();
 		try {
 			await workspace.seed();
 
 			const result = await resetAdminPasswordWithGenerated(workspace.db);
-			const rows = await workspace.db.select().from(adminBootstrapState);
+			const rows = await workspace.db.select().from(adminUsers);
 			const sessions = await workspace.db.select().from(adminSessions);
 
 			expect(result.passwordGenerated).toBe(true);
@@ -80,19 +91,19 @@ describe("admin bootstrap ops", () => {
 			expect(rows[0]?.passwordRotatedAt).toBeTruthy();
 			expect(sessions).toEqual([]);
 		} finally {
-			workspace.close();
+			await workspace.close();
 		}
 	});
 
 	it("uses a supplied password without returning it", async () => {
-		const workspace = createWorkspace();
+		const workspace = await createWorkspace();
 		try {
 			await workspace.seed();
 
 			const result = await resetAdminPasswordWithGenerated(workspace.db, {
 				password: "new-password",
 			});
-			const rows = await workspace.db.select().from(adminBootstrapState);
+			const rows = await workspace.db.select().from(adminUsers);
 
 			expect(result.passwordGenerated).toBe(false);
 			expect(result.password).toBeUndefined();
@@ -100,12 +111,12 @@ describe("admin bootstrap ops", () => {
 				verifyPasswordHash("new-password", rows[0]?.passwordHash ?? ""),
 			).toBe(true);
 		} finally {
-			workspace.close();
+			await workspace.close();
 		}
 	});
 
 	it("resets the admin entrance and clears sessions", async () => {
-		const workspace = createWorkspace();
+		const workspace = await createWorkspace();
 		try {
 			await workspace.seed();
 
@@ -122,12 +133,12 @@ describe("admin bootstrap ops", () => {
 			expect(info?.consolePath).toBe("/hidden-admin");
 			expect(sessions).toEqual([]);
 		} finally {
-			workspace.close();
+			await workspace.close();
 		}
 	});
 
 	it("rejects reserved admin entrance paths", async () => {
-		const workspace = createWorkspace();
+		const workspace = await createWorkspace();
 		try {
 			await workspace.seed();
 
@@ -135,12 +146,12 @@ describe("admin bootstrap ops", () => {
 				resetAdminEntrance(workspace.db, { path: "/api/admin" }),
 			).rejects.toThrow("reserved system route");
 		} finally {
-			workspace.close();
+			await workspace.close();
 		}
 	});
 
 	it("clears all admin sessions", async () => {
-		const workspace = createWorkspace();
+		const workspace = await createWorkspace();
 		try {
 			await workspace.seed();
 
@@ -150,7 +161,7 @@ describe("admin bootstrap ops", () => {
 				[],
 			);
 		} finally {
-			workspace.close();
+			await workspace.close();
 		}
 	});
 });

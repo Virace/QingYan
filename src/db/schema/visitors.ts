@@ -1,19 +1,24 @@
 import { sql } from "drizzle-orm";
 import {
+	bigint,
+	check,
+	foreignKey,
 	index,
-	integer,
-	sqliteTable,
-	text,
+	pgTable,
+	unique,
 	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
+import { exactText as text, utcTimestamp } from "./column-types";
 
 import { sites } from "./sites";
 
-export const visitors = sqliteTable(
+export const visitors = pgTable(
 	"visitors",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		siteId: integer("site_id")
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		siteId: bigint("site_id", { mode: "number" })
 			.notNull()
 			.references(() => sites.id),
 		visitorKey: text("visitor_key").notNull(),
@@ -23,10 +28,15 @@ export const visitors = sqliteTable(
 		lastUserAgent: text("last_user_agent"),
 		lastSeenPageKey: text("last_seen_page_key"),
 		lastSeenPageUrl: text("last_seen_page_url"),
-		lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		lastSeenAt: utcTimestamp("last_seen_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
+		unique("visitors_id_site_unique").on(table.id, table.siteId),
 		uniqueIndex("visitors_site_visitor_key_idx").on(
 			table.siteId,
 			table.visitorKey,
@@ -35,14 +45,16 @@ export const visitors = sqliteTable(
 	],
 );
 
-export const visitorRequestMetadata = sqliteTable(
+export const visitorRequestMetadata = pgTable(
 	"visitor_request_metadata",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
-		siteId: integer("site_id")
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
+		siteId: bigint("site_id", { mode: "number" })
 			.notNull()
 			.references(() => sites.id),
-		visitorId: integer("visitor_id")
+		visitorId: bigint("visitor_id", { mode: "number" })
 			.notNull()
 			.references(() => visitors.id),
 		ip: text("ip"),
@@ -56,7 +68,7 @@ export const visitorRequestMetadata = sqliteTable(
 		ipLocationRaw: text("ip_location_raw"),
 		ipLocationSource: text("ip_location_source"),
 		ipLocationDbHash: text("ip_location_db_hash"),
-		ipLocationUpdatedAt: text("ip_location_updated_at"),
+		ipLocationUpdatedAt: utcTimestamp("ip_location_updated_at"),
 		ipLocationError: text("ip_location_error"),
 		deviceBrowser: text("device_browser"),
 		deviceBrowserVersion: text("device_browser_version"),
@@ -66,26 +78,39 @@ export const visitorRequestMetadata = sqliteTable(
 		deviceIcon: text("device_icon"),
 		deviceSource: text("device_source"),
 		deviceParserVersion: text("device_parser_version"),
-		deviceUpdatedAt: text("device_updated_at"),
+		deviceUpdatedAt: utcTimestamp("device_updated_at"),
 		deviceError: text("device_error"),
-		firstSeenAt: text("first_seen_at")
+		firstSeenAt: utcTimestamp("first_seen_at")
 			.notNull()
 			.default(sql`CURRENT_TIMESTAMP`),
-		lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		seenCount: integer("seen_count").notNull().default(1),
+		lastSeenAt: utcTimestamp("last_seen_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		seenCount: bigint("seen_count", { mode: "number" }).notNull().default(1),
 		lastSeenPageKey: text("last_seen_page_key"),
 		lastSeenPageUrl: text("last_seen_page_url"),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [
+		check(
+			"visitor_request_metadata_seen_count_nonnegative",
+			sql`${table.seenCount} >= 0`,
+		),
+		foreignKey({
+			name: "visitor_metadata_site_fk",
+			columns: [table.visitorId, table.siteId],
+			foreignColumns: [visitors.id, visitors.siteId],
+		}),
 		index("visitor_request_metadata_site_id_idx").on(table.siteId),
 		index("visitor_request_metadata_visitor_id_idx").on(table.visitorId),
 		index("visitor_request_metadata_last_seen_at_idx").on(table.lastSeenAt),
-		uniqueIndex("visitor_request_metadata_identity_idx").on(
-			table.visitorId,
-			table.ipHash,
-			table.userAgentHash,
-		),
+		unique("visitor_request_metadata_identity_idx")
+			.on(table.visitorId, table.ipHash, table.userAgentHash)
+			.nullsNotDistinct(),
 	],
 );

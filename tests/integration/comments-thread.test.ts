@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	commentRequestMetadata,
 	comments,
@@ -11,6 +10,7 @@ import {
 	sites,
 	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { createTestApp } from "../support/test-fixtures";
 
@@ -86,6 +86,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/post:thread-only",
+			pageKeyHash: hashKey("/post:thread-only"),
 			pageTitle: "Thread Only",
 			commentCount: 1,
 			rootCommentCount: 1,
@@ -192,6 +193,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/post:external-avatar-thread",
+			pageKeyHash: hashKey("/post:external-avatar-thread"),
 			pageTitle: "External Avatar Thread",
 			pageUrl: "/post:external-avatar-thread",
 			commentCount: 1,
@@ -278,6 +280,7 @@ describe("GET /qingyan/api/comments/thread", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "/post:thread-metadata",
+			pageKeyHash: hashKey("/post:thread-metadata"),
 			pageTitle: "Thread Metadata",
 			commentCount: 1,
 			rootCommentCount: 1,

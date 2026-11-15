@@ -1,14 +1,10 @@
-import {
-	integer,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { bigint, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { exactText as text, utcTimestamp } from "./column-types";
 
 import { comments } from "./comments";
 
-export const commentRequestMetadata = sqliteTable("comment_request_metadata", {
+export const commentRequestMetadata = pgTable("comment_request_metadata", {
 	commentId: text("comment_id")
 		.primaryKey()
 		.references(() => comments.id),
@@ -21,7 +17,7 @@ export const commentRequestMetadata = sqliteTable("comment_request_metadata", {
 	ipLocationRaw: text("ip_location_raw"),
 	ipLocationSource: text("ip_location_source"),
 	ipLocationDbHash: text("ip_location_db_hash"),
-	ipLocationUpdatedAt: text("ip_location_updated_at"),
+	ipLocationUpdatedAt: utcTimestamp("ip_location_updated_at"),
 	ipLocationError: text("ip_location_error"),
 	deviceBrowser: text("device_browser"),
 	deviceBrowserVersion: text("device_browser_version"),
@@ -31,40 +27,35 @@ export const commentRequestMetadata = sqliteTable("comment_request_metadata", {
 	deviceIcon: text("device_icon"),
 	deviceSource: text("device_source"),
 	deviceParserVersion: text("device_parser_version"),
-	deviceUpdatedAt: text("device_updated_at"),
+	deviceUpdatedAt: utcTimestamp("device_updated_at"),
 	deviceError: text("device_error"),
-	createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-	updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+	createdAt: utcTimestamp("created_at")
+		.notNull()
+		.default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: utcTimestamp("updated_at")
+		.notNull()
+		.default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const ipRegionDatabaseState = sqliteTable(
+export const ipRegionDatabaseState = pgTable(
 	"ip_region_database_state",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
 		ipVersion: text("ip_version").notNull(),
-		filePath: text("file_path").notNull(),
-		fileHash: text("file_hash").notNull(),
+		filePath: text("file_path"),
+		fileHash: text("file_hash"),
 		sourceUrl: text("source_url"),
-		cachePolicy: text("cache_policy").notNull(),
-		activatedAt: text("activated_at").notNull(),
-		updatedAt: text("updated_at").notNull(),
+		cachePolicy: text("cache_policy"),
+		activatedAt: utcTimestamp("activated_at"),
+		updatedAt: utcTimestamp("updated_at").notNull(),
+		lastCheckedAt: utcTimestamp("last_checked_at"),
+		lastCheckStatus: text("last_check_status"),
+		lastCheckReason: text("last_check_reason"),
+		lastCheckError: text("last_check_error"),
 	},
 	(table) => [
 		uniqueIndex("ip_region_database_state_version_idx").on(table.ipVersion),
 	],
 );
-
-export const ipRegionUpdateRuns = sqliteTable("ip_region_update_runs", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
-	ipVersion: text("ip_version").notNull(),
-	sourceUrl: text("source_url"),
-	status: text("status").notNull(),
-	previousHash: text("previous_hash"),
-	nextHash: text("next_hash"),
-	downloadedAt: text("downloaded_at"),
-	activatedAt: text("activated_at"),
-	refreshedComments: integer("refreshed_comments").notNull().default(0),
-	errorMessage: text("error_message"),
-	createdAt: text("created_at").notNull(),
-	updatedAt: text("updated_at").notNull(),
-});

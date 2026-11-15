@@ -1,11 +1,17 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { bigint, pgTable } from "drizzle-orm/pg-core";
+import { adminUsers } from "./admin-users";
+import { exactText as text, utcTimestamp } from "./column-types";
 
-export const adminBootstrapState = sqliteTable("admin_bootstrap_state", {
-	id: integer("id").primaryKey({ autoIncrement: true }),
+export const adminBootstrapState = pgTable("admin_bootstrap_state", {
+	id: bigint("id", { mode: "number" })
+		.primaryKey()
+		.generatedByDefaultAsIdentity(),
 	consolePath: text("console_path").notNull(),
-	username: text("username").notNull(),
-	passwordHash: text("password_hash").notNull(),
-	generatedAt: text("generated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-	passwordRotatedAt: text("password_rotated_at"),
+	initialAdminUserId: bigint("initial_admin_user_id", { mode: "number" })
+		.notNull()
+		.references(() => adminUsers.id),
+	generatedAt: utcTimestamp("generated_at")
+		.notNull()
+		.default(sql`CURRENT_TIMESTAMP`),
 });

@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	blacklistRules,
 	commentRequestMetadata,
@@ -9,9 +8,10 @@ import {
 	pageViewSessions,
 	siteSettings,
 	sites,
-	visitors,
 	visitorRequestMetadata,
+	visitors,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
 import { loginAsAdmin } from "../support/admin-login";
 import { createTestApp } from "../support/test-fixtures";
@@ -168,6 +168,7 @@ describe("admin visitors", () => {
 		await fixture.app.db.insert(pageThreads).values({
 			siteId: site.id,
 			pageKey: "post:visitor-1",
+			pageKeyHash: hashKey("post:visitor-1"),
 			pageTitle: "Visitor One",
 		});
 		const [thread] = await fixture.app.db
@@ -373,20 +374,25 @@ describe("admin visitors", () => {
 		const assertVisitorFilter = async (
 			query: string,
 			expectedVisitors: string[],
+			pagination: { limit: number; offset: number; totalCount: number } = {
+				limit: 20,
+				offset: 0,
+				totalCount: expectedVisitors.length,
+			},
 		) => {
 			const filterResponse = await fixture.app.inject({
 				method: "GET",
-				url: `/qingyan/api/admin/visitors?siteKey=fangyuan&${query}&limit=20&offset=0`,
+				url: `/qingyan/api/admin/visitors?siteKey=fangyuan&${query}&limit=${pagination.limit}&offset=${pagination.offset}`,
 				cookies: {
 					qingyan_admin: adminCookie?.value ?? "",
 				},
 			});
 			expect(filterResponse.statusCode).toBe(200);
 			const json = filterResponse.json();
+			expect(json.pagination).toEqual(pagination);
 			expect(
 				json.items.map((item: { visitorKey: string }) => item.visitorKey),
 			).toEqual(expectedVisitors);
-			expect(json.pagination.totalCount).toBe(expectedVisitors.length);
 		};
 
 		await assertVisitorFilter("ip=203.0.113.30", ["visitor_admin_1"]);
@@ -398,6 +404,51 @@ describe("admin visitors", () => {
 		]);
 		await assertVisitorFilter("blacklist=ip", ["visitor_admin_1"]);
 		await assertVisitorFilter("blacklist=none", ["visitor_admin_2"]);
+		await assertVisitorFilter("", ["visitor_admin_1"], {
+			limit: 1,
+			offset: 0,
+			totalCount: 2,
+		});
+		await assertVisitorFilter("", ["visitor_admin_2"], {
+			limit: 1,
+			offset: 1,
+			totalCount: 2,
+		});
+		await assertVisitorFilter("", [], {
+			limit: 1,
+			offset: 2,
+			totalCount: 2,
+		});
+		await assertVisitorFilter("blacklist=ip", [], {
+			limit: 1,
+			offset: 1,
+			totalCount: 1,
+		});
+
+		await fixture.app.db
+			.update(visitors)
+			.set({ lastIp: null, lastSeenAt: "2026-04-17T10:03:00.000Z" })
+			.where(eq(visitors.id, secondVisitor.id));
+		await fixture.app.db.insert(blacklistRules).values({
+			siteId: site.id,
+			scope: "post",
+			targetType: "ip",
+			targetValue: "198.51.100.0/24",
+			matchMode: "cidr",
+			source: "manual",
+		});
+		await assertVisitorFilter("blacklist=ip", ["visitor_admin_2"], {
+			limit: 1,
+			offset: 0,
+			totalCount: 2,
+		});
+		await assertVisitorFilter("blacklist=ip", ["visitor_admin_1"], {
+			limit: 1,
+			offset: 1,
+			totalCount: 2,
+		});
+		await assertVisitorFilter("blacklist=none", []);
+		await assertVisitorFilter("blacklist=visitor", ["visitor_admin_1"]);
 	});
 
 	it("does not aggregate visitor missing or unparsed user agents as unknown devices", async () => {

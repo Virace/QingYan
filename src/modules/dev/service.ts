@@ -4,6 +4,7 @@ import type { FastifyRequest } from "fastify";
 
 import { and, eq, inArray } from "drizzle-orm";
 
+import { hashKey } from "../../db/values";
 import type { AppDatabase } from "../../db/client";
 import {
 	captchaSessions,
@@ -52,7 +53,13 @@ export class DevModeService {
 			.select()
 			.from(pageThreads)
 			.where(
-				and(eq(pageThreads.siteId, site.id), eq(pageThreads.pageKey, pageKey)),
+				and(
+					eq(pageThreads.siteId, site.id),
+					and(
+						eq(pageThreads.pageKeyHash, hashKey(pageKey)),
+						eq(pageThreads.pageKey, pageKey),
+					),
+				),
 			)
 			.limit(1);
 
@@ -119,7 +126,10 @@ export class DevModeService {
 					.where(
 						and(
 							eq(pageThreads.siteId, site.id),
-							eq(pageThreads.pageKey, pageKey),
+							and(
+								eq(pageThreads.pageKeyHash, hashKey(pageKey)),
+								eq(pageThreads.pageKey, pageKey),
+							),
 						),
 					)
 					.limit(1)

@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
-import { type EnvMapping, envMappings } from "../../config/env-mapping";
+import {
+	applyStartupEnvOverrides,
+	type EnvMapping,
+	envMappings,
+} from "../../config/env-mapping";
 import { joinPublicPath, normalizePublicPath } from "../../config/public-path";
 import { buildErrorResponse } from "../shared/error-response";
 import { AppError, InvalidRequestError } from "../shared/errors";
@@ -134,9 +138,7 @@ function buildEnvLocks(environment: NodeJS.ProcessEnv) {
 			const path =
 				mapping.category === "system_settings_seed"
 					? `systemSettings.${mapping.path}`
-					: mapping.path === "database.sqlite.file"
-						? "database.sqliteFile"
-						: mapping.path;
+					: mapping.path;
 			return {
 				path,
 				envName: mapping.envName,
@@ -166,7 +168,7 @@ function renderInstallHtml(
 			trustProxy: true,
 		},
 		database: {
-			sqliteFile: "./data/qingyan.db",
+			url: "postgresql://qingyan:change-me@postgres:5432/qingyan",
 		},
 		admin: {
 			consolePath: "",
@@ -211,10 +213,6 @@ function renderInstallHtml(
 		},
 		security: defaultSecurityConfig,
 		systemSettings: defaultSystemSettings,
-		restore: {
-			fileName: "",
-			payload: "",
-		},
 	};
 	const settingLabels = Object.fromEntries(
 		Object.keys(settingUiMetadata).map((path) => [path, getSettingLabel(path)]),
@@ -299,7 +297,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 </fieldset>
 <fieldset>
 <legend>数据库</legend>
-<label>SQLite 文件<input data-path="database.sqliteFile" autocomplete="off" required><span class="hint" data-hint-for="database.sqliteFile"></span></label>
+<label>PostgreSQL 连接 URL<input type="password" data-path="database.url" autocomplete="off" required><span class="hint" data-hint-for="database.url">先创建专用数据库和应用账号，预览只检查连接与空目标。</span></label>
 </fieldset>
 </section>
 <section class="step-panel" data-step="1" hidden>
@@ -500,11 +498,6 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 <legend>安装令牌</legend>
 <label>安装令牌<input data-path="token" autocomplete="one-time-code" required><span class="hint">使用 QingYan 启动日志或本机操作命令显示的安装令牌。</span></label>
 </fieldset>
-<fieldset>
-<legend>从 QingYan 站点导出 JSON 恢复</legend>
-<div class="restore-note">这是可选恢复入口。不选择文件则执行全新安装。选择文件时，浏览器会在本地读取文件内容并生成安装计划。</div>
-<label>选择 QingYan JSON 文件<input data-restore-file type="file" accept="application/json,.json"><span class="hint">这里仅接受 qingyan.export.v1 站点级 JSON，用于恢复评论、页面线程、访客和站点设置。整站 qyctl backup 包不能在这里恢复，请使用 qyctl restore。</span></label>
-</fieldset>
 <section id="install-review" class="message"></section>
 <div id="install-message" class="message"></div>
 </section>
@@ -538,7 +531,7 @@ const captchaProviderField = document.querySelector('[data-path="systemSettings.
 const publicBaseUrlField = document.querySelector('[data-path="server.publicBaseUrl"]');
 const secureCookieField = document.querySelector('[data-path="admin.session.secure"]');
 const allowedOriginsField = document.querySelector('[data-path="site.allowedOrigins"]');
-const restoreFileField = document.querySelector("[data-restore-file]");
+
 const envLockByPath = new Map(envLocks.map((lock) => [lock.path, lock]));
 let currentStep = 0;
 let maxUnlockedStep = 0;
@@ -734,24 +727,6 @@ function optionalString(value) {
 	const text = String(value ?? "").trim();
 	return text || undefined;
 }
-async function collectRestore() {
-	const file = restoreFileField?.files?.[0];
-	if (!file) return undefined;
-	let payload;
-	try {
-		payload = JSON.parse(await file.text());
-	} catch (_) {
-		throw new Error("无法读取 QingYan JSON 文件，或文件内容不是有效 JSON。");
-	}
-	return {
-		enabled: true,
-		fileName: file.name,
-		payload,
-		existingStrategy: "fail_on_existing",
-		importMode: "full_site",
-		settingsStrategy: "replace_settings",
-	};
-}
 async function collectPayload() {
 	const raw = {};
 	for (const field of fields) {
@@ -780,7 +755,6 @@ async function collectPayload() {
 		site: raw.site,
 		siteSettings: raw.siteSettings,
 		systemSettings: raw.systemSettings,
-		restore: await collectRestore(),
 	};
 }
 function renderPlan(plan) {
@@ -807,7 +781,7 @@ function renderPlan(plan) {
 	review.replaceChildren(title);
 	review.dataset.kind = "success";
 	appendPlanLine(review, "配置文件", plan.config.path);
-	appendPlanLine(review, "数据库", plan.database.sqliteFile);
+	appendPlanLine(review, "数据库", "PostgreSQL（连接信息已隐藏）");
 	appendPlanLine(review, "后台入口", plan.admin.consolePath);
 	appendPlanLine(review, "管理员", plan.admin.username + (plan.admin.passwordGenerated ? "（将随机生成初始密码）" : ""));
 	appendPlanLine(review, "默认站点", plan.site.siteKey + " / " + plan.site.name);
@@ -833,21 +807,9 @@ function renderPlan(plan) {
 	review.append(createList(systemReview));
 	appendPlanText(review, "环境变量锁定:");
 	review.append(createList(envFields));
-	if (plan.restore) {
-		appendPlanLine(review, "恢复来源", plan.restore.fileName);
-		appendPlanLine(review, "恢复格式", "QingYan 站点级 JSON");
-		appendPlanLine(review, "目标站点", plan.restore.siteKey);
-		appendPlanLine(
-			review,
-			"将创建",
-			"页面线程 " + plan.restore.dryRun.summary.willCreatePageThreads +
-				"，访客 " + plan.restore.dryRun.summary.willCreateVisitors +
-				"，评论 " + plan.restore.dryRun.summary.willCreateComments,
-		);
-		appendPlanLine(review, "冲突", plan.restore.dryRun.summary.conflicts);
-	}
 	return {
 		...plan.applyPayload,
+        database: plannedPayload.database,
 		token: plannedPayload?.token,
 	};
 }
@@ -893,9 +855,8 @@ applyButton.addEventListener("click", async () => {
 	try {
 		const result = await requestJson("${joinPublicPath(publicPath, INSTALL_PATH)}", plannedPayload);
 		const backupText = result.backupPath ? " 原配置备份: " + result.backupPath + "。" : "";
-		const restoreText = result.restore ? "恢复站点 " + result.restore.siteKey + "，写入评论 " + result.restore.apply.summary.createdComments + " 条。" : "";
 		const transition = result.transition;
-		setMessage("success", transition.message + " 管理员 " + result.username + "，初始密码 " + result.initialPassword + "。管理后台: " + transition.adminUrl + "。配置文件: " + result.configPath + "。数据库: " + result.databasePath + "。系统设置写入 " + result.systemSettings.length + " 项。" + restoreText + backupText);
+		setMessage("success", transition.message + " 管理员 " + result.username + "，初始密码 " + result.initialPassword + "。管理后台: " + transition.adminUrl + "。配置文件: " + result.configPath + "。数据库: " + result.databasePath + "。系统设置写入 " + result.systemSettings.length + " 项。" + backupText);
 		form.reset();
 		plannedPayload = null;
 	} catch (error) {
@@ -998,6 +959,11 @@ export function buildInstallApp(input: {
 		reply.status(response.statusCode).send(response.body);
 	});
 
+	app.get(joinPublicPath(publicPath, "/healthz"), async () => ({
+		status: "ok",
+		mode: "install",
+	}));
+
 	app.get(adminPath, async (_, reply) => {
 		return reply.redirect(installPath);
 	});
@@ -1020,7 +986,9 @@ export function buildInstallApp(input: {
 	});
 
 	app.post(installPlanPath, async (request, reply) => {
-		const payload = parseInstallPayload(request.body);
+		const payload = parseInstallPayload(
+			applyStartupEnvOverrides(request.body, input.environment ?? process.env),
+		);
 		const blocked = await assertInstallOpen({
 			minimalConfig: input.minimalConfig,
 			environment: input.environment,
@@ -1043,7 +1011,9 @@ export function buildInstallApp(input: {
 	});
 
 	app.post(installPath, async (request, reply) => {
-		const payload = parseInstallPayload(request.body);
+		const payload = parseInstallPayload(
+			applyStartupEnvOverrides(request.body, input.environment ?? process.env),
+		);
 		const blocked = await assertInstallOpen({
 			minimalConfig: input.minimalConfig,
 			environment: input.environment,

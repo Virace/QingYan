@@ -1,10 +1,23 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { AppTransaction, DatabaseExecutor } from "../../db/client";
 import { auditLogs, systemSettings } from "../../db/schema";
 
 export class AdminSystemSettingsRepository {
-	public constructor(private readonly db: AppDatabase) {}
+	public constructor(private readonly db: DatabaseExecutor) {}
+
+	public async transaction<T>(
+		callback: (
+			repository: AdminSystemSettingsRepository,
+			tx: AppTransaction,
+		) => Promise<T>,
+	): Promise<T> {
+		return this.db.transaction(async (tx) => {
+			// 空表也必须串行读取和合并设置，不能只锁已有设置行。
+			await tx.execute(sql`select pg_advisory_xact_lock(174007, 2)`);
+			return callback(new AdminSystemSettingsRepository(tx), tx);
+		});
+	}
 
 	public async listByCategory(category: string) {
 		return this.db

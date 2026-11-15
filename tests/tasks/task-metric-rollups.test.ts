@@ -12,27 +12,29 @@ import {
 interface Fixture {
 	workspace: TestWorkspace;
 	db: ReturnType<typeof createDatabaseClients>["db"];
-	sqlite: ReturnType<typeof createDatabaseClients>["sqlite"];
+	close: ReturnType<typeof createDatabaseClients>["close"];
 	rollups: TaskMetricRollupRepository;
 }
 
 const fixtures: Fixture[] = [];
 
-afterEach(() => {
+afterEach(async () => {
 	for (const fixture of fixtures.splice(0)) {
-		fixture.sqlite.close();
-		fixture.workspace.cleanup();
+		await fixture.close();
+		await fixture.workspace.cleanup();
 	}
 });
 
-function createFixture(options?: { maxDimensionsPerBucket?: number }): Fixture {
+async function createFixture(options?: {
+	maxDimensionsPerBucket?: number;
+}): Promise<Fixture> {
 	const workspace = createTestWorkspace("qingyan-task-metrics-");
-	applyInitialMigration(workspace.databaseFile);
-	const clients = createDatabaseClients(workspace.databaseFile);
+	await applyInitialMigration(workspace.databaseUrl);
+	const clients = createDatabaseClients(workspace.databaseUrl);
 	const fixture = {
 		workspace,
 		db: clients.db,
-		sqlite: clients.sqlite,
+		close: clients.close,
 		rollups: new TaskMetricRollupRepository(clients.db, options),
 	};
 	fixtures.push(fixture);
@@ -41,7 +43,7 @@ function createFixture(options?: { maxDimensionsPerBucket?: number }): Fixture {
 
 describe("TaskMetricRollupRepository", () => {
 	it("increments and sums 60-second and 300-second metric buckets", async () => {
-		const { rollups } = createFixture();
+		const { rollups } = await createFixture();
 
 		await rollups.increment({
 			siteKey: "fangyuan",
@@ -91,7 +93,7 @@ describe("TaskMetricRollupRepository", () => {
 	});
 
 	it("normalizes dimensions and caps new high-cardinality dimensions per bucket", async () => {
-		const { db, rollups } = createFixture({ maxDimensionsPerBucket: 2 });
+		const { db, rollups } = await createFixture({ maxDimensionsPerBucket: 2 });
 		const at = new Date("2026-06-04T10:00:00.000Z");
 
 		await rollups.increment({
@@ -121,11 +123,11 @@ describe("TaskMetricRollupRepository", () => {
 		const rows = await db.select().from(taskMetricRollups);
 
 		expect(rows).toHaveLength(3);
-		expect(rows.map((row) => row.dimensionJson)).toEqual(
+		expect(rows.map((row) => JSON.parse(row.dimensionJson))).toEqual(
 			expect.arrayContaining([
-				'{"method":"POST","statusGroup":"2xx"}',
-				'{"method":"POST","statusGroup":"4xx"}',
-				'{"overflow":true}',
+				{ method: "POST", statusGroup: "2xx" },
+				{ method: "POST", statusGroup: "4xx" },
+				{ overflow: true },
 			]),
 		);
 		await expect(
@@ -137,5 +139,61 @@ describe("TaskMetricRollupRepository", () => {
 				now: at,
 			}),
 		).resolves.toMatchObject({ value: 2, sampleCount: 2 });
+	});
+	it("caps concurrent new dimensions while preserving double values and sample totals", async () => {
+		const { db, rollups } = await createFixture({ maxDimensionsPerBucket: 2 });
+		const at = new Date("2026-06-04T10:00:00.000Z");
+		await Promise.all(
+			Array.from({ length: 20 }, (_, index) =>
+				rollups.increment({
+					siteKey: "unknown-site",
+					metricKey: "parallel",
+					at,
+					dimensions: { index },
+					value: 0.125,
+					sampleCount: 2,
+				}),
+			),
+		);
+		const rows = await db.select().from(taskMetricRollups);
+		expect(rows).toHaveLength(3);
+		expect(
+			rows.filter((row) => JSON.parse(row.dimensionJson).overflow === true),
+		).toHaveLength(1);
+		expect(rows.every((row) => row.dimensionHash.length === 32)).toBe(true);
+		expect(
+			await rollups.sumWindow({
+				siteKey: "unknown-site",
+				metricKey: "parallel",
+				windowSec: 60,
+				now: at,
+			}),
+		).toMatchObject({ value: 2.5, sampleCount: 40 });
+	});
+
+	it("keeps global, literal sentinel, and unknown site scopes distinct", async () => {
+		const { rollups } = await createFixture();
+		const at = new Date("2026-06-04T10:00:00.000Z");
+		for (const [siteKey, value] of [
+			[null, 1],
+			["__global__", 2],
+			["missing", 3],
+		] as const) {
+			await rollups.increment({ siteKey, metricKey: "scope", value, at });
+		}
+		for (const [siteKey, value] of [
+			[null, 1],
+			["__global__", 2],
+			["missing", 3],
+		] as const) {
+			expect(
+				await rollups.sumWindow({
+					siteKey,
+					metricKey: "scope",
+					windowSec: 60,
+					now: at,
+				}),
+			).toMatchObject({ value, sampleCount: 1 });
+		}
 	});
 });

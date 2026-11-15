@@ -1,5 +1,6 @@
 services:
   qingyan:
+    image: ${QINGYAN_IMAGE:-qingyan:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,10 +12,20 @@ services:
       TZ: Asia/Shanghai
       QINGYAN_CONFIG_PATH: /app/config/qingyan.yml
       QINGYAN_INSTALL_TRANSITION_MODE: exit_for_supervisor
+      QINGYAN_DATABASE_URL:
+      QINGYAN_WAF_GATEWAY_URL: http://onepanel-gateway:4402
+      QINGYAN_WAF_GATEWAY_TOKEN_FILE: /run/qingyan-gateway/qingyan-gateway-token
+      QINGYAN_WAF_SYNC_PAUSED: ${QINGYAN_WAF_SYNC_PAUSED:-false}
+      QINGYAN_WAF_ENABLED: ${QINGYAN_WAF_ENABLED:-false}
+      QINGYAN_WAF_MAPPING_FILE: /app/config/waf-sites.json
     volumes:
       - ./config:/app/config
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./gateway/client:/run/qingyan-gateway:ro
+    networks:
+      - default
+      - panel-gateway
     healthcheck:
       test:
         [
@@ -28,3 +39,36 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+
+  onepanel-gateway:
+    profiles: [onepanel]
+    image: ${QINGYAN_GATEWAY_IMAGE:-qingyan-onepanel-gateway:local}
+    build:
+      context: ./services/onepanel-gateway
+      dockerfile: Dockerfile
+    environment:
+      QINGYAN_GATEWAY_CONFIG_PATH: /app/config/gateway.json
+    volumes:
+      - ./gateway/allowlist.json:/app/config/gateway.json:ro
+      - ./gateway/client:/run/qingyan-gateway:ro
+      - ${QINGYAN_PANEL_API_KEY_FILE:-./gateway/secrets/onepanel-api-key}:/run/secrets/onepanel-api-key:ro
+    networks:
+      panel-gateway:
+        ipv4_address: ${QINGYAN_GATEWAY_IP:-172.30.251.3}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+networks:
+  default:
+  panel-gateway:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${QINGYAN_GATEWAY_SUBNET:-172.30.251.0/28}
+          gateway: ${QINGYAN_GATEWAY_HOST_IP:-172.30.251.1}
+
+# PostgreSQL 使用预建的专用数据库与账号，通过 QINGYAN_DATABASE_URL 配置。

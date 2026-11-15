@@ -1,10 +1,20 @@
 import type { FastifyPluginAsync } from "fastify";
-
+import { qingyanCookiePath } from "../../config/public-path";
+import { requireSiteAccess } from "../admin/authorization";
+import { AdminRepository } from "../admin/repository";
+import { AdminSessionService } from "../admin/session-service";
 import {
 	AppError,
 	InvalidRequestError,
 	ResourceNotFoundError,
 } from "../shared/errors";
+import { resolvePublicPageContext } from "../shared/page-context";
+import { setPublicVisitorCookie } from "../shared/public-visitor-cookie";
+import { RuntimeSystemSettingsService } from "../system-settings/service";
+import { AkismetClient } from "./akismet-client";
+import { CaptchaService } from "./captcha-service";
+import { DefaultCommentMetadataResolver } from "./metadata/resolver";
+import { ModerationService } from "./moderation-service";
 import { presentComments } from "./presenter";
 import { omitEmptyObject } from "./public-contract";
 import { CommentsRepository } from "./repository";
@@ -19,22 +29,12 @@ import {
 	voteCommentParamsSchema,
 } from "./schemas";
 import { buildCommentDisplayOptions, CommentsService } from "./service";
-import { CaptchaService } from "./captcha-service";
-import { DefaultCommentMetadataResolver } from "./metadata/resolver";
-import { CommentsWriteRepository } from "./write-repository";
-import { CommentsWriteService } from "./write-service";
-import { RuntimeSystemSettingsService } from "../system-settings/service";
-import { AdminRepository } from "../admin/repository";
-import { AdminSessionService } from "../admin/session-service";
-import { qingyanCookiePath } from "../../config/public-path";
-import { ModerationService } from "./moderation-service";
-import { AkismetClient } from "./akismet-client";
-import { resolvePublicPageContext } from "../shared/page-context";
-import { setPublicVisitorCookie } from "../shared/public-visitor-cookie";
 import {
 	mergeStaffDisplaySettings,
 	mergeVerifiedAuthorSettings,
 } from "./verified-author";
+import { CommentsWriteRepository } from "./write-repository";
+import { CommentsWriteService } from "./write-service";
 
 function requireDevPageKey(pageKey?: string): string {
 	if (!pageKey) {
@@ -56,6 +56,7 @@ function presentCaptchaState(result: {
 	required: boolean;
 	verified: boolean;
 	mode: string;
+	securityToken?: string;
 	challenge?: unknown;
 }) {
 	return {
@@ -93,7 +94,6 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			getSettings: () => systemSettingsService.getCaptchaSettings(),
 			getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 		},
-		metadataResolver,
 	);
 	const moderationService = new ModerationService({
 		akismetClient: fastify.akismetClient ?? new AkismetClient(),
@@ -158,9 +158,15 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			...parsed.data,
 			...pageContext,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
-			verifiedAuthorSession: adminSession ? { type: "admin" } : undefined,
+			verifiedAuthorSession:
+				adminSession?.permissions.includes("comments.reply") &&
+				(adminSession.isAdmin ||
+					adminSession.siteIds.includes(pageContext.site.id))
+					? { type: "admin", displayName: adminSession.user.displayName }
+					: undefined,
 		});
 		setPublicVisitorCookie({
 			reply,
@@ -246,6 +252,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			...parsed.data,
 			...pageContext,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
@@ -306,6 +313,13 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			pageTitle: parsed.data.pageTitle,
 		});
 		const adminSession = await adminSessionService.getOptionalSession(request);
+		if (adminSession)
+			requireSiteAccess({
+				session: adminSession,
+				siteRegistry: fastify.siteRegistry,
+				siteKey: pageContext.siteKey,
+				permission: "comments.reply",
+			});
 		const result = await writeService.createComment({
 			siteKey: pageContext.siteKey,
 			pageKey: pageContext.pageKey,
@@ -317,6 +331,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			captcha: parsed.data.captcha,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 			verifiedAuthorSession: adminSession
@@ -410,6 +425,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			captcha: parsedBody.data.captcha,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
@@ -458,6 +474,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			...pageContext,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
@@ -503,6 +520,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			...pageContext,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
@@ -543,6 +561,7 @@ export const commentsPublicRoutes: FastifyPluginAsync = async (fastify) => {
 			...pageContext,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 			checkRateLimit: async (identityKey) => {

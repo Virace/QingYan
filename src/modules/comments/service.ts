@@ -1,6 +1,6 @@
 import { AppError, ResourceNotFoundError } from "../shared/errors";
-import { normalizePagination } from "../shared/pagination";
 import { mergePageRegistrySettings } from "../shared/page-registry-settings";
+import { normalizePagination } from "../shared/pagination";
 import {
 	assertPublicPageAdmission,
 	resolvePublicPageAdmission,
@@ -100,9 +100,10 @@ export interface BootstrapInput {
 	limit?: number;
 	offset?: number;
 	visitorKey?: string;
+	securityToken?: string;
 	ip?: string;
 	userAgent?: string;
-	verifiedAuthorSession?: { type: "admin" };
+	verifiedAuthorSession?: { type: "admin"; displayName: string };
 }
 
 export class CommentsService {
@@ -163,7 +164,10 @@ export class CommentsService {
 		);
 		const staffDisplay = mergeStaffDisplaySettings(settings?.staffDisplayJson);
 		const publicVerifiedAuthor = input.verifiedAuthorSession
-			? toPublicVerifiedAuthorViewer(verifiedAuthor)
+			? toPublicVerifiedAuthorViewer({
+					...verifiedAuthor,
+					displayName: input.verifiedAuthorSession.displayName,
+				})
 			: undefined;
 		const avatarSettings: SystemSettings["avatar"] = this.loadAvatarSettings
 			? await this.loadAvatarSettings()
@@ -291,13 +295,16 @@ export class CommentsService {
 						liked: false,
 					};
 		const captcha =
-			this.captchaService && thread && visitor && pageInteractive
+			this.captchaService && pageInteractive
 				? await this.captchaService.getState({
+						allowDiscoveryPage:
+							admission.kind === "unknown" && admission.allowDiscoveryWrites,
 						siteKey: input.siteKey,
 						pageKey: input.pageKey,
 						pageTitle: input.pageTitle,
 						pageUrl: input.pageUrl,
-						visitorKey: visitor.visitorKey,
+						visitorKey: visitor?.visitorKey,
+						securityToken: input.securityToken,
 						ip: input.ip,
 						userAgent: input.userAgent,
 					})
@@ -366,6 +373,14 @@ export class CommentsService {
 				includeAdvisoryFields: publicApiSettings.advisoryFields.enabled,
 			}),
 			viewer: {
+				...(input.verifiedAuthorSession
+					? {
+							commentAccount: {
+								displayName: input.verifiedAuthorSession.displayName,
+								canComment: true,
+							},
+						}
+					: {}),
 				...(publicVerifiedAuthor
 					? { verifiedAuthor: publicVerifiedAuthor }
 					: {}),

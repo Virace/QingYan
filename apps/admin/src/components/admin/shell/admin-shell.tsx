@@ -1,43 +1,39 @@
-import {
-	lazy,
-	Suspense,
-	useCallback,
-	useEffect,
-	useState,
-	type ComponentType,
-	type Dispatch,
-	type SetStateAction,
-} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BadgeCheckIcon,
 	BookOpenIcon,
-	DatabaseIcon,
 	FlagIcon,
 	GlobeIcon,
+	ListChecksIcon,
 	LogOutIcon,
+	type LucideIcon,
 	MessageSquareTextIcon,
 	RefreshCwIcon,
 	SettingsIcon,
 	ShieldIcon,
-	ListChecksIcon,
 	TerminalSquareIcon,
-	UsersIcon,
 	UserCogIcon,
 	UserRoundIcon,
-	type LucideIcon,
+	UsersIcon,
 } from "lucide-react";
-
 import {
-	fetchAdminMe,
-	logoutAdmin,
-	type AdminSiteSummary,
-} from "@/api/session";
+	type ComponentType,
+	type Dispatch,
+	lazy,
+	type SetStateAction,
+	Suspense,
+	useCallback,
+	useEffect,
+	useState,
+} from "react";
+
+import { fetchAdminMe, logoutAdmin } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-
+import { useAdminNavigationGuard } from "../shared/admin-navigation-guard";
 import { EmptyState, inputClass } from "../shared/admin-ui";
 import { ThemeMenu } from "./theme-menu";
+import { useAdminNavigation } from "./use-admin-navigation";
 
 function lazyAdminPage<TProps extends object, TExportName extends string>(
 	loader: () => Promise<Record<TExportName, ComponentType<TProps>>>,
@@ -54,6 +50,8 @@ type OpenComments = (input: OpenCommentsInput) => void;
 type OpenSite = (siteKey: string, nextView: AdminView) => void;
 
 type CommentsPageProps = {
+	commentId?: string;
+	onClearCommentFilter?: () => void;
 	siteKey?: string;
 	search: string;
 	setSearch: Dispatch<SetStateAction<string>>;
@@ -77,7 +75,7 @@ const CommentsPage = lazyAdminPage<CommentsPageProps, "CommentsPage">(
 	"CommentsPage",
 );
 const PagesPage = lazyAdminPage<
-	{ siteKey?: string; openComments: OpenComments },
+	{ siteKey?: string; openComments: OpenComments; canReadOps?: boolean },
 	"PagesPage"
 >(() => import("../content/pages-page"), "PagesPage");
 const CommentersPage = lazyAdminPage<
@@ -96,18 +94,14 @@ const SitesPage = lazyAdminPage<{ openSite: OpenSite }, "SitesPage">(
 	() => import("../content/sites-page"),
 	"SitesPage",
 );
-const DataPage = lazyAdminPage<{ site: AdminSiteSummary }, "DataPage">(
-	() => import("../data/data-page"),
-	"DataPage",
-);
 const TasksPage = lazyAdminPage<TasksPageProps, "TasksPage">(
 	() => import("../tasks/tasks-page"),
 	"TasksPage",
 );
-const OpsPage = lazyAdminPage<object, "OpsPage">(
-	() => import("../ops/ops-page"),
-	"OpsPage",
-);
+const OpsPage = lazyAdminPage<
+	{ siteKey?: string; canRestore?: boolean },
+	"OpsPage"
+>(() => import("../ops/ops-page"), "OpsPage");
 const UsersPage = lazyAdminPage<
 	{ isInitialAdmin: boolean; siteKey: string },
 	"UsersPage"
@@ -133,7 +127,6 @@ export type AdminView =
 	| "visitors"
 	| "blacklist"
 	| "sites"
-	| "data"
 	| "tasks"
 	| "ops"
 	| "users"
@@ -180,7 +173,6 @@ const navItems: Array<{
 	},
 	{ id: "sites", label: "站点", icon: GlobeIcon, permission: "sites.read" },
 	{ id: "users", label: "用户", icon: UserCogIcon, permission: "users.read" },
-	{ id: "data", label: "数据", icon: DatabaseIcon, permission: "data.export" },
 	{
 		id: "tasks",
 		label: "任务",
@@ -213,31 +205,23 @@ const profileNavItem = {
 	icon: UserRoundIcon,
 };
 
-function readInitialView(): AdminView {
-	if (typeof window === "undefined") {
-		return "overview";
-	}
-	const value = new URLSearchParams(window.location.search).get("view");
+function readView(url: URL): AdminView {
+	const value = url.searchParams.get("view");
 	if (value === "profile" || navItems.some((item) => item.id === value)) {
 		return value as AdminView;
 	}
 	return "overview";
 }
 
-function readInitialTaskCommentId(): string {
-	if (typeof window === "undefined") {
-		return "";
-	}
-	return new URL(window.location.href).searchParams.get("commentId") ?? "";
-}
-
 export function AdminShell({ onLogout }: { onLogout: () => void }) {
 	const queryClient = useQueryClient();
-	const [view, setViewState] = useState<AdminView>(() => readInitialView());
-	const [selectedSiteKey, setSelectedSiteKey] = useState("");
+	const { url, navigate, replaceUrl } = useAdminNavigation();
+	const { confirmNavigation } = useAdminNavigationGuard();
+	const view = readView(url);
+	const selectedSiteKey = url.searchParams.get("siteKey") ?? "";
+	const taskCommentId = url.searchParams.get("commentId") ?? "";
 	const [commentSearch, setCommentSearch] = useState("");
 	const [commentPageKey, setCommentPageKey] = useState("");
-	const [taskCommentId, setTaskCommentId] = useState(readInitialTaskCommentId);
 	const meQuery = useQuery({
 		queryKey: ["admin", "me"],
 		queryFn: fetchAdminMe,
@@ -249,25 +233,20 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 		},
 	});
 
-	useEffect(() => {
-		if (!selectedSiteKey && meQuery.data?.sites[0]?.siteKey) {
-			setSelectedSiteKey(meQuery.data.sites[0].siteKey);
-		}
-	}, [meQuery.data, selectedSiteKey]);
-	const setView = useCallback((nextView: AdminView) => {
-		setViewState(nextView);
-		setTaskCommentId("");
-		if (typeof window === "undefined") {
-			return;
-		}
-		const url = new URL(window.location.href);
-		url.searchParams.set("view", nextView);
-		url.searchParams.delete("commentId");
-		window.history.replaceState(null, "", url);
-	}, []);
-
-	const activeSite = meQuery.data?.sites.find(
-		(site) => site.siteKey === selectedSiteKey,
+	const activeSite =
+		meQuery.data?.sites.find((site) => site.siteKey === selectedSiteKey) ??
+		meQuery.data?.sites[0];
+	const activeSiteKey = activeSite?.siteKey ?? "";
+	const setView = useCallback(
+		(nextView: AdminView, siteKey = activeSiteKey) => {
+			const nextUrl = new URL(window.location.href);
+			nextUrl.searchParams.set("view", nextView);
+			if (siteKey) nextUrl.searchParams.set("siteKey", siteKey);
+			nextUrl.searchParams.delete("commentId");
+			nextUrl.hash = "";
+			return navigate(nextUrl);
+		},
+		[activeSiteKey, navigate],
 	);
 	const permissions = meQuery.data?.permissions ?? [];
 	const visibleNavItems = navItems.filter(
@@ -280,40 +259,79 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			? (visibleNavItems[0]?.id ?? "overview")
 			: view;
 	useEffect(() => {
-		if (meQuery.data && activeView !== view) {
-			setView(activeView);
+		if (!meQuery.data) return;
+		if (activeView === view && activeSiteKey === selectedSiteKey) return;
+		const nextUrl = new URL(window.location.href);
+		nextUrl.searchParams.set("view", activeView);
+		if (activeSiteKey) nextUrl.searchParams.set("siteKey", activeSiteKey);
+		else nextUrl.searchParams.delete("siteKey");
+		replaceUrl(nextUrl);
+	}, [
+		activeSiteKey,
+		activeView,
+		meQuery.data,
+		replaceUrl,
+		selectedSiteKey,
+		view,
+	]);
+
+	useEffect(() => {
+		const internalLinkClick = (event: MouseEvent) => {
+			if (
+				event.defaultPrevented ||
+				event.button !== 0 ||
+				event.metaKey ||
+				event.ctrlKey ||
+				event.shiftKey ||
+				event.altKey
+			)
+				return;
+			const anchor =
+				event.target instanceof Element
+					? event.target.closest("a[href]")
+					: null;
+			if (
+				!(anchor instanceof HTMLAnchorElement) ||
+				anchor.hasAttribute("download") ||
+				(anchor.target && anchor.target !== "_self")
+			)
+				return;
+			const nextUrl = new URL(anchor.href);
+			if (
+				nextUrl.origin !== window.location.origin ||
+				nextUrl.pathname !== window.location.pathname ||
+				!nextUrl.searchParams.has("view")
+			)
+				return;
+			event.preventDefault();
+			if (!nextUrl.searchParams.has("siteKey") && activeSiteKey)
+				nextUrl.searchParams.set("siteKey", activeSiteKey);
+			void navigate(nextUrl);
+		};
+		document.addEventListener("click", internalLinkClick);
+		return () => document.removeEventListener("click", internalLinkClick);
+	}, [activeSiteKey, navigate]);
+
+	const openComments = async (input: { pageKey?: string; search?: string }) => {
+		if (await setView("comments")) {
+			setCommentPageKey(input.pageKey ?? "");
+			setCommentSearch(input.search ?? "");
 		}
-	}, [activeView, meQuery.data, setView, view]);
-	const activeSiteKey =
-		selectedSiteKey || meQuery.data?.sites[0]?.siteKey || "";
-	const openComments = (input: { pageKey?: string; search?: string }) => {
-		setCommentPageKey(input.pageKey ?? "");
-		setCommentSearch(input.search ?? "");
-		setView("comments");
 	};
 	const openSite = (siteKey: string, nextView: AdminView) => {
-		setSelectedSiteKey(siteKey);
-		setView(nextView);
+		void setView(nextView, siteKey);
 	};
 	const openTaskRecords = (commentId: string) => {
-		setTaskCommentId(commentId);
-		setViewState("tasks");
-		if (typeof window === "undefined") {
-			return;
-		}
-		const url = new URL(window.location.href);
-		url.searchParams.set("view", "tasks");
-		url.searchParams.set("commentId", commentId);
-		window.history.replaceState(null, "", url);
+		const nextUrl = new URL(window.location.href);
+		nextUrl.searchParams.set("view", "tasks");
+		nextUrl.searchParams.set("commentId", commentId);
+		if (activeSiteKey) nextUrl.searchParams.set("siteKey", activeSiteKey);
+		void navigate(nextUrl);
 	};
 	const clearTaskCommentFilter = () => {
-		setTaskCommentId("");
-		if (typeof window === "undefined") {
-			return;
-		}
-		const url = new URL(window.location.href);
-		url.searchParams.delete("commentId");
-		window.history.replaceState(null, "", url);
+		const nextUrl = new URL(window.location.href);
+		nextUrl.searchParams.delete("commentId");
+		replaceUrl(nextUrl);
 	};
 
 	function renderView() {
@@ -323,6 +341,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 			case "comments":
 				return (
 					<CommentsPage
+						commentId={taskCommentId}
+						onClearCommentFilter={clearTaskCommentFilter}
 						siteKey={activeSiteKey}
 						search={commentSearch}
 						setSearch={setCommentSearch}
@@ -333,7 +353,11 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				);
 			case "pages":
 				return (
-					<PagesPage siteKey={activeSiteKey} openComments={openComments} />
+					<PagesPage
+						siteKey={activeSiteKey}
+						openComments={openComments}
+						canReadOps={permissions.includes("ops.read")}
+					/>
 				);
 			case "commenters":
 				return (
@@ -347,18 +371,6 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				return <BlacklistPage siteKey={activeSiteKey} />;
 			case "sites":
 				return <SitesPage openSite={openSite} />;
-			case "data":
-				return (
-					<DataPage
-						site={
-							activeSite ?? {
-								siteKey: activeSiteKey,
-								name: activeSiteKey || "未选择站点",
-								allowedOrigins: [],
-							}
-						}
-					/>
-				);
 			case "tasks":
 				return (
 					<TasksPage
@@ -368,7 +380,12 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 					/>
 				);
 			case "ops":
-				return <OpsPage />;
+				return (
+					<OpsPage
+						siteKey={activeSiteKey}
+						canRestore={permissions.includes("ops.restore")}
+					/>
+				);
 			case "users":
 				return (
 					<UsersPage
@@ -406,7 +423,8 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 								key={item.id}
 								type="button"
 								variant={activeView === item.id ? "secondary" : "ghost"}
-								className="justify-start"
+								className="admin-nav-item justify-start"
+								aria-current={activeView === item.id ? "page" : undefined}
 								onClick={() => setView(item.id)}
 							>
 								<Icon data-icon="inline-start" />
@@ -417,7 +435,7 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 				</nav>
 			</aside>
 			<main className="flex min-w-0 flex-1 flex-col">
-				<header className="flex h-16 items-center justify-between border-b bg-background px-4 md:px-6">
+				<header className="admin-header border-b bg-background px-4 py-3 md:px-6">
 					<div className="min-w-0">
 						<h1 className="truncate text-base font-semibold">
 							{allVisibleNavItems.find((item) => item.id === activeView)
@@ -429,40 +447,57 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 								: "未选择站点"}
 						</p>
 					</div>
-					<div className="flex items-center gap-2">
-						<select
-							className={`${inputClass} md:hidden`}
-							value={view}
-							onChange={(event) => setView(event.target.value as AdminView)}
-							aria-label="管理模块"
-						>
-							{allVisibleNavItems.map((item) => (
-								<option key={item.id} value={item.id}>
-									{item.label}
-								</option>
-							))}
-						</select>
+					<div className="admin-header-selectors">
+						<label className="min-w-0 md:hidden">
+							<span className="mb-1 block text-xs text-muted-foreground">
+								管理模块
+							</span>
+							<select
+								className={`${inputClass} w-full min-w-0`}
+								value={activeView}
+								onChange={(event) => setView(event.target.value as AdminView)}
+								aria-label="管理模块"
+							>
+								{allVisibleNavItems.map((item) => (
+									<option key={item.id} value={item.id}>
+										{item.label}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className="min-w-0 md:w-44 lg:w-52">
+							<span className="mb-1 block text-xs text-muted-foreground md:sr-only">
+								当前站点
+							</span>
+							<select
+								className={`${inputClass} w-full min-w-0`}
+								value={activeSiteKey}
+								onChange={(event) =>
+									void setView(activeView, event.target.value)
+								}
+								aria-label="当前站点"
+							>
+								{meQuery.data?.sites.map((site) => (
+									<option key={site.siteKey} value={site.siteKey}>
+										{site.name}
+									</option>
+								))}
+							</select>
+						</label>
+					</div>
+					<div className="admin-header-actions flex items-center gap-2">
 						<Button
 							type="button"
 							variant={activeView === "profile" ? "secondary" : "outline"}
 							onClick={() => setView("profile")}
+							aria-label="个人中心"
+							className="size-9 px-0 lg:w-auto lg:px-3"
 						>
 							<UserRoundIcon data-icon="inline-start" />
-							<span className="hidden sm:inline">
+							<span className="hidden lg:inline">
 								{meQuery.data?.user.displayName ?? "个人中心"}
 							</span>
 						</Button>
-						<select
-							className={inputClass}
-							value={activeSiteKey}
-							onChange={(event) => setSelectedSiteKey(event.target.value)}
-						>
-							{meQuery.data?.sites.map((site) => (
-								<option key={site.siteKey} value={site.siteKey}>
-									{site.name}
-								</option>
-							))}
-						</select>
 						<ThemeMenu />
 						<Button
 							type="button"
@@ -476,17 +511,22 @@ export function AdminShell({ onLogout }: { onLogout: () => void }) {
 						<Button
 							type="button"
 							variant="outline"
-							onClick={() => logoutMutation.mutate()}
+							onClick={async () => {
+								if (await confirmNavigation()) logoutMutation.mutate();
+							}}
+							aria-label="退出"
+							className="size-9 px-0 lg:w-auto lg:px-3"
 							disabled={logoutMutation.isPending}
 						>
 							<LogOutIcon data-icon="inline-start" />
-							退出
+							<span className="hidden lg:inline">退出</span>
 						</Button>
 					</div>
 				</header>
 				<section
+					key={`${activeView}:${activeSiteKey}`}
 					data-testid="admin-content"
-					className="mx-auto flex w-full max-w-screen-2xl flex-1 flex-col gap-4 p-4 md:p-6"
+					className="admin-page-enter mx-auto flex w-full max-w-screen-2xl flex-1 flex-col gap-4 p-4 md:p-6"
 				>
 					<Suspense fallback={<EmptyState text="正在载入" />}>
 						{renderView()}

@@ -1,4 +1,4 @@
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import { eq } from "drizzle-orm";
 import { siteSettings } from "../../db/schema/settings";
 import { sites } from "../../db/schema/sites";
@@ -41,7 +41,7 @@ export class SiteRegistry {
 	}
 
 	public async loadFromDatabase(
-		db: AppDatabase,
+		db: DatabaseExecutor,
 	): Promise<RegisteredSiteRecord[]> {
 		this.registeredSites.clear();
 
@@ -60,42 +60,44 @@ export class SiteRegistry {
 	}
 
 	public async seedSiteFromTemplate(
-		db: AppDatabase,
+		db: DatabaseExecutor,
 		site: SiteSeed,
 	): Promise<RegisteredSiteRecord> {
-		await db
-			.insert(sites)
-			.values({
-				siteKey: site.siteKey,
-				name: site.name,
-				allowedOriginsJson: serializeAllowedOrigins(site.allowedOrigins),
-			})
-			.onConflictDoNothing({
-				target: sites.siteKey,
-			});
+		return db.transaction(async (tx) => {
+			await tx
+				.insert(sites)
+				.values({
+					siteKey: site.siteKey,
+					name: site.name,
+					allowedOriginsJson: serializeAllowedOrigins(site.allowedOrigins),
+				})
+				.onConflictDoNothing({
+					target: sites.siteKey,
+				});
 
-		const [registeredSite] = await db
-			.select()
-			.from(sites)
-			.where(eq(sites.siteKey, site.siteKey))
-			.limit(1);
-		if (!registeredSite) {
-			throw new Error("Expected seeded site row to exist.");
-		}
+			const [registeredSite] = await tx
+				.select()
+				.from(sites)
+				.where(eq(sites.siteKey, site.siteKey))
+				.limit(1);
+			if (!registeredSite) {
+				throw new Error("Expected seeded site row to exist.");
+			}
 
-		await db
-			.insert(siteSettings)
-			.values(buildDefaultSiteSettings(registeredSite.id))
-			.onConflictDoNothing({
-				target: siteSettings.siteId,
-			});
+			await tx
+				.insert(siteSettings)
+				.values(buildDefaultSiteSettings(registeredSite.id))
+				.onConflictDoNothing({
+					target: siteSettings.siteId,
+				});
 
-		return {
-			id: registeredSite.id,
-			siteKey: registeredSite.siteKey,
-			name: registeredSite.name,
-			allowedOrigins: parseAllowedOrigins(registeredSite.allowedOriginsJson),
-		};
+			return {
+				id: registeredSite.id,
+				siteKey: registeredSite.siteKey,
+				name: registeredSite.name,
+				allowedOrigins: parseAllowedOrigins(registeredSite.allowedOriginsJson),
+			};
+		});
 	}
 }
 

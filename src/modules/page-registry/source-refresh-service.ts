@@ -1,6 +1,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
+import { hashKey } from "../../db/values";
+import { assertPageKeyAvailable, lockPageKey } from "../shared/page-key";
 import { sitePageRegistry, sites } from "../../db/schema";
 import type { TaskRunnerContext } from "../tasks/task-runner-context";
 import { PageRegistryService } from "./service";
@@ -123,7 +125,7 @@ export class PageSourceRefreshService {
 	private readonly pageRegistry: PageRegistryService;
 
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly options: PageSourceRefreshOptions,
 	) {
 		this.pageRegistry = new PageRegistryService(db);
@@ -417,71 +419,88 @@ export class PageSourceRefreshService {
 		title?: string | null;
 		nowIso: string;
 	}) {
-		const [existing] = await this.db
-			.select()
-			.from(sitePageRegistry)
-			.where(
-				and(
-					eq(sitePageRegistry.siteId, input.siteId),
-					eq(sitePageRegistry.pageKey, input.pageKey),
-				),
-			)
-			.limit(1);
+		return this.db.transaction(async (tx) => {
+			await lockPageKey(tx, input.siteId, input.pageKey);
+			await assertPageKeyAvailable(
+				tx,
+				"site_page_registry",
+				input.siteId,
+				input.pageKey,
+			);
 
-		if (!existing) {
-			await this.db.insert(sitePageRegistry).values({
-				siteId: input.siteId,
-				pageKey: input.pageKey,
-				pageUrl: input.pageUrl,
-				title: input.title ?? null,
-				status: "active",
-				firstSeenAt: input.nowIso,
-				lastSeenAt: input.nowIso,
-				createdAt: input.nowIso,
-				updatedAt: input.nowIso,
-			});
-			const [page] = await this.db
+			const [existing] = await tx
 				.select()
 				.from(sitePageRegistry)
 				.where(
 					and(
 						eq(sitePageRegistry.siteId, input.siteId),
-						eq(sitePageRegistry.pageKey, input.pageKey),
+						and(
+							eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+							eq(sitePageRegistry.pageKey, input.pageKey),
+						),
 					),
 				)
 				.limit(1);
-			return { page, action: "created" as const };
-		}
 
-		const protectedStatus = ["trash", "deleted", "ignored"].includes(
-			existing.status,
-		);
-		await this.db
-			.update(sitePageRegistry)
-			.set({
-				pageUrl: input.pageUrl,
-				title: input.title ?? existing.title,
-				lastSeenAt: input.nowIso,
-				updatedAt: input.nowIso,
-			})
-			.where(eq(sitePageRegistry.id, existing.id));
-		const [page] = await this.db
-			.select()
-			.from(sitePageRegistry)
-			.where(eq(sitePageRegistry.id, existing.id))
-			.limit(1);
+			if (!existing) {
+				await tx.insert(sitePageRegistry).values({
+					siteId: input.siteId,
+					pageKey: input.pageKey,
+					pageKeyHash: hashKey(input.pageKey),
+					pageUrl: input.pageUrl,
+					title: input.title ?? null,
+					status: "active",
+					firstSeenAt: input.nowIso,
+					lastSeenAt: input.nowIso,
+					createdAt: input.nowIso,
+					updatedAt: input.nowIso,
+				});
+				const [page] = await tx
+					.select()
+					.from(sitePageRegistry)
+					.where(
+						and(
+							eq(sitePageRegistry.siteId, input.siteId),
+							and(
+								eq(sitePageRegistry.pageKeyHash, hashKey(input.pageKey)),
+								eq(sitePageRegistry.pageKey, input.pageKey),
+							),
+						),
+					)
+					.limit(1);
+				return { page, action: "created" as const };
+			}
 
-		if (protectedStatus) {
-			return { page, action: "skipped_protected" as const };
-		}
-		return {
-			page,
-			action:
-				existing.pageUrl === input.pageUrl &&
-				existing.title === (input.title ?? null)
-					? ("unchanged" as const)
-					: ("updated" as const),
-		};
+			const protectedStatus = ["trash", "deleted", "ignored"].includes(
+				existing.status,
+			);
+			await tx
+				.update(sitePageRegistry)
+				.set({
+					pageUrl: input.pageUrl,
+					title: input.title ?? existing.title,
+					lastSeenAt: input.nowIso,
+					updatedAt: input.nowIso,
+				})
+				.where(eq(sitePageRegistry.id, existing.id));
+			const [page] = await tx
+				.select()
+				.from(sitePageRegistry)
+				.where(eq(sitePageRegistry.id, existing.id))
+				.limit(1);
+
+			if (protectedStatus) {
+				return { page, action: "skipped_protected" as const };
+			}
+			return {
+				page,
+				action:
+					existing.pageUrl === input.pageUrl &&
+					existing.title === (input.title ?? null)
+						? ("unchanged" as const)
+						: ("updated" as const),
+			};
+		});
 	}
 
 	private async markMissingSitePagesStale(input: {

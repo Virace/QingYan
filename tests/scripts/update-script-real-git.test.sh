@@ -3,13 +3,14 @@ set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UPDATE_SCRIPT="$PROJECT_ROOT/scripts/update.sh"
-TEST_ROOT="$(mktemp -d)"
+mkdir -p "$PROJECT_ROOT/.temp/postgresql-migration/lifecycle"
+TEST_ROOT="$(mktemp -d "$PROJECT_ROOT/.temp/postgresql-migration/lifecycle/updater-XXXXXX")"
 ORIGIN="$TEST_ROOT/origin.git"
 SEED="$TEST_ROOT/seed"
 FAKE_BIN="$TEST_ROOT/bin"
 CALL_LOG="$TEST_ROOT/calls.log"
 FAKE_STATE_DIR="$TEST_ROOT/state"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+trap 'printf "验证文件保留在：%s\n" "$TEST_ROOT"' EXIT
 
 mkdir -p "$FAKE_BIN" "$FAKE_STATE_DIR"
 git init --bare --quiet "$ORIGIN"
@@ -18,7 +19,8 @@ git -C "$SEED" config user.email test@example.com
 git -C "$SEED" config user.name 'QingYan updater test'
 printf 'services:\n  qingyan:\n    image: old\n' > "$SEED/compose.yml"
 printf 'old\n' > "$SEED/release.txt"
-git -C "$SEED" add compose.yml release.txt
+printf '.env\ngateway/\ngateway.compose.json\n' > "$SEED/.gitignore"
+git -C "$SEED" add compose.yml release.txt .gitignore
 git -C "$SEED" commit --quiet -m old
 git -C "$SEED" tag v0.2.2
 printf 'new\n' > "$SEED/release.txt"
@@ -34,7 +36,7 @@ cat > "$FAKE_BIN/docker" <<'FAKE_DOCKER'
 set -euo pipefail
 printf 'docker %s\n' "$*" >> "$CALL_LOG"
 case "$*" in
-	"info"|"compose version"|"compose up -d qingyan"|"compose restart qingyan"|"compose ps") exit 0 ;;
+	"info"|"compose version"|"compose up -d qingyan"|"compose restart qingyan"|"compose stop qingyan"|"compose start qingyan"|"compose ps") exit 0 ;;
 	"compose ps -q qingyan") printf 'container-id\n'; exit 0 ;;
 esac
 if [[ "${1:-}" == "inspect" ]]; then
@@ -43,6 +45,7 @@ if [[ "${1:-}" == "inspect" ]]; then
 fi
 if [[ "$*" == *"qyctl --version"* ]]; then printf 'QingYan 0.2.3\n'; exit 0; fi
 if [[ "$*" == *"qyctl update check"* ]]; then printf '状态：当前已是最新版本\n'; exit 0; fi
+if [[ "$*" == "compose stop qingyan" || "$*" == "compose exec -T qingyan node "* ]]; then exit 0; fi
 if [[ "$*" == *"qyctl backup"* ]]; then printf 'backup-created\n'; exit 0; fi
 if [[ "$*" == *" build --pull "* && "$*" == *" qingyan" ]]; then
 	if [[ "${FAKE_BUILD_FAIL:-0}" == "1" ]]; then exit 42; fi
@@ -65,6 +68,9 @@ prepare_checkout() {
 	printf '# production override\n' >> "$destination/compose.yml"
 	printf '#!/bin/sh\necho local helper\n' > "$destination/up.sh"
 	chmod +x "$destination/up.sh"
+	mkdir -p "$destination/gateway"
+	printf 'PRIVATE_TEST_VALUE=must-stay-outside-git\n' > "$destination/.env"
+	printf 'must-stay-outside-git\n' > "$destination/gateway/private-key"
 }
 
 assert_deployment_state() {
@@ -75,6 +81,8 @@ assert_deployment_state() {
 	[[ "$actual_status" == "$expected_status" ]]
 	grep -F '# production override' "$checkout/compose.yml" > /dev/null
 	grep -F 'local helper' "$checkout/up.sh" > /dev/null
+	grep -F 'PRIVATE_TEST_VALUE=must-stay-outside-git' "$checkout/.env" > /dev/null
+	grep -Fx 'must-stay-outside-git' "$checkout/gateway/private-key" > /dev/null
 	[[ -z "$(git -C "$checkout" stash list)" ]]
 }
 

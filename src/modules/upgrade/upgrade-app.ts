@@ -1,26 +1,22 @@
 import { randomUUID } from "node:crypto";
 
 import Fastify, { type FastifyInstance } from "fastify";
-
-import type { AppConfig } from "../../config/types";
 import { joinPublicPath } from "../../config/public-path";
-import type { SqliteClient } from "../../db/client";
+import type { AppConfig } from "../../config/types";
 import { buildErrorResponse } from "../shared/error-response";
 import { AppError } from "../shared/errors";
-import { upgradeRoutes, UPGRADE_PATH } from "./upgrade-routes";
+import { UPGRADE_PATH, upgradeRoutes } from "./upgrade-routes";
 import {
-	UpgradeService,
 	type RegisteredApplicationUpgrade,
+	UpgradeService,
 } from "./upgrade-service";
 
 export interface CreateUpgradeAppInput {
 	configPath: string;
 	loadedConfig?: AppConfig;
 	configError?: unknown;
-	databaseFile: string;
 	currentApplicationVersion: string;
 	partialUpgradeMarkerPath: string;
-	createSqliteClient: (databaseFile: string) => SqliteClient;
 	registeredApplicationUpgrades?: RegisteredApplicationUpgrade[];
 	backupDirectory?: string;
 	migrationDirectory?: string;
@@ -135,9 +131,18 @@ export function createUpgradeApp(
 		reply
 			.type("text/html; charset=utf-8")
 			.send(
-				renderUpgradeHtml(service.publicState(), `${upgradeApiPath}/apply`),
+				renderUpgradeHtml(
+					await service.publicState(),
+					`${upgradeApiPath}/apply`,
+				),
 			),
 	);
+
+	app.get(joinPublicPath(publicPath, "/healthz"), async () => ({
+		status: "ok",
+		mode: "upgrade",
+		state: (await service.publicState()).state,
+	}));
 
 	void app.register(upgradeRoutes, {
 		prefix: upgradeApiPath,

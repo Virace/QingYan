@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
-
-import type { AppDatabase } from "../../db/client";
-import { taskEventLogs, taskRuns } from "../../db/schema";
+import type { DatabaseExecutor } from "../../db/client";
+import { taskRuns } from "../../db/schema";
+import { TaskEventLogRepository } from "../tasks/task-event-log-repository";
 import { TaskRunRepository } from "../tasks/task-run-repository";
 import type { TaskActorType, TaskRunStatus } from "../tasks/types";
 import {
-	commentEmailDecisionMessage,
 	type CommentEmailDecisionReason,
 	type CommentEmailDeliveryFact,
 	type CommentEmailFlow,
+	commentEmailDecisionMessage,
 } from "./comment-email-delivery-status";
 
 function nowIso(): string {
@@ -37,7 +36,7 @@ function decisionIdempotencyKey(input: {
 export class CommentEmailDeliveryRepository {
 	private readonly taskRuns: TaskRunRepository;
 
-	public constructor(private readonly db: AppDatabase) {
+	public constructor(private readonly db: DatabaseExecutor) {
 		this.taskRuns = new TaskRunRepository(db);
 	}
 
@@ -56,18 +55,10 @@ export class CommentEmailDeliveryRepository {
 	}) {
 		const timestamp = input.createdAt ?? nowIso();
 		const idempotencyKey = decisionIdempotencyKey(input);
-		const taskRunId = this.db.transaction((tx) => {
-			const existing = tx
-				.select({ id: taskRuns.id })
-				.from(taskRuns)
-				.where(eq(taskRuns.idempotencyKey, idempotencyKey))
-				.get();
-			if (existing) {
-				return existing.id;
-			}
-
+		return this.db.transaction(async (tx) => {
 			const id = randomId("task");
-			tx.insert(taskRuns)
+			const [created] = await tx
+				.insert(taskRuns)
 				.values({
 					id,
 					queueBackend: "database",
@@ -107,27 +98,26 @@ export class CommentEmailDeliveryRepository {
 					createdAt: timestamp,
 					updatedAt: timestamp,
 				})
-				.run();
-			tx.insert(taskEventLogs)
-				.values({
-					id: randomId("task_event"),
-					taskRunId: id,
-					sequence: 1,
-					stream: "system",
-					eventType: "notification.email.decision",
-					level: input.status === "failed" ? "error" : "info",
-					message: commentEmailDecisionMessage(input.reasonCode),
-					dataJson: JSON.stringify({
-						flow: input.flow,
-						reasonCode: input.reasonCode,
-					}),
-					visibleToSiteAdmin: true,
-					createdAt: timestamp,
-				})
-				.run();
-			return id;
+				.onConflictDoNothing({ target: taskRuns.idempotencyKey })
+				.returning({ id: taskRuns.id });
+			const repository = new TaskRunRepository(tx);
+			if (!created) {
+				const existing = await repository.getByIdempotencyKey(idempotencyKey);
+				if (!existing)
+					throw new Error("Notification decision conflict row was not found");
+				return existing;
+			}
+			await new TaskEventLogRepository(tx).append({
+				taskRunId: id,
+				eventType: "notification.email.decision",
+				level: input.status === "failed" ? "error" : "info",
+				message: commentEmailDecisionMessage(input.reasonCode),
+				data: { flow: input.flow, reasonCode: input.reasonCode },
+				visibleToSiteAdmin: true,
+				createdAt: timestamp,
+			});
+			return repository.getRequired(id);
 		});
-		return this.taskRuns.getRequired(taskRunId);
 	}
 
 	public getDecision(input: {

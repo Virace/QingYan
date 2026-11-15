@@ -64,7 +64,11 @@ export function CommentsPage({
 	pageKey,
 	setPageKey,
 	openTaskRecords,
+	commentId,
+	onClearCommentFilter,
 }: {
+	commentId?: string;
+	onClearCommentFilter?: () => void;
 	siteKey?: string;
 	search: string;
 	setSearch: (value: string) => void;
@@ -89,6 +93,7 @@ export function CommentsPage({
 		queryKey: [
 			"admin",
 			"comments",
+			commentId,
 			siteKey,
 			search,
 			pageKey,
@@ -98,12 +103,13 @@ export function CommentsPage({
 		],
 		queryFn: () =>
 			listComments({
+				commentId: commentId || undefined,
 				siteKey,
-				pageKey,
-				search,
-				status: currentView.status,
+				pageKey: commentId ? undefined : pageKey,
+				search: commentId ? undefined : search,
+				status: commentId ? undefined : currentView.status,
 				limit: pagination.limit,
-				offset: pagination.offset,
+				offset: commentId ? 0 : pagination.offset,
 			}),
 	});
 	const updateMutation = useMutation({
@@ -208,7 +214,7 @@ export function CommentsPage({
 	};
 	const blacklistMutationPending =
 		createBlacklistMutation.isPending || deleteBlacklistMutation.isPending;
-	const isTrashView = view === "trash";
+	const isTrashView = !commentId && view === "trash";
 	const visibleCommentIds =
 		commentsQuery.data?.items.map((comment) => comment.id) ?? [];
 	const selectedVisibleIds = selectedCommentIds.filter((commentId) =>
@@ -357,14 +363,25 @@ export function CommentsPage({
 				<CardDescription>审核、置顶、折叠或删除评论。</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
+				{commentId ? (
+					<div className="flex flex-wrap items-center justify-between gap-2">
+						<span className="text-sm">当前显示链接中的评论</span>
+						<Button variant="outline" size="sm" onClick={onClearCommentFilter}>
+							查看全部评论
+						</Button>
+					</div>
+				) : null}
 				<div className="flex flex-wrap gap-2 text-sm">
 					{commentViews.map((item) => (
 						<Button
 							key={item.id}
 							type="button"
 							size="sm"
-							variant={view === item.id ? "secondary" : "ghost"}
+							variant={
+								(commentId ? "all" : view) === item.id ? "secondary" : "ghost"
+							}
 							onClick={() => {
+								onClearCommentFilter?.();
 								setView(item.id);
 								setSelectedCommentIds([]);
 								pagination.resetPage();
@@ -377,11 +394,13 @@ export function CommentsPage({
 				<ResourceFilters
 					search={search}
 					setSearch={(value) => {
+						onClearCommentFilter?.();
 						setSearch(value);
 						pagination.resetPage();
 					}}
 					pageKey={pageKey}
 					setPageKey={(value) => {
+						onClearCommentFilter?.();
 						setPageKey(value);
 						pagination.resetPage();
 					}}
@@ -451,7 +470,18 @@ export function CommentsPage({
 						</Button>
 					) : null}
 				</div>
-				{commentsQuery.data?.items.length ? (
+				{commentsQuery.isError ? (
+					<div className="flex flex-col items-start gap-2">
+						<EmptyState text="评论暂时无法读取，请重试。" />
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => void commentsQuery.refetch()}
+						>
+							重新读取评论
+						</Button>
+					</div>
+				) : commentsQuery.data?.items.length ? (
 					<CommentsList
 						comments={commentsQuery.data.items}
 						selectedCommentIds={selectedCommentIds}
@@ -499,6 +529,7 @@ export function CommentsPage({
 							setActiveReplyId(null);
 						}}
 						onFilterPage={(nextPageKey) => {
+							onClearCommentFilter?.();
 							setPageKey(nextPageKey);
 							pagination.resetPage();
 						}}
@@ -522,7 +553,15 @@ export function CommentsPage({
 						}
 					/>
 				) : (
-					<EmptyState text={commentsQuery.isLoading ? "加载中" : "暂无评论"} />
+					<EmptyState
+						text={
+							commentsQuery.isLoading
+								? "加载中"
+								: commentId
+									? "该评论已删除或无权查看，请返回评论列表。"
+									: "暂无评论"
+						}
+					/>
 				)}
 				<CommentEmailDeliveryDialog
 					commentId={emailDeliveryCommentId}

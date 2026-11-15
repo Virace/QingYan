@@ -1,20 +1,22 @@
 import { sql } from "drizzle-orm";
-import {
-	integer,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { bigint, pgTable, uniqueIndex } from "drizzle-orm/pg-core";
+import { jsonText, exactText as text, utcTimestamp } from "./column-types";
 
-export const sites = sqliteTable(
+export const sites = pgTable(
 	"sites",
 	{
-		id: integer("id").primaryKey({ autoIncrement: true }),
+		id: bigint("id", { mode: "number" })
+			.primaryKey()
+			.generatedByDefaultAsIdentity(),
 		siteKey: text("site_key").notNull(),
 		name: text("name").notNull(),
-		allowedOriginsJson: text("allowed_origins_json").notNull(),
-		createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-		updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+		allowedOriginsJson: jsonText("allowed_origins_json").notNull(),
+		createdAt: utcTimestamp("created_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
+		updatedAt: utcTimestamp("updated_at")
+			.notNull()
+			.default(sql`CURRENT_TIMESTAMP`),
 	},
 	(table) => [uniqueIndex("sites_site_key_idx").on(table.siteKey)],
 );

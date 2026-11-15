@@ -25,6 +25,9 @@ export function nextMonthlyIpRegionUpdateDelay(now = new Date()): number {
 
 export class IpRegionAutoUpdateScheduler {
 	private timer: NodeJS.Timeout | null = null;
+	private stopped = false;
+	private runningUpdate: Promise<void> | null = null;
+	private runningTick: Promise<void> | null = null;
 	private readonly updater: Pick<IpRegionUpdater, "update">;
 
 	public constructor(
@@ -38,18 +41,24 @@ export class IpRegionAutoUpdateScheduler {
 	}
 
 	public async start(): Promise<void> {
-		if (!(await this.hasEnabledSettings())) {
+		this.stopped = false;
+		if (!(await this.hasEnabledSettings()) || this.stopped) {
 			return;
 		}
 
 		this.schedule();
 	}
 
-	public stop(): void {
+	public async stop(): Promise<void> {
+		this.stopped = true;
 		if (this.timer) {
 			clearTimeout(this.timer);
 			this.timer = null;
 		}
+		await Promise.all([
+			this.runningTick?.catch(() => undefined),
+			this.runningUpdate?.catch(() => undefined),
+		]);
 	}
 
 	private async hasEnabledSettings(): Promise<boolean> {
@@ -58,10 +67,16 @@ export class IpRegionAutoUpdateScheduler {
 	}
 
 	private schedule(): void {
-		this.stop();
+		if (this.stopped) return;
+		if (this.timer) clearTimeout(this.timer);
 		const delay = nextMonthlyIpRegionUpdateDelay();
 		this.timer = setTimeout(() => {
-			void this.runAndReschedule();
+			this.timer = null;
+			const tick = this.runAndReschedule().finally(() => {
+				if (this.runningTick === tick) this.runningTick = null;
+			});
+			this.runningTick = tick;
+			void tick.catch(() => undefined);
 		}, delay);
 		this.timer.unref?.();
 	}
@@ -70,19 +85,32 @@ export class IpRegionAutoUpdateScheduler {
 		try {
 			await this.runNow();
 		} finally {
-			if (await this.hasEnabledSettings()) {
+			if (!this.stopped && (await this.hasEnabledSettings())) {
 				this.schedule();
 			}
 		}
 	}
 
 	public async runNow(): Promise<void> {
+		if (this.stopped) return;
+		if (this.runningUpdate) return this.runningUpdate;
+		const update = this.runUpdate();
+		this.runningUpdate = update;
+		try {
+			await update;
+		} finally {
+			if (this.runningUpdate === update) this.runningUpdate = null;
+		}
+	}
+
+	private async runUpdate(): Promise<void> {
 		const ipRegion = await this.loadIpRegionSettings();
-		if (!ipRegion.enabled || !ipRegion.autoUpdate.enabled) {
+		if (this.stopped || !ipRegion.enabled || !ipRegion.autoUpdate.enabled) {
 			return;
 		}
 
 		await this.updater.update({ ipVersion: "v4", config: ipRegion });
+		if (this.stopped) return;
 		await this.updater.update({ ipVersion: "v6", config: ipRegion });
 	}
 }

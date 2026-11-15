@@ -1,23 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { InvalidRequestError } from "../shared/errors";
-import { CommentsRepository } from "./repository";
-import { CaptchaService } from "./captcha-service";
-import { CommentsWriteRepository } from "./write-repository";
-import { captchaCompleteBodySchema, captchaWidgetQuerySchema } from "./schemas";
 import { RuntimeSystemSettingsService } from "../system-settings/service";
-import { DefaultCommentMetadataResolver } from "./metadata/resolver";
+import { CaptchaService } from "./captcha-service";
+import { CommentsRepository } from "./repository";
+import { captchaCompleteBodySchema, captchaWidgetQuerySchema } from "./schemas";
+import { CommentsWriteRepository } from "./write-repository";
 
 export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 	const repository = new CommentsRepository(fastify.db, fastify.siteRegistry);
 	const systemSettingsService = new RuntimeSystemSettingsService(fastify.db);
-	const metadataResolver =
-		fastify.commentMetadataResolver ?? new DefaultCommentMetadataResolver();
-	if (!fastify.commentMetadataResolver) {
-		fastify.addHook("onClose", async () => {
-			metadataResolver.close?.();
-		});
-	}
 	const captchaService = new CaptchaService(
 		fastify.config,
 		fastify.security,
@@ -27,7 +19,6 @@ export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 			getSettings: () => systemSettingsService.getCaptchaSettings(),
 			getIpRegionSettings: () => systemSettingsService.getIpRegionSettings(),
 		},
-		metadataResolver,
 	);
 
 	fastify.get("/comments/captcha/widget", async (request, reply) => {
@@ -40,10 +31,12 @@ export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 
 		reply.type("text/html; charset=utf-8");
 		return captchaService.getWidgetHtml({
+			action: parsed.data.action,
 			siteKey: parsed.data.siteKey,
 			pageKey: parsed.data.pageKey,
 			challengeId: parsed.data.challengeId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});
@@ -58,6 +51,7 @@ export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 		}
 
 		return captchaService.completeWidgetChallenge({
+			action: parsed.data.action,
 			siteKey: parsed.data.siteKey,
 			pageKey: parsed.data.pageKey,
 			challengeId: parsed.data.challengeId,
@@ -68,6 +62,7 @@ export const captchaWidgetRoutes: FastifyPluginAsync = async (fastify) => {
 			genTime: parsed.data.genTime,
 			requestId: request.context?.requestId,
 			visitorKey: request.context?.visitor?.key,
+			securityToken: request.context?.securityToken,
 			ip: request.context?.ip,
 			userAgent: request.context?.userAgent,
 		});

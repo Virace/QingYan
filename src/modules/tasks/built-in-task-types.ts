@@ -1,31 +1,25 @@
 import { z } from "zod";
-
+import {
+	type BlacklistAutomationPayload,
+	blacklistAutomationPayloadSchema,
+	runBlacklistAutomationTask,
+} from "./built-in/blacklist-automation-task";
+import {
+	type DailySiteDigestPayload,
+	dailySiteDigestPayloadSchema,
+	runDailySiteDigestTask,
+} from "./built-in/daily-site-digest-task";
+import {
+	runSiteSettingsActionTask,
+	type SiteSettingsActionPayload,
+	siteSettingsActionPayloadSchema,
+} from "./built-in/site-settings-action-task";
+import type { TaskRunnerContext } from "./task-runner-context";
 import type {
 	TaskTypeDefinition,
 	TaskTypePermissions,
 } from "./task-type-registry";
 import { TaskTypeRegistry } from "./task-type-registry";
-import type { TaskRunnerContext } from "./task-runner-context";
-import {
-	backupPayloadSchema,
-	runBackupTask,
-	type BackupTaskPayload,
-} from "./built-in/backup-task";
-import {
-	blacklistAutomationPayloadSchema,
-	runBlacklistAutomationTask,
-	type BlacklistAutomationPayload,
-} from "./built-in/blacklist-automation-task";
-import {
-	dailySiteDigestPayloadSchema,
-	runDailySiteDigestTask,
-	type DailySiteDigestPayload,
-} from "./built-in/daily-site-digest-task";
-import {
-	runSiteSettingsActionTask,
-	siteSettingsActionPayloadSchema,
-	type SiteSettingsActionPayload,
-} from "./built-in/site-settings-action-task";
 
 const maintenancePermissions: TaskTypePermissions = {
 	read: "tasks.read",
@@ -177,6 +171,49 @@ function defineTaskType<TPayload>(
 
 export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 	const registry = new TaskTypeRegistry();
+	registry.register(
+		defineTaskType({
+			type: "waf_sync",
+			label: "站点访问防护同步",
+			description: "核对站点访问限制、处理到期并采集防护事件。",
+			scope: "site",
+			permissions: {
+				read: "blacklist.read",
+				create: "blacklist.create",
+				run: "blacklist.create",
+				update: "blacklist.create",
+				delete: "blacklist.delete",
+			},
+			payloadSchema: z
+				.object({
+					siteId: z.number().int().positive().optional(),
+					siteKey: z.string().min(1).optional(),
+					recordId: z.string().min(1).optional(),
+				})
+				.refine(
+					(payload) =>
+						payload.siteId !== undefined || payload.siteKey !== undefined,
+				),
+			defaultPayload: { siteKey: "" },
+			defaultPolicy: { maxAttempts: 3, retryDelaySec: 60, timeoutMs: 300000 },
+			schedule: { manual: true, presets: [], cron: true, condition: false },
+			dangerous: true,
+			reuse: {
+				service: "WafRuntime",
+				method: "execute",
+				file: "src/modules/waf/runtime.ts",
+			},
+			precondition(_payload, context) {
+				return context.services.wafSync && !context.services.wafSync.paused
+					? "ok"
+					: "blocked";
+			},
+			async run(payload, context) {
+				if (!context.services.wafSync) throw new Error("WAF_NOT_CONFIGURED");
+				return context.services.wafSync.execute(payload, context);
+			},
+		}),
+	);
 
 	registry.register(
 		defineTaskType<PageSourceRefreshPayload>({
@@ -380,49 +417,6 @@ export function createBuiltInTaskTypeRegistry(): TaskTypeRegistry {
 						);
 					},
 				);
-			},
-		}),
-	);
-	registry.register(
-		defineTaskType<BackupTaskPayload>({
-			type: "backup",
-			label: "站点备份",
-			description: "复用现有 QingYan 导出/备份服务生成任务备份结果。",
-			category: "backup",
-			scope: "site",
-			permissions: {
-				read: "ops.read",
-				create: "ops.backup",
-				run: "ops.backup",
-				update: "ops.backup",
-				delete: "ops.backup",
-			},
-			payloadSchema: backupPayloadSchema,
-			defaultPayload: {
-				scope: "site",
-				siteKey: "",
-				include: {
-					siteSettings: true,
-					pageThreads: true,
-					comments: true,
-					visitors: true,
-					voteRecords: true,
-					pageFeedbackRecords: true,
-					blacklistRules: true,
-					rawUserAgent: false,
-				},
-				retentionCount: 5,
-			},
-			defaultPolicy,
-			schedule,
-			dangerous: false,
-			reuse: {
-				service: "QingYanExportService",
-				method: "exportSite",
-				file: "src/modules/import-export/qingyan/export-service.ts",
-			},
-			run(payload, context) {
-				return runWithEvents(payload, context, runBackupTask);
 			},
 		}),
 	);

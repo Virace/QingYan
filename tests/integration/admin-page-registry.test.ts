@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-
 import {
 	adminGroups,
 	adminUserGroups,
@@ -9,10 +8,11 @@ import {
 	pageThreads,
 	pendingPageCandidates,
 	pendingPageViewSessions,
-	siteSettings,
 	sitePageRegistry,
+	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { createPasswordHash } from "../../src/modules/admin/password-hash";
 import { AdminRepository } from "../../src/modules/admin/repository";
 import { serializeEngagementSettings } from "../../src/modules/shared/site-settings-defaults";
@@ -114,12 +114,14 @@ describe("admin page registry", () => {
 		await fixture.app.db.insert(sitePageRegistry).values({
 			siteId: site.id,
 			pageKey: "/posts/already-registered-pending/",
+			pageKeyHash: hashKey("/posts/already-registered-pending/"),
 			pageUrl: "/posts/already-registered-pending/",
 			status: "active",
 		});
 		await fixture.app.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
 			pageKey: "/posts/already-registered-pending/",
+			pageKeyHash: hashKey("/posts/already-registered-pending/"),
 			pageUrl: "/posts/already-registered-pending/",
 			hitCount: 2,
 			status: "pending",
@@ -127,6 +129,7 @@ describe("admin page registry", () => {
 		await fixture.app.db.insert(pendingPageCandidates).values({
 			siteKey: "fangyuan",
 			pageKey: "/posts/actually-unknown/",
+			pageKeyHash: hashKey("/posts/actually-unknown/"),
 			pageUrl: "/posts/actually-unknown/",
 			hitCount: 1,
 			status: "pending",

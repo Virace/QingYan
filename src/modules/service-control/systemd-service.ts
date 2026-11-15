@@ -111,21 +111,14 @@ export class SystemdServiceController {
 		action: () => Promise<T>,
 	): Promise<{ result: T; wasRunning: boolean }> {
 		const state = await this.status();
+		if (state === "unknown") throw new Error("SERVICE_STATE_UNKNOWN");
 		const wasRunning = state === "running";
 		if (wasRunning) {
 			await this.stop();
 		}
-		try {
-			const result = await action();
-			if (wasRunning) {
-				await this.start();
-			}
-			return { result, wasRunning };
-		} catch (error) {
-			if (wasRunning) {
-				await this.start();
-			}
-			throw error;
-		}
+		// action 失败时保留停写状态，恢复确认前不重新处理业务。
+		const result = await action();
+		if (wasRunning) await this.start();
+		return { result, wasRunning };
 	}
 }

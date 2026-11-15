@@ -1,4 +1,6 @@
-import type { AppDatabase } from "../../db/client";
+import { eq, sql } from "drizzle-orm";
+import type { DatabaseExecutor } from "../../db/client";
+import { adminBootstrapState, adminUsers } from "../../db/schema";
 import type { AdminBootstrap } from "./bootstrap-service";
 import { AdminUsersRepository } from "./admin-users-repository";
 import { systemGroups } from "./permissions";
@@ -8,7 +10,7 @@ const INITIAL_ADMIN_EMAIL = "admin@localhost.invalid";
 export class AdminIdentityService {
 	private readonly repository: AdminUsersRepository;
 
-	public constructor(db: AppDatabase) {
+	public constructor(private readonly db: DatabaseExecutor) {
 		this.repository = new AdminUsersRepository(db);
 	}
 
@@ -19,30 +21,42 @@ export class AdminIdentityService {
 	}
 
 	public async ensureInitialAdmin(bootstrap: AdminBootstrap) {
-		await this.ensureSystemGroups();
-		const existing = await this.repository.getUserByUsername(
-			bootstrap.username,
-		);
-		const user = existing
-			? await this.repository.updateInitialAdmin({
-					userId: existing.id,
-					email: existing.email || INITIAL_ADMIN_EMAIL,
-					passwordHash: bootstrap.passwordHash,
-					displayName: existing.displayName || bootstrap.username,
-				})
-			: await this.repository.createInitialAdmin({
-					username: bootstrap.username,
-					email: INITIAL_ADMIN_EMAIL,
-					passwordHash: bootstrap.passwordHash,
-					displayName: bootstrap.username,
-				});
-		const adminGroup = await this.repository.getGroupByKey("admin");
-		if (user && adminGroup) {
-			await this.repository.setUserGroup({
+		return this.db.transaction(async (tx) => {
+			await tx.execute(sql`select pg_advisory_xact_lock(174007, 1)`);
+			const repository = new AdminUsersRepository(tx);
+			const identity = new AdminIdentityService(tx);
+			await identity.ensureSystemGroups();
+			const [existing] = await tx
+				.select()
+				.from(adminUsers)
+				.where(eq(adminUsers.isInitialAdmin, true))
+				.limit(1);
+			if (existing) return existing;
+			const user = await repository.createInitialAdmin({
+				username: bootstrap.username,
+				email: INITIAL_ADMIN_EMAIL,
+				passwordHash: bootstrap.passwordHash,
+				displayName: bootstrap.username,
+			});
+			if (!user) throw new Error("ADMIN_INITIALIZATION_FAILED");
+			const adminGroup = await repository.getGroupByKey("admin");
+			if (!adminGroup) throw new Error("ADMIN_GROUP_NOT_FOUND");
+			await repository.setUserGroup({
 				userId: user.id,
 				groupId: adminGroup.id,
 			});
-		}
-		return user;
+			await tx
+				.insert(adminBootstrapState)
+				.values({
+					id: 1,
+					consolePath: bootstrap.consolePath,
+					initialAdminUserId: user.id,
+				})
+				.onConflictDoUpdate({
+					target: adminBootstrapState.id,
+					set: { initialAdminUserId: user.id },
+				});
+			return user;
+		});
 	}
 }

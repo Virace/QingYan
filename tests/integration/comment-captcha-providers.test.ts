@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	captchaSessions,
 	sitePageRegistry,
 	siteSettings,
 	sites,
 } from "../../src/db/schema";
+import { hashKey } from "../../src/db/values";
 import { AdminSystemSettingsRepository } from "../../src/modules/admin/system-settings-repository";
 import { deriveCanonicalPageKeyFromPathname } from "../../src/modules/shared/canonical-page-key";
 import { createTestApp } from "../support/test-fixtures";
@@ -18,6 +18,16 @@ function refererFor(pageKey: string) {
 	return {
 		referer: `http://localhost:4321/${pageKey}`,
 	};
+}
+
+function readIframeRequest(iframeSrc: string) {
+	const iframe = new URL(iframeSrc, "http://localhost");
+	const securityToken = new URLSearchParams(iframe.hash.slice(1)).get(
+		"securityToken",
+	);
+	if (!securityToken) throw new Error("Expected iframe security credential");
+	expect(iframe.searchParams.has("securityToken")).toBe(false);
+	return { url: `${iframe.pathname}${iframe.search}`, securityToken };
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -43,6 +53,7 @@ async function seedActivePage(fixture: TestFixture, pageKey: string) {
 	await fixture.app.db.insert(sitePageRegistry).values({
 		siteId: site.id,
 		pageKey: canonicalPageKey,
+		pageKeyHash: hashKey(canonicalPageKey),
 		pageUrl: canonicalPageKey,
 		status: "active",
 	});
@@ -99,9 +110,6 @@ describe("comment captcha providers", () => {
 			},
 		});
 
-		const visitorCookie = state.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
 		const challenge = state.json().challenge as {
 			challengeId: string;
 			iframeSrc: string;
@@ -112,12 +120,10 @@ describe("comment captcha providers", () => {
 			.where(eq(captchaSessions.id, challenge.challengeId));
 		expect(session?.providerKind).toBe("turnstile");
 
+		const iframe = readIframeRequest(challenge.iframeSrc);
 		const widget = await fixture.app.inject({
 			method: "GET",
-			url: challenge.iframeSrc,
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
+			url: iframe.url,
 		});
 		expect(widget.statusCode).toBe(200);
 		expect(widget.body).toContain("Turnstile");
@@ -134,14 +140,12 @@ describe("comment captcha providers", () => {
 		const completed = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/complete",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
 			headers: refererFor("post:turnstile"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "/post:turnstile",
 				challengeId: challenge.challengeId,
+				securityToken: iframe.securityToken,
 				token: "turnstile-token",
 			},
 		});
@@ -160,10 +164,10 @@ describe("comment captcha providers", () => {
 		const verifiedState = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:turnstile",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
+			headers: {
+				...refererFor("post:turnstile"),
+				"x-qingyan-security": iframe.securityToken,
 			},
-			headers: refererFor("post:turnstile"),
 		});
 		expect(verifiedState.statusCode).toBe(200);
 		expect(verifiedState.json()).toMatchObject({
@@ -193,20 +197,15 @@ describe("comment captcha providers", () => {
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:hcaptcha",
 			headers: refererFor("post:hcaptcha"),
 		});
-		const visitorCookie = state.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
 		const challenge = state.json().challenge as {
 			challengeId: string;
 			iframeSrc: string;
 		};
 
+		const iframe = readIframeRequest(challenge.iframeSrc);
 		const widget = await fixture.app.inject({
 			method: "GET",
-			url: challenge.iframeSrc,
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
+			url: iframe.url,
 		});
 		expect(widget.statusCode).toBe(200);
 		expect(widget.body).toContain("hCaptcha");
@@ -222,14 +221,12 @@ describe("comment captcha providers", () => {
 		const completed = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/complete",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
 			headers: refererFor("post:hcaptcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "/post:hcaptcha",
 				challengeId: challenge.challengeId,
+				securityToken: iframe.securityToken,
 				token: "hcaptcha-token",
 			},
 		});
@@ -270,20 +267,15 @@ describe("comment captcha providers", () => {
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:recaptcha",
 			headers: refererFor("post:recaptcha"),
 		});
-		const visitorCookie = state.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
 		const challenge = state.json().challenge as {
 			challengeId: string;
 			iframeSrc: string;
 		};
 
+		const iframe = readIframeRequest(challenge.iframeSrc);
 		const widget = await fixture.app.inject({
 			method: "GET",
-			url: challenge.iframeSrc,
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
+			url: iframe.url,
 		});
 		expect(widget.statusCode).toBe(200);
 		expect(widget.body).toContain("reCAPTCHA");
@@ -305,14 +297,12 @@ describe("comment captcha providers", () => {
 		const completed = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/complete",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
 			headers: refererFor("post:recaptcha"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "/post:recaptcha",
 				challengeId: challenge.challengeId,
+				securityToken: iframe.securityToken,
 				token: "recaptcha-token",
 			},
 		});
@@ -344,26 +334,23 @@ describe("comment captcha providers", () => {
 		const lowScoreState = await fixture.app.inject({
 			method: "GET",
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:recaptcha-low-score",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
 			headers: refererFor("post:recaptcha-low-score"),
 		});
 		const refreshedChallenge = lowScoreState.json().challenge as {
 			challengeId: string;
+			iframeSrc: string;
 		};
+		const lowScoreIframe = readIframeRequest(refreshedChallenge.iframeSrc);
 
 		const invalid = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/complete",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
 			headers: refererFor("post:recaptcha-low-score"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "/post:recaptcha-low-score",
 				challengeId: refreshedChallenge.challengeId,
+				securityToken: lowScoreIframe.securityToken,
 				token: "recaptcha-low-score",
 			},
 		});
@@ -394,20 +381,15 @@ describe("comment captcha providers", () => {
 			url: "/qingyan/api/comments/captcha/state?siteKey=fangyuan&pageKey=post:geetest",
 			headers: refererFor("post:geetest"),
 		});
-		const visitorCookie = state.cookies.find(
-			(cookie) => cookie.name === "qingyan_visitor",
-		);
 		const challenge = state.json().challenge as {
 			challengeId: string;
 			iframeSrc: string;
 		};
 
+		const iframe = readIframeRequest(challenge.iframeSrc);
 		const widget = await fixture.app.inject({
 			method: "GET",
-			url: challenge.iframeSrc,
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
+			url: iframe.url,
 		});
 		expect(widget.statusCode).toBe(200);
 		expect(widget.body).toContain("GeeTest");
@@ -423,14 +405,12 @@ describe("comment captcha providers", () => {
 		const completed = await fixture.app.inject({
 			method: "POST",
 			url: "/qingyan/api/comments/captcha/complete",
-			cookies: {
-				qingyan_visitor: visitorCookie?.value ?? "",
-			},
 			headers: refererFor("post:geetest"),
 			payload: {
 				siteKey: "fangyuan",
 				pageKey: "/post:geetest",
 				challengeId: challenge.challengeId,
+				securityToken: iframe.securityToken,
 				lotNumber: "lot-number",
 				captchaOutput: "captcha-output",
 				passToken: "pass-token",

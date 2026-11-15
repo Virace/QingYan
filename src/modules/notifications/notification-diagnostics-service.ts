@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 
-import type { AppDatabase } from "../../db/client";
+import type { DatabaseExecutor } from "../../db/client";
 import {
 	notificationDeliveries,
 	siteSettings,
@@ -151,7 +151,7 @@ export class NotificationDiagnosticsService {
 	private readonly reputation: EmailReputationRepository;
 
 	public constructor(
-		private readonly db: AppDatabase,
+		private readonly db: DatabaseExecutor,
 		private readonly options: DiagnosticsOptions = {},
 	) {
 		this.systemSettings = new RuntimeSystemSettingsService(db);

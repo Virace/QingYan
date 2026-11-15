@@ -8,6 +8,7 @@ export default defineConfig({
 	testDir: "./tests/e2e",
 	outputDir: ".temp/playwright/results",
 	fullyParallel: false,
+	workers: 1,
 	retries: process.env.CI ? 2 : 0,
 	reporter: [["list"]],
 	use: {
@@ -22,7 +23,7 @@ export default defineConfig({
 	],
 	webServer: [
 		{
-			command: `pnpm exec tsx src/server.ts`,
+			command: `pnpm exec tsx tests/support/e2e-server.ts`,
 			url: `http://127.0.0.1:${apiPort}${publicPath}/api/admin/session/captcha`,
 			reuseExistingServer: !process.env.CI,
 			timeout: 30_000,
@@ -33,7 +34,6 @@ export default defineConfig({
 				QINGYAN_DEV_ADMIN_PASSWORD: "admin",
 				QINGYAN_DEV_ADMIN_ORIGIN: `http://127.0.0.1:${adminPort}`,
 				QINGYAN_TEST_CAPTCHA_ANSWER: "2468",
-				QINGYAN_SQLITE_FILE: ".temp/playwright/qingyan-e2e.db",
 			},
 		},
 		{

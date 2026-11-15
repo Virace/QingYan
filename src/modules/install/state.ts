@@ -1,13 +1,9 @@
 import { existsSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-
-import { eq, sql } from "drizzle-orm";
-
 import { loadConfig } from "../../config/load-config";
-import { createDatabaseClients } from "../../db/client";
-import { applyDatabaseMigrations } from "../../db/migrations";
-import { adminBootstrapState, sites } from "../../db/schema";
+import { detectUpgradeRuntimeState } from "../upgrade/state";
+
 import type { MinimalInstallConfig } from "./minimal-config";
 
 export interface InstallState {
@@ -45,28 +41,9 @@ export async function writeInstallLock(input: {
 	return lockPath;
 }
 
-async function databaseInstalled(databaseFile: string): Promise<boolean> {
-	const { db, sqlite } = createDatabaseClients(databaseFile);
-	try {
-		applyDatabaseMigrations(sqlite);
-		const [bootstrap] = await db
-			.select()
-			.from(adminBootstrapState)
-			.where(eq(adminBootstrapState.id, 1))
-			.limit(1);
-		const [siteCount] = await db
-			.select({ value: sql<number>`count(*)` })
-			.from(sites);
-
-		return Boolean(bootstrap) && Number(siteCount?.value ?? 0) > 0;
-	} finally {
-		sqlite.close();
-	}
-}
-
 export async function resolveInstallState(
 	minimalConfig: MinimalInstallConfig,
-	environment: NodeJS.ProcessEnv = process.env,
+	_environment: NodeJS.ProcessEnv = process.env,
 ): Promise<InstallState> {
 	const lockPath = resolveInstallLockPath(minimalConfig.configPath);
 	if (existsSync(lockPath)) {
@@ -77,6 +54,16 @@ export async function resolveInstallState(
 		};
 	}
 
+	if (
+		existsSync(
+			path.resolve(
+				path.dirname(minimalConfig.configPath),
+				"../data/upgrade/partial-upgrade.json",
+			),
+		)
+	)
+		return { installed: true, configPath: minimalConfig.configPath, lockPath };
+
 	if (!existsSync(minimalConfig.configPath)) {
 		return {
 			installed: false,
@@ -86,26 +73,28 @@ export async function resolveInstallState(
 		};
 	}
 
+	let loadedConfig: Awaited<ReturnType<typeof loadConfig>> | undefined;
+	let configError: unknown;
 	try {
-		const config = await loadConfig(minimalConfig.configPath, environment);
-		const databaseFile = path.resolve(
-			process.cwd(),
-			config.database.sqlite.file,
-		);
-		const initialized = await databaseInstalled(databaseFile);
-		return {
-			installed: false,
-			configPath: minimalConfig.configPath,
-			lockPath,
-			reason: initialized ? "lock_missing" : "database_uninitialized",
-		};
+		loadedConfig = await loadConfig(minimalConfig.configPath, _environment);
 	} catch (error) {
-		return {
-			installed: false,
-			configPath: minimalConfig.configPath,
-			lockPath,
-			reason: "config_invalid",
-			errorMessage: error instanceof Error ? error.message : String(error),
-		};
+		configError = error;
 	}
+	const state = await detectUpgradeRuntimeState({
+		configPath: minimalConfig.configPath,
+		loadedConfig,
+		configError,
+		currentApplicationVersion: "0.0.0",
+		partialUpgradeMarkerPath: path.resolve(
+			path.dirname(minimalConfig.configPath),
+			"../data/upgrade/partial-upgrade.json",
+		),
+	});
+	return {
+		installed: state.state !== "not_installed",
+		configPath: minimalConfig.configPath,
+		lockPath,
+		reason:
+			state.state === "not_installed" ? "database_uninitialized" : undefined,
+	};
 }
